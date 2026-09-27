@@ -35,6 +35,8 @@ const MAX_TRACKED_ACTORS: usize = 4_096;
 const ENROLLMENT_PAGE_SIZE: u16 = 128;
 const IDLE_ROTATION_AFTER: Duration = Duration::from_secs(2);
 const MAX_WORKER_LEASE: Duration = Duration::from_secs(15);
+const MAX_FAILED_WORKER_LEASE: Duration = Duration::from_secs(15);
+const CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Configures the fixed-resource actor subscription pool.
 #[derive(Clone)]
@@ -389,8 +391,16 @@ async fn run_actor_worker(
         return;
     }
     let mut attempt = 0_u32;
+    let mut failure_deadline = None;
     while !*shutdown.borrow() {
-        let result = run_actor_connection(&config, &lifecycle, &did, &mut shutdown).await;
+        let result = if let Some(deadline) = failure_deadline {
+            tokio::select! {
+                result = run_actor_connection(&config, &lifecycle, &did, &mut shutdown) => result,
+                _ = tokio::time::sleep_until(deadline) => return,
+            }
+        } else {
+            run_actor_connection(&config, &lifecycle, &did, &mut shutdown).await
+        };
         if *shutdown.borrow()
             || matches!(
                 result,
@@ -401,8 +411,11 @@ async fn run_actor_worker(
         }
         failures.send_modify(|count| *count = count.saturating_add(1));
         attempt = attempt.saturating_add(1);
+        let deadline = *failure_deadline
+            .get_or_insert_with(|| tokio::time::Instant::now() + MAX_FAILED_WORKER_LEASE);
         tokio::select! {
             _ = tokio::time::sleep(reconnect_delay(attempt)) => {}
+            _ = tokio::time::sleep_until(deadline) => return,
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
                     return;
@@ -458,16 +471,16 @@ async fn run_actor_connection(
     loop {
         tokio::select! {
             _ = tokio::time::sleep(IDLE_ROTATION_AFTER) => {
-                let _ = socket.close(None).await;
+                let _ = timeout(CLOSE_TIMEOUT, socket.close(None)).await;
                 return Ok(ActorFrameResult::Ignored);
             }
             _ = tokio::time::sleep_until(lease_deadline) => {
-                let _ = socket.close(None).await;
+                let _ = timeout(CLOSE_TIMEOUT, socket.close(None)).await;
                 return Ok(ActorFrameResult::Ignored);
             }
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
-                    let _ = socket.close(None).await;
+                    let _ = timeout(CLOSE_TIMEOUT, socket.close(None)).await;
                     return Ok(ActorFrameResult::NotEnrolled);
                 }
             }
@@ -579,7 +592,7 @@ mod tests {
 
     use super::{
         ActiveWorker, ActorPool, ActorPoolError, ActorStreamConfig, actor_subscription_url,
-        next_waiting_actor, reconnect_delay, retention_deadline,
+        next_waiting_actor, reconnect_delay, retention_deadline, run_actor_worker,
     };
 
     #[test]
@@ -718,5 +731,54 @@ mod tests {
         tokio::time::timeout(Duration::from_millis(100), pool.stop())
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_worker_releases_its_slot_after_the_retry_window() {
+        let lifecycle = Arc::new(
+            ControlLifecycle::for_authority(
+                ProjectionReader::new(
+                    EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+                ),
+                Arc::new(Mutex::new(FeedReadinessGate::default())),
+                "did:web:stratos.example.test",
+            )
+            .unwrap(),
+        );
+        lifecycle
+            .reconcile_actor_enrollment(
+                "did:plc:faye",
+                "1998-04-03T00:00:00.000Z",
+                Some(ActorEnrollment {
+                    did: "did:plc:faye".to_owned(),
+                    boundaries: vec!["did:web:stratos.example.test/bebop".to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        let config = ActorStreamConfig {
+            service_url: "http://127.0.0.1:9".to_owned(),
+            service_did: "did:web:stratos.example.test".to_owned(),
+            feedgen_did: "did:web:feedgen.example.test".to_owned(),
+            signing_key: crate::service_auth::ServiceSigningKey::from_hex(&"11".repeat(32))
+                .unwrap(),
+            retention: Duration::from_secs(60),
+            max_connections: 1,
+        };
+        let (failures, _) = tokio::sync::watch::channel(0_u64);
+        let (_shutdown, receiver) = tokio::sync::watch::channel(false);
+        tokio::time::timeout(
+            super::MAX_FAILED_WORKER_LEASE + Duration::from_secs(2),
+            run_actor_worker(
+                config,
+                lifecycle,
+                failures.clone(),
+                "did:plc:faye".to_owned(),
+                receiver,
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(*failures.borrow() > 0);
     }
 }
