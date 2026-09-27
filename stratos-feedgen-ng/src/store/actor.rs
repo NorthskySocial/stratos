@@ -1,5 +1,52 @@
 use super::*;
 
+fn load_actor_enrollment(
+    transaction: &rusqlite::Transaction<'_>,
+    did: &str,
+) -> Result<Option<StoredActorEnrollment>, StoreError> {
+    transaction
+        .query_row(
+            "SELECT did, boundaries_json, observed_at, enrolled FROM actor_enrollment WHERE did = ?1",
+            [did],
+            |row| {
+                let boundaries: Vec<String> = serde_json::from_slice(&row.get::<_, Vec<u8>>(1)?)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                let observed_at: String = row.get(2)?;
+                let enrolled: bool = row.get(3)?;
+                Ok(StoredActorEnrollment {
+                    enrollment: enrolled.then_some(ActorEnrollment {
+                        did: row.get(0)?,
+                        boundaries,
+                        observed_at: observed_at.clone(),
+                    }),
+                    observed_at,
+                })
+            },
+        )
+        .optional()
+        .map_err(StoreError::Open)
+}
+
+fn validate_actor_enrollment(enrollment: &ActorEnrollment) -> Result<(), StoreError> {
+    if enrollment.boundaries.len() > 128
+        || enrollment
+            .boundaries
+            .iter()
+            .any(|boundary| boundary.is_empty() || boundary.len() > 256 || !boundary.is_ascii())
+        || !is_utc_timestamp(&enrollment.observed_at)
+    {
+        return Err(StoreError::InvalidProjectionMutation);
+    }
+    let unique = enrollment
+        .boundaries
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    if unique.len() != enrollment.boundaries.len() {
+        return Err(StoreError::InvalidProjectionMutation);
+    }
+    Ok(())
+}
+
 impl EncryptedStore {
     pub fn apply_actor_page(&mut self, page: ActorPage) -> Result<(), StoreError> {
         validate_actor_page(&page)?;
@@ -317,23 +364,5 @@ impl EncryptedStore {
             );
         }
         Ok(boundaries)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn stage_space_page(
-        &mut self,
-        page: SpaceStagePage,
-        mutations: Vec<SpaceStageMutation>,
-    ) -> Result<(), StoreError> {
-        validate_space_stage_page(&page)?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(StoreError::Open)?;
-        for mutation in mutations {
-            stage_space_mutation(&transaction, &page, mutation)?;
-        }
-        update_space_stage_checkpoint(&transaction, &page)?;
-        transaction.commit().map_err(StoreError::Open)
     }
 }
