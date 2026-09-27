@@ -22,6 +22,7 @@ use crate::{
     lifecycle::ControlLifecycle,
     pds_space_scheduler::{PdsSpacePass, PdsSpaceSyncStatus},
     readiness::FeedReadinessGate,
+    telemetry::FeedTelemetry,
 };
 
 mod authorization;
@@ -55,6 +56,7 @@ pub struct FeedRuntime {
     pub authority: Arc<dyn AuthorityClient>,
     pub pds_space_sync: Arc<Mutex<PdsSpaceSyncStatus>>,
     pub blobs: Arc<BlobService>,
+    pub telemetry: Arc<FeedTelemetry>,
 }
 
 const MAX_FEED_ID_BYTES: usize = 256;
@@ -71,6 +73,7 @@ pub(super) struct FeedServerState {
     pub(super) request_permits: Arc<Semaphore>,
     pub(super) blobs: Option<Arc<BlobService>>,
     pub(super) authority: Option<Arc<dyn AuthorityClient>>,
+    pub(super) telemetry: Arc<FeedTelemetry>,
 }
 
 pub fn router(
@@ -113,6 +116,7 @@ pub fn router_with_feed(
         MAX_CONCURRENT_FEED_REQUESTS,
         None,
         None,
+        Arc::new(FeedTelemetry::disabled()),
     )
 }
 
@@ -134,6 +138,7 @@ pub fn router_with_feed_with_pds_space_sync(
         MAX_CONCURRENT_FEED_REQUESTS,
         Some(runtime.blobs),
         Some(runtime.authority),
+        runtime.telemetry,
     )
 }
 
@@ -144,9 +149,18 @@ fn router_with_feed_with_request_limit(
     request_limit: usize,
     blobs: Option<Arc<BlobService>>,
     authority: Option<Arc<dyn AuthorityClient>>,
+    telemetry: Arc<FeedTelemetry>,
 ) -> Router {
     let server = Arc::new(server);
-    let state = feed_server_state(server, lifecycle, verifier, request_limit, blobs, authority);
+    let state = feed_server_state(
+        server,
+        lifecycle,
+        verifier,
+        request_limit,
+        blobs,
+        authority,
+        telemetry,
+    );
     Router::new()
         .route("/health", get(feed_health))
         .route("/.well-known/did.json", get(feed_did_document))
@@ -166,6 +180,7 @@ fn feed_server_state(
     request_limit: usize,
     blobs: Option<Arc<BlobService>>,
     authority: Option<Arc<dyn AuthorityClient>>,
+    telemetry: Arc<FeedTelemetry>,
 ) -> Arc<FeedServerState> {
     Arc::new(FeedServerState {
         server,
@@ -174,6 +189,7 @@ fn feed_server_state(
         request_permits: Arc::new(Semaphore::new(request_limit)),
         blobs,
         authority,
+        telemetry,
     })
 }
 

@@ -26,6 +26,7 @@ use stratos_feedgen_ng::{
     service_stream::{ServiceStream, ServiceStreamConfig},
     space_commit::SpaceCommitVerifier,
     space_membership::HttpSpaceMembershipClient,
+    telemetry::MetricsRuntime,
     writer_lock::WriterLock,
 };
 
@@ -47,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
     let feeds = FeedgenConfig::load_feed_registry_from_env()?;
+    let metrics = MetricsRuntime::initialize(&config.metrics_export)?;
     let shutdown = shutdown_signal()?;
     let projection = ProjectionReader::new(open_projection_store(&config.storage)?);
     let port = std::env::var("FEEDGEN_PORT")
@@ -173,6 +175,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
                 authority,
                 pds_space_sync: pds_scheduler.status(),
                 blobs: blob_service,
+                telemetry: metrics.telemetry(),
             },
         ),
     )
@@ -182,6 +185,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
     blob_sweeper.stop().await;
     compactor.stop().await;
     stream.stop().await;
+    metrics.shutdown();
     result?;
     Ok(())
 }

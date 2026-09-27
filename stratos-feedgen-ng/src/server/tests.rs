@@ -32,6 +32,7 @@ use crate::{
     service::ProjectionReader,
     service_auth::ServiceSigningKey,
     store::{ActorPage, EncryptedStore, ProjectionPost, StorageKey},
+    telemetry::FeedTelemetry,
 };
 
 use super::{
@@ -104,6 +105,9 @@ fn config() -> FeedgenConfig {
             max_bytes: 16 * 1024 * 1024,
         },
         actor_max_connections: 8,
+        metrics_export: crate::config::MetricsExportConfig {
+            otlp_http_endpoint: None,
+        },
     }
 }
 
@@ -145,6 +149,7 @@ async fn resolves_viewer_boundaries_once_and_reuses_the_authoritative_cache() {
         request_permits: Arc::new(tokio::sync::Semaphore::new(4)),
         blobs: None,
         authority: Some(authority.clone()),
+        telemetry: Arc::new(FeedTelemetry::disabled()),
     };
 
     ensure_viewer_authorization(&state, "did:plc:faye", 1)
@@ -272,6 +277,7 @@ fn authenticated_router_with_request_limit(
         request_limit,
         blobs,
         None,
+        Arc::new(FeedTelemetry::disabled()),
     )
 }
 
@@ -631,6 +637,7 @@ async fn refuses_feed_work_before_resolving_a_viewer_when_all_request_permits_ar
         0,
         None,
         Some(Arc::new(PanicAuthority)),
+        Arc::new(FeedTelemetry::disabled()),
     );
     let response = app
         .oneshot(

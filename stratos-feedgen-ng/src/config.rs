@@ -27,6 +27,12 @@ pub struct ProjectionRetention {
     pub max_bytes: u64,
 }
 
+/// Private OTLP/HTTP metrics export is opt-in and never affects feed serving.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MetricsExportConfig {
+    pub otlp_http_endpoint: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FeedgenConfig {
     pub service_did: String,
@@ -41,6 +47,7 @@ pub struct FeedgenConfig {
     pub storage: StorageProfile,
     pub retention: ProjectionRetention,
     pub actor_max_connections: u16,
+    pub metrics_export: MetricsExportConfig,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -54,6 +61,7 @@ pub enum ConfigError {
     InvalidStorageProfile,
     InvalidProjectionRetention,
     InvalidActorConnectionLimit,
+    InvalidMetricsExportEndpoint,
 }
 
 impl std::fmt::Display for ConfigError {
@@ -81,6 +89,9 @@ impl std::fmt::Display for ConfigError {
             }
             Self::InvalidActorConnectionLimit => {
                 formatter.write_str("invalid Feedgen NG actor connection limit")
+            }
+            Self::InvalidMetricsExportEndpoint => {
+                formatter.write_str("invalid private OTLP/HTTP metrics endpoint")
             }
         }
     }
@@ -126,6 +137,11 @@ impl FeedgenConfig {
             .unwrap_or_else(|| config.stratos_service_url.clone());
         config.actor_max_connections =
             parse_actor_connection_limit(env::var("FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS").ok())?;
+        config.metrics_export = MetricsExportConfig {
+            otlp_http_endpoint: parse_metrics_export_endpoint(
+                env::var("FEEDGEN_OTLP_METRICS_ENDPOINT").ok(),
+            )?,
+        };
         Ok(config)
     }
 
@@ -211,6 +227,9 @@ impl FeedgenConfig {
             storage,
             retention,
             actor_max_connections: 8,
+            metrics_export: MetricsExportConfig {
+                otlp_http_endpoint: None,
+            },
         })
     }
 }
@@ -279,6 +298,33 @@ fn parse_actor_connection_limit(value: Option<String>) -> Result<u16, ConfigErro
         .ok()
         .filter(|value| (1..=MAX_ACTOR_CONNECTIONS).contains(value))
         .ok_or(ConfigError::InvalidActorConnectionLimit)
+}
+
+fn parse_metrics_export_endpoint(value: Option<String>) -> Result<Option<String>, ConfigError> {
+    let Some(value) = value.filter(|value| !value.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let endpoint =
+        url::Url::parse(&value).map_err(|_| ConfigError::InvalidMetricsExportEndpoint)?;
+    let private_host = match endpoint.host() {
+        Some(url::Host::Ipv4(address)) => address.is_private() || address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_unique_local() || address.is_loopback(),
+        // A single-label name is resolved by the operator's private network,
+        // such as a compose or cluster collector service.
+        Some(url::Host::Domain(name)) => !name.contains('.'),
+        None => false,
+    };
+    if !matches!(endpoint.scheme(), "http" | "https")
+        || !private_host
+        || !endpoint.username().is_empty()
+        || endpoint.password().is_some()
+        || endpoint.query().is_some()
+        || endpoint.fragment().is_some()
+        || endpoint.path() != "/v1/metrics"
+    {
+        return Err(ConfigError::InvalidMetricsExportEndpoint);
+    }
+    Ok(Some(endpoint.into()))
 }
 
 fn parse_storage(
@@ -354,7 +400,36 @@ mod tests {
         path::Path,
     };
 
-    use super::{FeedgenConfig, StorageProfile, StorageValues, load_feed_registry_from_values};
+    use super::{
+        ConfigError, FeedgenConfig, StorageProfile, StorageValues, load_feed_registry_from_values,
+        parse_metrics_export_endpoint,
+    };
+
+    #[test]
+    fn metrics_export_is_disabled_without_a_private_collector_endpoint() {
+        assert_eq!(parse_metrics_export_endpoint(None).unwrap(), None);
+        assert_eq!(
+            parse_metrics_export_endpoint(Some("http://collector:4318/v1/metrics".to_owned()))
+                .unwrap(),
+            Some("http://collector:4318/v1/metrics".to_owned())
+        );
+    }
+
+    #[test]
+    fn metrics_export_rejects_public_or_non_metric_endpoints() {
+        for endpoint in [
+            "https://collector.example.com/v1/metrics",
+            "http://8.8.8.8/v1/metrics",
+            "http://collector:4318/not-metrics",
+            "http://collector:4318/v1/metrics?token=private",
+        ] {
+            assert_eq!(
+                parse_metrics_export_endpoint(Some(endpoint.to_owned())),
+                Err(ConfigError::InvalidMetricsExportEndpoint),
+                "{endpoint}"
+            );
+        }
+    }
 
     fn storage(
         backend: Option<&str>,

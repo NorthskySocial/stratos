@@ -63,6 +63,25 @@ To poll a PDS on a private network, set both
 `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS` (the same CIDR format). This grant is
 separate from PLC trust and applies to that PDS origin only.
 
+## Private metrics export
+
+Feed-read timing is aggregate-only and disabled by default. Set
+`FEEDGEN_OTLP_METRICS_ENDPOINT` to a private Collector OTLP/HTTP endpoint
+ending in `/v1/metrics`, for example `http://collector:4318/v1/metrics`.
+The endpoint accepts a private IP address or a single-label private service
+name; public hosts, credentials, query strings, and other paths are rejected.
+The exporter runs on its own bounded background schedule (60-second interval,
+3-second export timeout), so Collector availability never blocks a feed
+request. No public `/metrics` endpoint is served.
+
+The scope is `stratos.feedgen.ng`; the metric namespace is
+`stratos.feedgen.*` for comparison with the existing Feedgen runtime. This
+initial instrumentation records only `stratos.feedgen.read.stage.duration`
+with the fixed labels `stage` (`verify_authorization`, `viewer_authorization`,
+or `projection_serialization`) and `outcome` (`success`, `failure`, or
+`timeout`). It never includes DIDs, feed IDs, boundaries, record URIs, tokens,
+queries, or response bodies.
+
 ## Constrained rehearsal container
 
 Build the production-shaped rehearsal image from the workspace root:

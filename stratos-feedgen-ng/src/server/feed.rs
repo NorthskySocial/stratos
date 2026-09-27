@@ -12,6 +12,9 @@ pub(super) async fn get_feed(
     headers: HeaderMap,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
+    let verify_timer = state
+        .telemetry
+        .start(crate::telemetry::FeedReadStage::VerifyAuthorization);
     let authorization = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok());
@@ -22,8 +25,12 @@ pub(super) async fn get_feed(
     )
     .await
     {
-        Ok(Ok(verified)) => verified,
+        Ok(Ok(verified)) => {
+            verify_timer.finish(crate::telemetry::FeedReadStageOutcome::Success);
+            verified
+        }
         Ok(Err(error)) => {
+            verify_timer.finish(crate::telemetry::FeedReadStageOutcome::Failure);
             return xrpc_error(
                 StatusCode::UNAUTHORIZED,
                 error.code(),
@@ -31,6 +38,7 @@ pub(super) async fn get_feed(
             );
         }
         Err(_) => {
+            verify_timer.finish(crate::telemetry::FeedReadStageOutcome::Timeout);
             return xrpc_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "FeedNotReady",
@@ -92,15 +100,23 @@ pub(super) async fn get_feed(
             );
         }
     };
+    let viewer_authorization_timer = state
+        .telemetry
+        .start(crate::telemetry::FeedReadStage::ViewerAuthorization);
     if let Err(error) = ensure_viewer_authorization(&state, &verified.viewer_did, now).await {
+        viewer_authorization_timer.finish(crate::telemetry::FeedReadStageOutcome::Failure);
         return feed_error(error);
     }
+    viewer_authorization_timer.finish(crate::telemetry::FeedReadStageOutcome::Success);
     let as_of = current_timestamp();
     let lifecycle = Arc::clone(&state.lifecycle);
     let server = Arc::clone(&state.server);
     let viewer_did = verified.viewer_did;
     let feed_id = parameters.feed;
     let cursor = parameters.cursor;
+    let projection_timer = state
+        .telemetry
+        .start(crate::telemetry::FeedReadStage::ProjectionSerialization);
     let response = timeout(
         FEED_REQUEST_TIMEOUT,
         tokio::task::spawn_blocking(move || {
@@ -121,14 +137,24 @@ pub(super) async fn get_feed(
     )
     .await;
     match response {
-        Ok(Ok(Ok(body))) => private_json(StatusCode::OK, body),
-        Ok(Ok(Err(error))) => feed_error(error),
-        Ok(Err(_)) => xrpc_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "FeedNotReady",
-            "feed is unavailable",
-        ),
+        Ok(Ok(Ok(body))) => {
+            projection_timer.finish(crate::telemetry::FeedReadStageOutcome::Success);
+            private_json(StatusCode::OK, body)
+        }
+        Ok(Ok(Err(error))) => {
+            projection_timer.finish(crate::telemetry::FeedReadStageOutcome::Failure);
+            feed_error(error)
+        }
+        Ok(Err(_)) => {
+            projection_timer.finish(crate::telemetry::FeedReadStageOutcome::Failure);
+            xrpc_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "FeedNotReady",
+                "feed is unavailable",
+            )
+        }
         Err(_) => {
+            projection_timer.finish(crate::telemetry::FeedReadStageOutcome::Timeout);
             state.lifecycle.interrupt_feed_work();
             state.lifecycle.mark_unavailable();
             xrpc_error(
