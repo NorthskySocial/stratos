@@ -1,4 +1,4 @@
-# Clubhouse public-alpha room catalogue
+# Historical public-alpha room catalogue
 
 > Historical TypeScript feedgen deployment procedure. The current feed generator uses an
 > explicit feed registry and does not implement the legacy catalogue refresh

@@ -25,7 +25,6 @@ The cache transport currently supports **Stratos custody**. It does not discover
 PDS-custody posts, and space posts without a current custody snapshot, have no feedgen blob view.
 Clients retain their existing host read path for those records. The example webapp retains its authenticated Stratos-agent path.
 Availability on that path still depends on the host's blob support; a feedgen view does not claim to add PDS blob support.
-Clubhouse currently renders post text only and does not render attachments.
 
 ## Authenticated downloads
 
