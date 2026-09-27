@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     sync::mpsc,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use rusqlite::Connection;
@@ -386,8 +386,15 @@ fn interrupt_handle_stops_a_running_query() {
     started_receiver
         .recv_timeout(Duration::from_secs(1))
         .unwrap();
-    thread::sleep(Duration::from_millis(20));
-    interrupt.interrupt();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !worker.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "query did not stop after interrupts"
+        );
+        interrupt.interrupt();
+        thread::yield_now();
+    }
     assert!(worker.join().unwrap());
 }
 
