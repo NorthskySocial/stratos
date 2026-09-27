@@ -138,6 +138,5 @@ not mount the deprecated TypeScript feedgen database as Rust state. The
 [Feedgen NG architecture](/operator/feedgen-ng) describes authority-derived
 membership, verified PDS-space ingestion, request authorization, retention,
 and private DNS policy. Rehearse an independent-state start and authenticated
-feed probe before changing routing; follow the repository's
-[cutover runbook](https://github.com/NorthskySocial/stratos/blob/main/stratos-feedgen-ng/CUTOVER.md)
-for comparison and rollback.
+feed probe before changing routing; follow
+`stratos-feedgen-ng/CUTOVER.md` for comparison and rollback.

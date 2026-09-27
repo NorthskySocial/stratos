@@ -84,7 +84,7 @@ opt-in: supply the exact HTTPS origin and approved CIDRs through
 `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS`. Mixed public/private answers,
 unapproved private addresses, redirects, and proxy bypasses are rejected.
 
-Use the [Feedgen NG README](https://github.com/NorthskySocial/stratos/blob/main/stratos-feedgen-ng/README.md)
-for process variables and the [cutover runbook](https://github.com/NorthskySocial/stratos/blob/main/stratos-feedgen-ng/CUTOVER.md)
-for independent-state rehearsal, comparison, switch, and rollback. Do not
-reuse a TypeScript projection or writer lock for Feedgen NG.
+Use `stratos-feedgen-ng/README.md` for process variables and
+`stratos-feedgen-ng/CUTOVER.md` for independent-state rehearsal, comparison,
+switch, and rollback. Do not reuse a TypeScript projection or writer lock for
+Feedgen NG.

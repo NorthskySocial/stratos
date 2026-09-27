@@ -83,7 +83,7 @@ run an authenticated feed probe before routing traffic. See
 
 This section describes the deprecated TypeScript rollback path only. New feed
 deployments should follow [Feedgen NG](/operator/feedgen-ng) and its
-[rehearsal profile](https://github.com/NorthskySocial/stratos/blob/main/stratos-feedgen-ng/compose.rehearsal.yml).
+`stratos-feedgen-ng/compose.rehearsal.yml` rehearsal profile.
 
 To run the boundary-scoped feed generator alongside the service, layer the feedgen
 overlay on top of the base stack. The overlay adds a `feedgen` service (SQLite-backed) and
