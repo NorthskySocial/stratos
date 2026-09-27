@@ -75,7 +75,8 @@ The exporter runs on its own bounded background schedule (60-second interval,
 3-second export timeout), so Collector availability never blocks a feed
 request. No public `/metrics` endpoint is served.
 
-The scope is `stratos.feedgen.ng`; the metric namespace is
+The resource `service.name` is fixed to `stratos-feedgen-ng`, and the scope is
+`stratos.feedgen.ng`; the metric namespace is
 `stratos.feedgen.*` for comparison with the existing Feedgen runtime. The
 Collector adds `otel_scope_name=stratos.feedgen.ng`, allowing Rust and
 TypeScript series to be selected separately without changing metric names.

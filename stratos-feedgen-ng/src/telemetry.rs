@@ -21,6 +21,7 @@ use opentelemetry_sdk::{
 use crate::config::MetricsExportConfig;
 
 const METER_SCOPE: &str = "stratos.feedgen.ng";
+const SERVICE_NAME: &str = "stratos-feedgen-ng";
 const EXPORT_INTERVAL: Duration = Duration::from_secs(60);
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -561,7 +562,11 @@ impl MetricsRuntime {
             .with_interval(EXPORT_INTERVAL)
             .build();
         let provider = SdkMeterProvider::builder()
-            .with_resource(Resource::builder().build())
+            .with_resource(
+                Resource::builder()
+                    .with_attributes([KeyValue::new("service.name", SERVICE_NAME)])
+                    .build(),
+            )
             .with_reader(reader)
             .build();
         Ok(Self {
