@@ -35,6 +35,8 @@ export interface BrowserAuthConfig {
   spaceWriteScope?: SpaceWriteScopeConfig
   /** Handle resolver used by the OAuth client. */
   handleResolver: string
+  /** PLC directory used for DID resolution in local AT Protocol stacks. */
+  plcDirectoryUrl?: string
   /** Returns the application base URL. */
   getBaseUrl: () => string
   /** Returns the OAuth redirect URI. Defaults to `${getBaseUrl()}/`. */
@@ -203,6 +205,9 @@ export function createBrowserAuth(config: BrowserAuthConfig): BrowserAuth {
     client ??= new BrowserOAuthClient({
       fetch: createOAuthFetch(config),
       handleResolver: config.handleResolver,
+      ...(config.plcDirectoryUrl
+        ? { plcDirectoryUrl: config.plcDirectoryUrl }
+        : {}),
       responseMode: 'query',
       allowHttp: config.isLoopback(),
       clientMetadata: getClientMetadata(config, scope),

@@ -8,7 +8,8 @@
  * not a verified identity.
  */
 
-const PLC_DIRECTORY = 'https://plc.directory'
+const PLC_DIRECTORY =
+  import.meta.env.VITE_PLC_DIRECTORY || 'https://plc.directory'
 
 const PLC_DID_RE = /^did:plc:[a-z2-7]{24}$/
 const HOSTNAME_RE = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/

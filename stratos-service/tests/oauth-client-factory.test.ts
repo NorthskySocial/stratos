@@ -41,6 +41,7 @@ function config(
       repoUrl: 'http://motoko.spike.test:3100',
     },
     stratos,
+    identity: { plcUrl: 'https://plc.directory' },
     oauth: {},
   } as StratosServiceConfig
 }
@@ -56,6 +57,32 @@ describe('OAuth client factories', () => {
         await expect(options.fetch('https://127.0.0.1/token')).rejects.toThrow()
       }
       expect(transport).not.toHaveBeenCalled()
+    } finally {
+      transport.mockRestore()
+    }
+  })
+
+  it('applies the configured PLC CIDR policy only to the PLC origin', async () => {
+    const serviceConfig = config({})
+    serviceConfig.identity.plcPrivateCidrs = ['172.25.111.0/24']
+    const transport = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => new Response('{}'))
+    try {
+      await createEnrollmentAndAdminClients(serviceConfig)
+      for (const [options] of nodeOAuthClient.mock.calls) {
+        expect(options.plcDirectoryUrl).toBe('https://plc.directory')
+        await options.fetch('https://plc.directory/did:plc:rei')
+        await options.fetch('https://pds.nerv.jp/.well-known/did.json')
+        const plcInit = transport.mock.calls.at(-2)?.[1] as RequestInit & {
+          dispatcher: unknown
+        }
+        const pdsInit = transport.mock.calls.at(-1)?.[1] as RequestInit & {
+          dispatcher: unknown
+        }
+        expect(plcInit.redirect).toBe('error')
+        expect(plcInit.dispatcher).not.toBe(pdsInit.dispatcher)
+      }
     } finally {
       transport.mockRestore()
     }

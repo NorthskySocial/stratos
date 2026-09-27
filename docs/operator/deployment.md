@@ -63,7 +63,7 @@ STORAGE_BACKEND="sqlite"
 STRATOS_BLOB_STORAGE="local"
 
 # Identity Resolution
-STRATOS_PLC_URL="https://plc.directory"
+PLC_DIRECTORY="https://plc.directory"
 
 # Enrollment
 STRATOS_ENROLLMENT_MODE="allowlist"

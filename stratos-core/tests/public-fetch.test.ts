@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fetch as undiciFetch } from 'undici'
 import {
+  createCheckedLookup,
   createPublicFetch,
   isPublicAddress,
   publicFetch,
@@ -40,6 +41,310 @@ afterEach(async () => {
 })
 
 describe('public outbound transport', () => {
+  it('allows only an exact trusted hostname with answers entirely inside its private CIDR', () => {
+    const lookupAll = (
+      _host: string,
+      _opts: dns.LookupOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) => callback(null, [{ address: '172.25.111.24', family: 4 }])
+    vi.spyOn(dns, 'lookup').mockImplementation(lookupAll as typeof dns.lookup)
+    syncBuiltinESMExports()
+    const checkedLookup = createCheckedLookup({
+      origin: 'https://plc.nerv.jp',
+      privateCidrs: ['172.25.111.0/24'],
+    })
+    const accepted = vi.fn()
+    checkedLookup('plc.nerv.jp', {}, accepted)
+    expect(accepted).toHaveBeenCalledWith(null, '172.25.111.24', 4)
+    const rejected = vi.fn()
+    checkedLookup('pds.nerv.jp', {}, rejected)
+    expect(rejected).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'UnsafeOutboundAddress' }),
+      '',
+    )
+  })
+
+  it('rejects mixed DNS answers, network addresses and overly broad CIDRs', () => {
+    let addresses = [
+      { address: '172.25.111.24', family: 4 },
+      { address: '8.8.8.8', family: 4 },
+    ]
+    const lookupAll = (
+      _host: string,
+      _opts: dns.LookupOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) => callback(null, addresses)
+    vi.spyOn(dns, 'lookup').mockImplementation(lookupAll as typeof dns.lookup)
+    syncBuiltinESMExports()
+    const policy = {
+      origin: 'https://plc.nerv.jp',
+      privateCidrs: ['172.25.111.0/24'],
+    }
+    const rejected = vi.fn()
+    const checkedLookup = createCheckedLookup(policy)
+    checkedLookup('plc.nerv.jp', {}, rejected)
+    expect(rejected).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'UnsafeOutboundAddress' }),
+      '',
+    )
+    for (const address of ['172.25.111.0', '172.25.111.255', '172.25.112.24']) {
+      addresses = [{ address, family: 4 }]
+      const callback = vi.fn()
+      checkedLookup('plc.nerv.jp', {}, callback)
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'UnsafeOutboundAddress' }),
+        '',
+      )
+    }
+    expect(() =>
+      createCheckedLookup({
+        origin: 'https://plc.nerv.jp',
+        privateCidrs: ['10.0.0.0/7'],
+      }),
+    ).toThrow('private')
+    expect(() =>
+      createCheckedLookup({
+        origin: 'https://plc.nerv.jp/path',
+        privateCidrs: ['172.25.111.0/24'],
+      }),
+    ).toThrow('HTTPS DNS origin')
+  })
+
+  it.each([
+    ['10.0.0.0/8', '10.42.0.18'],
+    ['172.16.0.0/12', '172.25.111.18'],
+    ['192.168.0.0/16', '192.168.42.18'],
+    ['fc00::/7', 'fd00::18'],
+  ])('accepts private range %s for its exact origin', (cidr, address) => {
+    const lookupAll = (
+      _host: string,
+      _options: dns.LookupOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) => callback(null, [{ address, family: address.includes(':') ? 6 : 4 }])
+    vi.spyOn(dns, 'lookup').mockImplementation(lookupAll as typeof dns.lookup)
+    syncBuiltinESMExports()
+    const callback = vi.fn()
+    createCheckedLookup({
+      origin: 'https://plc.nerv.jp',
+      privateCidrs: [cidr],
+    })('plc.nerv.jp', {}, callback)
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      address,
+      address.includes(':') ? 6 : 4,
+    )
+  })
+
+  it('accepts either configured CIDR and refuses an empty private answer', () => {
+    let addresses: dns.LookupAddress[] = [{ address: '10.42.0.18', family: 4 }]
+    const lookupAll = (
+      _host: string,
+      _options: dns.LookupOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) => callback(null, addresses)
+    vi.spyOn(dns, 'lookup').mockImplementation(lookupAll as typeof dns.lookup)
+    syncBuiltinESMExports()
+    const checkedLookup = createCheckedLookup({
+      origin: 'https://plc.nerv.jp',
+      privateCidrs: ['172.25.111.0/24', '10.42.0.0/16'],
+    })
+    const accepted = vi.fn()
+    checkedLookup('plc.nerv.jp', {}, accepted)
+    expect(accepted).toHaveBeenCalledWith(null, '10.42.0.18', 4)
+    addresses = []
+    const rejected = vi.fn()
+    checkedLookup('plc.nerv.jp', {}, rejected)
+    expect(rejected).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'UnsafeOutboundAddress' }),
+      '',
+    )
+  })
+
+  it('rejects an invalid CIDR even if a second configured range is valid', () => {
+    expect(() =>
+      createCheckedLookup({
+        origin: 'https://plc.nerv.jp',
+        privateCidrs: ['11.0.0.0/8', '172.25.111.0/24'],
+      }),
+    ).toThrow('private')
+  })
+
+  it('accepts both usable addresses in an explicitly trusted point-to-point /31', () => {
+    let address = '172.25.111.24'
+    const lookupAll = (
+      _host: string,
+      _options: dns.LookupOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) => callback(null, [{ address, family: 4 }])
+    vi.spyOn(dns, 'lookup').mockImplementation(lookupAll as typeof dns.lookup)
+    syncBuiltinESMExports()
+    const checkedLookup = createCheckedLookup({
+      origin: 'https://plc.nerv.jp',
+      privateCidrs: ['172.25.111.24/31'],
+    })
+    for (address of ['172.25.111.24', '172.25.111.25']) {
+      const callback = vi.fn()
+      checkedLookup('plc.nerv.jp', {}, callback)
+      expect(callback).toHaveBeenCalledWith(null, address, 4)
+    }
+  })
+
+  it('keeps public DNS usable for a configured PLC origin', () => {
+    const lookupAll = (
+      _host: string,
+      _options: dns.LookupOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) => callback(null, [{ address: '8.8.8.8', family: 4 }])
+    vi.spyOn(dns, 'lookup').mockImplementation(lookupAll as typeof dns.lookup)
+    syncBuiltinESMExports()
+    const callback = vi.fn()
+    createCheckedLookup({
+      origin: 'https://plc.nerv.jp',
+      privateCidrs: ['172.25.111.0/24'],
+    })('plc.nerv.jp', {}, callback)
+    expect(callback).toHaveBeenCalledWith(null, '8.8.8.8', 4)
+  })
+
+  it('rejects network and broadcast addresses in a trusted /30', () => {
+    let address = '172.25.111.24'
+    const lookupAll = (
+      _host: string,
+      _options: dns.LookupOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) => callback(null, [{ address, family: 4 }])
+    vi.spyOn(dns, 'lookup').mockImplementation(lookupAll as typeof dns.lookup)
+    syncBuiltinESMExports()
+    const checkedLookup = createCheckedLookup({
+      origin: 'https://plc.nerv.jp',
+      privateCidrs: ['172.25.111.24/30'],
+    })
+    for (address of ['172.25.111.24', '172.25.111.27']) {
+      const callback = vi.fn()
+      checkedLookup('plc.nerv.jp', {}, callback)
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'UnsafeOutboundAddress' }),
+        '',
+      )
+    }
+  })
+
+  it('checks both DNS families even when the socket requests IPv4', () => {
+    const answers = [
+      { address: '8.8.8.8', family: 4 },
+      { address: 'fd00::18', family: 6 },
+    ]
+    const lookupAll = (
+      _host: string,
+      _options: dns.LookupOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) => callback(null, answers)
+    const lookup = vi
+      .spyOn(dns, 'lookup')
+      .mockImplementation(lookupAll as typeof dns.lookup)
+    syncBuiltinESMExports()
+    const callback = vi.fn()
+    createCheckedLookup({
+      origin: 'https://plc.nerv.jp',
+      privateCidrs: ['172.25.111.0/24'],
+    })('plc.nerv.jp', { family: 4 }, callback)
+    expect(lookup).toHaveBeenCalledWith(
+      'plc.nerv.jp',
+      { family: 0, all: true },
+      expect.any(Function),
+    )
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'UnsafeOutboundAddress' }),
+      '',
+    )
+  })
+
+  it('returns only the requested family after validating all answers', () => {
+    const lookupAll = (
+      _host: string,
+      _options: dns.LookupOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) =>
+      callback(null, [
+        { address: '8.8.8.8', family: 4 },
+        { address: '2606:4700:4700::1111', family: 6 },
+      ])
+    vi.spyOn(dns, 'lookup').mockImplementation(lookupAll as typeof dns.lookup)
+    syncBuiltinESMExports()
+    const checkedLookup = createCheckedLookup()
+    const callback = vi.fn()
+    checkedLookup('plc.nerv.jp', { family: 4, all: true }, callback)
+    expect(callback).toHaveBeenCalledWith(null, [
+      { address: '8.8.8.8', family: 4 },
+    ])
+  })
+
+  it('rejects a trusted hostname with no DNS answers', () => {
+    const lookupAll = (
+      _host: string,
+      _options: dns.LookupOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) => callback(null, [])
+    vi.spyOn(dns, 'lookup').mockImplementation(lookupAll as typeof dns.lookup)
+    syncBuiltinESMExports()
+    const callback = vi.fn()
+    createCheckedLookup({
+      origin: 'https://plc.nerv.jp',
+      privateCidrs: ['172.25.111.0/24'],
+    })('plc.nerv.jp', {}, callback)
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'UnsafeOutboundAddress' }),
+      '',
+    )
+  })
+
+  it('rejects when the validated DNS answer has no address in the requested family', () => {
+    const lookupAll = (
+      _host: string,
+      _options: dns.LookupOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) => callback(null, [{ address: '2606:4700:4700::1111', family: 6 }])
+    vi.spyOn(dns, 'lookup').mockImplementation(lookupAll as typeof dns.lookup)
+    syncBuiltinESMExports()
+    const callback = vi.fn()
+    createCheckedLookup()('plc.nerv.jp', { family: 4 }, callback)
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'UnsafeOutboundAddress' }),
+      '',
+    )
+  })
+
+  it.each([
+    'http://plc.nerv.jp',
+    'https://rei@plc.nerv.jp',
+    'https://plc.nerv.jp?mode=test',
+    'https://plc.nerv.jp#fragment',
+  ])('refuses malformed trusted origin %s', (origin) => {
+    expect(() =>
+      createCheckedLookup({
+        origin,
+        privateCidrs: ['172.25.111.0/24'],
+      }),
+    ).toThrow('HTTPS DNS origin')
+  })
+
+  it('selects the private dispatcher only for the configured origin', async () => {
+    const transport = vi.fn().mockImplementation(async () => new Response('{}'))
+    const fetch = createPublicFetch(transport, [
+      {
+        origin: 'https://plc.nerv.jp',
+        privateCidrs: ['172.25.111.0/24'],
+      },
+    ])
+    await fetch('https://plc.nerv.jp/did:plc:rei')
+    await fetch('https://plc.nerv.jp:8443/did:plc:rei')
+    await fetch('https://pds.nerv.jp/did.json')
+    const [, trustedInit] = transport.mock.calls[0]
+    const [, differentPortInit] = transport.mock.calls[1]
+    const [, otherHostInit] = transport.mock.calls[2]
+    expect(trustedInit.redirect).toBe('error')
+    expect(differentPortInit.dispatcher).not.toBe(trustedInit.dispatcher)
+    expect(otherHostInit.dispatcher).toBe(differentPortInit.dispatcher)
+  })
   it('uses a dispatcher-aware transport on Deno and preserves Request data', async () => {
     vi.stubGlobal('Deno', {})
     const nativeFetch = vi.spyOn(globalThis, 'fetch')
@@ -88,7 +393,7 @@ describe('public outbound transport', () => {
       publicLookup('nerv.jp', options, callback)
       expect(lookup).toHaveBeenCalledWith(
         'nerv.jp',
-        { ...options, all: true },
+        { ...options, family: 0, all: true },
         expect.any(Function),
       )
       if ('all' in options)

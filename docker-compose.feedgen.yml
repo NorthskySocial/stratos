@@ -56,7 +56,7 @@ services:
       FEEDGEN_MEMBERSHIP_SQLITE_PATH: /app/data/feedgen-membership.sqlite
       FEEDGEN_FEEDS_FILE: /app/config/feeds.yaml
       FEEDGEN_SUBSCRIBE_ENROLLMENTS: 'true'
-      FEEDGEN_PLC_URL: ${STRATOS_PLC_URL:-https://plc.directory}
+      FEEDGEN_PLC_URL: ${PLC_DIRECTORY:-https://plc.directory}
     ulimits:
       core: 0
     volumes:

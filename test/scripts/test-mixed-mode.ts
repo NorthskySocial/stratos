@@ -64,7 +64,7 @@ const GET_FEED_LXM = 'zone.stratos.feedgen.getFeed'
 const DNS_DECLARATION_NAME = '_lexicon.space.stratos.zone'
 const SPACE_DECLARATION_AUTHORITY_DID = 'did:plc:6uxgo3ypovauub7nblwylqyv'
 const PLC_DIRECTORY_URL =
-  Deno.env.get('STRATOS_PLC_URL') ?? 'https://plc.directory'
+  Deno.env.get('PLC_DIRECTORY') ?? 'https://plc.directory'
 const MIXED_MODE_FEEDS = [
   { id: 'swordsmith', boundary: DOMAINS.swordsmith },
   { id: 'aekea', boundary: DOMAINS.aekea },

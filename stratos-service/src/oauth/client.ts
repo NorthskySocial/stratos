@@ -5,7 +5,10 @@ import {
 } from '@atproto/oauth-client-node'
 import { JoseKey } from '@atproto/jwk-jose'
 import { IdResolver } from '@atproto/identity'
-import { createPublicFetch } from '@northskysocial/stratos-core/network'
+import {
+  createPublicFetch,
+  type TrustedOriginPolicy,
+} from '@northskysocial/stratos-core/network'
 import { eq } from 'drizzle-orm'
 import { oauthSession, oauthState, type ServiceDb } from '../db'
 import { pgOauthSession, pgOauthState } from '../db/pg-schema.js'
@@ -222,6 +225,8 @@ export interface OAuthClientConfig {
   policyUri?: string
   /** Allow loopback HTTP only for the local development OAuth flow. */
   allowHttp?: boolean
+  plcDirectoryUrl?: string
+  trustedOrigins?: readonly TrustedOriginPolicy[]
 }
 
 /**
@@ -467,7 +472,10 @@ export async function createOAuthClient(
       },
     },
 
-    fetch: createPublicFetch(fetch),
+    fetch: createPublicFetch(fetch, config.trustedOrigins),
+    ...(config.plcDirectoryUrl
+      ? { plcDirectoryUrl: config.plcDirectoryUrl }
+      : {}),
     ...(config.allowHttp === true ? { allowHttp: true } : {}),
   })
 }

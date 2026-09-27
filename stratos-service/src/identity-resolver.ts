@@ -1,8 +1,33 @@
 import type { DidDocument, IdResolver } from '@atproto/identity'
-import { createPublicIdResolver } from '@northskysocial/stratos-core/network'
+import {
+  createPublicFetch,
+  createPublicIdResolver,
+  type TrustedOriginPolicy,
+} from '@northskysocial/stratos-core/network'
 import { isValidHandle } from '@atproto/syntax'
 import type { Logger, ServiceEnrollment } from '@northskysocial/stratos-core'
 import type { StratosServiceConfig } from './config.js'
+
+/** Narrow private DNS access to configured control-plane origins. */
+export function trustedIdentityOrigins(
+  cfg: StratosServiceConfig,
+): TrustedOriginPolicy[] {
+  const identity = cfg.identity
+  const policies: TrustedOriginPolicy[] = []
+  if (identity.plcPrivateCidrs?.length) {
+    policies.push({
+      origin: identity.plcUrl,
+      privateCidrs: identity.plcPrivateCidrs,
+    })
+  }
+  if (identity.privateOrigins?.length && !identity.privateCidrs?.length) {
+    throw new Error('IDENTITY_PRIVATE_CIDRS is required for private origins')
+  }
+  for (const origin of identity.privateOrigins ?? []) {
+    policies.push({ origin, privateCidrs: identity.privateCidrs ?? [] })
+  }
+  return policies
+}
 
 /**
  * Create an ID resolver with PLC fallback logic
@@ -16,9 +41,16 @@ export function createIdResolver(
   fetchWithUserAgent: typeof fetch,
   logger?: Logger,
 ): IdResolver {
-  const idResolver = createPublicIdResolver({
-    plcUrl: cfg.identity.plcUrl,
-  })
+  const policies = trustedIdentityOrigins(cfg)
+  const idResolver = createPublicIdResolver(
+    {
+      plcUrl: cfg.identity.plcUrl,
+    },
+    policies,
+  )
+  const plcFetch = policies.length
+    ? createPublicFetch(fetchWithUserAgent, policies)
+    : fetchWithUserAgent
 
   installServiceKeyShortcut(
     idResolver,
@@ -43,7 +75,7 @@ export function createIdResolver(
     try {
       const plcUrl = cfg.identity.plcUrl
       const resolveUrl = `${plcUrl}/did-by-handle/${encodeURIComponent(handle)}`
-      const resp = await fetchWithUserAgent(resolveUrl, { redirect: 'error' })
+      const resp = await plcFetch(resolveUrl, { redirect: 'error' })
       if (resp.ok) {
         const did = await resp.text()
         if (did && did.startsWith('did:')) {

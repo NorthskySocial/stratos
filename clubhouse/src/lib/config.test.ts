@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import {
   feedgenServiceId,
+  loadClubhouseConfig,
   roomCatalogEndpoint,
   roomPostEndpoint,
   roomStatusEndpoint,
 } from './config'
 
 describe('Clubhouse service endpoints', () => {
+  it('loads the local PLC directory when configured', () => {
+    const config = loadClubhouseConfig({
+      VITE_PLC_DIRECTORY: 'https://plc.atmosbox.test/',
+    })
+
+    expect(config.plcDirectoryUrl).toBe('https://plc.atmosbox.test')
+  })
+
   it('identifies the Feedgen service for OAuth scopes and PDS proxy routing', () => {
     expect(feedgenServiceId('did:web:feed.example')).toBe(
       'did:web:feed.example#stratos_feedgen',

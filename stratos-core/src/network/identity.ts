@@ -7,7 +7,7 @@ import {
 } from '@atproto/identity'
 import { isValidHandle } from '@atproto/syntax'
 import { createBoundedFetch } from './bounded-fetch.js'
-import { publicFetch } from './public-fetch.js'
+import { createPublicFetch, type TrustedOriginPolicy } from './public-fetch.js'
 
 export function didWebDocumentUrl(did: string): URL {
   if (!did.startsWith('did:web:')) throw new PoorlyFormattedDidError(did)
@@ -32,8 +32,8 @@ export function didWebDocumentUrl(did: string): URL {
 }
 
 class PublicDidWebResolver extends DidWebResolver {
-  constructor(timeout: number) {
-    super(timeout, undefined, publicFetch)
+  constructor(timeout: number, fetch: typeof globalThis.fetch) {
+    super(timeout, undefined, fetch)
   }
 
   override resolveNoCheck(did: string): Promise<unknown> {
@@ -44,19 +44,23 @@ class PublicDidWebResolver extends DidWebResolver {
 
 export function createPublicIdResolver(
   opts: Omit<IdentityResolverOpts, 'fetch'> = {},
+  trustedOrigins: readonly TrustedOriginPolicy[] = [],
 ): IdResolver {
-  // PLC is operator-configured; DID web and HTTP handles use public-host checks below.
-  const resolver = new IdResolver({ ...opts, fetch: createBoundedFetch() })
+  const protectedFetch = createPublicFetch(undefined, trustedOrigins)
+  const resolver = new IdResolver({
+    ...opts,
+    fetch: trustedOrigins.length ? protectedFetch : createBoundedFetch(),
+  })
   resolver.did.methods.set(
     'web',
-    new PublicDidWebResolver(resolver.handle.timeout),
+    new PublicDidWebResolver(resolver.handle.timeout, protectedFetch),
   )
   // Keep HTTP handles on the well-known path even when the server redirects.
   resolver.handle.resolveHttp = async (handle, signal) => {
     if (!isValidHandle(handle)) return undefined
     try {
       const timeout = AbortSignal.timeout(resolver.handle.timeout)
-      const response = await publicFetch(
+      const response = await protectedFetch(
         new URL('/.well-known/atproto-did', `https://${handle}`),
         { signal: signal ? AbortSignal.any([signal, timeout]) : timeout },
       )
