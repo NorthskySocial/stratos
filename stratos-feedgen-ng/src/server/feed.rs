@@ -164,14 +164,12 @@ pub(super) async fn get_feed(
     )
     .await;
     match response {
-        Ok(Ok(Ok(body))) => {
+        Ok(Ok(Ok((body, posts_returned)))) => {
             projection_timer.finish(crate::telemetry::FeedReadStageOutcome::Success);
-            let posts_returned = serde_json::from_slice::<serde_json::Value>(&body)
-                .ok()
-                .and_then(|response| response.get("feed")?.as_array().map(Vec::len));
-            state
-                .telemetry
-                .record_feed_request(crate::telemetry::FeedRequestOutcome::Ok, posts_returned);
+            state.telemetry.record_feed_request(
+                crate::telemetry::FeedRequestOutcome::Ok,
+                Some(posts_returned),
+            );
             private_json(StatusCode::OK, body)
         }
         Ok(Ok(Err(error))) => {

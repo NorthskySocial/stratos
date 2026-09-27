@@ -160,12 +160,14 @@ impl<'a> FeedService<'a> {
         &self,
         authorization: ViewerAuthorization<'_>,
         query: FeedQuery<'_>,
-    ) -> Result<Vec<u8>, FeedServiceError> {
+    ) -> Result<(Vec<u8>, usize), FeedServiceError> {
         let (token, response) = self.prepare(authorization, query)?;
+        let post_count = response.feed.len();
         let response =
             serde_json::to_vec(&response).map_err(|_| FeedServiceError::InvalidProjection)?;
         self.reader
             .release(token, response, query.now)
+            .map(|response| (response, post_count))
             .ok_or(FeedServiceError::FeedNotReady)
     }
 
@@ -384,7 +386,7 @@ mod tests {
         let service = FeedService::new(&feeds, &reader);
         let boundaries = ["bebop".to_owned()];
 
-        let response = service
+        let (response, post_count) = service
             .serve_serialized(
                 ViewerAuthorization {
                     did: "did:plc:faye",
@@ -395,6 +397,7 @@ mod tests {
             )
             .unwrap();
 
+        assert_eq!(post_count, 1);
         let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
         assert_eq!(response["feed"][0]["post"]["record"]["text"], "Bang");
     }

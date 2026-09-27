@@ -309,9 +309,8 @@ fn parse_metrics_export_endpoint(value: Option<String>) -> Result<Option<String>
     let private_host = match endpoint.host() {
         Some(url::Host::Ipv4(address)) => address.is_private() || address.is_loopback(),
         Some(url::Host::Ipv6(address)) => address.is_unique_local() || address.is_loopback(),
-        // A single-label name is resolved by the operator's private network,
-        // such as a compose or cluster collector service.
-        Some(url::Host::Domain(name)) => !name.contains('.'),
+        Some(url::Host::Domain("collector")) => true,
+        Some(url::Host::Domain(_)) => false,
         None => false,
     };
     if !matches!(endpoint.scheme(), "http" | "https")
@@ -420,6 +419,7 @@ mod tests {
         for endpoint in [
             "https://collector.example.com/v1/metrics",
             "http://8.8.8.8/v1/metrics",
+            "http://not-a-private-collector:4318/v1/metrics",
             "http://collector:4318/not-metrics",
             "http://collector:4318/v1/metrics?token=private",
         ] {

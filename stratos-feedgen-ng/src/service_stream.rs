@@ -145,8 +145,6 @@ async fn run_forever(
         )
         .await;
         lifecycle.mark_unavailable();
-        telemetry.set_service_connected(false);
-        telemetry.set_ready(false);
         if *shutdown.borrow() {
             return;
         }
@@ -216,9 +214,8 @@ async fn run_connection(
     })?;
 
     lifecycle.session_established();
-    telemetry.set_service_connected(true);
     let reconciliation_started = std::time::Instant::now();
-    let summary = reconcile_with_shutdown(
+    let summary = match reconcile_with_shutdown(
         lifecycle,
         authority,
         now.unix_timestamp().max(0) as u64,
@@ -227,7 +224,16 @@ async fn run_connection(
         shutdown,
     )
     .await
-    .map_err(|_| ServiceStreamError::ReconciliationIncomplete)?;
+    {
+        Ok(summary) => summary,
+        Err(_) => {
+            telemetry.record_reconciliation(
+                ReconciliationOutcome::Failed,
+                reconciliation_started.elapsed(),
+            );
+            return Err(ServiceStreamError::ReconciliationIncomplete);
+        }
+    };
     let Some(summary) = summary else {
         let _ = socket.close(None).await;
         return Ok(());
@@ -243,7 +249,6 @@ async fn run_connection(
         reconciliation_started.elapsed(),
     );
     if summary.errors != 0 || summary.truncated {
-        telemetry.set_ready(false);
         return Err(ServiceStreamError::ReconciliationIncomplete);
     }
     actor_failures.borrow_and_update();
@@ -252,7 +257,6 @@ async fn run_connection(
         ServiceStreamError::ReconciliationIncomplete
     })?;
     telemetry.set_actor_pool(stats.active, stats.waiting, stats.max_connections);
-    telemetry.set_ready(true);
 
     loop {
         tokio::select! {

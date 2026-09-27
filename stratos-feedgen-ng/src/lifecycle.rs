@@ -120,7 +120,7 @@ impl ControlLifecycle {
         did: &str,
         feeds: &FeedRegistry,
         query: FeedQuery<'_>,
-    ) -> Result<Vec<u8>, FeedServiceError> {
+    ) -> Result<(Vec<u8>, usize), FeedServiceError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         if !self
             .readiness
@@ -225,6 +225,8 @@ impl ControlLifecycle {
         let mut projection = self.projection.lock().expect("projection lock poisoned");
         readiness.mark_session_established();
         projection.close_session();
+        self.telemetry.mark_service_connected();
+        self.telemetry.mark_unready();
     }
 
     pub fn begin_reconciliation(&self) -> u64 {
@@ -232,6 +234,7 @@ impl ControlLifecycle {
         let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
         let mut projection = self.projection.lock().expect("projection lock poisoned");
         projection.close_session();
+        self.telemetry.mark_unready();
         readiness.begin_reconciliation()
     }
 
@@ -242,8 +245,10 @@ impl ControlLifecycle {
         let ready = readiness.complete_reconciliation(generation, outcome);
         if ready {
             projection.establish_session();
+            self.telemetry.mark_ready();
         } else {
             projection.close_session();
+            self.telemetry.mark_unready();
         }
         ready
     }
@@ -254,6 +259,8 @@ impl ControlLifecycle {
         let mut projection = self.projection.lock().expect("projection lock poisoned");
         readiness.mark_unavailable();
         projection.close_session();
+        self.telemetry.mark_unready();
+        self.telemetry.mark_service_disconnected();
     }
 
     pub fn apply_actor_page(&self, page: ActorPage) -> Result<(), StoreError> {
@@ -790,6 +797,32 @@ mod tests {
             Err(AuthorizationError::CapacityExceeded)
         );
         assert!(lifecycle.read(|projection| projection.release(token, page, 2).is_none()));
+    }
+
+    #[test]
+    fn unavailable_lifecycle_transition_closes_the_telemetry_readiness_gauge() {
+        let telemetry = Arc::new(FeedTelemetry::disabled());
+        let lifecycle = ControlLifecycle::for_authority_with_telemetry(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            "did:plc:spike",
+            Arc::clone(&telemetry),
+        )
+        .unwrap();
+        lifecycle.session_established();
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+        assert!(telemetry.is_ready());
+        lifecycle.mark_unavailable();
+        assert!(!telemetry.is_ready());
     }
 
     #[test]

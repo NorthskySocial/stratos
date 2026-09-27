@@ -326,13 +326,20 @@ impl FeedTelemetry {
     pub fn is_export_enabled(&self) -> bool {
         self.stage_duration.is_some()
     }
-    pub fn set_ready(&self, ready: bool) {
-        self.state.ready.store(ready, Ordering::Relaxed);
+    pub fn is_ready(&self) -> bool {
+        self.state.ready.load(Ordering::Relaxed)
     }
-    pub fn set_service_connected(&self, connected: bool) {
-        self.state
-            .service_connected
-            .store(connected, Ordering::Relaxed);
+    pub fn mark_ready(&self) {
+        self.state.ready.store(true, Ordering::Relaxed);
+    }
+    pub fn mark_unready(&self) {
+        self.state.ready.store(false, Ordering::Relaxed);
+    }
+    pub fn mark_service_connected(&self) {
+        self.state.service_connected.store(true, Ordering::Relaxed);
+    }
+    pub fn mark_service_disconnected(&self) {
+        self.state.service_connected.store(false, Ordering::Relaxed);
     }
     pub fn set_actor_pool(&self, active: usize, waiting: usize, capacity: u16) {
         self.state
@@ -591,8 +598,8 @@ mod tests {
             .with_reader(PeriodicReader::builder(exporter.clone()).build())
             .build();
         let telemetry = FeedTelemetry::enabled(&provider);
-        telemetry.set_ready(true);
-        telemetry.set_service_connected(true);
+        telemetry.mark_ready();
+        telemetry.mark_service_connected();
         telemetry.set_actor_pool(2, 1, 8);
         telemetry
             .begin_http_request()

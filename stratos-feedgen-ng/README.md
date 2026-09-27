@@ -68,8 +68,9 @@ separate from PLC trust and applies to that PDS origin only.
 Feed-read timing is aggregate-only and disabled by default. Set
 `FEEDGEN_OTLP_METRICS_ENDPOINT` to a private Collector OTLP/HTTP endpoint
 ending in `/v1/metrics`, for example `http://collector:4318/v1/metrics`.
-The endpoint accepts a private IP address or a single-label private service
-name; public hosts, credentials, query strings, and other paths are rejected.
+The endpoint accepts a literal private IP address or the exact internal
+service name `collector`; public hosts, arbitrary DNS names, credentials,
+query strings, and other paths are rejected.
 The exporter runs on its own bounded background schedule (60-second interval,
 3-second export timeout), so Collector availability never blocks a feed
 request. No public `/metrics` endpoint is served.
