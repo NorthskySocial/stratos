@@ -14,6 +14,7 @@ use tokio::{sync::Semaphore, time::timeout};
 
 use crate::{
     auth::{FeedRequestVerifier, IdentityKeyResolver},
+    authority::AuthorityClient,
     blob_service::{BlobService, BlobServiceError},
     config::FeedgenConfig,
     feed_service::{FeedQuery, FeedServiceError},
@@ -32,11 +33,20 @@ struct ServerState {
 
 pub type RuntimeVerifier = FeedRequestVerifier<Arc<dyn IdentityKeyResolver>>;
 
+pub struct FeedRuntime {
+    pub lifecycle: Arc<ControlLifecycle>,
+    pub verifier: RuntimeVerifier,
+    pub authority: Arc<dyn AuthorityClient>,
+    pub pds_space_sync: Arc<Mutex<PdsSpaceSyncStatus>>,
+    pub blobs: Arc<BlobService>,
+}
+
 const MAX_FEED_ID_BYTES: usize = 256;
 const MAX_CURSOR_BYTES: usize = 4 * 1024;
 const MAX_GET_FEED_QUERY_BYTES: usize = 8 * 1024;
 const MAX_CONCURRENT_FEED_REQUESTS: usize = 4;
 const FEED_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+const BOUNDARY_AUTHORIZATION_TTL_SECONDS: u64 = 300;
 
 struct FeedServerState {
     server: Arc<ServerState>,
@@ -44,6 +54,7 @@ struct FeedServerState {
     verifier: RuntimeVerifier,
     request_permits: Arc<Semaphore>,
     blobs: Option<Arc<BlobService>>,
+    authority: Option<Arc<dyn AuthorityClient>>,
 }
 
 #[derive(Serialize)]
@@ -131,49 +142,39 @@ pub fn router_with_feed(
     lifecycle: Arc<ControlLifecycle>,
     verifier: RuntimeVerifier,
 ) -> Router {
-    router_with_feed_with_sync_status(config, feeds, readiness, lifecycle, verifier, None, None)
+    router_with_feed_with_request_limit(
+        ServerState {
+            config,
+            feeds,
+            readiness,
+            pds_space_sync: None,
+        },
+        lifecycle,
+        verifier,
+        MAX_CONCURRENT_FEED_REQUESTS,
+        None,
+        None,
+    )
 }
 
 pub fn router_with_feed_with_pds_space_sync(
     config: FeedgenConfig,
     feeds: FeedRegistry,
     readiness: Arc<Mutex<FeedReadinessGate>>,
-    lifecycle: Arc<ControlLifecycle>,
-    verifier: RuntimeVerifier,
-    pds_space_sync: Arc<Mutex<PdsSpaceSyncStatus>>,
-    blobs: Arc<BlobService>,
-) -> Router {
-    router_with_feed_with_sync_status(
-        config,
-        feeds,
-        readiness,
-        lifecycle,
-        verifier,
-        Some(pds_space_sync),
-        Some(blobs),
-    )
-}
-
-fn router_with_feed_with_sync_status(
-    config: FeedgenConfig,
-    feeds: FeedRegistry,
-    readiness: Arc<Mutex<FeedReadinessGate>>,
-    lifecycle: Arc<ControlLifecycle>,
-    verifier: RuntimeVerifier,
-    pds_space_sync: Option<Arc<Mutex<PdsSpaceSyncStatus>>>,
-    blobs: Option<Arc<BlobService>>,
+    runtime: FeedRuntime,
 ) -> Router {
     router_with_feed_with_request_limit(
         ServerState {
             config,
             feeds,
             readiness,
-            pds_space_sync,
+            pds_space_sync: Some(runtime.pds_space_sync),
         },
-        lifecycle,
-        verifier,
+        runtime.lifecycle,
+        runtime.verifier,
         MAX_CONCURRENT_FEED_REQUESTS,
-        blobs,
+        Some(runtime.blobs),
+        Some(runtime.authority),
     )
 }
 
@@ -183,9 +184,10 @@ fn router_with_feed_with_request_limit(
     verifier: RuntimeVerifier,
     request_limit: usize,
     blobs: Option<Arc<BlobService>>,
+    authority: Option<Arc<dyn AuthorityClient>>,
 ) -> Router {
     let server = Arc::new(server);
-    let state = feed_server_state(server, lifecycle, verifier, request_limit, blobs);
+    let state = feed_server_state(server, lifecycle, verifier, request_limit, blobs, authority);
     Router::new()
         .route("/health", get(feed_health))
         .route("/.well-known/did.json", get(feed_did_document))
@@ -204,6 +206,7 @@ fn feed_server_state(
     verifier: RuntimeVerifier,
     request_limit: usize,
     blobs: Option<Arc<BlobService>>,
+    authority: Option<Arc<dyn AuthorityClient>>,
 ) -> Arc<FeedServerState> {
     Arc::new(FeedServerState {
         server,
@@ -211,6 +214,7 @@ fn feed_server_state(
         verifier,
         request_permits: Arc::new(Semaphore::new(request_limit)),
         blobs,
+        authority,
     })
 }
 
@@ -381,7 +385,6 @@ async fn get_feed(
             "limit must be between 1 and 100",
         );
     }
-    let as_of = current_timestamp();
     let permit = match Arc::clone(&state.request_permits).try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
@@ -392,6 +395,10 @@ async fn get_feed(
             );
         }
     };
+    if let Err(error) = ensure_viewer_authorization(&state, &verified.viewer_did, now).await {
+        return feed_error(error);
+    }
+    let as_of = current_timestamp();
     let lifecycle = Arc::clone(&state.lifecycle);
     let server = Arc::clone(&state.server);
     let viewer_did = verified.viewer_did;
@@ -511,6 +518,9 @@ async fn get_blob(
             );
         }
     };
+    if let Err(error) = ensure_viewer_authorization(&state, &verified.viewer_did, now).await {
+        return feed_error(error);
+    }
     let as_of = current_timestamp();
     let lifecycle = Arc::clone(&state.lifecycle);
     let server = Arc::clone(&state.server);
@@ -634,6 +644,54 @@ fn feed_error(error: FeedServiceError) -> Response {
     }
 }
 
+async fn ensure_viewer_authorization(
+    state: &FeedServerState,
+    viewer_did: &str,
+    now: u64,
+) -> Result<(), FeedServiceError> {
+    if state
+        .lifecycle
+        .has_current_viewer_authorization(viewer_did, now)
+    {
+        return Ok(());
+    }
+    let Some(authority) = &state.authority else {
+        return Err(FeedServiceError::AuthorizationUnavailable);
+    };
+    let resolution = timeout(
+        FEED_REQUEST_TIMEOUT,
+        authority.resolve_enrollment(viewer_did, now),
+    )
+    .await
+    .map_err(|_| FeedServiceError::AuthorizationUnavailable)?
+    .map_err(|_| FeedServiceError::AuthorizationUnavailable)?;
+    if resolution.did != viewer_did {
+        return Err(FeedServiceError::AuthorizationUnavailable);
+    }
+    let boundaries = if resolution.enrolled {
+        resolution.boundaries
+    } else {
+        Vec::new()
+    };
+    let enrolled = !boundaries.is_empty();
+    state
+        .lifecycle
+        .apply_viewer_authorization(
+            crate::authorization::ViewerAuthorization {
+                did: viewer_did.to_owned(),
+                boundaries,
+                expires_at: now.saturating_add(BOUNDARY_AUTHORIZATION_TTL_SECONDS),
+            },
+            now,
+        )
+        .map_err(|_| FeedServiceError::AuthorizationUnavailable)?;
+    if enrolled {
+        Ok(())
+    } else {
+        Err(FeedServiceError::AuthorizationUnavailable)
+    }
+}
+
 fn xrpc_error(status: StatusCode, error: &'static str, message: &'static str) -> Response {
     let body = serde_json::to_vec(&XrpcErrorResponse { error, message })
         .expect("static XRPC error serializes");
@@ -701,7 +759,10 @@ fn current_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::{Arc, Mutex},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
         time::Duration,
     };
 
@@ -720,6 +781,7 @@ mod tests {
 
     use crate::{
         auth::{FeedRequestVerifier, IdentityKeyResolver, IdentityResolutionError},
+        authority::{AuthorityClient, AuthorityError, EnrollmentResolution},
         blob_cache::BlobCache,
         blob_service::BlobService,
         blob_upstream::{BlobUpstream, BlobUpstreamError},
@@ -732,7 +794,41 @@ mod tests {
         store::{ActorPage, EncryptedStore, ProjectionPost, StorageKey},
     };
 
-    use super::{ServerState, blob_mime, feed_error, router, router_with_feed_with_request_limit};
+    use super::{
+        FeedServerState, ServerState, blob_mime, ensure_viewer_authorization, feed_error, router,
+        router_with_feed_with_request_limit,
+    };
+
+    struct StaticAuthority(AtomicUsize);
+
+    #[async_trait]
+    impl AuthorityClient for StaticAuthority {
+        async fn resolve_enrollment(
+            &self,
+            did: &str,
+            _now: u64,
+        ) -> Result<EnrollmentResolution, AuthorityError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(EnrollmentResolution {
+                did: did.to_owned(),
+                enrolled: true,
+                boundaries: vec!["did:web:stratos.example.test/bebop".to_owned()],
+            })
+        }
+    }
+
+    struct PanicAuthority;
+
+    #[async_trait]
+    impl AuthorityClient for PanicAuthority {
+        async fn resolve_enrollment(
+            &self,
+            _: &str,
+            _: u64,
+        ) -> Result<EnrollmentResolution, AuthorityError> {
+            panic!("a full request limit must reject before resolving a viewer enrollment")
+        }
+    }
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -761,6 +857,7 @@ mod tests {
             stratos_public_url: "https://stratos.example.test".to_string(),
             stratos_service_did: "did:web:stratos.example.test".to_string(),
             plc_url: "https://plc.example.test".to_string(),
+            plc_private_cidrs: None,
             storage: StorageProfile::Memory,
             retention: ProjectionRetention {
                 max_age: std::time::Duration::from_secs(60 * 60),
@@ -778,6 +875,47 @@ mod tests {
             description: None,
         }])
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn resolves_viewer_boundaries_once_and_reuses_the_authoritative_cache() {
+        let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+        let lifecycle = Arc::new(ControlLifecycle::new(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::clone(&readiness),
+        ));
+        let key = SigningKey::from_bytes(&[11; 32].into()).unwrap();
+        let resolver: Arc<dyn IdentityKeyResolver> = Arc::new(StaticResolver(did_key(&key)));
+        let authority = Arc::new(StaticAuthority(AtomicUsize::new(0)));
+        let state = FeedServerState {
+            server: Arc::new(ServerState {
+                config: config(),
+                feeds: feeds(),
+                readiness,
+                pds_space_sync: None,
+            }),
+            lifecycle: Arc::clone(&lifecycle),
+            verifier: FeedRequestVerifier::new(
+                "did:web:feedgen.example.test",
+                ["zone.stratos.feedgen.getFeed".to_owned()],
+                resolver,
+            ),
+            request_permits: Arc::new(tokio::sync::Semaphore::new(4)),
+            blobs: None,
+            authority: Some(authority.clone()),
+        };
+
+        ensure_viewer_authorization(&state, "did:plc:faye", 1)
+            .await
+            .unwrap();
+        ensure_viewer_authorization(&state, "did:plc:faye", 2)
+            .await
+            .unwrap();
+
+        assert_eq!(authority.0.load(Ordering::SeqCst), 1);
+        assert!(lifecycle.has_current_viewer_authorization("did:plc:faye", 2));
     }
 
     struct StaticResolver(String);
@@ -893,6 +1031,7 @@ mod tests {
             verifier,
             request_limit,
             blobs,
+            None,
         )
     }
 
@@ -1217,14 +1356,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refuses_feed_work_when_all_request_permits_are_reserved() {
+    async fn refuses_feed_work_before_resolving_a_viewer_when_all_request_permits_are_reserved() {
         let key = SigningKey::from_bytes((&[7_u8; 32]).into()).unwrap();
         let expires_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs()
             + 60;
-        let response = authenticated_router_with_request_limit(&key, 0, None, None, Vec::new())
+        let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+        let lifecycle = Arc::new(ControlLifecycle::new(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::clone(&readiness),
+        ));
+        lifecycle.session_established();
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            crate::readiness::ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+        let resolver: Arc<dyn IdentityKeyResolver> = Arc::new(StaticResolver(did_key(&key)));
+        let app = router_with_feed_with_request_limit(
+            ServerState {
+                config: config(),
+                feeds: feeds(),
+                readiness,
+                pds_space_sync: None,
+            },
+            lifecycle,
+            FeedRequestVerifier::new(
+                "did:web:feedgen.example.test",
+                ["zone.stratos.feedgen.getFeed".to_owned()],
+                resolver,
+            ),
+            0,
+            None,
+            Some(Arc::new(PanicAuthority)),
+        );
+        let response = app
             .oneshot(
                 Request::builder()
                     .uri("/xrpc/zone.stratos.feedgen.getFeed?feed=bebop")

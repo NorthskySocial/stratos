@@ -53,10 +53,15 @@ pub async fn reconcile_current_session(
     let generation = lifecycle.begin_reconciliation();
     match reconcile_actor_enrollments(lifecycle, authority, now, observed_at, options).await {
         Ok(summary) => {
+            eprintln!(
+                "event=service_reconciliation_completed examined={} errors={} truncated={}",
+                summary.examined, summary.errors, summary.truncated
+            );
             lifecycle.complete_reconciliation(generation, summary.outcome());
             Ok(summary)
         }
         Err(error) => {
+            eprintln!("event=service_reconciliation_failed kind=store");
             lifecycle.complete_reconciliation(
                 generation,
                 ReconciliationOutcome {
@@ -97,11 +102,13 @@ pub async fn reconcile_actor_enrollments(
                 Ok(resolution) => resolution,
                 Err(_) => {
                     summary.errors += 1;
+                    eprintln!("event=service_reconciliation_actor_failed kind=authority");
                     continue;
                 }
             };
             if resolution.did != actor.did {
                 summary.errors += 1;
+                eprintln!("event=service_reconciliation_actor_failed kind=did_mismatch");
                 continue;
             }
             let enrollment = resolution.enrolled.then_some(ActorEnrollment {
@@ -111,7 +118,10 @@ pub async fn reconcile_actor_enrollments(
             });
             match lifecycle.reconcile_actor_enrollment(&actor.did, observed_at, enrollment) {
                 Ok(result) => update_summary(&mut summary, result),
-                Err(_) => summary.errors += 1,
+                Err(_) => {
+                    summary.errors += 1;
+                    eprintln!("event=service_reconciliation_actor_failed kind=store");
+                }
             }
         }
         after_did = page.last().map(|actor| actor.did.clone());

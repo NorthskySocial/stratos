@@ -20,6 +20,7 @@ use crate::{
     reconciliation::{ReconciliationOptions, ReconciliationSummary, reconcile_current_session},
     service_auth::{ServiceSigningKey, mint_service_jwt},
     service_event::parse_enrollment_event,
+    store::StoreError,
     websocket_client::authenticated_client_request,
 };
 
@@ -127,10 +128,15 @@ async fn run_forever(
         if *shutdown.borrow() {
             return;
         }
-        if result.is_ok() {
-            attempt = 0;
-        } else {
-            attempt = attempt.saturating_add(1);
+        match result {
+            Ok(()) => attempt = 0,
+            Err(error) => {
+                eprintln!(
+                    "event=service_stream_session_ended kind={}",
+                    service_stream_error_kind(&error)
+                );
+                attempt = attempt.saturating_add(1);
+            }
         }
         let delay = reconnect_delay(attempt);
         tokio::select! {
@@ -203,10 +209,10 @@ async fn run_connection(
         return Err(ServiceStreamError::ReconciliationIncomplete);
     }
     actor_failures.borrow_and_update();
-    actors
-        .sync_from_store()
-        .await
-        .map_err(|_| ServiceStreamError::ReconciliationIncomplete)?;
+    if actors.sync_from_store().await.is_err() {
+        eprintln!("event=service_actor_sync_failed kind=store");
+        return Err(ServiceStreamError::ReconciliationIncomplete);
+    }
 
     loop {
         tokio::select! {
@@ -217,23 +223,48 @@ async fn run_connection(
                 }
             }
             _ = actor_failures.changed() => {
+                eprintln!("event=service_stream_session_ended kind=actor_failure");
                 return Err(ServiceStreamError::ReconciliationIncomplete);
             }
             message = socket.next() => {
-                let message = message.ok_or(ServiceStreamError::Connection)?
-                    .map_err(|_| ServiceStreamError::Connection)?;
+                let message = message.ok_or_else(|| {
+                    eprintln!("event=service_stream_session_ended kind=connection_closed");
+                    ServiceStreamError::Connection
+                })?
+                    .map_err(|_| {
+                        eprintln!("event=service_stream_session_ended kind=connection_error");
+                        ServiceStreamError::Connection
+                    })?;
                 match message {
                     Message::Binary(frame) => {
                         if let Some(event) = parse_enrollment_event(&frame, &config.service_did)
-                            .map_err(|_| ServiceStreamError::InvalidFrame)?
+                            .map_err(|_| {
+                                eprintln!("event=service_stream_session_ended kind=invalid_enrollment_frame");
+                                ServiceStreamError::InvalidFrame
+                            })?
                         {
-                            lifecycle
-                                .apply_enrollment_event(event.clone())
-                                .map_err(|_| ServiceStreamError::InvalidFrame)?;
+                            match lifecycle.apply_enrollment_event(event.clone()) {
+                                Ok(_) => {}
+                                Err(StoreError::StaleCursor) => {
+                                    eprintln!("event=service_stale_enrollment_event_ignored");
+                                    continue;
+                                }
+                                Err(StoreError::EnrollmentConflict) => {
+                                    eprintln!("event=service_enrollment_conflict");
+                                    return Err(ServiceStreamError::ReconciliationIncomplete);
+                                }
+                                Err(_) => {
+                                    eprintln!("event=service_stream_session_ended kind=enrollment_store_error");
+                                    return Err(ServiceStreamError::InvalidFrame);
+                                }
+                            }
                             actors
                                 .sync_actor(&event.did)
                                 .await
-                                .map_err(|_| ServiceStreamError::InvalidFrame)?;
+                                .map_err(|_| {
+                                    eprintln!("event=service_stream_session_ended kind=actor_pool_error");
+                                    ServiceStreamError::InvalidFrame
+                                })?;
                         }
                     }
                     Message::Ping(payload) => {
@@ -245,6 +276,16 @@ async fn run_connection(
                 }
             }
         }
+    }
+}
+
+fn service_stream_error_kind(error: &ServiceStreamError) -> &'static str {
+    match error {
+        ServiceStreamError::InvalidConfiguration => "configuration",
+        ServiceStreamError::Authentication => "authentication",
+        ServiceStreamError::Connection => "connection",
+        ServiceStreamError::InvalidFrame => "invalid_frame",
+        ServiceStreamError::ReconciliationIncomplete => "reconciliation_incomplete",
     }
 }
 

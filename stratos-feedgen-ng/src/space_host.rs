@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use reqwest::{Client, redirect::Policy};
@@ -7,7 +7,7 @@ use serde_json::Value;
 use url::Url;
 
 use crate::{
-    identity::is_public_address,
+    identity::{PrivateCidr, is_public_address, parse_private_cidrs},
     space_sync::{MAX_SPACE_PAGE_OPS, SpacePage, SpaceRepoOp},
 };
 
@@ -23,6 +23,7 @@ const MAX_CID_BYTES: usize = 256;
 #[derive(Debug, Eq, PartialEq)]
 pub enum SpaceHostError {
     InvalidOrigin,
+    InvalidPrivateAddressPolicy,
     InvalidRequest,
     UnsafeAddress,
     Unreachable,
@@ -38,6 +39,9 @@ impl std::fmt::Display for SpaceHostError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidOrigin => formatter.write_str("space host origin is invalid"),
+            Self::InvalidPrivateAddressPolicy => {
+                formatter.write_str("space host private address policy is invalid")
+            }
             Self::InvalidRequest => formatter.write_str("space host request is invalid"),
             Self::UnsafeAddress => formatter.write_str("space host resolved an unsafe address"),
             Self::Unreachable => formatter.write_str("space host is unreachable"),
@@ -92,7 +96,14 @@ impl PinnedSpaceHostClient {
         origin: &str,
         proof: Arc<dyn SpaceCredentialProof>,
     ) -> Result<Self, SpaceHostError> {
-        Self::connect_with_resolver(origin, proof, &SystemHostResolver).await
+        let private_policy = PrivateHostPolicy::from_env()?;
+        Self::connect_with_resolver_and_policy(
+            origin,
+            proof,
+            &SystemHostResolver,
+            private_policy.as_ref(),
+        )
+        .await
     }
 
     pub async fn connect_with_resolver(
@@ -100,15 +111,25 @@ impl PinnedSpaceHostClient {
         proof: Arc<dyn SpaceCredentialProof>,
         resolver: &dyn HostResolver,
     ) -> Result<Self, SpaceHostError> {
+        Self::connect_with_resolver_and_policy(origin, proof, resolver, None).await
+    }
+
+    async fn connect_with_resolver_and_policy(
+        origin: &str,
+        proof: Arc<dyn SpaceCredentialProof>,
+        resolver: &dyn HostResolver,
+        private_policy: Option<&PrivateHostPolicy>,
+    ) -> Result<Self, SpaceHostError> {
         let origin = parse_origin(origin)?;
         let host = origin.host_str().ok_or(SpaceHostError::InvalidOrigin)?;
         let port = origin
             .port_or_known_default()
             .ok_or(SpaceHostError::InvalidOrigin)?;
         let addresses = resolver.resolve(host, port).await?;
-        let address = validate_addresses(&addresses)?;
+        let address = validate_addresses(&origin, &addresses, private_policy)?;
         let client = Client::builder()
             .redirect(Policy::none())
+            .no_proxy()
             .https_only(true)
             .connect_timeout(REQUEST_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
@@ -196,14 +217,49 @@ fn parse_origin(value: &str) -> Result<Url, SpaceHostError> {
     Ok(origin)
 }
 
-fn validate_addresses(addresses: &[SocketAddr]) -> Result<SocketAddr, SpaceHostError> {
+struct PrivateHostPolicy {
+    origin: Url,
+    cidrs: Vec<PrivateCidr>,
+}
+
+impl PrivateHostPolicy {
+    fn from_env() -> Result<Option<Self>, SpaceHostError> {
+        let origin = env::var("FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN").ok();
+        let cidrs = env::var("FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS").ok();
+        match (origin, cidrs) {
+            (None, None) => Ok(None),
+            (Some(origin), Some(cidrs)) => {
+                let origin = parse_origin(&origin)
+                    .map_err(|_| SpaceHostError::InvalidPrivateAddressPolicy)?;
+                let cidrs = parse_private_cidrs(&cidrs)
+                    .map_err(|_| SpaceHostError::InvalidPrivateAddressPolicy)?;
+                Ok(Some(Self { origin, cidrs }))
+            }
+            _ => Err(SpaceHostError::InvalidPrivateAddressPolicy),
+        }
+    }
+}
+
+fn validate_addresses(
+    origin: &Url,
+    addresses: &[SocketAddr],
+    private_policy: Option<&PrivateHostPolicy>,
+) -> Result<SocketAddr, SpaceHostError> {
     let Some(address) = addresses.first().copied() else {
         return Err(SpaceHostError::Unreachable);
     };
-    if addresses
+    let private_cidrs = private_policy
+        .filter(|policy| origin.origin() == policy.origin.origin())
+        .map(|policy| policy.cidrs.as_slice());
+    let all_public = addresses
         .iter()
-        .any(|address| !is_public_address(address.ip()))
-    {
+        .all(|address| is_public_address(address.ip()));
+    let all_trusted_private = private_cidrs.is_some_and(|cidrs| {
+        addresses
+            .iter()
+            .all(|address| cidrs.iter().any(|cidr| cidr.contains(address.ip())))
+    });
+    if !all_public && !all_trusted_private {
         return Err(SpaceHostError::UnsafeAddress);
     }
     Ok(address)
@@ -349,9 +405,10 @@ mod tests {
     use async_trait::async_trait;
 
     use super::{
-        HostResolver, PinnedSpaceHostClient, SpaceCredentialProof, SpaceHostError, decode_page,
-        parse_origin, validate_addresses, validate_request,
+        HostResolver, PinnedSpaceHostClient, PrivateHostPolicy, SpaceCredentialProof,
+        SpaceHostError, decode_page, parse_origin, validate_addresses, validate_request,
     };
+    use crate::identity::parse_private_cidrs;
 
     struct TestProof;
 
@@ -396,7 +453,61 @@ mod tests {
             SocketAddr::from((Ipv4Addr::new(127, 0, 0, 1), 443)),
         ];
         assert_eq!(
-            validate_addresses(&addresses),
+            validate_addresses(
+                &parse_origin("https://pds.example.test").unwrap(),
+                &addresses,
+                None
+            ),
+            Err(SpaceHostError::UnsafeAddress)
+        );
+    }
+
+    #[test]
+    fn permits_private_dns_only_for_the_configured_pds_origin() {
+        let policy = PrivateHostPolicy {
+            origin: parse_origin("https://pds.internal.test").unwrap(),
+            cidrs: parse_private_cidrs("172.25.111.0/24").unwrap(),
+        };
+        let address = SocketAddr::from((Ipv4Addr::new(172, 25, 111, 6), 443));
+        assert_eq!(
+            validate_addresses(&policy.origin, &[address], Some(&policy)),
+            Ok(address)
+        );
+        assert_eq!(
+            validate_addresses(
+                &parse_origin("https://other.internal.test").unwrap(),
+                &[address],
+                Some(&policy)
+            ),
+            Err(SpaceHostError::UnsafeAddress)
+        );
+        assert_eq!(
+            validate_addresses(
+                &parse_origin("https://pds.internal.test:8443").unwrap(),
+                &[address],
+                Some(&policy)
+            ),
+            Err(SpaceHostError::UnsafeAddress)
+        );
+        assert_eq!(
+            validate_addresses(
+                &policy.origin,
+                &[address, SocketAddr::from((Ipv4Addr::new(1, 1, 1, 1), 443))],
+                Some(&policy)
+            ),
+            Err(SpaceHostError::UnsafeAddress)
+        );
+        let public = SocketAddr::from((Ipv4Addr::new(1, 1, 1, 1), 443));
+        assert_eq!(
+            validate_addresses(&policy.origin, &[public], Some(&policy)),
+            Ok(public)
+        );
+        assert_eq!(
+            validate_addresses(
+                &policy.origin,
+                &[SocketAddr::from((Ipv4Addr::new(172, 25, 111, 0), 443))],
+                Some(&policy)
+            ),
             Err(SpaceHostError::UnsafeAddress)
         );
     }

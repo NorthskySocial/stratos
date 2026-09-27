@@ -63,7 +63,10 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&readiness),
         config.stratos_service_did.clone(),
     )?);
-    let resolver = Arc::new(HttpIdentityKeyResolver::new(Some(&config.plc_url))?);
+    let resolver = Arc::new(HttpIdentityKeyResolver::new(
+        Some(&config.plc_url),
+        config.plc_private_cidrs.as_deref(),
+    )?);
     let credential_manager = Arc::new(SpaceCredentialManager::new(Arc::new(
         HttpSpaceCredentialIssuer::new(
             &config.stratos_service_url,
@@ -125,7 +128,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
             reconciliation: Default::default(),
         },
         Arc::clone(&lifecycle),
-        authority,
+        Arc::clone(&authority),
         Arc::clone(&actors),
     ) {
         Ok(stream) => stream,
@@ -164,10 +167,13 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
             config,
             feeds,
             readiness,
-            lifecycle,
-            verifier,
-            pds_scheduler.status(),
-            blob_service,
+            server::FeedRuntime {
+                lifecycle,
+                verifier,
+                authority,
+                pds_space_sync: pds_scheduler.status(),
+                blobs: blob_service,
+            },
         ),
     )
     .with_graceful_shutdown(shutdown)

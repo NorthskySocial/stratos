@@ -1,4 +1,7 @@
-use base64::{Engine, engine::general_purpose::STANDARD};
+use base64::{
+    Engine,
+    engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE_NO_PAD},
+};
 use hmac::{Hmac, Mac};
 use serde_json::Value;
 use sha2::Sha256;
@@ -118,21 +121,108 @@ struct SignedSpaceCommit {
 
 impl SignedSpaceCommit {
     fn decode(value: &Value) -> Option<Self> {
-        let record = value.as_object()?;
+        let Some(record) = value.as_object() else {
+            eprintln!("event=pds_space_commit_shape root={}", json_shape(value));
+            return None;
+        };
+        let Some(version) = record.get("ver").and_then(Value::as_u64) else {
+            eprintln!(
+                "event=pds_space_commit_shape field=ver shape={}",
+                field_shape(record.get("ver"))
+            );
+            return None;
+        };
+        let Some(revision) = record.get("rev").and_then(Value::as_str) else {
+            eprintln!(
+                "event=pds_space_commit_shape field=rev shape={}",
+                field_shape(record.get("rev"))
+            );
+            return None;
+        };
+        let Some(hash) = record.get("hash").and_then(decode_lex_bytes) else {
+            eprintln!(
+                "event=pds_space_commit_shape field=hash shape={}",
+                field_shape(record.get("hash"))
+            );
+            return None;
+        };
+        let Some(ikm) = record.get("ikm").and_then(decode_lex_bytes) else {
+            eprintln!(
+                "event=pds_space_commit_shape field=ikm shape={}",
+                field_shape(record.get("ikm"))
+            );
+            return None;
+        };
+        let Some(mac) = record.get("mac").and_then(decode_lex_bytes) else {
+            eprintln!(
+                "event=pds_space_commit_shape field=mac shape={}",
+                field_shape(record.get("mac"))
+            );
+            return None;
+        };
+        let Some(signature) = record.get("sig").and_then(decode_lex_bytes) else {
+            eprintln!(
+                "event=pds_space_commit_shape field=sig shape={}",
+                field_shape(record.get("sig"))
+            );
+            return None;
+        };
         Some(Self {
-            version: record.get("ver")?.as_u64()?,
-            revision: record.get("rev")?.as_str()?.to_owned(),
-            hash: decode_lex_bytes(record.get("hash")?)?,
-            ikm: decode_lex_bytes(record.get("ikm")?)?,
-            mac: decode_lex_bytes(record.get("mac")?)?,
-            signature: decode_lex_bytes(record.get("sig")?)?,
+            version,
+            revision: revision.to_owned(),
+            hash,
+            ikm,
+            mac,
+            signature,
         })
+    }
+}
+
+fn json_shape(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn field_shape(value: Option<&Value>) -> String {
+    match value {
+        None => "missing".to_owned(),
+        Some(Value::Object(record)) => {
+            let mut keys = record.keys().map(String::as_str).collect::<Vec<_>>();
+            keys.sort_unstable();
+            let bytes = record.get("$bytes").map(|value| match value {
+                Value::String(encoded) => format!(
+                    "string:length={},padding={},standard={},standard_no_pad={},url_safe={}",
+                    encoded.len(),
+                    encoded.ends_with('='),
+                    STANDARD.decode(encoded).is_ok(),
+                    STANDARD_NO_PAD.decode(encoded).is_ok(),
+                    URL_SAFE_NO_PAD.decode(encoded).is_ok(),
+                ),
+                value => json_shape(value).to_owned(),
+            });
+            format!(
+                "object:{} bytes={}",
+                keys.join(","),
+                bytes.unwrap_or_default()
+            )
+        }
+        Some(value) => json_shape(value).to_owned(),
     }
 }
 
 fn decode_lex_bytes(value: &Value) -> Option<Vec<u8>> {
     let encoded = value.as_object()?.get("$bytes")?.as_str()?;
-    STANDARD.decode(encoded).ok()
+    STANDARD_NO_PAD
+        .decode(encoded)
+        .or_else(|_| STANDARD.decode(encoded))
+        .or_else(|_| URL_SAFE_NO_PAD.decode(encoded))
+        .ok()
 }
 
 fn commit_context(
@@ -185,12 +275,17 @@ mod tests {
 
     use super::{
         COMMIT_VERSION, CommitVerification, CommitVerificationFailure, HmacSha256,
-        SpaceCommitVerifier, commit_context,
+        SpaceCommitVerifier, commit_context, decode_lex_bytes,
     };
     use crate::auth::{IdentityKeyResolver, IdentityResolutionError};
 
     const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
     const AUTHOR: &str = "did:plc:spike";
+
+    #[test]
+    fn decodes_unpadded_standard_base64_bytes() {
+        assert_eq!(decode_lex_bytes(&json!({"$bytes": "/w"})), Some(vec![255]));
+    }
 
     struct Key(String);
 
@@ -269,10 +364,10 @@ mod tests {
         json!({
             "ver": COMMIT_VERSION,
             "rev": "rev",
-            "hash": {"$bytes": base64::engine::general_purpose::STANDARD.encode(hash)},
-            "ikm": {"$bytes": base64::engine::general_purpose::STANDARD.encode(ikm)},
-            "mac": {"$bytes": base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())},
-            "sig": {"$bytes": base64::engine::general_purpose::STANDARD.encode(signature)},
+            "hash": {"$bytes": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash)},
+            "ikm": {"$bytes": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(ikm)},
+            "mac": {"$bytes": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())},
+            "sig": {"$bytes": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature)},
         })
     }
 
@@ -331,7 +426,7 @@ mod tests {
         let key = SigningKey::from_slice(&[9; 32]).unwrap();
         let mut invalid = commit(&key);
         invalid["mac"]["$bytes"] =
-            json!(base64::engine::general_purpose::STANDARD.encode([0_u8; 32]));
+            json!(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([0_u8; 32]));
         assert_eq!(
             verifier(did_key(&key))
                 .verify(SPACE, AUTHOR, Some(&invalid))
@@ -345,7 +440,7 @@ mod tests {
         let key = SigningKey::from_slice(&[9; 32]).unwrap();
         let mut invalid = commit(&key);
         invalid["mac"]["$bytes"] =
-            json!(base64::engine::general_purpose::STANDARD.encode([0_u8; 32]));
+            json!(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([0_u8; 32]));
         let verifier = SpaceCommitVerifier::new(Box::new(UnavailableKey));
         assert_eq!(
             verifier.verify(SPACE, AUTHOR, Some(&invalid)).await,
@@ -384,7 +479,7 @@ mod tests {
         };
         let mut invalid = commit(&key);
         invalid["sig"]["$bytes"] =
-            json!(base64::engine::general_purpose::STANDARD.encode([0_u8; 63]));
+            json!(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([0_u8; 63]));
         let verifier = SpaceCommitVerifier::new(Box::new(rotating));
 
         assert_eq!(

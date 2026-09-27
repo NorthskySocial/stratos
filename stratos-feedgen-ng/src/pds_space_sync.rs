@@ -253,7 +253,8 @@ impl PdsSpaceSynchronizer {
                 CommitVerification::DeferredKeyResolution => {
                     Ok(PdsSpaceSyncOutcome::DeferredKeyResolution)
                 }
-                CommitVerification::Rejected(_) => {
+                CommitVerification::Rejected(failure) => {
+                    eprintln!("event=pds_space_commit_rejected reason={failure:?}");
                     lifecycle
                         .discard_pds_space_stage(&target.boundary, &target.space_uri, &target.did)
                         .map_err(PdsSpaceSyncError::Store)?;

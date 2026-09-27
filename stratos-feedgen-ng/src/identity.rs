@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
     time::{Duration, SystemTime},
 };
@@ -25,16 +25,28 @@ const MAX_IN_FLIGHT_RESOLUTIONS: usize = 128;
 
 pub struct HttpIdentityKeyResolver {
     plc_url: Url,
+    plc_private_cidrs: Vec<PrivateCidr>,
     state: Arc<Mutex<ResolverState>>,
 }
 
 impl HttpIdentityKeyResolver {
-    pub fn new(plc_url: Option<&str>) -> Result<Self, IdentityResolutionError> {
+    pub fn new(
+        plc_url: Option<&str>,
+        private_cidrs: Option<&str>,
+    ) -> Result<Self, IdentityResolutionError> {
         let plc_url = Url::parse(plc_url.unwrap_or(DEFAULT_PLC_URL))
             .map_err(|_| IdentityResolutionError::InvalidResolverUrl)?;
         validate_resolver_url(&plc_url)?;
+        if plc_url.path() != "/" || plc_url.query().is_some() {
+            return Err(IdentityResolutionError::InvalidResolverUrl);
+        }
+        let plc_private_cidrs = private_cidrs
+            .map(parse_private_cidrs)
+            .transpose()?
+            .unwrap_or_default();
         Ok(Self {
             plc_url,
+            plc_private_cidrs,
             state: Arc::new(Mutex::new(ResolverState::new())),
         })
     }
@@ -57,10 +69,11 @@ impl IdentityKeyResolver for HttpIdentityKeyResolver {
             Resolution::Fetch(flight) => {
                 let did = did.to_owned();
                 let plc_url = self.plc_url.clone();
+                let plc_private_cidrs = self.plc_private_cidrs.clone();
                 let state = Arc::clone(&self.state);
                 let owner = Arc::clone(&flight);
                 tokio::spawn(async move {
-                    let result = fetch_key(&plc_url, &did).await;
+                    let result = fetch_key(&plc_url, &plc_private_cidrs, &did).await;
                     if let Ok(key) = &result {
                         state
                             .lock()
@@ -150,10 +163,24 @@ async fn wait_for_flight(
     Err(IdentityResolutionError::Unavailable)
 }
 
-async fn fetch_key(plc_url: &Url, did: &str) -> Result<String, IdentityResolutionError> {
+async fn fetch_key(
+    plc_url: &Url,
+    plc_private_cidrs: &[PrivateCidr],
+    did: &str,
+) -> Result<String, IdentityResolutionError> {
     let url = did_document_url(did, plc_url)?;
-    let document = fetch_document(url).await?;
+    let private_cidrs = private_cidrs_for_document(did, &url, plc_url, plc_private_cidrs);
+    let document = fetch_document(url, private_cidrs).await?;
     did_key_from_document(did, &document)
+}
+
+fn private_cidrs_for_document<'a>(
+    did: &str,
+    url: &Url,
+    plc_url: &Url,
+    plc_private_cidrs: &'a [PrivateCidr],
+) -> Option<&'a [PrivateCidr]> {
+    (did.starts_with("did:plc:") && url.origin() == plc_url.origin()).then_some(plc_private_cidrs)
 }
 
 fn complete_flight(
@@ -237,7 +264,10 @@ fn did_web_url(identifier: &str) -> Result<Url, IdentityResolutionError> {
     Ok(url)
 }
 
-async fn fetch_document(url: Url) -> Result<String, IdentityResolutionError> {
+async fn fetch_document(
+    url: Url,
+    plc_private_cidrs: Option<&[PrivateCidr]>,
+) -> Result<String, IdentityResolutionError> {
     validate_resolver_url(&url)?;
     let host = url
         .host_str()
@@ -249,14 +279,10 @@ async fn fetch_document(url: Url) -> Result<String, IdentityResolutionError> {
     let Some(address) = addresses.first().copied() else {
         return Err(IdentityResolutionError::Unavailable);
     };
-    if addresses
-        .iter()
-        .any(|address| !is_public_address(address.ip()))
-    {
-        return Err(IdentityResolutionError::UnsafeResolverAddress);
-    }
+    validate_addresses(&addresses, plc_private_cidrs)?;
     let client = Client::builder()
         .redirect(Policy::none())
+        .no_proxy()
         .connect_timeout(RESOLVER_TIMEOUT)
         .timeout(RESOLVER_TIMEOUT)
         .https_only(true)
@@ -291,6 +317,125 @@ async fn fetch_document(url: Url) -> Result<String, IdentityResolutionError> {
         document.extend_from_slice(&chunk);
     }
     String::from_utf8(document).map_err(|_| IdentityResolutionError::InvalidDocument)
+}
+
+#[derive(Clone)]
+pub(crate) enum PrivateCidr {
+    V4 { network: u32, mask: u32, prefix: u8 },
+    V6 { network: u128, mask: u128 },
+}
+
+impl PrivateCidr {
+    fn parse(value: &str) -> Result<Self, IdentityResolutionError> {
+        let (address, prefix) = value
+            .split_once('/')
+            .ok_or(IdentityResolutionError::InvalidPrivateResolverCidrs)?;
+        let address = address
+            .parse::<IpAddr>()
+            .map_err(|_| IdentityResolutionError::InvalidPrivateResolverCidrs)?;
+        let prefix = prefix
+            .parse::<u8>()
+            .map_err(|_| IdentityResolutionError::InvalidPrivateResolverCidrs)?;
+        match address {
+            IpAddr::V4(address) if (1..=32).contains(&prefix) && prefix != 31 => {
+                let mask = u32::MAX.checked_shl(u32::from(32 - prefix)).unwrap_or(0);
+                let network = u32::from(address);
+                let last = network | !mask;
+                if network & mask != network
+                    || !is_private_address(IpAddr::V4(address))
+                    || !is_private_address(IpAddr::V4(last.into()))
+                {
+                    return Err(IdentityResolutionError::InvalidPrivateResolverCidrs);
+                }
+                Ok(Self::V4 {
+                    network,
+                    mask,
+                    prefix,
+                })
+            }
+            IpAddr::V6(address) if (1..=128).contains(&prefix) => {
+                let mask = u128::MAX.checked_shl(u32::from(128 - prefix)).unwrap_or(0);
+                let network = u128::from(address);
+                let last = network | !mask;
+                if network & mask != network
+                    || !is_private_address(IpAddr::V6(address))
+                    || !is_private_address(IpAddr::V6(last.into()))
+                {
+                    return Err(IdentityResolutionError::InvalidPrivateResolverCidrs);
+                }
+                Ok(Self::V6 { network, mask })
+            }
+            _ => Err(IdentityResolutionError::InvalidPrivateResolverCidrs),
+        }
+    }
+
+    pub(crate) fn contains(&self, address: IpAddr) -> bool {
+        match (self, address) {
+            (
+                Self::V4 {
+                    network,
+                    mask,
+                    prefix,
+                },
+                IpAddr::V4(address),
+            ) => {
+                let address = u32::from(address);
+                (address & mask) == *network
+                    && (*prefix > 30 || (address != *network && address != (*network | !mask)))
+            }
+            (Self::V6 { network, mask }, IpAddr::V6(address)) => {
+                (u128::from(address) & mask) == *network
+            }
+            _ => false,
+        }
+    }
+}
+
+fn is_private_address(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => {
+            let [first, second, ..] = address.octets();
+            first == 10
+                || (first == 172 && (16..=31).contains(&second))
+                || (first == 192 && second == 168)
+        }
+        IpAddr::V6(address) => address.segments()[0] & 0xfe00 == 0xfc00,
+    }
+}
+
+pub(crate) fn parse_private_cidrs(
+    value: &str,
+) -> Result<Vec<PrivateCidr>, IdentityResolutionError> {
+    if value.is_empty() {
+        return Err(IdentityResolutionError::InvalidPrivateResolverCidrs);
+    }
+    value
+        .split(',')
+        .map(|cidr| PrivateCidr::parse(cidr.trim()))
+        .collect()
+}
+
+fn validate_addresses(
+    addresses: &[SocketAddr],
+    plc_private_cidrs: Option<&[PrivateCidr]>,
+) -> Result<(), IdentityResolutionError> {
+    if addresses.is_empty() {
+        return Err(IdentityResolutionError::Unavailable);
+    }
+    let all_public = addresses
+        .iter()
+        .all(|address| is_public_address(address.ip()));
+    let all_trusted_private = plc_private_cidrs.is_some_and(|cidrs| {
+        !cidrs.is_empty()
+            && addresses
+                .iter()
+                .all(|address| cidrs.iter().any(|cidr| cidr.contains(address.ip())))
+    });
+    if all_public || all_trusted_private {
+        Ok(())
+    } else {
+        Err(IdentityResolutionError::UnsafeResolverAddress)
+    }
 }
 
 fn validate_resolver_url(url: &Url) -> Result<(), IdentityResolutionError> {
@@ -427,13 +572,14 @@ fn cache_weight(did: &str, key: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
     use url::Url;
 
     use super::{
         HttpIdentityKeyResolver, IdentityKeyCache, IdentityResolutionError, Resolution,
-        did_document_url, did_key_from_document, is_public_address,
+        did_document_url, did_key_from_document, is_public_address, parse_private_cidrs,
+        private_cidrs_for_document, validate_addresses,
     };
 
     const DID: &str = "did:plc:spike";
@@ -498,6 +644,68 @@ mod tests {
     }
 
     #[test]
+    fn permits_only_canonical_private_cidrs_and_usable_addresses() {
+        let cidrs = parse_private_cidrs("172.25.111.0/24,fd00:abcd::/48").unwrap();
+        assert!(cidrs[0].contains("172.25.111.2".parse().unwrap()));
+        assert!(cidrs[1].contains("fd00:abcd::2".parse().unwrap()));
+        for address in ["172.25.111.0", "172.25.111.255", "172.25.112.2"] {
+            assert!(!cidrs[0].contains(address.parse().unwrap()));
+        }
+        for invalid in [
+            "172.25.111.3/24",
+            "172.25.111.0/31",
+            "127.0.0.0/8",
+            "169.254.0.0/16",
+            "0.0.0.0/0",
+            "fc00::/6",
+            "::ffff:ac19:6f03/128",
+            "172.25.111.0/24,",
+        ] {
+            assert!(parse_private_cidrs(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn rejects_mixed_or_outside_dns_answers_and_limits_private_policy_to_plc() {
+        let plc = Url::parse("https://plc.internal.test").unwrap();
+        let private = parse_private_cidrs("172.25.111.0/24").unwrap();
+        let plc_document = did_document_url(DID, &plc).unwrap();
+        assert!(private_cidrs_for_document(DID, &plc_document, &plc, &private).is_some());
+        let web_document = Url::parse("https://plc.internal.test/.well-known/did.json").unwrap();
+        assert!(
+            private_cidrs_for_document("did:web:plc.internal.test", &web_document, &plc, &private)
+                .is_none()
+        );
+        let other_origin = Url::parse("https://other.internal.test/did:plc:spike").unwrap();
+        assert!(private_cidrs_for_document(DID, &other_origin, &plc, &private).is_none());
+
+        let address = |value: &str| SocketAddr::new(value.parse().unwrap(), 443);
+        assert_eq!(
+            validate_addresses(&[address("172.25.111.2")], Some(&private)),
+            Ok(())
+        );
+        for answers in [
+            vec![address("172.25.111.2"), address("1.1.1.1")],
+            vec![address("172.25.111.2"), address("172.25.112.2")],
+            vec![address("172.25.111.0")],
+        ] {
+            assert_eq!(
+                validate_addresses(&answers, Some(&private)),
+                Err(IdentityResolutionError::UnsafeResolverAddress)
+            );
+        }
+        assert_eq!(
+            validate_addresses(&[address("172.25.111.2")], None),
+            Err(IdentityResolutionError::UnsafeResolverAddress)
+        );
+        assert_eq!(validate_addresses(&[address("1.1.1.1")], None), Ok(()));
+        assert_eq!(
+            validate_addresses(&[address("1.1.1.1"), address("8.8.8.8")], Some(&private)),
+            Ok(())
+        );
+    }
+
+    #[test]
     fn evicts_least_recently_used_keys_before_exceeding_its_bound() {
         let mut cache = IdentityKeyCache::new(1_000, 2);
         cache.insert("did:plc:faye", KEY);
@@ -512,7 +720,8 @@ mod tests {
 
     #[test]
     fn coalesces_an_in_flight_resolution_and_reuses_the_verified_result() {
-        let resolver = HttpIdentityKeyResolver::new(Some("https://plc.example.test")).unwrap();
+        let resolver =
+            HttpIdentityKeyResolver::new(Some("https://plc.example.test"), None).unwrap();
         let Resolution::Fetch(flight) = resolver.begin_resolution(DID, false) else {
             panic!("first resolution must fetch");
         };
@@ -531,7 +740,8 @@ mod tests {
 
     #[test]
     fn bounds_stalled_identity_resolutions_before_starting_more_requests() {
-        let resolver = HttpIdentityKeyResolver::new(Some("https://plc.example.test")).unwrap();
+        let resolver =
+            HttpIdentityKeyResolver::new(Some("https://plc.example.test"), None).unwrap();
         for index in 0..super::MAX_IN_FLIGHT_RESOLUTIONS {
             assert!(matches!(
                 resolver.begin_resolution(&format!("did:plc:spike{index}"), false),

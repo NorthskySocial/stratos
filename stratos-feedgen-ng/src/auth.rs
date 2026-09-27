@@ -50,6 +50,7 @@ impl std::error::Error for AuthError {}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IdentityResolutionError {
     InvalidResolverUrl,
+    InvalidPrivateResolverCidrs,
     UnsupportedDid,
     UnsafeResolverAddress,
     NotFound,

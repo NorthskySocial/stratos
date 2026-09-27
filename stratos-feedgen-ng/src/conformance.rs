@@ -258,6 +258,7 @@ mod tests {
                 stratos_public_url: "https://stratos.example.test".to_owned(),
                 stratos_service_did: "did:web:stratos.example.test".to_owned(),
                 plc_url: "https://plc.example.test".to_owned(),
+                plc_private_cidrs: None,
                 storage: StorageProfile::Memory,
                 retention: crate::config::ProjectionRetention {
                     max_age: std::time::Duration::from_secs(60 * 60),

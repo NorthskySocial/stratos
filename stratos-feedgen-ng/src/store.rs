@@ -82,6 +82,7 @@ pub enum StoreError {
     InvalidKeyFile,
     InvalidProjectionMutation,
     StaleCursor,
+    EnrollmentConflict,
     UnverifiedSpaceStage,
     UnauthorizedSpaceMember,
 }
@@ -96,6 +97,7 @@ impl fmt::Debug for StoreError {
             Self::InvalidKeyFile => "InvalidKeyFile",
             Self::InvalidProjectionMutation => "InvalidProjectionMutation",
             Self::StaleCursor => "StaleCursor",
+            Self::EnrollmentConflict => "EnrollmentConflict",
             Self::UnverifiedSpaceStage => "UnverifiedSpaceStage",
             Self::UnauthorizedSpaceMember => "UnauthorizedSpaceMember",
         };
@@ -117,6 +119,9 @@ impl fmt::Display for StoreError {
                 formatter.write_str("projection mutation is invalid")
             }
             Self::StaleCursor => formatter.write_str("projection cursor is stale"),
+            Self::EnrollmentConflict => {
+                formatter.write_str("actor enrollment conflicts at the same observation time")
+            }
             Self::UnverifiedSpaceStage => {
                 formatter.write_str("space stage has not completed verification")
             }
@@ -708,7 +713,7 @@ impl EncryptedStore {
                         enrolled: enrollment.is_some(),
                     });
                 }
-                return Err(StoreError::StaleCursor);
+                return Err(StoreError::EnrollmentConflict);
             }
         }
         let (removed_boundaries, removed_posts, enrolled) = match enrollment {
@@ -2035,6 +2040,32 @@ mod tests {
             Err(StoreError::StaleCursor)
         ));
         assert_eq!(store.list_actor_enrollments_page(None, 1).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn rejects_a_conflicting_enrollment_at_the_current_observation_time() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let observed_at = "1998-04-03T00:00:02.000Z";
+        store
+            .reconcile_actor_enrollment(
+                "did:plc:spikespiegel",
+                observed_at,
+                Some(ActorEnrollment {
+                    did: "did:plc:spikespiegel".to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    observed_at: observed_at.to_owned(),
+                }),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            store.reconcile_actor_enrollment("did:plc:spikespiegel", observed_at, None),
+            Err(StoreError::EnrollmentConflict)
+        ));
+        assert_eq!(
+            store.list_actor_enrollments_page(None, 1).unwrap()[0].boundaries,
+            ["bebop"]
+        );
     }
 
     #[test]

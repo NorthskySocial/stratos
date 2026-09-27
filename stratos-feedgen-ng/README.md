@@ -21,6 +21,19 @@ For a process, set `FEEDGEN_SERVICE_DID`, `FEEDGEN_PUBLIC_URL`,
 `STRATOS_SERVICE_URL`, and `STRATOS_SERVICE_DID`. Set `STRATOS_PUBLIC_URL`
 when the authority's public endpoint differs from its private service URL.
 
+Set `PLC_DIRECTORY` to the HTTPS origin of a non-default PLC directory. For a
+private PLC, also set `PLC_DIRECTORY_PRIVATE_CIDRS` to a comma-separated list
+of canonical RFC 1918 or IPv6 ULA ranges, such as `10.42.0.0/16`. A PLC DNS
+answer set must be entirely public or entirely inside those private ranges;
+mixed answers are rejected. Other identity hosts still require public
+addresses. The validated address is pinned for the request, and redirects are
+not followed.
+
+To poll a PDS on a private network, set both
+`FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN` (its exact HTTPS origin) and
+`FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS` (the same CIDR format). This grant is
+separate from PLC trust and applies to that PDS origin only.
+
 ## Constrained rehearsal container
 
 Build the production-shaped rehearsal image from the workspace root:

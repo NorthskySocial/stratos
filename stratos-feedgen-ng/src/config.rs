@@ -37,6 +37,7 @@ pub struct FeedgenConfig {
     pub stratos_public_url: String,
     pub stratos_service_did: String,
     pub plc_url: String,
+    pub plc_private_cidrs: Option<String>,
     pub storage: StorageProfile,
     pub retention: ProjectionRetention,
     pub actor_max_connections: u16,
@@ -110,10 +111,13 @@ impl FeedgenConfig {
                 projection_max_bytes: env::var("FEEDGEN_PROJECTION_MAX_BYTES").ok(),
             },
         )?;
-        config.plc_url = env::var("FEEDGEN_PLC_URL")
+        config.plc_url = env::var("PLC_DIRECTORY")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "https://plc.directory".to_owned());
+        config.plc_private_cidrs = env::var("PLC_DIRECTORY_PRIVATE_CIDRS")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
         config.stratos_public_url = env::var("STRATOS_PUBLIC_URL")
             .ok()
             .filter(|value| !value.trim().is_empty())
@@ -203,6 +207,7 @@ impl FeedgenConfig {
             stratos_service_url,
             stratos_service_did: required_value(stratos_service_did, "STRATOS_SERVICE_DID")?,
             plc_url: "https://plc.directory".to_owned(),
+            plc_private_cidrs: None,
             storage,
             retention,
             actor_max_connections: 8,

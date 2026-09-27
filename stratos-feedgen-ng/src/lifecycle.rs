@@ -396,10 +396,26 @@ impl ControlLifecycle {
         enrollment: Option<ActorEnrollment>,
     ) -> Result<EnrollmentReconciliation, StoreError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
+        let result = self
+            .projection
             .lock()
             .expect("projection lock poisoned")
-            .reconcile_actor_enrollment(did, observed_at, enrollment)
+            .reconcile_actor_enrollment(did, observed_at, enrollment);
+        if result.is_ok() && self.revoke_viewer_authorization_locked(did) {
+            self.projection
+                .lock()
+                .expect("projection lock poisoned")
+                .invalidate_viewer(did);
+        }
+        result
+    }
+
+    pub fn has_current_viewer_authorization(&self, did: &str, now: u64) -> bool {
+        self.authorizations
+            .lock()
+            .expect("authorization lock poisoned")
+            .current(did, now)
+            .is_some()
     }
 
     pub fn apply_enrollment_event(
@@ -442,6 +458,14 @@ impl ControlLifecycle {
             projection.invalidate_viewer(&authorization.did);
         }
         result
+    }
+
+    fn revoke_viewer_authorization_locked(&self, did: &str) -> bool {
+        self.authorizations
+            .lock()
+            .expect("authorization lock poisoned")
+            .revoke(did)
+            .is_some()
     }
 }
 

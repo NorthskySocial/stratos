@@ -40,7 +40,8 @@ services:
       FEEDGEN_PROJECTION_MAX_BYTES: '${FEEDGEN_PROJECTION_MAX_BYTES:?set a retention byte limit}'
       FEEDGEN_FEEDS_FILE: /etc/feedgen/feeds.yaml
       FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS: '${FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS:-8}'
-      FEEDGEN_PLC_URL: '${FEEDGEN_PLC_URL:-https://plc.directory}'
+      PLC_DIRECTORY: '${PLC_DIRECTORY:-https://plc.directory}'
+      PLC_DIRECTORY_PRIVATE_CIDRS: '${PLC_DIRECTORY_PRIVATE_CIDRS:-}'
     volumes:
       - type: bind
         source: '${FEEDGEN_STATE_DIR:?set the protected state directory}'
