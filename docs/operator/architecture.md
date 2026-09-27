@@ -20,13 +20,14 @@ import RecordCreationAnimation from '../.vitepress/theme/components/RecordCreati
 
 <RecordCreationAnimation />
 
-### Private feed projection
+### Private feed storage
 
-The feed generator follows Stratos actor subscriptions and authority-listed PDS space
-members. It verifies PDS terminal commits before promoting staged records to
-an encrypted, bounded SQLCipher projection. A viewer's current enrollment
-controls feed and blob reads. See [Feed Generator](/operator/feedgen-ng) for the
-module boundaries, privacy controls, and readiness policy.
+The feed generator collects posts hosted by Stratos and protected posts from
+PDS users whom Stratos lists as members. It checks each PDS user's signed
+update before adding those posts to its encrypted local database. A viewer
+can read posts and attachments only from boundaries they currently belong to.
+See [Feed Generator](/operator/feedgen-ng) for storage, access, and startup
+checks.
 
 ## Repository & MST Architecture
 

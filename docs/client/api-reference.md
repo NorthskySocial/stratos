@@ -171,8 +171,8 @@ Response: { "cids": ["..."], "cursor": "..." }
 ```
 
 List the CIDs of blobs referenced by an account's records within a permissioned
-space (spec-shaped mirror of `com.atproto.space.listBlobs`). Same admission
-contract as Get Space Record: standard user auth requires space membership, or
+space (spec-shaped mirror of `com.atproto.space.listBlobs`). The same access
+rules as Get Space Record apply: standard user auth requires space membership, or
 a space credential for that space. `limit` is 1-1000 (default 500); a `cursor`
 is returned when a page is full.
 

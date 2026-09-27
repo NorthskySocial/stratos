@@ -11,9 +11,8 @@ supported deployments:
 | `docker-compose.feedgen.yml`               | Deprecated TypeScript feedgen overlay, retained for rollback  |
 | `.env.example`                             | Annotated service configuration template — copy to `.env`     |
 
-For the current feed service, use the [feed generator design](/operator/feedgen-ng)
-and its independently encrypted state. The legacy overlay below is not its
-deployment recipe.
+The current [Feed Generator](/operator/feedgen-ng) keeps its own encrypted
+database. The older TypeScript overlay below is only for rollback.
 
 ## Base Stack (`docker-compose.yml`)
 
@@ -63,10 +62,11 @@ at the `bsky` database — it is shared with the indexer's AppView.
 Blob storage is a separate choice: `local` (default) or `s3`. See
 [Blob Storage](/operator/configuration#blob-storage) for MinIO/S3 settings.
 
-## Feed generator rehearsal
+## Test the feed generator before launch
 
-Build the Rust image and use its constrained rehearsal profile with a separate
-encrypted state directory, private key files, and a reviewed feed registry:
+Build the Rust image and use its 1 vCPU / 512 MiB test configuration. Prepare
+a separate encrypted data directory, private key files, and an approved feed
+list:
 
 > Before running Compose, use a feed `did:web` under the Stratos-controlled
 > space domain and grant it membership in every feed boundary. See
@@ -85,35 +85,37 @@ run an authenticated feed probe before routing traffic. See
 
 ## Legacy TypeScript Feed Generator Overlay (`docker-compose.feedgen.yml`)
 
-This section describes the deprecated TypeScript rollback path only. New feed
-deployments should follow [Feed Generator](/operator/feedgen-ng) and its
-`stratos-feedgen-ng/compose.rehearsal.yml` rehearsal profile.
+This section describes the deprecated TypeScript rollback path only. Its
+temporary tunnel DID does not meet the current feed DID domain requirement;
+do not use this overlay for a new production deployment. Follow
+[Feed Generator](/operator/feedgen-ng) and its
+`stratos-feedgen-ng/compose.rehearsal.yml` rehearsal profile instead.
 
 To run the boundary-scoped feed generator alongside the service, layer the feedgen
 overlay on top of the base stack. The overlay adds a `feedgen` service (SQLite-backed) and
 an ephemeral Cloudflare tunnel so the feedgen's `did:web` document is reachable over
 HTTPS.
 
-Feedgen keeps its materialized record projection in memory by default: posts, post
-boundaries, actor subscription cursors, and PDS-custody cursors all rebuild after a
-restart. The overlay still mounts a small `feedgen-control` volume and sets
+The older feed generator keeps posts, boundaries, and its position in the
+update stream in memory by default. It rebuilds that data after a restart.
+The overlay still mounts a small `feedgen-control` volume and sets
 `FEEDGEN_MEMBERSHIP_SQLITE_PATH=/app/data/feedgen-membership.sqlite`. That database holds
-only enrolled-actor and space-member snapshots, from which runtime components source their
-hot maps for fast lookup and recovery/reconciliation.
+only saved enrollment and space membership lists, which help it restart and
+check for changes.
 
-Those durable snapshots are not an authorization grant. Before actor-subscription replayed
-records are admitted, Feedgen checks current membership with the authority; an unavailable
-or invalid answer fails closed and leaves the replay to retry. The overlay also sets the
-core-dump limit to zero because the process can hold private content.
+Those saved lists do not grant access. Before using records received again
+after a restart, the older feed generator checks current membership with
+Stratos. If it cannot confirm membership, it keeps feeds unavailable and
+retries. The overlay also disables core dumps because the process can hold
+private content.
 
-Feed reads are separately admission-gated. From process start, and again through every
-enrollment-stream reconnect and reconciliation, `zone.stratos.feedgen.getFeed` returns HTTP
-`503` `FeedNotReady`. It becomes available only after a complete current-authority
-reconciliation. A pass bounded by `FEEDGEN_RECONCILE_MAX_ACTORS` is partial and does not
-release that gate. Keep `FEEDGEN_SUBSCRIBE_ENROLLMENTS` enabled: setting it to `false` leaves
-feed reads unavailable, so it is not a static-feed or manual-soak serving mode.
+Until it has checked all current memberships with Stratos, the older feed
+generator returns HTTP `503` `FeedNotReady`. It repeats that check after a
+connection loss. If `FEEDGEN_RECONCILE_MAX_ACTORS` stops a check early, feeds
+stay unavailable. Keep `FEEDGEN_SUBSCRIBE_ENROLLMENTS` enabled; disabling it
+also keeps feeds unavailable.
 
-Persisting the private record projection is separately opt-in. Add a deployment-specific
+Saving private posts to disk is separately opt-in. Add a deployment-specific
 Compose override:
 
 ```yaml
@@ -123,15 +125,15 @@ services:
       FEEDGEN_SQLITE_PATH: /app/data/feedgen.sqlite
 ```
 
-Layer that file after `docker-compose.feedgen.yml`. The overlay's `feedgen-control` volume
-remains required; the opt-in record file additionally retains private posts, boundaries,
-and both replay cursors. Protect that volume as private content. It is also where the
-membership snapshots live, but those snapshots remain a recovery baseline rather than the
-authority for replay authorization.
+Layer that file after `docker-compose.feedgen.yml`. The `feedgen-control`
+volume is still required. The new database also saves private posts, their
+boundaries, and the positions needed to resume updates. Protect both as
+private data. Saved membership lists help recovery but do not replace a
+current membership check with Stratos.
 
-Using `FEEDGEN_STORAGE_BACKEND=postgres` with `FEEDGEN_POSTGRES_URL` persists both the
-record projection and membership snapshots in PostgreSQL. Protect that database as private
-content.
+Using `FEEDGEN_STORAGE_BACKEND=postgres` with `FEEDGEN_POSTGRES_URL` saves
+posts and membership lists in PostgreSQL. Protect that database as private
+data.
 
 A bare `docker compose -f docker-compose.yml -f docker-compose.feedgen.yml up -d` is not
 enough on its own: the feedgen's identity is derived from `FEEDGEN_HOST`

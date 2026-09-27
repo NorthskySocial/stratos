@@ -132,12 +132,10 @@ curl "https://stratos.example.com/xrpc/zone.stratos.enrollment.status?did=did:pl
 
 ## Add the Feed Generator
 
-For boundary-scoped feeds, deploy the Rust `stratos-feedgen-ng` service with
-its own DID, signing key, feed registry, and encrypted projection volume. Do
-not mount the deprecated TypeScript feedgen database as Rust state. The
-[feed generator architecture](/operator/feedgen-ng) describes authority-derived
-membership, verified PDS-space ingestion, request authorization, retention,
-and private DNS policy.
+To serve private feeds, deploy the Rust `stratos-feedgen-ng` service with its
+own DID, signing key, feed list, and encrypted data volume. Do not reuse the
+older TypeScript feed generator's database. See [Feed Generator](/operator/feedgen-ng)
+for how it collects posts, checks membership, and protects local data.
 
 > Before startup, the feed generator's `did:web` **must be under the
 > Stratos-controlled space domain**. For example, if Stratos uses
@@ -149,5 +147,6 @@ and private DNS policy.
 > grants no access. After startup, check the feed host's
 > `/.well-known/did.json` and make an authenticated feed request.
 
-Rehearse an independent-state start before changing routing; follow
-`stratos-feedgen-ng/CUTOVER.md` for comparison and rollback.
+Start it with a separate, empty database and test an authenticated feed request
+before changing traffic routing. Follow `stratos-feedgen-ng/CUTOVER.md` for
+comparison and rollback.
