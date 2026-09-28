@@ -24,8 +24,8 @@ const clubhousePackage = new URL(
 )
 const SERVICE_BEARER_EXIT = '__delegation_service_bearer_exit__='
 
-// This runs in the disposable Stratos container. It uses the sandbox feedgen
-// key, emits only an assertion ID, and never prints the key or signed token.
+// This runs in the disposable Stratos container. Its ephemeral service-JWT
+// key exists only in this process; neither key nor token is printed.
 const checkServiceBearer = String.raw`
 import assert from 'node:assert/strict'
 import { Secp256k1Keypair, verifySignature } from '@atproto/crypto'
@@ -33,19 +33,24 @@ import { createServiceJwt } from '@atproto/xrpc-server'
 
 try {
   const domain = process.env.SANDBOX_DOMAIN
-  const signingKey = process.env.DELEGATION_SIGNING_KEY
   assert.match(domain ?? '', /^[a-z0-9.-]+$/)
-  assert.match(signingKey ?? '', /^[0-9a-f]{64}$/i)
-  const feedgenDid = 'did:web:feedgen-e2e.' + domain
   const authorityDid = 'did:web:stratos-e2e.' + domain
-  const keypair = await Secp256k1Keypair.import(signingKey)
+  const keypair = await Secp256k1Keypair.create()
+  const issuerDid = keypair.did()
   const token = await createServiceJwt({
-    iss: feedgenDid,
+    iss: issuerDid,
     aud: authorityDid,
     lxm: 'zone.stratos.space.getSpaceCredential',
     keypair,
   })
   const [header, payload, signature] = token.split('.')
+  const protectedHeader = JSON.parse(Buffer.from(header, 'base64url').toString('utf8'))
+  const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+  assert.equal(protectedHeader.typ, 'JWT')
+  assert.equal(protectedHeader.alg, 'ES256K')
+  assert.equal(claims.iss, issuerDid)
+  assert.equal(claims.aud, authorityDid)
+  assert.equal(claims.lxm, 'zone.stratos.space.getSpaceCredential')
   assert.equal(await verifySignature(
     keypair.did(),
     new TextEncoder().encode(header + '.' + payload),
@@ -122,31 +127,12 @@ async function assertServiceBearerDenied(
     '--project-directory',
     context.sandboxDirectory,
   ]
-  const signingKey = (
-    await context.runCommand(
-      'docker',
-      [
-        ...compose,
-        'exec',
-        '-T',
-        'feedgen-e2e-rust',
-        'cat',
-        '/tmp/feedgen-signing-key',
-      ],
-      context.sandboxDirectory,
-    )
-  ).trim()
-  if (!/^[0-9a-f]{64}$/i.test(signingKey)) {
-    throw new Error('Sandbox feedgen signing key was unavailable')
-  }
   const output = await context.runCommand(
     'docker',
     [
       ...compose,
       'exec',
       '-T',
-      '-e',
-      `DELEGATION_SIGNING_KEY=${signingKey}`,
       'feedgen-e2e-stratos',
       'sh',
       '-c',
