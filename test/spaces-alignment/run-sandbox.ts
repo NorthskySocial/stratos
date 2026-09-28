@@ -245,8 +245,16 @@ async function exportSources(
   const templateFiles = [
     ['templates/feedgen-ng-e2e.yaml', 'stacks/feedgen-ng-e2e.yaml'],
     [
+      'templates/feedgen-ng-e2e.definition.json',
+      'stacks/feedgen-ng-e2e.definition.json',
+    ],
+    [
       'templates/feedgen-ng-e2e-browser.mjs',
       'runtime/feedgen-ng-e2e-browser.mjs',
+    ],
+    [
+      'templates/feedgen-ng-e2e-clubhouse.yaml',
+      'stacks/feedgen-ng-e2e-clubhouse.yaml',
     ],
     [
       'templates/feedgen-ng-e2e-clubhouse.definition.json',
@@ -381,6 +389,13 @@ export async function runSandbox(
       '--subnet',
       'auto',
     ])
+    const sandboxManifest = JSON.parse(
+      await readFile(join(atmosphere, 'state/manifest.json'), 'utf8'),
+    ) as { domain?: string }
+    if (sandboxManifest.domain !== 'atmosbox.test')
+      throw new Error(
+        'Pinned sandbox domain differs from the OAuth route templates',
+      )
     await runStep('check', 'deno', ['task', 'sandbox', 'check'])
     await runStep('up', 'deno', ['task', 'sandbox', 'up', '--build'])
     await runStep('seed', 'deno', ['task', 'sandbox', 'seed'])

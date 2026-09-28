@@ -102,18 +102,25 @@ services:
       - |-
         test -r /runtime/service-enrollments.json
         export STRATOS_SERVICE_DID="did:web:stratos-e2e.$${SANDBOX_DOMAIN}"
-        export STRATOS_PUBLIC_URL="https://stratos-e2e.$${SANDBOX_DOMAIN}"
+        export STRATOS_PUBLIC_URL="https://stratos-e2e.atmosbox.internal"
+        printf '{"feeds":[{"id":"general","boundary":"%s/general","displayName":"General","description":"Private sandbox room","available":true}]}' "$${STRATOS_SERVICE_DID}" > /tmp/rooms.json
         exec node dist/bin/stratos.js
     environment:
       NODE_EXTRA_CA_CERTS: /ca/root.crt
       STRATOS_PORT: '3100'
       STRATOS_VALKEY_URL: redis://feedgen-e2e-valkey:6379
       STRATOS_ALLOWED_DOMAINS: general,other
+      STRATOS_ROOM_CATALOG_FILE: /tmp/rooms.json
       STRATOS_RESERVED_DOMAIN: all
       STRATOS_AUTO_ENROLL_DOMAINS: other
       STRATOS_ENROLLMENT_MODE: open
       STRATOS_RETENTION_DAYS: '1'
       STRATOS_DEV_MODE: 'false'
+      STRATOS_ALLOWED_REDIRECT_ORIGINS: https://clubhouse-e2e.atmosbox.internal
+      PLC_DIRECTORY: https://plc.atmosbox.test
+      PLC_DIRECTORY_PRIVATE_CIDRS: 172.16.0.0/12
+      IDENTITY_PRIVATE_ORIGINS: https://spaces-pds-e2e.atmosbox.test,https://motoko.spaces-pds-e2e.atmosbox.test,https://pds1.atmosbox.test,https://user1.pds1.atmosbox.test,https://user2.pds1.atmosbox.test
+      IDENTITY_PRIVATE_CIDRS: 172.16.0.0/12
       STORAGE_BACKEND: sqlite
       STRATOS_DATA_DIR: /app/data
       STRATOS_SERVICE_ENROLLMENTS_FILE: /runtime/service-enrollments.json
@@ -167,7 +174,7 @@ services:
         export FEEDGEN_SERVICE_DID="did:web:feedgen-e2e.$${SANDBOX_DOMAIN}"
         export FEEDGEN_PUBLIC_URL="https://feedgen-e2e.$${SANDBOX_DOMAIN}"
         export STRATOS_SERVICE_URL="https://stratos-e2e.$${SANDBOX_DOMAIN}"
-        export STRATOS_PUBLIC_URL="https://stratos-e2e.$${SANDBOX_DOMAIN}"
+        export STRATOS_PUBLIC_URL="https://stratos-e2e.atmosbox.internal"
         export STRATOS_SERVICE_DID="did:web:stratos-e2e.$${SANDBOX_DOMAIN}"
         export FEEDGEN_FEEDS_YAML="feeds:
           - id: general
@@ -186,6 +193,10 @@ services:
       FEEDGEN_PROJECTION_MAX_AGE_MS: '86400000'
       FEEDGEN_PROJECTION_MAX_BYTES: '33554432'
       FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS: '4'
+      FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN: https://spaces-pds-e2e.atmosbox.test
+      FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS: 172.16.0.0/12
+      PLC_DIRECTORY: https://plc.atmosbox.test
+      PLC_DIRECTORY_PRIVATE_CIDRS: 172.16.0.0/12
     volumes:
       - feedgen-e2e-rust-data:/var/lib/feedgen
       - feedgen-e2e-runtime:/runtime:ro
@@ -202,7 +213,7 @@ services:
     user: '1001:1001'
     read_only: true
     shm_size: 256m
-    pids_limit: 128
+    pids_limit: 256
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=256m,mode=1777
     cap_drop: [ALL]

@@ -1,0 +1,28 @@
+services:
+  feedgen-e2e-clubhouse:
+    build:
+      context: ../stratos
+      dockerfile: clubhouse/Dockerfile
+      args:
+        VITE_STRATOS_URL: https://stratos-e2e.atmosbox.internal
+        VITE_CLUBHOUSE_URL: https://clubhouse-e2e.atmosbox.internal
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=16m,uid=0,gid=0,mode=0755
+      - /var/run:rw,noexec,nosuid,size=4m,uid=0,gid=0,mode=0755
+    cap_drop: [ALL]
+    cap_add: [CHOWN, NET_BIND_SERVICE, SETGID, SETUID]
+    security_opt: ['no-new-privileges:true']
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://127.0.0.1/',
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
