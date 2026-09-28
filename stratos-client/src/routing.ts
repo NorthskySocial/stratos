@@ -92,7 +92,8 @@ export interface TrustedRepositoryHosts {
   sessionPdsUrl?: string
 }
 
-const hostOrigin = (value: string): string | null => {
+export const normalizeHttpsOrigin = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null
   try {
     const url = new URL(value)
     if (
@@ -125,14 +126,14 @@ export const resolveRepositoryTarget = (
       ? hosts.authorityServiceUrl
       : (hosts.authoritativeRepoHost ?? hosts.sessionPdsUrl)
   if (!selected) return { kind: 'unresolved', reason: 'missing-trusted-host' }
-  const url = hostOrigin(selected)
+  const url = normalizeHttpsOrigin(selected)
   if (!url) return { kind: 'unresolved', reason: 'invalid-trusted-host' }
   if (
     enrollment.custody === 'pds' &&
     hosts.authoritativeRepoHost &&
     hosts.sessionPdsUrl
   ) {
-    const sessionUrl = hostOrigin(hosts.sessionPdsUrl)
+    const sessionUrl = normalizeHttpsOrigin(hosts.sessionPdsUrl)
     if (!sessionUrl)
       return { kind: 'unresolved', reason: 'invalid-trusted-host' }
     if (sessionUrl !== url)

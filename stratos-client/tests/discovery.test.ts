@@ -6,6 +6,7 @@ import {
   discoverEnrollments,
   getEnrollmentByServiceDid,
   parseEnrollmentRecord,
+  resolveRepositoryTarget,
   serviceDIDToRkey,
 } from '../src/index.js'
 
@@ -95,7 +96,40 @@ describe('Enrollment Discovery', () => {
           'rkey',
         ),
       ).not.toHaveProperty('repoHost')
+      expect(
+        parseEnrollmentRecord(
+          {
+            ...validRecord,
+            custody: 'pds',
+            repoHost: new URL('https://pds.nerv.jp'),
+          },
+          'rkey',
+        ),
+      ).not.toHaveProperty('repoHost')
     })
+
+    it.each([
+      ['https://pds.nerv.jp/', 'https://pds.nerv.jp'],
+      ['http://pds.nerv.jp', null],
+      ['https://user@pds.nerv.jp', null],
+      ['https://pds.nerv.jp/path', null],
+      ['https://pds.nerv.jp?query=1', null],
+    ])(
+      'applies the same host policy to discovery and routing: %s',
+      (host, expected) => {
+        const parsed = parseEnrollmentRecord(
+          { ...validRecord, custody: 'pds', repoHost: host },
+          'nerv',
+        )
+        expect(parsed?.repoHost).toBe(expected ?? undefined)
+        const target = resolveRepositoryTarget(parsed, { sessionPdsUrl: host })
+        expect(target).toEqual(
+          expected
+            ? { kind: 'pds', url: expected }
+            : { kind: 'unresolved', reason: 'invalid-trusted-host' },
+        )
+      },
+    )
 
     it('preserves unsupported custody without a repo host', () => {
       expect(
