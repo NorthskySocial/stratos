@@ -560,6 +560,7 @@ mod tests {
         crate::config::ProjectionRetention {
             max_age: Duration::from_secs(60),
             max_bytes: 1_024,
+            stage_budget: crate::config::SpaceStageBudget::for_projection(1_024).unwrap(),
         }
     }
 

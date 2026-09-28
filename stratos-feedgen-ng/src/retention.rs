@@ -96,11 +96,12 @@ fn compact_once(
     let maximum_retained_at = now
         .checked_add(time::Duration::seconds(seconds))
         .ok_or(StoreError::InvalidProjectionMutation)?;
-    lifecycle.compact_projection(
+    lifecycle.compact_projection_with_budget(
         &format_utc_millis(now),
         &format_utc_millis(maximum_retained_at),
         retention.max_bytes,
         COMPACTION_BATCH,
+        &retention.stage_budget,
     )
 }
 

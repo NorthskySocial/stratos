@@ -6,6 +6,7 @@ describe('staging limits sandbox receipt', () => {
     expect(suite.id).toBe('staging-limits')
     expect(suite.requiredAssertions).toEqual([
       'cumulative-pass-budget',
+      'multi-target-global-budget',
       'storage-accounting',
       'service-responsive',
       'interrupted-stage',

@@ -234,6 +234,27 @@ impl ProjectionReader {
         }
         Ok(result)
     }
+
+    pub fn compact_projection_with_budget(
+        &mut self,
+        as_of: &str,
+        maximum_retained_at: &str,
+        max_bytes: u64,
+        limit: u16,
+        budget: &crate::config::SpaceStageBudget,
+    ) -> Result<ProjectionCompaction, StoreError> {
+        let result = self.store.compact_projection_with_budget(
+            as_of,
+            maximum_retained_at,
+            max_bytes,
+            limit,
+            budget,
+        )?;
+        if result.deleted != 0 {
+            self.admission.replace_projection();
+        }
+        Ok(result)
+    }
     pub fn prepare(
         &self,
         request: ReadRequest<'_>,

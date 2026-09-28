@@ -22,9 +22,25 @@ impl EncryptedStore {
         max_bytes: u64,
         limit: u16,
     ) -> Result<ProjectionCompaction, StoreError> {
+        let budget = crate::config::SpaceStageBudget::for_projection(max_bytes)
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        self.compact_projection_with_budget(as_of, maximum_retained_at, max_bytes, limit, &budget)
+    }
+
+    pub fn compact_projection_with_budget(
+        &mut self,
+        as_of: &str,
+        maximum_retained_at: &str,
+        max_bytes: u64,
+        limit: u16,
+        budget: &crate::config::SpaceStageBudget,
+    ) -> Result<ProjectionCompaction, StoreError> {
         if !is_utc_timestamp(as_of) || !is_utc_timestamp(maximum_retained_at) {
             return Err(StoreError::InvalidProjectionMutation);
         }
+        budget
+            .validate(max_bytes)
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
         let max_bytes =
             i64::try_from(max_bytes).map_err(|_| StoreError::InvalidProjectionMutation)?;
         let limit = i64::from(limit.clamp(1, MAX_PURGE_BATCH));
@@ -39,6 +55,23 @@ impl EncryptedStore {
                 [max_bytes],
             )
             .map_err(StoreError::Open)?;
+        for (key, value) in [
+            ("stage_target_max_rows", budget.target_rows),
+            ("stage_global_max_rows", budget.global_rows),
+            ("stage_target_max_bytes", budget.target_bytes),
+            ("stage_global_max_bytes", budget.global_bytes),
+        ] {
+            transaction
+                .execute(
+                    "INSERT INTO retention_metadata (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![
+                        key,
+                        i64::try_from(value).map_err(|_| StoreError::InvalidProjectionMutation)?
+                    ],
+                )
+                .map_err(StoreError::Open)?;
+        }
         let now =
             time::OffsetDateTime::parse(as_of, &time::format_description::well_known::Rfc3339)
                 .map_err(|_| StoreError::InvalidProjectionMutation)?;
@@ -117,7 +150,7 @@ impl EncryptedStore {
                     |row| row.get(0),
                 )
                 .map_err(StoreError::Open)?;
-            let staged_bytes = super::space::stage_usage(&transaction, None, None)?.1;
+            let staged_bytes = super::space::stage_usage(&transaction, None, None)?.bytes;
             let bytes = published_bytes
                 .checked_add(staged_bytes)
                 .ok_or(StoreError::SpaceStageLimit)?;
@@ -146,7 +179,7 @@ impl EncryptedStore {
                 |row| row.get(0),
             )
             .map_err(StoreError::Open)?;
-        let staged_bytes = super::space::stage_usage(&transaction, None, None)?.1;
+        let staged_bytes = super::space::stage_usage(&transaction, None, None)?.bytes;
         let bytes_remaining = published_bytes
             .checked_add(staged_bytes)
             .ok_or(StoreError::SpaceStageLimit)?;

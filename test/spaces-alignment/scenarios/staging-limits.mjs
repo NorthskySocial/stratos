@@ -22,6 +22,7 @@ async function command(args) {
 const compose = (args) => command([...prefix, ...args])
 const withProxy = (args) => compose(['-f', 'compose.yaml', '-f', 'state/staging-limits-proxy.yaml', ...args])
 const withLimits = (args) => compose(['-f', 'compose.yaml', '-f', 'state/staging-limits-config.yaml', ...args])
+const withAccount = (args) => compose(['-f', 'compose.yaml', '-f', 'state/staging-limits-account.yaml', ...args])
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function waitFor(check, label, timeout = 150_000) {
@@ -40,6 +41,8 @@ let blockedCursor = null
 let pages = 0
 let interruptions = 0
 let firstRequests = 0
+const repos = new Set()
+const globalRepos = new Set()
 const cid = 'bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://proxy')
@@ -51,11 +54,16 @@ http.createServer(async (req, res) => {
   }
   if (url.pathname === '/_control/status') {
     res.setHeader('content-type', 'application/json')
-    res.end(JSON.stringify({ pages, interruptions, firstRequests }))
+    res.end(JSON.stringify({ pages, interruptions, firstRequests,
+      targetCount: repos.size, globalTargetCount: globalRepos.size }))
     return
   }
   const isPage = url.pathname === '/xrpc/com.atproto.space.listRepoOps'
-  if (isPage && !url.searchParams.has('cursor')) firstRequests += 1
+  if (isPage) {
+    repos.add(url.searchParams.get('repo'))
+    if (mode === 'global') globalRepos.add(url.searchParams.get('repo'))
+    if (!url.searchParams.has('cursor')) firstRequests += 1
+  }
   if (isPage && mode !== 'observe') {
     const cursor = url.searchParams.get('cursor')
     if (blockedCursor !== null && blockedCursor === cursor) {
@@ -66,9 +74,9 @@ http.createServer(async (req, res) => {
       return
     }
     const index = pages++
-    const next = mode === 'limit' ? 'limit-' + (index + 1) : 'interrupted-' + (index + 1)
+    const next = mode + '-' + (index + 1)
     blockedCursor = next
-    const count = mode === 'limit' ? 10 : 1
+    const count = mode === 'interrupted' ? 1 : 10
     const ops = Array.from({ length: count }, (_, n) => ({
       rev: 'synthetic', collection: 'zone.stratos.feed.post',
       rkey: 'stage-' + index + '-' + n, cid,
@@ -128,6 +136,10 @@ assert.ok(originalCaddy.includes(route), 'Pinned PDS route changed')
 const config = JSON.parse(await compose(['config', '--format', 'json']))
 const image = config.services['feedgen-e2e-pds-spaces']?.image
 assert.ok(typeof image === 'string' && image.length > 0)
+const accountScript = new URL('./staging-limits.account.mjs', import.meta.url).pathname
+await writeFile(join(sandbox, 'state/staging-limits-account.yaml'),
+  `services:\n  feedgen-e2e-browser:\n    volumes:\n      - ${JSON.stringify(`${accountScript}:/runner/staging-limits.account.mjs:ro`)}\n`,
+  { mode: 0o600 })
 const proxyPath = join(sandbox, 'state/staging-limits-proxy.mjs')
 await writeFile(proxyPath, proxyScript, { mode: 0o600 })
 await writeFile(join(sandbox, 'state/staging-limits-proxy.yaml'),
@@ -137,6 +149,9 @@ let proxyStarted = false
 let gatewayChanged = false
 let limitsChanged = false
 try {
+  const added = await withAccount(['run', '--rm', '--no-deps', '--entrypoint', 'node',
+    'feedgen-e2e-browser', '/runner/staging-limits.account.mjs'])
+  assert.match(added, /"did":"did:/, 'Second spaces-PDS target was not provisioned')
   await withProxy(['up', '-d', 'staging-limits-proxy'])
   proxyStarted = true
   await writeFile(caddyPath, originalCaddy.replace(route,
@@ -162,6 +177,7 @@ try {
   const accounting = logs.match(/event=space_stage_budget_rejected target_rows=(\d+) target_bytes=(\d+) global_rows=(\d+) global_bytes=(\d+)/)
   assert.ok(accounting)
   assert.ok(Number(accounting[2]) > 32_768)
+  assert.match(logs, /event=space_stage_budget_rejected[^\n]*reason=target_bytes/)
   const fileSize = Number((await compose(['exec', '-T', 'feedgen-e2e-rust',
     'stat', '-c', '%s', '/var/lib/feedgen/projection.sqlite'])).trim())
   assert.ok(Number.isSafeInteger(fileSize) && fileSize > 0)
@@ -186,6 +202,26 @@ try {
   await waitFor(async () => (await control('status')).firstRequests > firstBefore,
     'restart without staged cursor')
   assertions.push('expired-stage-restart')
+
+  await writeFile(join(sandbox, 'state/staging-limits-config.yaml'),
+    'services:\n  feedgen-e2e-rust:\n    environment:\n      FEEDGEN_PROJECTION_MAX_BYTES: "131072"\n      FEEDGEN_PROJECTION_MAX_AGE_MS: "86400000"\n      FEEDGEN_STAGE_TARGET_MAX_BYTES: "35000"\n      FEEDGEN_STAGE_GLOBAL_MAX_BYTES: "40000"\n',
+    { mode: 0o600 })
+  await withLimits(['up', '-d', '--no-deps', '--force-recreate', 'feedgen-e2e-rust'])
+  await control('mode?value=global')
+  await waitFor(async () => (await control('status')).globalTargetCount >= 2,
+    'multiple authority-listed targets')
+  await waitFor(async () => [...(await compose(['logs', '--no-color', 'feedgen-e2e-rust']))
+    .matchAll(/event=space_stage_budget_rejected target_rows=(\d+) target_bytes=(\d+) global_rows=(\d+) global_bytes=(\d+) reason=global_bytes/g)]
+    .some((match) => Number(match[3]) > Number(match[1]) && Number(match[4]) > Number(match[2])),
+  'global staged-byte rejection across targets')
+  const globalLogs = await compose(['logs', '--no-color', 'feedgen-e2e-rust'])
+  const global = [...globalLogs.matchAll(/event=space_stage_budget_rejected target_rows=(\d+) target_bytes=(\d+) global_rows=(\d+) global_bytes=(\d+) reason=global_bytes/g)]
+    .find((match) => Number(match[3]) > Number(match[1]) && Number(match[4]) > Number(match[2]))
+  assert.ok(global)
+  assert.ok(Number(global[2]) < 35_000 && Number(global[4]) > 40_000)
+  assert.ok(Number(global[3]) > Number(global[1]) && Number(global[4]) > Number(global[2]),
+    'Global rejection did not include another staged target')
+  assertions.push('multi-target-global-budget')
 
   console.log(JSON.stringify({ suite: 'staging-limits',
     assertions: assertions.map((id) => ({ id, status: 'passed' })) }))
