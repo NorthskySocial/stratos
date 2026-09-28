@@ -24,6 +24,7 @@ pub struct SpaceSyncTarget {
     space_uri: String,
     boundary: String,
     actor_did: String,
+    generation: u64,
 }
 
 impl SpaceSyncTarget {
@@ -33,15 +34,35 @@ impl SpaceSyncTarget {
         boundary: impl Into<String>,
         actor_did: impl Into<String>,
     ) -> Result<Self, SpaceSyncError> {
+        let boundary = boundary.into();
+        let actor_did = actor_did.into();
+        let generation = store
+            .pds_member_generation(&boundary, &actor_did)
+            .map_err(SpaceSyncError::Store)?
+            .ok_or(SpaceSyncError::UnauthorizedTarget)?;
+        Self::from_authoritative_membership_at_generation(
+            store, space_uri, boundary, actor_did, generation,
+        )
+    }
+
+    pub fn from_authoritative_membership_at_generation(
+        store: &EncryptedStore,
+        space_uri: impl Into<String>,
+        boundary: impl Into<String>,
+        actor_did: impl Into<String>,
+        generation: u64,
+    ) -> Result<Self, SpaceSyncError> {
         let target = Self {
             space_uri: space_uri.into(),
             boundary: boundary.into(),
             actor_did: actor_did.into(),
+            generation,
         };
         validate_target(&target)?;
-        if !store
-            .is_current_pds_space_member(&target.boundary, &target.actor_did)
+        if store
+            .pds_member_generation(&target.boundary, &target.actor_did)
             .map_err(SpaceSyncError::Store)?
+            != Some(generation)
         {
             return Err(SpaceSyncError::UnauthorizedTarget);
         }
@@ -216,7 +237,11 @@ pub fn stage_space_page(
         return Err(SpaceSyncError::InvalidTarget);
     }
     store
-        .stage_authorized_space_page(prepared.page, prepared.mutations)
+        .stage_authorized_space_page_at_generation(
+            prepared.page,
+            prepared.mutations,
+            prepared.target.generation,
+        )
         .map_err(|error| match error {
             StoreError::UnauthorizedSpaceMember => SpaceSyncError::UnauthorizedTarget,
             error => SpaceSyncError::Store(error),

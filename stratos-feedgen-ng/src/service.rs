@@ -97,6 +97,32 @@ impl ProjectionReader {
         self.admission.invalidate_boundary(boundary);
         Ok(())
     }
+    pub fn pds_boundary_generation(&self, boundary: &str) -> Result<u64, StoreError> {
+        self.store.pds_boundary_generation(boundary)
+    }
+    pub fn pds_member_generation(
+        &self,
+        boundary: &str,
+        did: &str,
+    ) -> Result<Option<u64>, StoreError> {
+        self.store.pds_member_generation(boundary, did)
+    }
+    pub fn replace_pds_space_members_at_generation(
+        &mut self,
+        boundary: &str,
+        members: Vec<PdsSpaceMember>,
+        reconciled_at: &str,
+        generation: u64,
+    ) -> Result<std::collections::BTreeMap<String, u64>, StoreError> {
+        let generations = self.store.replace_pds_space_members_at_generation(
+            boundary,
+            members,
+            reconciled_at,
+            generation,
+        )?;
+        self.admission.invalidate_boundary(boundary);
+        Ok(generations)
+    }
     pub fn pds_space_target(
         &self,
         space_uri: impl Into<String>,
@@ -104,6 +130,21 @@ impl ProjectionReader {
         actor_did: impl Into<String>,
     ) -> Result<SpaceSyncTarget, SpaceSyncError> {
         SpaceSyncTarget::from_authoritative_membership(&self.store, space_uri, boundary, actor_did)
+    }
+    pub fn pds_space_target_at_generation(
+        &self,
+        space_uri: impl Into<String>,
+        boundary: impl Into<String>,
+        actor_did: impl Into<String>,
+        generation: u64,
+    ) -> Result<SpaceSyncTarget, SpaceSyncError> {
+        SpaceSyncTarget::from_authoritative_membership_at_generation(
+            &self.store,
+            space_uri,
+            boundary,
+            actor_did,
+            generation,
+        )
     }
     pub fn space_sync_cursor(
         &self,
@@ -125,6 +166,24 @@ impl ProjectionReader {
     ) -> Result<(), StoreError> {
         self.store
             .promote_authorized_space_stage(boundary, space_uri, actor_did, retained_at)?;
+        self.admission.invalidate_boundary(boundary);
+        Ok(())
+    }
+    pub fn promote_pds_space_stage_at_generation(
+        &mut self,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
+        retained_at: &str,
+        generation: u64,
+    ) -> Result<(), StoreError> {
+        self.store.promote_authorized_space_stage_at_generation(
+            boundary,
+            space_uri,
+            actor_did,
+            retained_at,
+            generation,
+        )?;
         self.admission.invalidate_boundary(boundary);
         Ok(())
     }

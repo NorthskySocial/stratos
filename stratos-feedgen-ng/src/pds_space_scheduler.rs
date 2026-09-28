@@ -252,6 +252,13 @@ async fn run_pass(
     };
     let mut workers = JoinSet::new();
     for boundary in boundaries {
+        let generation = match lifecycle.pds_boundary_generation(boundary) {
+            Ok(generation) => generation,
+            Err(_) => {
+                pass.membership_failures += 1;
+                continue;
+            }
+        };
         let snapshot = match membership.discover(boundary).await {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -263,15 +270,25 @@ async fn run_pass(
                 continue;
             }
         };
-        if lifecycle
-            .replace_pds_space_members(boundary, snapshot.members, &observed_at)
-            .is_err()
-        {
-            pass.membership_failures += 1;
-            eprintln!("event=pds_space_membership_failed kind=store");
-            continue;
-        }
-        for target in snapshot.targets {
+        let generations = match lifecycle.replace_pds_space_members_at_generation(
+            boundary,
+            snapshot.members,
+            &observed_at,
+            generation,
+        ) {
+            Ok(generations) => generations,
+            Err(_) => {
+                pass.membership_failures += 1;
+                eprintln!("event=pds_space_membership_failed kind=store");
+                continue;
+            }
+        };
+        for mut target in snapshot.targets {
+            let Some(member_generation) = generations.get(&target.did).copied() else {
+                pass.target_failures += 1;
+                continue;
+            };
+            target.generation = member_generation;
             pass.targets += 1;
             if workers.len() == MAX_TARGET_CONCURRENCY {
                 record_target_result(&mut pass, workers.join_next().await);
@@ -373,6 +390,7 @@ mod tests {
     };
 
     use async_trait::async_trait;
+    use tokio::sync::oneshot;
 
     use crate::{
         credential_issuer::{
@@ -421,6 +439,40 @@ mod tests {
     }
 
     struct MembershipPages(Mutex<VecDeque<Result<SpaceMembershipPage, SpaceMembershipError>>>);
+
+    struct PausedMembershipPage {
+        started: Mutex<Option<oneshot::Sender<()>>>,
+        release: Mutex<Option<oneshot::Receiver<()>>>,
+    }
+
+    #[async_trait]
+    impl SpaceMembershipClient for PausedMembershipPage {
+        async fn list(
+            &self,
+            _: &str,
+            _: &crate::space_credential::HeldSpaceCredential,
+            _: Option<&str>,
+            _: usize,
+        ) -> Result<SpaceMembershipPage, SpaceMembershipError> {
+            let release = self.release.lock().unwrap().take().unwrap();
+            self.started
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap()
+                .send(())
+                .unwrap();
+            release.await.unwrap();
+            Ok(SpaceMembershipPage {
+                members: vec![SpaceRepoMember {
+                    did: DID.to_owned(),
+                    custody: RepoCustody::Pds,
+                    host: Some("https://pds.example.test/".to_owned()),
+                }],
+                next_cursor: None,
+            })
+        }
+    }
 
     #[async_trait]
     impl SpaceMembershipClient for MembershipPages {
@@ -580,6 +632,60 @@ mod tests {
         assert_eq!(
             lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
             None
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_enumeration_does_not_restore_a_revoked_member() {
+        let lifecycle = lifecycle();
+        lifecycle
+            .replace_pds_space_members(
+                BOUNDARY,
+                vec![crate::store::PdsSpaceMember {
+                    did: DID.to_owned(),
+                }],
+                "2026-09-22T00:00:00.000Z",
+            )
+            .unwrap();
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let credentials = credentials();
+        let membership = Arc::new(MembershipReconciler::new(
+            Arc::new(PausedMembershipPage {
+                started: Mutex::new(Some(started_tx)),
+                release: Mutex::new(Some(release_rx)),
+            }),
+            Arc::clone(&credentials),
+        ));
+        let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
+            Arc::new(EmptyPages),
+            credentials,
+            Arc::new(VerifiedCommit),
+        ));
+        let task_lifecycle = Arc::clone(&lifecycle);
+        let task = tokio::spawn(async move {
+            run_pass(
+                task_lifecycle,
+                membership,
+                synchronizer,
+                &[BOUNDARY.to_owned()].into_iter().collect(),
+                &retention(),
+            )
+            .await
+        });
+        started_rx.await.unwrap();
+        lifecycle
+            .replace_pds_space_members(BOUNDARY, Vec::new(), "2026-09-22T00:01:00.000Z")
+            .unwrap();
+        release_tx.send(()).unwrap();
+        let pass = task.await.unwrap();
+        assert_eq!(pass.membership_failures, 1);
+        assert_eq!(pass.targets, 0);
+        assert!(
+            lifecycle
+                .pds_member_generation(BOUNDARY, DID)
+                .unwrap()
+                .is_none()
         );
     }
 

@@ -231,7 +231,7 @@ impl EncryptedStore {
                     .iter()
                     .cloned()
                     .collect::<std::collections::BTreeSet<_>>();
-                let removed_boundaries = previous
+                let mut removed_boundaries = previous
                     .as_ref()
                     .and_then(|previous| previous.enrollment.as_ref())
                     .map(|previous| {
@@ -242,8 +242,23 @@ impl EncryptedStore {
                             .cloned()
                             .collect::<Vec<_>>()
                     })
-                    .unwrap_or_default();
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>();
+                let pds_boundaries = transaction
+                    .prepare("SELECT boundary FROM membership_baseline WHERE did = ?1 AND custody = 'pds'")
+                    .map_err(StoreError::Open)?
+                    .query_map([did], |row| row.get::<_, String>(0))
+                    .map_err(StoreError::Open)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(StoreError::Open)?;
+                removed_boundaries.extend(
+                    pds_boundaries
+                        .into_iter()
+                        .filter(|boundary| !current.contains(boundary)),
+                );
                 for boundary in &removed_boundaries {
+                    super::space::invalidate_pds_member(&transaction, boundary, did)?;
                     transaction
                         .execute(
                             "DELETE FROM post_boundary WHERE boundary = ?1 AND uri IN (SELECT uri FROM post WHERE author_did = ?2)",
@@ -296,13 +311,31 @@ impl EncryptedStore {
                         params![entry.did, boundaries_json, observed_at],
                     )
                     .map_err(StoreError::Open)?;
-                (removed_boundaries, removed_posts, true)
+                (
+                    removed_boundaries.into_iter().collect(),
+                    removed_posts,
+                    true,
+                )
             }
             None => {
                 let removed_boundaries = previous
                     .and_then(|previous| previous.enrollment)
                     .map(|previous| previous.boundaries)
                     .unwrap_or_default();
+                let pds_boundaries = transaction
+                    .prepare("SELECT boundary FROM membership_baseline WHERE did = ?1 AND custody = 'pds'")
+                    .map_err(StoreError::Open)?
+                    .query_map([did], |row| row.get::<_, String>(0))
+                    .map_err(StoreError::Open)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(StoreError::Open)?;
+                for boundary in removed_boundaries
+                    .iter()
+                    .chain(pds_boundaries.iter())
+                    .collect::<std::collections::BTreeSet<_>>()
+                {
+                    super::space::invalidate_pds_member(&transaction, boundary, did)?;
+                }
                 let removed_posts = transaction
                     .execute("DELETE FROM post WHERE author_did = ?1", [did])
                     .map_err(StoreError::Open)? as u64;

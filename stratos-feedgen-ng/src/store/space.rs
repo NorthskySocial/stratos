@@ -380,27 +380,102 @@ fn purge_departed_pds_member(
     Ok(())
 }
 
-fn has_current_pds_space_member(
+pub(super) fn invalidate_pds_member(
     transaction: &rusqlite::Transaction<'_>,
     boundary: &str,
     did: &str,
+) -> Result<(), StoreError> {
+    transaction
+        .execute(
+            "INSERT INTO pds_member_generation (boundary, did, generation) VALUES (?1, ?2, 1)
+         ON CONFLICT(boundary, did) DO UPDATE SET generation = generation + 1",
+            params![boundary, did],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "INSERT INTO pds_boundary_generation (boundary, generation) VALUES (?1, 1)
+         ON CONFLICT(boundary) DO UPDATE SET generation = generation + 1",
+            [boundary],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM membership_baseline WHERE boundary = ?1 AND did = ?2 AND custody = 'pds'",
+            params![boundary, did],
+        )
+        .map_err(StoreError::Open)?;
+    Ok(())
+}
+
+fn has_pds_member_generation(
+    transaction: &rusqlite::Transaction<'_>,
+    boundary: &str,
+    did: &str,
+    generation: u64,
 ) -> Result<bool, StoreError> {
+    let generation =
+        i64::try_from(generation).map_err(|_| StoreError::InvalidProjectionMutation)?;
     transaction
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM membership_baseline WHERE boundary = ?1 AND did = ?2 AND custody = 'pds')",
-            params![boundary, did],
+            "SELECT EXISTS(SELECT 1 FROM membership_baseline AS member
+         JOIN pds_member_generation AS version USING (boundary, did)
+         WHERE member.boundary = ?1 AND member.did = ?2 AND member.custody = 'pds'
+         AND version.generation = ?3)",
+            params![boundary, did, generation],
             |row| row.get(0),
         )
         .map_err(StoreError::Open)
 }
 
 impl EncryptedStore {
+    pub fn pds_boundary_generation(&self, boundary: &str) -> Result<u64, StoreError> {
+        let generation: i64 = self.connection.query_row(
+            "SELECT COALESCE((SELECT generation FROM pds_boundary_generation WHERE boundary = ?1), 0)",
+            [boundary], |row| row.get(0),
+        ).map_err(StoreError::Open)?;
+        u64::try_from(generation).map_err(|_| StoreError::InvalidProjectionMutation)
+    }
+
+    pub fn pds_member_generation(
+        &self,
+        boundary: &str,
+        did: &str,
+    ) -> Result<Option<u64>, StoreError> {
+        let generation: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT version.generation FROM membership_baseline AS member
+             JOIN pds_member_generation AS version USING (boundary, did)
+             WHERE member.boundary = ?1 AND member.did = ?2 AND member.custody = 'pds'",
+                params![boundary, did],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StoreError::Open)?;
+        generation
+            .map(|value| u64::try_from(value).map_err(|_| StoreError::InvalidProjectionMutation))
+            .transpose()
+    }
+
     pub fn replace_pds_space_members(
         &mut self,
         boundary: &str,
         members: Vec<PdsSpaceMember>,
         reconciled_at: &str,
     ) -> Result<(), StoreError> {
+        let generation = self.pds_boundary_generation(boundary)?;
+        self.replace_pds_space_members_at_generation(boundary, members, reconciled_at, generation)
+            .map(|_| ())
+    }
+
+    pub fn replace_pds_space_members_at_generation(
+        &mut self,
+        boundary: &str,
+        members: Vec<PdsSpaceMember>,
+        reconciled_at: &str,
+        generation: u64,
+    ) -> Result<std::collections::BTreeMap<String, u64>, StoreError> {
         if boundary.is_empty()
             || boundary.len() > 256
             || !boundary.is_ascii()
@@ -427,6 +502,15 @@ impl EncryptedStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StoreError::Open)?;
+        let current_generation: i64 = transaction.query_row(
+            "SELECT COALESCE((SELECT generation FROM pds_boundary_generation WHERE boundary = ?1), 0)",
+            [boundary], |row| row.get(0),
+        ).map_err(StoreError::Open)?;
+        if u64::try_from(current_generation).map_err(|_| StoreError::InvalidProjectionMutation)?
+            != generation
+        {
+            return Err(StoreError::UnauthorizedSpaceMember);
+        }
         let prior = transaction
             .prepare("SELECT did FROM membership_baseline WHERE boundary = ?1 AND custody = 'pds'")
             .map_err(StoreError::Open)?
@@ -442,16 +526,34 @@ impl EncryptedStore {
             .map_err(StoreError::Open)?;
         for did in prior.difference(&unique) {
             purge_departed_pds_member(&transaction, boundary, did)?;
+            invalidate_pds_member(&transaction, boundary, did)?;
         }
+        let mut generations = std::collections::BTreeMap::new();
         for member in members {
+            transaction.execute(
+                "INSERT OR IGNORE INTO pds_member_generation (boundary, did, generation) VALUES (?1, ?2, 0)",
+                params![boundary, member.did],
+            ).map_err(StoreError::Open)?;
             transaction
                 .execute(
                     "INSERT INTO membership_baseline (boundary, did, custody, repo_host, reconciled_at) VALUES (?1, ?2, 'pds', NULL, ?3)",
                     params![boundary, member.did, reconciled_at],
                 )
                 .map_err(StoreError::Open)?;
+            let value: i64 = transaction
+                .query_row(
+                    "SELECT generation FROM pds_member_generation WHERE boundary = ?1 AND did = ?2",
+                    params![boundary, member.did],
+                    |row| row.get(0),
+                )
+                .map_err(StoreError::Open)?;
+            generations.insert(
+                member.did,
+                u64::try_from(value).map_err(|_| StoreError::InvalidProjectionMutation)?,
+            );
         }
-        transaction.commit().map_err(StoreError::Open)
+        transaction.commit().map_err(StoreError::Open)?;
+        Ok(generations)
     }
 
     pub fn is_current_pds_space_member(
@@ -500,12 +602,24 @@ impl EncryptedStore {
         page: SpaceStagePage,
         mutations: Vec<SpaceStageMutation>,
     ) -> Result<(), StoreError> {
+        let generation = self
+            .pds_member_generation(&page.boundary, &page.actor_did)?
+            .ok_or(StoreError::UnauthorizedSpaceMember)?;
+        self.stage_authorized_space_page_at_generation(page, mutations, generation)
+    }
+
+    pub fn stage_authorized_space_page_at_generation(
+        &mut self,
+        page: SpaceStagePage,
+        mutations: Vec<SpaceStageMutation>,
+        generation: u64,
+    ) -> Result<(), StoreError> {
         validate_space_stage_page(&page)?;
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StoreError::Open)?;
-        if !has_current_pds_space_member(&transaction, &page.boundary, &page.actor_did)? {
+        if !has_pds_member_generation(&transaction, &page.boundary, &page.actor_did, generation)? {
             return Err(StoreError::UnauthorizedSpaceMember);
         }
         for mutation in mutations {
@@ -541,6 +655,26 @@ impl EncryptedStore {
         actor_did: &str,
         retained_at: &str,
     ) -> Result<(), StoreError> {
+        let generation = self
+            .pds_member_generation(boundary, actor_did)?
+            .ok_or(StoreError::UnauthorizedSpaceMember)?;
+        self.promote_authorized_space_stage_at_generation(
+            boundary,
+            space_uri,
+            actor_did,
+            retained_at,
+            generation,
+        )
+    }
+
+    pub fn promote_authorized_space_stage_at_generation(
+        &mut self,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
+        retained_at: &str,
+        generation: u64,
+    ) -> Result<(), StoreError> {
         validate_space_stage_scope(space_uri, actor_did)?;
         if boundary.is_empty() || !is_utc_timestamp(retained_at) {
             return Err(StoreError::InvalidProjectionMutation);
@@ -549,7 +683,7 @@ impl EncryptedStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StoreError::Open)?;
-        if !has_current_pds_space_member(&transaction, boundary, actor_did)? {
+        if !has_pds_member_generation(&transaction, boundary, actor_did, generation)? {
             return Err(StoreError::UnauthorizedSpaceMember);
         }
         promote_space_stage_transaction(&transaction, space_uri, actor_did, retained_at)?;
@@ -608,5 +742,277 @@ impl EncryptedStore {
         }
         update_space_stage_checkpoint(&transaction, &page)?;
         transaction.commit().map_err(StoreError::Open)
+    }
+}
+
+#[cfg(test)]
+mod revocation_tests {
+    use super::*;
+    use crate::store::{ActorEnrollment, StorageKey};
+
+    const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
+    const OTHER: &str = "did:web:stratos.example.test/trigun";
+    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const DID: &str = "did:plc:fayevalentine";
+    const OTHER_DID: &str = "did:plc:spiegel";
+    const NOW: &str = "2026-09-22T00:00:00.000Z";
+    const LATER: &str = "2026-09-22T00:01:00.000Z";
+
+    fn store() -> EncryptedStore {
+        EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap()
+    }
+
+    fn member(did: &str) -> PdsSpaceMember {
+        PdsSpaceMember {
+            did: did.to_owned(),
+        }
+    }
+
+    fn page() -> SpaceStagePage {
+        SpaceStagePage {
+            space_uri: SPACE.to_owned(),
+            actor_did: DID.to_owned(),
+            boundary: BOUNDARY.to_owned(),
+            next_cursor: Some("pending".to_owned()),
+            updated_at: NOW.to_owned(),
+        }
+    }
+
+    #[test]
+    fn enrollment_shrink_invalidates_only_the_removed_boundary() {
+        let mut store = store();
+        for boundary in [BOUNDARY, OTHER] {
+            store
+                .replace_pds_space_members(boundary, vec![member(DID), member(OTHER_DID)], NOW)
+                .unwrap();
+        }
+        store
+            .reconcile_actor_enrollment(
+                DID,
+                NOW,
+                Some(ActorEnrollment {
+                    did: DID.to_owned(),
+                    boundaries: vec![BOUNDARY.to_owned(), OTHER.to_owned()],
+                    observed_at: NOW.to_owned(),
+                }),
+            )
+            .unwrap();
+        let generation = store.pds_member_generation(BOUNDARY, DID).unwrap().unwrap();
+        store
+            .stage_authorized_space_page_at_generation(page(), Vec::new(), generation)
+            .unwrap();
+        store
+            .reconcile_actor_enrollment(
+                DID,
+                LATER,
+                Some(ActorEnrollment {
+                    did: DID.to_owned(),
+                    boundaries: vec![OTHER.to_owned()],
+                    observed_at: LATER.to_owned(),
+                }),
+            )
+            .unwrap();
+
+        assert_eq!(store.pds_member_generation(BOUNDARY, DID).unwrap(), None);
+        assert!(store.is_current_pds_space_member(OTHER, DID).unwrap());
+        assert!(
+            store
+                .is_current_pds_space_member(BOUNDARY, OTHER_DID)
+                .unwrap()
+        );
+        assert_eq!(store.space_sync_cursor(BOUNDARY, SPACE, DID).unwrap(), None);
+        assert!(matches!(
+            store.stage_authorized_space_page_at_generation(page(), Vec::new(), generation),
+            Err(StoreError::UnauthorizedSpaceMember)
+        ));
+    }
+
+    #[test]
+    fn first_enrollment_invalidates_an_unauthorized_pds_baseline() {
+        let mut store = store();
+        store
+            .replace_pds_space_members(BOUNDARY, vec![member(DID)], NOW)
+            .unwrap();
+        let generation = store.pds_member_generation(BOUNDARY, DID).unwrap().unwrap();
+
+        store
+            .reconcile_actor_enrollment(
+                DID,
+                LATER,
+                Some(ActorEnrollment {
+                    did: DID.to_owned(),
+                    boundaries: vec![OTHER.to_owned()],
+                    observed_at: LATER.to_owned(),
+                }),
+            )
+            .unwrap();
+
+        assert_eq!(store.pds_member_generation(BOUNDARY, DID).unwrap(), None);
+        assert!(matches!(
+            store.stage_authorized_space_page_at_generation(page(), Vec::new(), generation),
+            Err(StoreError::UnauthorizedSpaceMember)
+        ));
+    }
+
+    #[test]
+    fn old_page_and_enumeration_fail_after_remove_and_readd() {
+        let mut store = store();
+        store
+            .replace_pds_space_members(BOUNDARY, vec![member(DID)], NOW)
+            .unwrap();
+        let old_boundary = store.pds_boundary_generation(BOUNDARY).unwrap();
+        let old_member = store.pds_member_generation(BOUNDARY, DID).unwrap().unwrap();
+        store
+            .replace_pds_space_members(BOUNDARY, Vec::new(), LATER)
+            .unwrap();
+        assert!(matches!(
+            store.replace_pds_space_members_at_generation(
+                BOUNDARY,
+                vec![member(DID)],
+                LATER,
+                old_boundary
+            ),
+            Err(StoreError::UnauthorizedSpaceMember)
+        ));
+        store
+            .replace_pds_space_members(BOUNDARY, vec![member(DID)], LATER)
+            .unwrap();
+        assert_ne!(
+            store.pds_member_generation(BOUNDARY, DID).unwrap(),
+            Some(old_member)
+        );
+        assert!(matches!(
+            store.stage_authorized_space_page_at_generation(page(), Vec::new(), old_member),
+            Err(StoreError::UnauthorizedSpaceMember)
+        ));
+        assert!(matches!(
+            store.promote_authorized_space_stage_at_generation(
+                BOUNDARY, SPACE, DID, LATER, old_member
+            ),
+            Err(StoreError::UnauthorizedSpaceMember)
+        ));
+        let fresh = store.pds_member_generation(BOUNDARY, DID).unwrap().unwrap();
+        store
+            .stage_authorized_space_page_at_generation(page(), Vec::new(), fresh)
+            .unwrap();
+        assert_eq!(
+            store.space_sync_cursor(BOUNDARY, SPACE, DID).unwrap(),
+            Some("pending".to_owned())
+        );
+    }
+
+    #[test]
+    fn full_unenrollment_removes_private_rows_and_survives_reopen() {
+        let path = std::env::current_dir().unwrap().join(format!(
+            "stratos-pds-revocation-{}-{}.sqlite",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = std::fs::remove_file(&path);
+        let uri = format!("{SPACE}/{DID}/zone.stratos.feed.post/see-you");
+        let old_generation;
+        {
+            let mut store = EncryptedStore::open(&path, StorageKey::from_bytes([8; 32])).unwrap();
+            store
+                .replace_pds_space_members(BOUNDARY, vec![member(DID), member(OTHER_DID)], NOW)
+                .unwrap();
+            store
+                .reconcile_actor_enrollment(
+                    DID,
+                    NOW,
+                    Some(ActorEnrollment {
+                        did: DID.to_owned(),
+                        boundaries: vec![BOUNDARY.to_owned()],
+                        observed_at: NOW.to_owned(),
+                    }),
+                )
+                .unwrap();
+            old_generation = store.pds_member_generation(BOUNDARY, DID).unwrap().unwrap();
+            let mutation = SpaceStageMutation::Upsert {
+                uri: uri.clone(),
+                cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+                sort_at: NOW.to_owned(),
+                indexed_at: NOW.to_owned(),
+                record_json: br#"{"$type":"zone.stratos.feed.post"}"#.to_vec(),
+                blob_refs_json: b"[]".to_vec(),
+            };
+            let mut terminal = page();
+            terminal.next_cursor = None;
+            store
+                .stage_authorized_space_page_at_generation(terminal, vec![mutation], old_generation)
+                .unwrap();
+            store
+                .promote_authorized_space_stage_at_generation(
+                    BOUNDARY,
+                    SPACE,
+                    DID,
+                    LATER,
+                    old_generation,
+                )
+                .unwrap();
+            assert_eq!(
+                store
+                    .connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM post WHERE author_did = ?1",
+                        [DID],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                1
+            );
+            store
+                .stage_authorized_space_page_at_generation(page(), Vec::new(), old_generation)
+                .unwrap();
+            store.reconcile_actor_enrollment(DID, LATER, None).unwrap();
+            assert_eq!(
+                store
+                    .connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM post WHERE author_did = ?1",
+                        [DID],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                store
+                    .connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM space_sync_stage_cursor WHERE did = ?1",
+                        [DID],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                0
+            );
+            assert!(
+                store
+                    .is_current_pds_space_member(BOUNDARY, OTHER_DID)
+                    .unwrap()
+            );
+        }
+        {
+            let mut store = EncryptedStore::open(&path, StorageKey::from_bytes([8; 32])).unwrap();
+            assert_eq!(store.pds_member_generation(BOUNDARY, DID).unwrap(), None);
+            assert!(
+                store
+                    .is_current_pds_space_member(BOUNDARY, OTHER_DID)
+                    .unwrap()
+            );
+            store
+                .replace_pds_space_members(BOUNDARY, vec![member(DID), member(OTHER_DID)], LATER)
+                .unwrap();
+            assert_ne!(
+                store.pds_member_generation(BOUNDARY, DID).unwrap(),
+                Some(old_generation)
+            );
+            assert!(matches!(
+                store.stage_authorized_space_page_at_generation(page(), Vec::new(), old_generation),
+                Err(StoreError::UnauthorizedSpaceMember)
+            ));
+        }
+        std::fs::remove_file(path).unwrap();
     }
 }
