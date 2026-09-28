@@ -126,6 +126,10 @@ services:
         condition: service_completed_successfully
       feedgen-e2e-valkey:
         condition: service_healthy
+      # AiaB provisions this helper even while the browser's profile is off.
+      # Keep it in the active dependency graph so Compose --wait accepts exit 0.
+      app-feedgen-ng-e2e-feedgen-e2e-browser-secrets:
+        condition: service_completed_successfully
 
   feedgen-e2e-rust:
     build:
@@ -204,6 +208,7 @@ services:
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
     environment:
+      HOME: /tmp/config
       XDG_CONFIG_HOME: /tmp/config
       NODE_EXTRA_CA_CERTS: /ca/root.crt
     volumes:

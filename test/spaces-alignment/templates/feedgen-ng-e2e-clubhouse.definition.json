@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "id": "feedgen-ng-e2e-clubhouse",
+  "services": [
+    {
+      "service": "feedgen-e2e-clubhouse",
+      "environment": [],
+      "buildArguments": [
+        {
+          "name": "VITE_STRATOS_URL",
+          "source": {
+            "kind": "host-url",
+            "host": "stratos-e2e"
+          }
+        },
+        {
+          "name": "VITE_STRATOS_SERVICE_DID",
+          "source": {
+            "kind": "web-did",
+            "host": "stratos-e2e"
+          }
+        },
+        {
+          "name": "VITE_FEEDGEN_URL",
+          "source": {
+            "kind": "host-url",
+            "host": "feedgen-e2e"
+          }
+        },
+        {
+          "name": "VITE_FEEDGEN_DID",
+          "source": {
+            "kind": "web-did",
+            "host": "feedgen-e2e"
+          }
+        },
+        {
+          "name": "VITE_CLUBHOUSE_URL",
+          "source": {
+            "kind": "host-url",
+            "host": "clubhouse-e2e"
+          }
+        },
+        {
+          "name": "VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON",
+          "source": {
+            "kind": "space-uri-json",
+            "room": "general",
+            "authority": "stratos-e2e",
+            "type": "zone.stratos.space.feed",
+            "key": "general"
+          }
+        },
+        {
+          "name": "VITE_ATPROTO_HANDLE_RESOLVER",
+          "source": {
+            "kind": "host-url",
+            "host": "spaces-pds-e2e"
+          }
+        },
+        {
+          "name": "VITE_PLC_DIRECTORY",
+          "source": {
+            "kind": "host-url",
+            "host": "plc"
+          }
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "id": "clubhouse",
+      "service": "feedgen-e2e-clubhouse",
+      "host": "clubhouse-e2e",
+      "port": 80
+    }
+  ],
+  "secrets": []
+}
