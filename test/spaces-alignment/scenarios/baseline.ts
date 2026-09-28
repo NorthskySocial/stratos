@@ -5,8 +5,10 @@ const requiredAssertions = [
   'stratos-custody',
   'pds-custody',
   'space-lexicon',
+  'pds-space-grant',
   'publication-feed',
   'boundary-isolation',
+  'unrelated-boundary-denied',
   'public-private-blob-denied',
   'authenticated-space-blob',
 ] as const

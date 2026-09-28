@@ -384,20 +384,7 @@ async function unjoinedOrdinaryAccount(domain) {
   return { username, password: account.password, did: account.did }
 }
 
-async function assertSpaceLexicon(domain, authorityDid) {
-  const query = new URL(
-    `https://stratos-e2e.${domain}/xrpc/com.atproto.repo.getRecord`,
-  )
-  query.searchParams.set('repo', authorityDid)
-  query.searchParams.set('collection', 'com.atproto.lexicon.schema')
-  query.searchParams.set('rkey', 'zone.stratos.space.feed')
-  const response = await fetch(query)
-  assert.equal(response.status, 200, 'Space lexicon record did not resolve')
-  const record = await response.json()
-  assert.equal(record.value?.defs?.main?.type, 'space')
-}
-
-async function assertSpaceBlob(domain, account, authorityDid, roomId) {
+async function pdsSession(domain, account) {
   const pdsUrl = `https://spaces-pds-e2e.${domain}`
   const session = await requestJson(
     `${pdsUrl}/xrpc/com.atproto.server.createSession`,
@@ -415,6 +402,56 @@ async function assertSpaceBlob(domain, account, authorityDid, roomId) {
     session.accessJwt && session.did,
     'Space PDS session was incomplete',
   )
+  return session
+}
+
+async function pdsEnrollment(domain, account, authorityDid) {
+  const session = await pdsSession(domain, account)
+  const query = new URL(
+    `https://spaces-pds-e2e.${domain}/xrpc/com.atproto.repo.getRecord`,
+  )
+  query.searchParams.set('repo', session.did)
+  query.searchParams.set('collection', 'zone.stratos.actor.enrollment')
+  query.searchParams.set('rkey', authorityDid)
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const response = await fetch(query)
+    if (response.ok) return (await response.json()).value
+    assert.ok(
+      response.status === 400 || response.status === 404,
+      `PDS enrollment lookup failed with HTTP ${response.status}`,
+    )
+    await delay(500)
+  }
+  throw new Error('PDS enrollment record was not published')
+}
+
+async function assertSpaceLexicon(domain, authorityDid, account) {
+  const query = new URL(
+    `https://stratos-e2e.${domain}/xrpc/com.atproto.repo.getRecord`,
+  )
+  query.searchParams.set('repo', authorityDid)
+  query.searchParams.set('collection', 'com.atproto.lexicon.schema')
+  query.searchParams.set('rkey', 'zone.stratos.space.feed')
+  const response = await fetch(query)
+  assert.equal(response.status, 200, 'Space lexicon record did not resolve')
+  const record = await response.json()
+  assert.equal(record.value?.defs?.main?.type, 'space')
+
+  // The alpha PDS resolves this NSID during Stratos OAuth. PDS custody in
+  // the PDS-hosted enrollment record proves that the scope was granted there.
+  const enrollment = await pdsEnrollment(domain, account, authorityDid)
+  assert.equal(enrollment.custody, 'pds', 'PDS did not grant the space scope')
+  assert.equal(
+    new URL(enrollment.repoHost).origin,
+    `https://spaces-pds-e2e.${domain}`,
+    'PDS grant did not select the space repo host',
+  )
+}
+
+async function assertSpaceBlob(domain, account, authorityDid, roomId) {
+  const pdsUrl = `https://spaces-pds-e2e.${domain}`
+  const session = await pdsSession(domain, account)
   const payload = Buffer.from(`Private space blob ${randomUUID()}`)
   const upload = await requestJson(
     `${pdsUrl}/xrpc/com.atproto.repo.uploadBlob`,
@@ -435,7 +472,7 @@ async function assertSpaceBlob(domain, account, authorityDid, roomId) {
     'Space blob upload returned no CID',
   )
   const space = `at://${authorityDid}/space/${spaceType}/${roomId}`
-  await requestJson(
+  const write = await requestJson(
     `${pdsUrl}${pdsCreatePath}`,
     {
       method: 'POST',
@@ -447,16 +484,27 @@ async function assertSpaceBlob(domain, account, authorityDid, roomId) {
         space,
         repo: session.did,
         collection: postCollection,
-        validate: false,
         record: {
           $type: postCollection,
           text: `Blob fixture ${randomUUID()}`,
           createdAt: new Date().toISOString(),
-          attachment: blob,
+          embed: {
+            $type: 'app.bsky.embed.images',
+            images: [{ alt: 'Private sandbox fixture', image: blob }],
+          },
         },
       }),
     },
     'Space blob record',
+  )
+  assert.ok(
+    write.uri?.startsWith(`${space}/${session.did}/${postCollection}/`),
+    'PDS did not accept the space-scoped record write',
+  )
+  assert.equal(
+    write.validationStatus,
+    'unknown',
+    'PDS did not run its default record validation path',
   )
   const publicUrl = new URL(`${pdsUrl}/xrpc/com.atproto.sync.getBlob`)
   publicUrl.searchParams.set('did', session.did)
@@ -519,10 +567,60 @@ async function assertStratosCustody(domain, clubhouseUrl, roomId, pdsText) {
 
 async function assertNonmemberDenied(domain, clubhouseUrl, roomId, postText) {
   const account = await unjoinedOrdinaryAccount(domain)
+  const authorityDid = `did:web:stratos-e2e.${domain}`
   const browser = await chromium.launch({ headless: true })
   try {
     const page = await browser.newPage()
     const responses = listenForFeedResponses(page)
+    const authorization = new URL(
+      `https://stratos-e2e.${domain}/oauth/authorize`,
+    )
+    authorization.searchParams.set('handle', account.username)
+    await page.goto(authorization.toString(), {
+      waitUntil: 'domcontentloaded',
+    })
+    await completeOAuth(page, account, authorization.origin)
+    const result = JSON.parse(await page.locator('body').innerText())
+    assert.equal(result.success, true, 'Unrelated actor enrollment failed')
+    assert.equal(result.did, account.did)
+    const enrollment = await pdsEnrollment(domain, account, authorityDid)
+    const boundaries = enrollment.boundaries?.map((item) => item.value)
+    assert.ok(
+      Array.isArray(boundaries),
+      'Unrelated enrollment has no boundaries',
+    )
+    assert.ok(
+      boundaries.includes(`${authorityDid}/other`),
+      'Unrelated actor did not receive its distinct boundary',
+    )
+    assert.ok(
+      !boundaries.includes(`${authorityDid}/general`),
+      'Unrelated actor unexpectedly received the target boundary',
+    )
+
+    const session = await pdsSession(domain, account)
+    const feedUrl = new URL(
+      `https://spaces-pds-e2e.${domain}/xrpc/zone.stratos.feedgen.getFeed`,
+    )
+    feedUrl.searchParams.set('feed', roomId)
+    feedUrl.searchParams.set('limit', '50')
+    const feedResponse = await fetch(feedUrl, {
+      headers: {
+        authorization: `Bearer ${session.accessJwt}`,
+        'atproto-proxy': `did:web:feedgen-e2e.${domain}#stratos_feedgen`,
+      },
+    })
+    if (feedResponse.ok) {
+      const body = await feedResponse.json()
+      assert.ok(
+        Array.isArray(body.feed) && body.feed.length === 0,
+        'Unrelated-boundary actor received target feed content',
+      )
+    } else {
+      const body = await feedResponse.json()
+      assert.equal(body.error, 'BoundaryMismatch')
+    }
+
     await signIn(page, account, clubhouseUrl)
     const card = roomCard(page, roomId)
     await card.waitFor({ state: 'visible', timeout: 30_000 })
@@ -613,7 +711,7 @@ async function main() {
       'PDS custody URI author does not match the createRecord repo',
     )
     await waitForFeed(page, feedResponses, text, result.uri)
-    await assertSpaceLexicon(domain, authorityDid)
+    await assertSpaceLexicon(domain, authorityDid, account)
     await assertSpaceBlob(domain, account, authorityDid, roomId)
     await assertStratosCustody(domain, clubhouseUrl, roomId, text)
     await assertNonmemberDenied(domain, clubhouseUrl, roomId, text)
@@ -625,8 +723,10 @@ async function main() {
           'stratos-custody',
           'pds-custody',
           'space-lexicon',
+          'pds-space-grant',
           'publication-feed',
           'boundary-isolation',
+          'unrelated-boundary-denied',
           'public-private-blob-denied',
           'authenticated-space-blob',
         ].map((id) => ({ id, status: 'passed' })),
