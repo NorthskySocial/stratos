@@ -316,7 +316,10 @@ async function provisionAccount(domain) {
       body: JSON.stringify(sessionBody),
     },
   )
-  if (session.ok) return { username, password }
+  if (session.ok) {
+    pdsSessions.set(username, await session.json())
+    return { username, password }
+  }
   if (session.status !== 400 && session.status !== 401) {
     throw new Error(`PDS account lookup failed with HTTP ${session.status}`)
   }
@@ -338,7 +341,7 @@ async function provisionAccount(domain) {
     'string',
     'PDS invite response has no code',
   )
-  await requestJson(
+  const created = await requestJson(
     `${pdsUrl}/xrpc/com.atproto.server.createAccount`,
     {
       method: 'POST',
@@ -352,6 +355,7 @@ async function provisionAccount(domain) {
     },
     'PDS account creation',
   )
+  pdsSessions.set(username, created)
   return { username, password }
 }
 
@@ -383,10 +387,23 @@ async function unjoinedOrdinaryAccount(domain) {
 
 const pdsSessions = new Map()
 
+function accountPdsUrl(domain, account) {
+  const host = account.username.includes(`.pds1.${domain}`)
+    ? `pds1.${domain}`
+    : `spaces-pds-e2e.${domain}`
+  return `https://${host}`
+}
+
 async function pdsSession(domain, account) {
   const cached = pdsSessions.get(account.username)
-  if (cached) return cached
-  const pdsUrl = `https://spaces-pds-e2e.${domain}`
+  if (cached) {
+    assert.ok(
+      cached.accessJwt && cached.did,
+      'Space PDS session was incomplete',
+    )
+    return cached
+  }
+  const pdsUrl = accountPdsUrl(domain, account)
   const session = await requestJson(
     `${pdsUrl}/xrpc/com.atproto.server.createSession`,
     {
@@ -397,7 +414,7 @@ async function pdsSession(domain, account) {
         password: account.password,
       }),
     },
-    'Space PDS session',
+    `${account.username} PDS session`,
   )
   assert.ok(
     session.accessJwt && session.did,
@@ -410,7 +427,7 @@ async function pdsSession(domain, account) {
 async function pdsEnrollment(domain, account, authorityDid) {
   const session = await pdsSession(domain, account)
   const query = new URL(
-    `https://spaces-pds-e2e.${domain}/xrpc/com.atproto.repo.getRecord`,
+    `${accountPdsUrl(domain, account)}/xrpc/com.atproto.repo.getRecord`,
   )
   query.searchParams.set('repo', session.did)
   query.searchParams.set('collection', 'zone.stratos.actor.enrollment')
@@ -602,7 +619,7 @@ async function assertNonmemberDenied(domain, clubhouseUrl, roomId, postText) {
 
     const session = await pdsSession(domain, account)
     const feedUrl = new URL(
-      `https://spaces-pds-e2e.${domain}/xrpc/zone.stratos.feedgen.getFeed`,
+      `${accountPdsUrl(domain, account)}/xrpc/zone.stratos.feedgen.getFeed`,
     )
     feedUrl.searchParams.set('feed', roomId)
     feedUrl.searchParams.set('limit', '50')

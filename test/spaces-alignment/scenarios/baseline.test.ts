@@ -34,6 +34,7 @@ describe('baseline browser receipt', () => {
           '--project-directory',
           '/tmp/faye-sandbox',
           'run',
+          '--build',
           '--rm',
           '--no-deps',
           'feedgen-e2e-browser',
