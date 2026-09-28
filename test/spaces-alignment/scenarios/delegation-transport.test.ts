@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -62,7 +69,7 @@ describe('delegation transport browser scenario', () => {
         '--rm',
         '--no-deps',
         '--volume',
-        `${reportDirectory}:/scenario:ro,Z`,
+        `${join(reportDirectory, 'browser-assets')}:/scenario:ro,Z`,
         '--entrypoint',
         'node',
         'feedgen-e2e-browser',
@@ -83,11 +90,24 @@ describe('delegation transport browser scenario', () => {
       expect(await readFile(join(reportDirectory, 'keep'), 'utf8')).toBe(
         'sentinel',
       )
+      const browserAssets = join(reportDirectory, 'browser-assets')
+      expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
+      expect((await stat(browserAssets)).mode & 0o777).toBe(0o755)
+      expect((await readdir(browserAssets)).sort()).toEqual([
+        'auth-client.iife.js',
+        'driver.mjs',
+      ])
       expect(
-        await readFile(join(reportDirectory, 'auth-client.iife.js'), 'utf8'),
+        (await stat(join(browserAssets, 'auth-client.iife.js'))).mode & 0o777,
+      ).toBe(0o644)
+      expect((await stat(join(browserAssets, 'driver.mjs'))).mode & 0o777).toBe(
+        0o644,
+      )
+      expect(
+        await readFile(join(browserAssets, 'auth-client.iife.js'), 'utf8'),
       ).toContain('delegationScenarioAuth')
       expect(
-        await readFile(join(reportDirectory, 'driver.mjs'), 'utf8'),
+        await readFile(join(browserAssets, 'driver.mjs'), 'utf8'),
       ).toContain('getDelegationToken')
       expect(suite.requiredAssertions).toContain('pds-issued-delegation')
       expect(suite.requiredAssertions).toContain('foreign-repo-read')
