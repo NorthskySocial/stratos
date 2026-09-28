@@ -69,6 +69,11 @@ describe('baseline browser receipt', () => {
       ),
     ).rejects.toThrow('invalid baseline assertion receipt')
     await expect(
+      suite.run(
+        context('{"suite":"baseline","assertions":[],"suite":"wrong"}'),
+      ),
+    ).rejects.toThrow('invalid baseline assertion receipt')
+    await expect(
       suite.run(context('{"suite":"baseline","assertions":{}}')),
     ).rejects.toThrow('invalid baseline assertion receipt')
   })

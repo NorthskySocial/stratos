@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -19,6 +26,8 @@ afterEach(async () => {
   process.env.PATH = originalPath
   delete process.env.RUNNER_TEST_FAIL_DOCKER_BUILD
   delete process.env.RUNNER_TEST_FAIL_DOCKER_INSPECT
+  delete process.env.RUNNER_TEST_IMAGE_ID
+  delete process.env.RUNNER_TEST_SOURCE_LOG
   await Promise.all(
     temporary
       .splice(0)
@@ -35,7 +44,8 @@ describe('pinned PDS build', () => {
     await mkdir(join(source, 'services/pds'), { recursive: true })
     await mkdir(bin)
     await mkdir(report)
-    const dockerfile = 'FROM node:24-alpine AS build\nFROM build\n'
+    const dockerfile =
+      'ARG BASE=node:24-alpine\nFROM $BASE AS base\nFROM node:24-alpine AS build\nFROM base\nFROM build\n# FROM ignored:latest\n'
     const lockfile = 'lockfileVersion: 9.0\n'
     await writeFile(join(source, 'services/pds/Dockerfile'), dockerfile)
     await writeFile(join(source, 'pnpm-lock.yaml'), lockfile)
@@ -77,17 +87,20 @@ if (args[0] === 'build') {
   assert.equal(args[args.indexOf('--label') + 1], 'org.opencontainers.image.revision=${revision}')
   assert.match(args[args.indexOf('--tag') + 1], /^stratos-spaces-pds-[0-9a-f-]+:local$/)
   assert.ok(args.at(-1).endsWith('/atproto'))
+  fs.writeFileSync(process.env.RUNNER_TEST_SOURCE_LOG, args.at(-1))
   if (process.env.RUNNER_TEST_FAIL_DOCKER_BUILD) {
     console.error('synthetic private failure detail')
     process.exit(17)
   }
-  fs.writeFileSync(args[index + 1], 'sha256:${'c'.repeat(64)}\\n')
+  fs.writeFileSync(args[index + 1], (process.env.RUNNER_TEST_IMAGE_ID || 'sha256:${'c'.repeat(64)}') + '\\n')
   process.exit(0)
 }
 process.exit(2)
 `
     await writeFile(join(bin, 'docker'), dockerScript, { mode: 0o755 })
     process.env.PATH = `${bin}:${originalPath}`
+    const sourceLog = join(root, 'source-path')
+    process.env.RUNNER_TEST_SOURCE_LOG = sourceLog
 
     const receipt = await buildAlphaPds(
       {
@@ -109,6 +122,28 @@ process.exit(2)
     expect((await readFile(join(report, 'pds-image.id'), 'utf8')).trim()).toBe(
       receipt.imageId,
     )
+    await expect(access(await readFile(sourceLog, 'utf8'))).rejects.toThrow()
+
+    for (const imageId of [
+      `prefix-sha256:${'c'.repeat(64)}`,
+      `sha256:${'c'.repeat(64)}-suffix`,
+      'invalid',
+    ]) {
+      process.env.RUNNER_TEST_IMAGE_ID = imageId
+      await expect(
+        buildAlphaPds(
+          {
+            url: source,
+            revision,
+            dockerfile: 'services/pds/Dockerfile',
+            lockfile: 'pnpm-lock.yaml',
+          },
+          report,
+        ),
+      ).rejects.toThrow('PDS build produced no immutable image ID')
+      await expect(access(await readFile(sourceLog, 'utf8'))).rejects.toThrow()
+    }
+    delete process.env.RUNNER_TEST_IMAGE_ID
 
     process.env.RUNNER_TEST_FAIL_DOCKER_BUILD = '1'
     await expect(
