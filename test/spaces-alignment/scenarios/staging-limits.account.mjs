@@ -41,6 +41,15 @@ const browser = await chromium.launch({ headless: true })
 const page = await browser.newPage()
 try {
   const visible = (locator) => locator.isVisible().catch(() => false)
+  async function clickEnabled(locator) {
+    for (let index = 0; index < await locator.count(); index += 1) {
+      const candidate = locator.nth(index)
+      if (!(await visible(candidate)) || !(await candidate.isEnabled())) continue
+      await candidate.click({ noWaitAfter: true, timeout: 2_000 }).catch(() => {})
+      return true
+    }
+    return false
+  }
   async function completeOAuth(origin) {
     const deadline = Date.now() + 60_000
     let left = false
@@ -50,17 +59,24 @@ try {
       if (left && current.origin === origin) return
       const password = page.locator('input[name="password"], input[type="password"]').first()
       if (await visible(password)) {
-        const username = page.locator('input[name="username"]:not([readonly]), input[name="identifier"]:not([readonly])').first()
+        const username = page.locator('input[name="username"]:not([readonly]):not([disabled]), input[name="identifier"]:not([readonly]):not([disabled])').first()
         if (await visible(username)) await username.fill(account.username)
         await password.fill(account.password)
-        const submit = page.locator('button[type="submit"], button:has-text("Sign in")').first()
-        if (await visible(submit)) await submit.click({ noWaitAfter: true }).catch(() => {})
-        else await page.keyboard.press('Enter')
-      } else {
-        const consent = page.locator('button:has-text("Accept"), button:has-text("Authorize"), button:has-text("Allow")').first()
-        if (await visible(consent)) await consent.click({ noWaitAfter: true }).catch(() => {})
+        const submit = page.locator('button[type="submit"], button:has-text("Sign in")')
+        if (await clickEnabled(submit)) {
+          await delay(300)
+          continue
+        }
+        await page.keyboard.press('Enter')
+        await delay(300)
+        continue
       }
-      await delay(300)
+      const consent = page.locator('button:has-text("Accept"), button:has-text("Authorize"), button:has-text("Allow")')
+      if (await clickEnabled(consent)) {
+        await delay(300)
+        continue
+      }
+      await delay(250)
     }
     throw new Error('Second-account OAuth timed out')
   }
