@@ -211,33 +211,37 @@ pub(super) fn stage_usage(
     space_uri: Option<&str>,
     did: Option<&str>,
 ) -> Result<StageUsage, StoreError> {
-    let staged: (i64, i64) = transaction.query_row(
+    let mut usage = StageUsage { rows: 0, bytes: 0 };
+    for query in [
         "SELECT COUNT(*), COALESCE(SUM(length(space_uri) + length(did) + length(uri) + length(boundary) +
           COALESCE(length(cid), 0) + COALESCE(length(sort_at), 0) + COALESCE(length(indexed_at), 0) +
-          COALESCE(length(record_json), 0) + COALESCE(length(blob_refs_json), 0)), 0)
+          COALESCE(length(record_json), 0) + COALESCE(length(blob_refs_json), 0) + length(updated_at)), 0)
          FROM space_sync_stage WHERE (?1 IS NULL OR space_uri = ?1) AND (?2 IS NULL OR did = ?2)",
-        params![space_uri, did], |row| Ok((row.get(0)?, row.get(1)?)),
-    ).map_err(StoreError::Open)?;
-    let checkpoints: (i64, i64) = transaction.query_row(
-        "SELECT COUNT(*), COALESCE(SUM(length(lifetime.space_uri) + length(lifetime.did) +
-          length(lifetime.boundary) + length(lifetime.created_at) + length(lifetime.last_progress_at) +
-          COALESCE(length(cursor.cursor), 0)), 0)
-         FROM space_sync_stage_lifetime AS lifetime
-         LEFT JOIN space_sync_stage_cursor AS cursor
-           ON cursor.space_uri = lifetime.space_uri AND cursor.did = lifetime.did
-         WHERE (?1 IS NULL OR lifetime.space_uri = ?1) AND (?2 IS NULL OR lifetime.did = ?2)",
-        params![space_uri, did], |row| Ok((row.get(0)?, row.get(1)?)),
-    ).map_err(StoreError::Open)?;
-    Ok(StageUsage {
-        rows: staged
-            .0
-            .checked_add(checkpoints.0)
-            .ok_or(StoreError::SpaceStageLimit)?,
-        bytes: staged
-            .1
-            .checked_add(checkpoints.1)
-            .ok_or(StoreError::SpaceStageLimit)?,
-    })
+        "SELECT COUNT(*), COALESCE(SUM(length(space_uri) + length(did) + length(boundary) +
+          length(CAST(cursor AS BLOB)) + length(updated_at)), 0)
+         FROM space_sync_stage_cursor WHERE (?1 IS NULL OR space_uri = ?1) AND (?2 IS NULL OR did = ?2)",
+        "SELECT COUNT(*), COALESCE(SUM(length(space_uri) + length(did) + length(boundary) +
+          length(updated_at)), 0)
+         FROM space_sync_pending_verification WHERE (?1 IS NULL OR space_uri = ?1) AND (?2 IS NULL OR did = ?2)",
+        "SELECT COUNT(*), COALESCE(SUM(length(space_uri) + length(did) + length(boundary) +
+          length(created_at) + length(last_progress_at)), 0)
+         FROM space_sync_stage_lifetime WHERE (?1 IS NULL OR space_uri = ?1) AND (?2 IS NULL OR did = ?2)",
+    ] {
+        let (rows, bytes): (i64, i64) = transaction
+            .query_row(query, params![space_uri, did], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .map_err(StoreError::Open)?;
+        usage.rows = usage
+            .rows
+            .checked_add(rows)
+            .ok_or(StoreError::SpaceStageLimit)?;
+        usage.bytes = usage
+            .bytes
+            .checked_add(bytes)
+            .ok_or(StoreError::SpaceStageLimit)?;
+    }
+    Ok(usage)
 }
 
 fn enforce_stage_budget(
@@ -1692,7 +1696,7 @@ mod stage_limit_tests {
                 .unwrap();
         };
         let mut target = store(16_000);
-        set_limit(&target, "stage_target_max_rows", 2);
+        set_limit(&target, "stage_target_max_rows", 3);
         set_limit(&target, "stage_global_max_rows", 10);
         target
             .stage_space_page(page("first"), vec![upsert(0, 100)])
@@ -1703,8 +1707,8 @@ mod stage_limit_tests {
         ));
 
         let mut global = store(16_000);
-        set_limit(&global, "stage_target_max_rows", 2);
-        set_limit(&global, "stage_global_max_rows", 3);
+        set_limit(&global, "stage_target_max_rows", 3);
+        set_limit(&global, "stage_global_max_rows", 5);
         global
             .stage_space_page(page("first"), vec![upsert(0, 100)])
             .unwrap();
@@ -1723,6 +1727,121 @@ mod stage_limit_tests {
             ),
             Err(StoreError::SpaceStageLimit),
         ));
+    }
+
+    #[test]
+    fn cursored_checkpoint_bytes_and_terminal_pending_row_roll_back_at_target_cap() {
+        let mut store = store(16_000);
+        store.stage_space_page(page("short"), Vec::new()).unwrap();
+        let before = {
+            let transaction = store.connection.transaction().unwrap();
+            let usage = stage_usage(&transaction, Some(SPACE), Some(DID)).unwrap();
+            transaction.rollback().unwrap();
+            usage
+        };
+        assert_eq!(before.rows, 2); // cursor and lifetime are distinct rows
+        for (key, value) in [
+            ("stage_target_max_rows", 2),
+            ("stage_global_max_rows", 20),
+            ("stage_target_max_bytes", before.bytes + 10),
+            ("stage_global_max_bytes", 16_000),
+        ] {
+            store
+                .connection
+                .execute(
+                    "INSERT INTO retention_metadata (key, value) VALUES (?1, ?2)",
+                    params![key, value],
+                )
+                .unwrap();
+        }
+        let long_cursor = "x".repeat(100);
+        assert!(matches!(
+            store.stage_space_page(page(&long_cursor), Vec::new()),
+            Err(StoreError::SpaceStageLimit)
+        ));
+        let terminal = || SpaceStagePage {
+            next_cursor: None,
+            ..page("unused")
+        };
+        assert!(matches!(
+            store.stage_space_page(terminal(), Vec::new()),
+            Err(StoreError::SpaceStageLimit)
+        ));
+        store
+            .connection
+            .execute(
+                "UPDATE retention_metadata SET value = 3 WHERE key = 'stage_target_max_rows'",
+                [],
+            )
+            .unwrap();
+        assert!(matches!(
+            store.stage_space_page(terminal(), Vec::new()),
+            Err(StoreError::SpaceStageLimit)
+        ));
+        let after = {
+            let transaction = store.connection.transaction().unwrap();
+            let usage = stage_usage(&transaction, Some(SPACE), Some(DID)).unwrap();
+            transaction.rollback().unwrap();
+            usage
+        };
+        assert_eq!((after.rows, after.bytes), (before.rows, before.bytes));
+        assert_eq!(
+            store.space_sync_cursor(BOUNDARY, SPACE, DID).unwrap(),
+            Some("short".to_owned())
+        );
+        let pending: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM space_sync_pending_verification",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, 0);
+    }
+
+    #[test]
+    fn terminal_pending_metadata_counts_against_global_cap_across_targets() {
+        let mut store = store(16_000);
+        for (key, value) in [("stage_target_max_rows", 3), ("stage_global_max_rows", 3)] {
+            store
+                .connection
+                .execute(
+                    "INSERT INTO retention_metadata (key, value) VALUES (?1, ?2)",
+                    params![key, value],
+                )
+                .unwrap();
+        }
+        store.stage_space_page(page("first"), Vec::new()).unwrap();
+        let mut terminal = page("unused");
+        terminal.next_cursor = None;
+        store.stage_space_page(terminal, Vec::new()).unwrap();
+        let other_did = "did:plc:jetblack";
+        let second = SpaceStagePage {
+            actor_did: other_did.to_owned(),
+            next_cursor: Some("second".to_owned()),
+            ..page("unused")
+        };
+        assert!(matches!(
+            store.stage_space_page(second, Vec::new()),
+            Err(StoreError::SpaceStageLimit)
+        ));
+        let usage = {
+            let transaction = store.connection.transaction().unwrap();
+            let usage = stage_usage(&transaction, None, None).unwrap();
+            transaction.rollback().unwrap();
+            usage
+        };
+        assert_eq!(usage.rows, 3); // cursor, pending verification, lifetime
+        let other_rows: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM space_sync_stage_lifetime WHERE did = ?1",
+                [other_did],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(other_rows, 0);
     }
 
     #[test]
@@ -1939,7 +2058,7 @@ mod stage_limit_tests {
             transaction.rollback().unwrap();
             usage
         };
-        assert_eq!(staged_before.rows, 2); // post and target checkpoint
+        assert_eq!(staged_before.rows, 3); // post, pending verification, lifetime
         assert!(staged_before.bytes > 0);
         let maximum = staged_before.bytes;
         for (key, value) in [
