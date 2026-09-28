@@ -62,7 +62,7 @@ describe('delegation transport browser scenario', () => {
         '--rm',
         '--no-deps',
         '--volume',
-        `${reportDirectory}:/scenario:ro`,
+        `${reportDirectory}:/scenario:ro,Z`,
         '--entrypoint',
         'node',
         'feedgen-e2e-browser',
