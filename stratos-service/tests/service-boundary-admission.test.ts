@@ -8,6 +8,7 @@ import { createServicePgDb, migrateServicePgDb } from '../src/db/pg.js'
 import { PgEnrollmentStoreWriter } from '../src/infra/storage/postgres/index.js'
 import type { AppContext } from '../src/context-types.js'
 import {
+  createCid,
   startPostgresContainer,
   stopPostgresContainer,
 } from './helpers/test-env.js'
@@ -16,9 +17,11 @@ import { TestServer } from './helpers/test-server.js'
 const AUTHORITY = 'did:web:test.stratos.actor'
 const RESERVED = `${AUTHORITY}/general`
 const SECOND = `${AUTHORITY}/test.com`
+const UNASSIGNED = `${AUTHORITY}/example.com`
 const ACTOR = 'did:plc:rei-ayanami'
 const SPACE = `at://${AUTHORITY}/space/zone.stratos.space.feed/general`
 const SECOND_SPACE = `at://${AUTHORITY}/space/zone.stratos.space.feed/test.com`
+const UNASSIGNED_SPACE = `at://${AUTHORITY}/space/zone.stratos.space.feed/example.com`
 const METHODS = [
   'zone.stratos.sync.listRepoOps',
   'zone.stratos.sync.listRecordPaths',
@@ -60,30 +63,57 @@ describe('service boundary admission over HTTP', () => {
       enrolledAt: new Date().toISOString(),
       active: true,
       signingKeyDid: 'did:key:zRei',
-      boundaries: [SECOND],
+      boundaries: [SECOND, UNASSIGNED],
     })
     await server.server.ctx.actorStore.create(ACTOR)
-    const write = await fetch(
-      `${server.url}/xrpc/com.atproto.repo.createRecord`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${ACTOR}`,
-        },
-        body: JSON.stringify({
-          repo: ACTOR,
-          collection: 'zone.stratos.feed.post',
-          record: {
-            $type: 'zone.stratos.feed.post',
-            text: 'Rei joins the room',
-            createdAt: new Date().toISOString(),
-            boundary: { values: [{ value: SECOND }] },
+    for (const [text, boundary] of [
+      ['Rei joins the room', SECOND],
+      ['Rei keeps another room private', UNASSIGNED],
+    ]) {
+      const write = await fetch(
+        `${server.url}/xrpc/com.atproto.repo.createRecord`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${ACTOR}`,
           },
-        }),
-      },
-    )
-    expect(write.status, await write.clone().text()).toBe(200)
+          body: JSON.stringify({
+            repo: ACTOR,
+            collection: 'zone.stratos.feed.post',
+            record: {
+              $type: 'zone.stratos.feed.post',
+              text,
+              createdAt: new Date().toISOString(),
+              boundary: { values: [{ value: boundary }] },
+            },
+          }),
+        },
+      )
+      expect(write.status, await write.clone().text()).toBe(200)
+    }
+
+    // The test server's decoder expects JSON bytes. Seed recovery records in
+    // that format so listRecordPaths exercises its real boundary filter.
+    await server.server.ctx.actorStore.transact(ACTOR, async (store) => {
+      for (const [rkey, boundary] of [
+        ['visible', SECOND],
+        ['private', UNASSIGNED],
+      ]) {
+        const value = {
+          $type: 'zone.stratos.graph.follow',
+          subject: 'did:plc:shinji-ikari',
+          boundary: { values: [{ value: boundary }] },
+        }
+        const content = new TextEncoder().encode(JSON.stringify(value))
+        await store.record.putRecord({
+          uri: `at://${ACTOR}/zone.stratos.graph.follow/${rkey}`,
+          cid: await createCid(content),
+          value,
+          content,
+        })
+      }
+    })
   }, 30_000)
 
   afterAll(async () => {
@@ -130,21 +160,41 @@ describe('service boundary admission over HTTP', () => {
       isService: true,
       boundaries: [SECOND],
     })
-    for (const method of METHODS) {
-      const { response } = await request(method)
-      expect(response.status).toBe(200)
-    }
+    const ops = await request('zone.stratos.sync.listRepoOps')
+    expect(ops.response.status).toBe(200)
+    expect(ops.body.ops).toHaveLength(1)
+    expect(ops.body.ops[0].value.text).toBe('Rei joins the room')
+
+    const paths = await request('zone.stratos.sync.listRecordPaths')
+    expect(paths.response.status).toBe(200)
+    expect(
+      paths.body.records.map((record: { rkey: string }) => record.rkey),
+    ).toEqual(['visible'])
+
+    const all = await request('zone.stratos.space.listRepos')
+    expect(all.response.status).toBe(200)
+    expect(all.body.repos).toEqual(
+      expect.arrayContaining([expect.objectContaining({ did: ACTOR })]),
+    )
     const second = await request('zone.stratos.space.listRepos', SECOND_SPACE)
     expect(second.response.status).toBe(200)
     expect(second.body.repos).toEqual(
       expect.arrayContaining([expect.objectContaining({ did: ACTOR })]),
     )
+    const unassigned = await request(
+      'zone.stratos.space.listRepos',
+      UNASSIGNED_SPACE,
+    )
+    expect([401, 403]).toContain(unassigned.response.status)
+    expect(unassigned.body).not.toHaveProperty('repos')
 
     await store.updateEnrollment(callerDid, { active: false })
     expect(await store.getBoundaries(callerDid)).toContain(SECOND)
     for (const method of METHODS) {
       const { response, body } = await request(method)
       expect([401, 403]).toContain(response.status)
+      expect(body).not.toHaveProperty('ops')
+      expect(body).not.toHaveProperty('records')
       expect(body).not.toHaveProperty('repos')
     }
 
