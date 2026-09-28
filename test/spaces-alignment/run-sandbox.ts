@@ -17,7 +17,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { buildAlphaPds } from './build-alpha-pds.js'
-import type { PdsBuildReceipt } from './build-alpha-pds.js'
+import type { PdsBuildReceipt, PdsSourcePin } from './build-alpha-pds.js'
 import {
   suiteExecutionOrder,
   validateAssertions,
@@ -34,12 +34,7 @@ interface SourcePins {
     sha256: Record<string, string>
     archivePaths: string[]
   }
-  spacesPds: {
-    url: string
-    revision: string
-    dockerfile: string
-    lockfile: string
-  }
+  spacesPds: PdsSourcePin
 }
 
 const sources = JSON.parse(

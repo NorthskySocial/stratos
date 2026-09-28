@@ -53,3 +53,14 @@ The AiaB checkout must be clean at the SHA in `sources.json`. If the path is abs
 Each tracked `scenarios/<suite>.ts` exports `suite: ScenarioSuite` with `id`, nonempty `requiredAssertions`, and an async `run(context)` returning one result for each named assertion. Import `ScenarioSuite` from `../rules.js`. The runner discovers modules from the candidate checkout and runs `baseline` before any additional suite. A missing, skipped, failed, or duplicate assertion fails the gate. Add a new suite in its own scenario module; no registry edit is needed.
 
 Mock child processes only in runner unit tests. Acceptance requires the real private sandbox with production authorization gates and the complete baseline assertion receipt. A health check or zero-test filter is not acceptance evidence.
+
+The baseline checks the authority's space lexicon record separately from the
+alpha PDS grant: successful PDS-custody enrollment and a space-scoped PDS write
+show that the PDS resolved the space type during OAuth and enforced the grant.
+It also enrolls a second actor in `other` (plus reserved `all`), verifies that
+actor lacks `general`, and queries the `general` feed through the PDS proxy to
+require an empty or `BoundaryMismatch` result. The pinned alpha PDS cannot
+strictly validate the Stratos-specific post record type: its record validator
+only knows built-in lexicons. The blob fixture therefore uses the PDS's default
+best-effort validation path, without disabling validation, and verifies that
+the scoped record write and private blob retrieval both succeed.
