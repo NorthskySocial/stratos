@@ -1,0 +1,142 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import {
+  getEnrollmentByServiceDid,
+  resolveRepositoryTarget,
+  resolveServiceUrl,
+} from './client-custody-sdk.mjs'
+
+const domain = process.env.SANDBOX_DOMAIN
+assert.equal(domain, 'atmosbox.test')
+const authorityDid = `did:web:stratos-e2e.${domain}`
+const authorityUrl = 'https://stratos-e2e.atmosbox.internal'
+const spacesPdsUrl = `https://spaces-pds-e2e.${domain}`
+const ordinaryPdsUrl = `https://pds1.${domain}`
+
+async function session(url, identifier, password) {
+  const response = await fetch(`${url}/xrpc/com.atproto.server.createSession`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ identifier, password }),
+  })
+  assert.equal(response.status, 200, 'Synthetic PDS session failed')
+  return response.json()
+}
+
+async function main() {
+  const ordinary = JSON.parse(
+    await readFile('/sandbox-state/accounts.json', 'utf8'),
+  ).accounts[`user1.pds1.${domain}`]
+  assert.ok(ordinary?.did && ordinary?.password)
+  const spacesPassword = (
+    await readFile('/run/sandbox-secrets/browser-password', 'utf8')
+  ).trim()
+  const spacesSession = await session(
+    spacesPdsUrl,
+    `motoko.spaces-pds-e2e.${domain}`,
+    spacesPassword,
+  )
+  const ordinarySession = await session(
+    ordinaryPdsUrl,
+    `user1.pds1.${domain}`,
+    ordinary.password,
+  )
+
+  const [pdsEnrollment, stratosEnrollment] = await Promise.all([
+    getEnrollmentByServiceDid(spacesSession.did, spacesPdsUrl, authorityDid),
+    getEnrollmentByServiceDid(
+      ordinarySession.did,
+      ordinaryPdsUrl,
+      authorityDid,
+    ),
+  ])
+  assert.equal(pdsEnrollment?.custody, 'pds')
+  assert.equal(stratosEnrollment?.custody, 'stratos')
+  assert.equal(pdsEnrollment.repoHost, spacesPdsUrl)
+  const assertions = [{ id: 'sdk-discovers-both-custodies', status: 'passed' }]
+
+  for (const [did, enrollment] of [
+    [spacesSession.did, pdsEnrollment],
+    [ordinarySession.did, stratosEnrollment],
+  ]) {
+    const response = await fetch(
+      `${authorityUrl}/xrpc/zone.stratos.enrollment.status?did=${encodeURIComponent(did)}`,
+    )
+    assert.equal(response.status, 200)
+    const status = await response.json()
+    assert.equal(status.enrolled, true)
+    assert.equal(status.active, true)
+    assert.equal(status.enrollmentRkey, enrollment.rkey)
+    assert.equal(status.signingKey, enrollment.signingKey)
+  }
+  assert.equal(
+    resolveServiceUrl(pdsEnrollment, ordinaryPdsUrl),
+    pdsEnrollment.service,
+  )
+  const pdsTarget = resolveRepositoryTarget(pdsEnrollment, {
+    sessionPdsUrl: spacesPdsUrl,
+  })
+  const stratosTarget = resolveRepositoryTarget(stratosEnrollment, {
+    authorityServiceUrl: authorityUrl,
+  })
+  assert.deepEqual(pdsTarget, { kind: 'pds', url: spacesPdsUrl })
+  assert.deepEqual(stratosTarget, { kind: 'stratos', url: authorityUrl })
+  assertions.push({ id: 'authority-and-host-agree', status: 'passed' })
+
+  const text = `Client custody ${randomUUID()}`
+  const space = `at://${authorityDid}/space/zone.stratos.space.feed/general`
+  const write = await fetch(
+    `${pdsTarget.url}/xrpc/com.atproto.space.createRecord`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${spacesSession.accessJwt}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        space,
+        repo: spacesSession.did,
+        collection: 'zone.stratos.feed.post',
+        record: {
+          $type: 'zone.stratos.feed.post',
+          text,
+          createdAt: new Date().toISOString(),
+        },
+      }),
+    },
+  )
+  assert.equal(write.status, 200, 'Selected PDS space write failed')
+  const result = await write.json()
+  assert.ok(
+    result.uri?.startsWith(
+      `${space}/${spacesSession.did}/zone.stratos.feed.post/`,
+    ),
+  )
+  const segments = result.uri.slice('at://'.length).split('/')
+  assert.equal(segments.length, 7)
+  assertions.push({ id: 'selected-space-write', status: 'passed' })
+
+  const publicUrl = new URL(`${spacesPdsUrl}/xrpc/com.atproto.repo.getRecord`)
+  publicUrl.searchParams.set('repo', spacesSession.did)
+  publicUrl.searchParams.set('collection', 'zone.stratos.feed.post')
+  publicUrl.searchParams.set('rkey', segments[6])
+  const publicRead = await fetch(publicUrl)
+  assert.ok(publicRead.status === 400 || publicRead.status === 404)
+  assertions.push({ id: 'space-write-is-private', status: 'passed' })
+
+  let credentialForwards = 0
+  for (const custody of ['pds', 'future']) {
+    const unresolved = resolveRepositoryTarget({ custody }, {})
+    assert.equal(unresolved.kind, 'unresolved')
+    if (unresolved.kind !== 'unresolved') credentialForwards++
+  }
+  assert.equal(credentialForwards, 0)
+  assertions.push({
+    id: 'unresolved-custody-sends-no-credentials',
+    status: 'passed',
+  })
+  console.log(JSON.stringify({ suite: 'client-custody', assertions }))
+}
+
+await main()

@@ -184,8 +184,8 @@ See the [service key history design](../docs/architecture/service-key-history.md
 
 ## 2. Service Routing
 
-The core routing decision is: _when reading/writing Stratos data and enrollment exists, route XRPC
-calls to the Stratos service URL instead of the user's PDS._
+Select the write route from the enrollment's custody. Stratos custody uses the authority service.
+PDS custody uses the user's spaces-capable PDS and `com.atproto.space.*` methods.
 
 When a user has multiple enrollments, select the target enrollment first (see
 `findEnrollmentByService` in Section 1), then route using that enrollment's service URL.
@@ -199,7 +199,48 @@ const url = resolveServiceUrl(enrollment, pdsUrl)
 ```
 
 `resolveServiceUrl` returns the enrollment's service URL if enrolled, otherwise the fallback PDS
-URL. Record creation/deletion always has the corresponding action to the PDS record referencing it.
+URL. It continues to resolve the authority service; it does not select a repository host.
+
+`custody` defaults to `stratos` only when the published field is absent. Unknown values stay
+visible and cannot select a repository target. `repoHost` is a validated HTTPS origin hint only
+for PDS custody. Neither field is covered by the current service attestation. Resolve the actual
+write host from the live authority or the authenticated session before forwarding credentials.
+
+```typescript
+import { resolveRepositoryTarget } from '@northskysocial/stratos-client'
+
+const target = resolveRepositoryTarget(enrollment, {
+  authorityServiceUrl, // live authority endpoint for Stratos custody
+  authoritativeRepoHost, // live authority answer when available
+  sessionPdsUrl, // PDS endpoint bound to this authenticated session
+})
+if (target.kind === 'unresolved') throw new Error(target.reason)
+
+const handler = createServiceFetchHandler(authenticatedHandler, target.url)
+const rpc = new Client({ handler })
+if (target.kind === 'stratos') {
+  await rpc.post('com.atproto.repo.createRecord', {
+    input: {
+      repo: did,
+      collection: 'zone.stratos.feed.post',
+      record: stratosPost,
+    },
+  })
+} else {
+  await rpc.post('com.atproto.space.createRecord', {
+    input: {
+      space: `at://${authorityDid}/space/zone.stratos.space.feed/${spaceKey}`,
+      repo: did,
+      collection: 'zone.stratos.feed.post',
+      record: pdsPost,
+    },
+  })
+}
+```
+
+The PDS result URI has seven segments:
+`at://{authorityDid}/space/{type}/{spaceKey}/{authorDid}/{collection}/{rkey}`.
+Changing only the origin of legacy repo CRUD does not write into the space.
 
 ### Routing applies to
 
@@ -208,9 +249,9 @@ URL. Record creation/deletion always has the corresponding action to the PDS rec
 | `com.atproto.repo.getRecord`            | Yes (reads private records)                                                   |
 | `com.atproto.repo.listRecords`          | Yes (lists private collections)                                               |
 | `com.atproto.repo.describeRepo`         | Yes (describes private repo)                                                  |
-| `com.atproto.repo.createRecord`         | Yes (writes to Stratos)                                                       |
-| `com.atproto.repo.deleteRecord`         | Yes (deletes from Stratos)                                                    |
-| `com.atproto.repo.applyWrites`          | Yes (batch writes)                                                            |
+| `com.atproto.repo.createRecord`         | Stratos custody only                                                          |
+| `com.atproto.repo.deleteRecord`         | Stratos custody only                                                          |
+| `com.atproto.repo.applyWrites`          | Stratos custody only                                                          |
 | `com.atproto.sync.getRecord`            | Yes (CAR export for verification)                                             |
 | `zone.stratos.space.listBlobs`          | Yes (lists blob CIDs in a space)                                              |
 | `zone.stratos.sync.getRepo`             | Yes (full repo export as CAR)                                                 |

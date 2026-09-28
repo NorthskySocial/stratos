@@ -7,6 +7,7 @@ import {
   findEnrollmentByService,
   getEnrollmentByServiceDid,
   resolveServiceUrl,
+  resolveRepositoryTarget,
   STRATOS_SCOPES,
 } from '../src'
 
@@ -60,6 +61,7 @@ describe('discovery', () => {
 
     expect(result).toEqual({
       service: 'https://stratos.example.com',
+      custody: 'stratos',
       boundaries: [{ value: 'cosplayers' }],
       signingKey: MOCK_USER_KEY,
       attestation: { sig: MOCK_SIG, signingKey: MOCK_SERVICE_KEY },
@@ -126,6 +128,7 @@ describe('discovery', () => {
 
     expect(result).toEqual({
       service: 'https://stratos.example.com',
+      custody: 'stratos',
       boundaries: [{ value: 'cosplayers' }],
       signingKey: MOCK_USER_KEY,
       attestation: { sig: MOCK_SIG, signingKey: MOCK_SERVICE_KEY },
@@ -203,6 +206,108 @@ describe('routing', () => {
     it('returns fallback URL when not enrolled', () => {
       const url = resolveServiceUrl(null, 'https://pds.example.com')
       expect(url).toBe('https://pds.example.com')
+    })
+  })
+
+  describe('resolveRepositoryTarget', () => {
+    it('routes Stratos custody only through a live authority endpoint', () => {
+      expect(
+        resolveRepositoryTarget(
+          { custody: 'stratos' },
+          { authorityServiceUrl: 'https://stratos.nerv.jp' },
+        ),
+      ).toEqual({ kind: 'stratos', url: 'https://stratos.nerv.jp' })
+      expect(resolveRepositoryTarget({ custody: 'stratos' }, {})).toEqual({
+        kind: 'unresolved',
+        reason: 'missing-trusted-host',
+      })
+    })
+
+    it('routes PDS custody through a trusted session or matching authority host', () => {
+      expect(
+        resolveRepositoryTarget(
+          { custody: 'pds' },
+          { sessionPdsUrl: 'https://pds.nerv.jp' },
+        ),
+      ).toEqual({ kind: 'pds', url: 'https://pds.nerv.jp' })
+      expect(
+        resolveRepositoryTarget(
+          { custody: 'pds' },
+          {
+            authoritativeRepoHost: 'https://pds.nerv.jp',
+            sessionPdsUrl: 'https://pds.nerv.jp/',
+          },
+        ),
+      ).toEqual({ kind: 'pds', url: 'https://pds.nerv.jp' })
+      expect(
+        resolveRepositoryTarget(
+          { custody: 'pds' },
+          { authoritativeRepoHost: 'https://pds.nerv.jp' },
+        ),
+      ).toEqual({ kind: 'pds', url: 'https://pds.nerv.jp' })
+      expect(
+        resolveRepositoryTarget(
+          { custody: 'pds' },
+          {
+            authoritativeRepoHost: 'https://other.nerv.jp',
+            sessionPdsUrl: 'https://pds.nerv.jp',
+          },
+        ),
+      ).toEqual({ kind: 'unresolved', reason: 'host-mismatch' })
+    })
+
+    it('fails closed without trusted hosts or for unsupported custody', () => {
+      expect(resolveRepositoryTarget(null, {})).toEqual({
+        kind: 'unresolved',
+        reason: 'missing-enrollment',
+      })
+      expect(
+        resolveRepositoryTarget(
+          { custody: 'future' },
+          { sessionPdsUrl: 'https://pds.nerv.jp' },
+        ),
+      ).toEqual({ kind: 'unresolved', reason: 'unsupported-custody' })
+      expect(resolveRepositoryTarget({ custody: 'pds' }, {})).toEqual({
+        kind: 'unresolved',
+        reason: 'missing-trusted-host',
+      })
+      expect(
+        resolveRepositoryTarget(
+          { custody: 'pds' },
+          { sessionPdsUrl: 'http://pds.nerv.jp' },
+        ),
+      ).toEqual({ kind: 'unresolved', reason: 'invalid-trusted-host' })
+      expect(
+        resolveRepositoryTarget(
+          { custody: 'stratos' },
+          { authorityServiceUrl: 'https://evil@stratos.nerv.jp' },
+        ),
+      ).toEqual({ kind: 'unresolved', reason: 'invalid-trusted-host' })
+      expect(
+        resolveRepositoryTarget(
+          { custody: 'stratos' },
+          { authorityServiceUrl: 'https://stratos.nerv.jp/path' },
+        ),
+      ).toEqual({ kind: 'unresolved', reason: 'invalid-trusted-host' })
+      expect(
+        resolveRepositoryTarget(
+          { custody: 'pds' },
+          {
+            authoritativeRepoHost: 'https://pds.nerv.jp',
+            sessionPdsUrl: 'http://pds.nerv.jp',
+          },
+        ),
+      ).toEqual({ kind: 'unresolved', reason: 'invalid-trusted-host' })
+      expect(
+        resolveRepositoryTarget(
+          { custody: 'stratos' },
+          {
+            authorityServiceUrl: 'https://stratos.nerv.jp',
+            authoritativeRepoHost: 'https://pds.nerv.jp',
+            sessionPdsUrl: 'http://pds.nerv.jp',
+          },
+        ),
+      ).toEqual({ kind: 'stratos', url: 'https://stratos.nerv.jp' })
     })
   })
 
