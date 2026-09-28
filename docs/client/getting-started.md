@@ -25,7 +25,7 @@ service routing, record verification, and OAuth scope management:
 | Module       | What it provides                                                                                                                           |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | discovery    | `getEnrollmentByServiceDid()` — find enrollment for a specific service                                                                     |
-| routing      | `createServiceFetchHandler()`, `resolveServiceUrl()`, `findEnrollmentByService()` — route XRPC calls to the correct Stratos service        |
+| routing      | `resolveRepositoryTarget()`, `createServiceFetchHandler()`, `findEnrollmentByService()` — select custody-aware XRPC targets                |
 | verification | `fetchAndVerifyRecord()`, `verifyCidIntegrity()`, `resolveServiceSigningKey()`, `resolveUserSigningKey()` — three-tier record verification |
 | scopes       | `buildStratosScopes()`, `STRATOS_SCOPES` — build OAuth scope strings for Stratos collections                                               |
 
@@ -90,10 +90,10 @@ const STRATOS_ENDPOINT = 'https://stratos.example.com'
 See [User Enrollment](/client/enrollment) for the full enrollment record schema and all discovery
 variants.
 
-### 3. Create a Stratos Agent
+### 3. Create a Routed Agent
 
 When using `@atproto/api` with an OAuth session, you **must** wrap the session's `fetchHandler` to
-route requests to the Stratos service URL.
+route requests to the selected repository target URL.
 
 ::: warning Common mistake
 `new Agent(session)` followed by `agent.serviceUrl = new URL(stratosUrl)` will silently send
@@ -170,36 +170,42 @@ Repository routing depends on custody. Stratos custody uses authority repo metho
 PDS custody uses space methods on the user's PDS.
 
 When a user has multiple enrollments, select the target enrollment first (see
-`findEnrollmentByService` in [User Enrollment](/client/enrollment)), then route using that
-enrollment's service URL.
+`findEnrollmentByService` in [User Enrollment](/client/enrollment)), then select the repository
+target from its custody and trusted host information.
 
 ### Routing logic
 
 ```typescript
-import { resolveServiceUrl } from '@northskysocial/stratos-client'
+import { resolveRepositoryTarget } from '@northskysocial/stratos-client'
 
-const url = resolveServiceUrl(enrollment, pdsUrl)
+const target = resolveRepositoryTarget(enrollment, {
+  authorityServiceUrl,
+  authoritativeRepoHost,
+  sessionPdsUrl,
+})
+if (target.kind === 'unresolved') throw new Error(target.reason)
 ```
 
-`resolveServiceUrl` returns the enrollment's service URL if enrolled, otherwise the fallback PDS
-URL.
+Use `target.url` with repo methods for `stratos` custody or space methods for `pds` custody, as
+shown in [Create a Private Post](#4-create-a-private-post). `resolveServiceUrl` returns the
+authority URL; it does not select a repository host.
 
 ### Which operations route to Stratos
 
-| Operation                            | Routes to Stratos?                |
-| ------------------------------------ | --------------------------------- |
-| `com.atproto.repo.getRecord`         | Yes (reads private records)       |
-| `com.atproto.repo.listRecords`       | Yes (lists private collections)   |
-| `com.atproto.repo.describeRepo`      | Yes (describes private repo)      |
-| `com.atproto.repo.createRecord`      | Stratos custody only              |
-| `com.atproto.repo.deleteRecord`      | Stratos custody only              |
-| `com.atproto.repo.applyWrites`       | Stratos custody only              |
-| `com.atproto.sync.getRecord`         | Yes (CAR export for verification) |
-| `zone.stratos.space.listBlobs`       | Yes (lists blob CIDs in a space)  |
-| `zone.stratos.sync.getRepo`          | Yes (full repo export as CAR)     |
-| `zone.stratos.repo.importRepo`       | Yes (import repo from CAR)        |
-| `zone.stratos.sync.subscribeRecords` | Yes (WebSocket firehose)          |
-| `com.atproto.sync.getBlob`           | No (not yet implemented)          |
+| Operation                            | Routes to Stratos?               |
+| ------------------------------------ | -------------------------------- |
+| `com.atproto.repo.getRecord`         | Stratos custody only             |
+| `com.atproto.repo.listRecords`       | Stratos custody only             |
+| `com.atproto.repo.describeRepo`      | Stratos custody only             |
+| `com.atproto.repo.createRecord`      | Stratos custody only             |
+| `com.atproto.repo.deleteRecord`      | Stratos custody only             |
+| `com.atproto.repo.applyWrites`       | Stratos custody only             |
+| `com.atproto.sync.getRecord`         | Stratos custody only             |
+| `zone.stratos.space.listBlobs`       | Yes (lists blob CIDs in a space) |
+| `zone.stratos.sync.getRepo`          | Yes (full repo export as CAR)    |
+| `zone.stratos.repo.importRepo`       | Yes (import repo from CAR)       |
+| `zone.stratos.sync.subscribeRecords` | Yes (WebSocket firehose)         |
+| `com.atproto.sync.getBlob`           | No (not yet implemented)         |
 
 ## DPoP-Aware Transport
 

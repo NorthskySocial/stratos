@@ -188,18 +188,13 @@ Select the write route from the enrollment's custody. Stratos custody uses the a
 PDS custody uses the user's spaces-capable PDS and `com.atproto.space.*` methods.
 
 When a user has multiple enrollments, select the target enrollment first (see
-`findEnrollmentByService` in Section 1), then route using that enrollment's service URL.
+`findEnrollmentByService` in Section 1), then select the repository target from its custody and
+trusted host information.
 
 ### Routing logic
 
-```typescript
-import { resolveServiceUrl } from '@northskysocial/stratos-client'
-
-const url = resolveServiceUrl(enrollment, pdsUrl)
-```
-
-`resolveServiceUrl` returns the enrollment's service URL if enrolled, otherwise the fallback PDS
-URL. It continues to resolve the authority service; it does not select a repository host.
+`resolveServiceUrl(enrollment, pdsUrl)` returns the authority service URL if enrolled, otherwise
+the fallback PDS URL. It does not select a repository host; use `resolveRepositoryTarget` below.
 
 `custody` defaults to `stratos` only when the published field is absent. Unknown values stay
 visible and cannot select a repository target. `repoHost` is a validated HTTPS origin hint only
@@ -246,13 +241,13 @@ Changing only the origin of legacy repo CRUD does not write into the space.
 
 | Operation                               | Routes to Stratos?                                                            |
 | --------------------------------------- | ----------------------------------------------------------------------------- |
-| `com.atproto.repo.getRecord`            | Yes (reads private records)                                                   |
-| `com.atproto.repo.listRecords`          | Yes (lists private collections)                                               |
-| `com.atproto.repo.describeRepo`         | Yes (describes private repo)                                                  |
+| `com.atproto.repo.getRecord`            | Stratos custody only                                                          |
+| `com.atproto.repo.listRecords`          | Stratos custody only                                                          |
+| `com.atproto.repo.describeRepo`         | Stratos custody only                                                          |
 | `com.atproto.repo.createRecord`         | Stratos custody only                                                          |
 | `com.atproto.repo.deleteRecord`         | Stratos custody only                                                          |
 | `com.atproto.repo.applyWrites`          | Stratos custody only                                                          |
-| `com.atproto.sync.getRecord`            | Yes (CAR export for verification)                                             |
+| `com.atproto.sync.getRecord`            | Stratos custody only                                                          |
 | `zone.stratos.space.listBlobs`          | Yes (lists blob CIDs in a space)                                              |
 | `zone.stratos.sync.getRepo`             | Yes (full repo export as CAR)                                                 |
 | `zone.stratos.repo.importRepo`          | Yes (import repo from CAR)                                                    |
@@ -381,9 +376,9 @@ if (stratosActive && !agent) {
 
 ### Pattern: empty repo handling
 
-Stratos initializes every enrolled user's repository with an empty signed commit at enrollment time.
-This means `describeRepo` and `getRepo` will always return a valid (possibly empty) repo for any
-enrolled user. A `describeRepo` call against an enrolled user will return an empty `collections`
+For Stratos custody, the service initializes an empty signed commit at enrollment time.
+This means `describeRepo` and `getRepo` return a valid (possibly empty) repo for a
+Stratos-custody user. A `describeRepo` call against that repo returns an empty `collections`
 list until the first record is created — this is normal and should be rendered as an empty state,
 not an error.
 
@@ -451,8 +446,8 @@ The Stratos-specific alias `zone.stratos.sync.getBlob` is preferred when you wan
 
 ## 7. Record Verification
 
-Stratos supports `com.atproto.sync.getRecord` which returns a CAR file containing an inclusion proof
-for a single record. Stratos maintains independent repositories per user. Record commits are signed
+For Stratos custody, `com.atproto.sync.getRecord` returns a CAR file containing an inclusion proof
+for a single record. The service maintains independent repositories per user. Record commits are signed
 with the user's per-enrollment P-256 key when available, falling back to the service's Secp256k1
 key. This means standard ATproto verification against the user's PDS DID document will fail —
 clients must verify against either the user's enrollment `signingKey` or the Stratos service's
@@ -756,8 +751,8 @@ qualification.
 
 ### Empty repo vs. error masking
 
-Stratos initializes a signed empty commit at enrollment time, so every enrolled user has a valid
-repository from the start. `RepoNotFound` for an enrolled user is always an error — it no longer
+For Stratos custody, the service initializes a signed empty commit at enrollment time, so the user
+has a valid repository from the start. `RepoNotFound` for a Stratos-custody user is an error — it no longer
 indicates "no records yet." Possible causes:
 
 - The Stratos service is unreachable or misconfigured
