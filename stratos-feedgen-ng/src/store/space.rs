@@ -326,6 +326,40 @@ struct StageUsageBudget {
     global_bytes: i64,
 }
 
+fn pass_observed_at_from_retention_deadline(
+    connection: &rusqlite::Connection,
+    retained_at: &str,
+) -> Result<String, StoreError> {
+    let maximum_age_ms: Option<i64> = connection
+        .query_row(
+            "SELECT value FROM retention_metadata WHERE key = 'projection_max_age_ms'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StoreError::Open)?;
+    let Some(maximum_age_ms) = maximum_age_ms else {
+        return Ok(retained_at.to_owned());
+    };
+    let deadline =
+        time::OffsetDateTime::parse(retained_at, &time::format_description::well_known::Rfc3339)
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+    // Retained-at is the post's future deadline, not the promotion time.
+    let observed_at = deadline
+        .checked_sub(time::Duration::milliseconds(maximum_age_ms))
+        .ok_or(StoreError::InvalidProjectionMutation)?;
+    Ok(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        observed_at.year(),
+        u8::from(observed_at.month()),
+        observed_at.day(),
+        observed_at.hour(),
+        observed_at.minute(),
+        observed_at.second(),
+        observed_at.millisecond()
+    ))
+}
+
 fn ensure_stage_live(
     transaction: &rusqlite::Transaction<'_>,
     space_uri: &str,
@@ -924,11 +958,13 @@ impl EncryptedStore {
         let generation = self
             .pds_member_generation(boundary, actor_did)?
             .ok_or(StoreError::UnauthorizedSpaceMember)?;
+        let observed_at = pass_observed_at_from_retention_deadline(&self.connection, retained_at)?;
         self.promote_authorized_space_stage_at_generation(
             boundary,
             space_uri,
             actor_did,
             retained_at,
+            &observed_at,
             generation,
         )
     }
@@ -939,10 +975,11 @@ impl EncryptedStore {
         space_uri: &str,
         actor_did: &str,
         retained_at: &str,
+        observed_at: &str,
         generation: u64,
     ) -> Result<(), StoreError> {
         validate_space_stage_scope(space_uri, actor_did)?;
-        if boundary.is_empty() || !is_utc_timestamp(retained_at) {
+        if boundary.is_empty() || !is_utc_timestamp(retained_at) || !is_utc_timestamp(observed_at) {
             return Err(StoreError::InvalidProjectionMutation);
         }
         let transaction = self
@@ -952,37 +989,7 @@ impl EncryptedStore {
         if !has_pds_member_generation(&transaction, boundary, actor_did, generation)? {
             return Err(StoreError::UnauthorizedSpaceMember);
         }
-        let maximum_age_ms: Option<i64> = transaction
-            .query_row(
-                "SELECT value FROM retention_metadata WHERE key = 'projection_max_age_ms'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(StoreError::Open)?;
-        if let Some(maximum_age_ms) = maximum_age_ms {
-            let deadline = time::OffsetDateTime::parse(
-                retained_at,
-                &time::format_description::well_known::Rfc3339,
-            )
-            .map_err(|_| StoreError::InvalidProjectionMutation)?;
-            // retained_at is the post's future retention deadline, not the
-            // promotion time. Recover the observation time before checking age.
-            let promotion_observed_at = deadline
-                .checked_sub(time::Duration::milliseconds(maximum_age_ms))
-                .ok_or(StoreError::InvalidProjectionMutation)?;
-            let promotion_observed_at = format!(
-                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-                promotion_observed_at.year(),
-                u8::from(promotion_observed_at.month()),
-                promotion_observed_at.day(),
-                promotion_observed_at.hour(),
-                promotion_observed_at.minute(),
-                promotion_observed_at.second(),
-                promotion_observed_at.millisecond()
-            );
-            ensure_stage_live(&transaction, space_uri, actor_did, &promotion_observed_at)?;
-        }
+        ensure_stage_live(&transaction, space_uri, actor_did, observed_at)?;
         promote_space_stage_transaction(&transaction, space_uri, actor_did, retained_at)?;
         transaction.commit().map_err(StoreError::Open)
     }
@@ -1243,7 +1250,7 @@ mod revocation_tests {
         ));
         assert!(matches!(
             store.promote_authorized_space_stage_at_generation(
-                BOUNDARY, SPACE, DID, LATER, old_member
+                BOUNDARY, SPACE, DID, LATER, LATER, old_member
             ),
             Err(StoreError::UnauthorizedSpaceMember)
         ));
@@ -1325,6 +1332,7 @@ mod revocation_tests {
                     BOUNDARY,
                     SPACE,
                     DID,
+                    LATER,
                     LATER,
                     old_generation,
                 )
@@ -1880,10 +1888,18 @@ mod stage_limit_tests {
             .stage_authorized_space_page(terminal, vec![upsert(0, 100)])
             .unwrap();
 
-        // The scheduler passes a retention deadline one age window after the
-        // observation time (1.5 s after the stage was created).
+        let generation = store.pds_member_generation(BOUNDARY, DID).unwrap().unwrap();
+        // The scheduler captured a deadline at T0, but verification completed
+        // at T0 + 1.5 ages. Promotion must use that later observation time.
         assert!(matches!(
-            store.promote_authorized_space_stage(BOUNDARY, SPACE, DID, "2026-09-22T00:00:02.500Z",),
+            store.promote_authorized_space_stage_at_generation(
+                BOUNDARY,
+                SPACE,
+                DID,
+                "2026-09-22T00:00:01.000Z",
+                "2026-09-22T00:00:01.500Z",
+                generation,
+            ),
             Err(StoreError::ExpiredSpaceStage)
         ));
         let published: i64 = store
