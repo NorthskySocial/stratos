@@ -54,6 +54,15 @@ stderr, account passwords, or environment values.
 
 The AiaB checkout must be clean at the SHA in `sources.json`. If the path is absent, the runner clones the pinned source into a disposable directory. The PDS source build always uses the pinned source revision. Do not replace it with an unproven public image digest.
 
+The pinned AiaB creates `atmosbox.test` for the private PLC and PDS handles.
+Its explicit application routes also serve Stratos and Clubhouse OAuth at
+`atmosbox.internal`: the alpha PDS accepts `.test` handles but rejects `.test`
+OAuth client IDs. The runner checks the primary domain before starting the
+stack. Private transport grants name only these sandbox origins, and
+`STRATOS_DEV_MODE` remains false. The lexicon is published by AiaB's
+`schemas.authority.atmosbox.test` account, which the baseline queries through
+the private authority PDS.
+
 ## Suite API
 
 Each tracked `scenarios/<suite>.ts` exports `suite: ScenarioSuite` with `id`, nonempty `requiredAssertions`, and an async `run(context)` returning one result for each named assertion. Import `ScenarioSuite` from `../rules.js`. The runner discovers modules from the candidate checkout and runs `baseline` before any additional suite. A missing, skipped, failed, or duplicate assertion fails the gate. Add a new suite in its own scenario module; no registry edit is needed.
