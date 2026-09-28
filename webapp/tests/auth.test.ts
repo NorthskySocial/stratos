@@ -13,6 +13,8 @@ import {
   signOut,
 } from '../src/lib/auth'
 import { BrowserOAuthClient } from '@atproto/oauth-client-browser'
+import published from '../public/client-metadata.json.template?raw'
+import dockerfile from '../Dockerfile?raw'
 
 // We need a variable for onSessionDeleted captured from constructor
 let capturedOnDelete: ((sub: string, cause: string) => void) | null = null
@@ -135,7 +137,7 @@ describe('auth', () => {
     const getTokenInfo = vi.fn().mockResolvedValue({ scope: SPACE_WRITE_SCOPE })
 
     expect(SPACE_WRITE_SCOPE).toBe(
-      'space:zone.stratos.space.feed?authority=did%3Aweb%3Amotoko.test%253A3100&collection=zone.stratos.feed.post&action=read&action=create',
+      'space:zone.stratos.space.feed?authority=did%3Aweb%3Amotoko.test%253A3100&collection=zone.stratos.feed.post&action=read&action=create&action=delete',
     )
     await expect(
       getSpaceWriteScopeStatus({ getTokenInfo } as never),
@@ -145,12 +147,36 @@ describe('auth', () => {
       getSpaceWriteScopeStatus({
         getTokenInfo: vi.fn().mockResolvedValue({
           scope: SPACE_WRITE_SCOPE.replace(
-            'action=read&action=create',
-            'action=create&action=read',
+            'action=read&action=create&action=delete',
+            'action=delete&action=create&action=read',
           ),
         }),
       } as never),
     ).resolves.toBe('missing')
+    vi.unstubAllEnvs()
+  })
+
+  it('keeps the published space actions equal to the OAuth request', async () => {
+    vi.stubEnv('VITE_STRATOS_SERVICE_DID', 'did:web:motoko.test%3A3100')
+    vi.resetModules()
+    const { SPACE_WRITE_SCOPE, init } = await import('../src/lib/auth')
+    await init()
+    const options = vi.mocked(BrowserOAuthClient).mock.lastCall?.[0]
+    const metadata = JSON.parse(
+      published.replaceAll(
+        'VITE_STRATOS_SERVICE_DID_ENCODED',
+        encodeURIComponent('did:web:motoko.test%3A3100'),
+      ),
+    ) as { scope: string }
+    const requested = options?.clientMetadata?.scope?.split(' ')
+
+    expect(requested).toBeDefined()
+
+    expect(requested).toContain(SPACE_WRITE_SCOPE)
+    expect(metadata.scope.split(' ')).toEqual(requested)
+    expect(SPACE_WRITE_SCOPE.match(/action=delete/g)).toHaveLength(1)
+    expect(dockerfile).toContain('public/client-metadata.json.template')
+    expect(dockerfile).toContain('VITE_PLC_DIRECTORY=${VITE_PLC_DIRECTORY}')
     vi.unstubAllEnvs()
   })
   it('uses the default handle resolver when the build argument is empty', async () => {
@@ -167,6 +193,21 @@ describe('auth', () => {
         clientMetadata: expect.objectContaining({
           scope: expect.stringContaining(SPACE_WRITE_SCOPE),
         }),
+      }),
+    )
+    vi.unstubAllEnvs()
+  })
+
+  it('uses the configured private PLC for sandbox OAuth', async () => {
+    vi.stubEnv('VITE_PLC_DIRECTORY', 'https://plc.atmosbox.test')
+    vi.resetModules()
+    const auth = await import('../src/lib/auth')
+
+    await auth.init()
+
+    expect(BrowserOAuthClient).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        plcDirectoryUrl: 'https://plc.atmosbox.test',
       }),
     )
     vi.unstubAllEnvs()

@@ -257,7 +257,9 @@
       await ondelete(post)
     } catch (error) {
       console.error('Post deletion failed:', error)
-      deleteError = 'Could not delete the post. Try again.'
+      deleteError = error instanceof Error && error.message.startsWith('Sign out and sign in again')
+        ? error.message
+        : 'Could not delete the post. Try again.'
     } finally {
       deleting = false
     }
