@@ -303,6 +303,8 @@ pub const MEMORY_RETENTION_MAX_BYTES: u64 = 16 * 1024 * 1024;
 const DEFAULT_STAGE_TARGET_ROWS: u64 = 2_048;
 const DEFAULT_STAGE_GLOBAL_ROWS: u64 = 8_192;
 const MAX_STAGE_TARGET_BYTES: u64 = 16 * 1024 * 1024;
+pub(crate) const MAX_SPACE_PROMOTION_STAGE_ROWS: i64 = 1_024;
+pub(crate) const MAX_SPACE_PROMOTION_STAGE_BYTES: i64 = 8 * 1024 * 1024;
 
 fn parse_retention(
     storage: &StorageProfile,

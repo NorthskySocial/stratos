@@ -84,8 +84,10 @@ Stages expire after the configured projection age from creation or the last
 actual progress, whichever occurs first. Replaying the same cursor and data
 does not extend that age. The compactor removes expired rows, checkpoints, and
 pending verification together in bounded batches at startup and every minute.
-Promotion is atomic and limited to the same target budget; a larger stage
-fails closed. Cleanup logs contain aggregate counts only.
+Promotion is atomic and also has a fixed work ceiling of 1,024 staged rows
+(including checkpoints) and 8 MiB of staged bytes. A stage above that ceiling
+cannot publish; its rows and cursor remain intact for retry or expiry, while
+other targets can continue. Cleanup logs contain aggregate counts only.
 
 ## Private metrics export
 
