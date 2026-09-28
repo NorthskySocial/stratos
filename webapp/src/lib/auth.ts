@@ -6,13 +6,15 @@ import {
 } from '@northskysocial/stratos-browser'
 import type { OAuthSession } from '@atproto/oauth-client-browser'
 
+const SPACE_WRITE_ACTIONS = ['read', 'create', 'delete'] as const
+
 /** Build the webapp's canonical Stratos feed-space write scope. */
 export function buildSpaceWriteScope(
   serviceDid = import.meta.env.VITE_STRATOS_SERVICE_DID,
 ): string {
   return buildSharedSpaceWriteScope({
     serviceDid,
-    actions: ['read', 'create', 'delete'],
+    actions: SPACE_WRITE_ACTIONS,
   })
 }
 
@@ -23,9 +25,7 @@ export type SpaceWriteScopeStatus = BrowserAuthScopeStatus
 const HANDLE_RESOLVER =
   import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER || 'https://bsky.social'
 const OAUTH_PROXY_URL = import.meta.env.VITE_ATPROTO_OAUTH_PROXY_URL
-const PLC_DIRECTORY_URL = (
-  import.meta.env as unknown as { VITE_PLC_DIRECTORY?: string }
-).VITE_PLC_DIRECTORY
+const PLC_DIRECTORY_URL = import.meta.env.VITE_PLC_DIRECTORY
 
 function isLoopback(): boolean {
   const hostname = window.location.hostname
@@ -56,7 +56,7 @@ const auth = createBrowserAuth({
   scopes: [...buildStratosScopes(), 'repo:app.bsky.feed.post?action=create'],
   spaceWriteScope: {
     serviceDid: import.meta.env.VITE_STRATOS_SERVICE_DID,
-    actions: ['read', 'create', 'delete'],
+    actions: SPACE_WRITE_ACTIONS,
   },
   handleResolver: HANDLE_RESOLVER,
   plcDirectoryUrl: PLC_DIRECTORY_URL,
