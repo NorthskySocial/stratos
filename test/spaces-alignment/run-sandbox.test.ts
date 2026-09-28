@@ -188,6 +188,13 @@ describe('sandbox preflight', () => {
       ),
       'console.log("browser-ok")\n',
     )
+    await writeFile(
+      join(
+        candidateRepo,
+        'test/spaces-alignment/templates/feedgen-ng-e2e-clubhouse.definition.json',
+      ),
+      '{"buildArguments":[{"name":"VITE_PLC_DIRECTORY"}]}\n',
+    )
     git(candidateRepo, 'add', '.')
     git(candidateRepo, 'commit', '-qm', 'Add candidate')
     await writeFile(join(candidateRepo, 'README.md'), 'Faye reviewed update\n')
@@ -222,6 +229,10 @@ describe('sandbox preflight', () => {
     await writeFile(
       join(sandboxRepo, 'runtime/feedgen-ng-e2e-browser.mjs'),
       'console.log("original")\n',
+    )
+    await writeFile(
+      join(sandboxRepo, 'stacks/feedgen-ng-e2e-clubhouse.definition.json'),
+      '{}\n',
     )
     git(sandboxRepo, 'add', '.')
     git(sandboxRepo, 'commit', '-qm', 'Pin sandbox')
@@ -444,6 +455,9 @@ if (args.includes('down')) {
     )
     expect(
       receipt.templateHashes['runtime/feedgen-ng-e2e-browser.mjs'],
+    ).toMatch(/^[0-9a-f]{64}$/)
+    expect(
+      receipt.templateHashes['stacks/feedgen-ng-e2e-clubhouse.definition.json'],
     ).toMatch(/^[0-9a-f]{64}$/)
     expect(receipt.reviews).toEqual({
       standards: {

@@ -53,10 +53,7 @@ function assertAtprotoUri(uri, authorityDid, roomId) {
 async function trustSandboxCa() {
   const certPath = process.env.SANDBOX_CA_CERT?.trim() || '/ca/root.crt'
   await readFile(certPath)
-  const database = path.join(
-    process.env.XDG_CONFIG_HOME || '/tmp/config',
-    'chromium-nssdb',
-  )
+  const database = path.join(process.env.HOME || '/tmp/config', '.pki', 'nssdb')
   await mkdir(database, { recursive: true })
   try {
     execFileSync(
