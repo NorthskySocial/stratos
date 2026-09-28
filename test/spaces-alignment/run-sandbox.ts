@@ -320,18 +320,24 @@ export async function runSandbox(
   const workspace = await mkdtemp(join(tmpdir(), 'stratos-spaces-alignment-'))
   const projectName = `stratos-${randomUUID().replaceAll('-', '').slice(0, 12)}`
   const atmosphere = join(workspace, 'atmosphereinabox')
+  const dockerConfig = join(workspace, 'docker-config')
+  const childEnvironment = { ...process.env, DOCKER_CONFIG: dockerConfig }
   const steps: Array<{ name: string; exitCode: 0 }> = []
   const results: Record<string, AssertionResult[]> = {}
+  let failedStep = 'docker-config'
   const runStep = async (
     name: string,
     file: string,
     args: string[],
   ): Promise<string> => {
-    const result = await command(file, args, atmosphere)
+    failedStep = name
+    const result = await command(file, args, atmosphere, childEnvironment)
     steps.push({ name, exitCode: result.exitCode })
     return result.output
   }
   try {
+    await mkdir(dockerConfig, { mode: 0o700 })
+    failedStep = 'export-sources'
     const { atmosphereFingerprint, templateHashes } = await exportSources(
       sandboxCheckout,
       source,
@@ -340,10 +346,12 @@ export async function runSandbox(
       options.reportDirectory,
       pins,
     )
+    failedStep = 'build-pds'
     const pds = await (dependencies.buildPds ?? buildAlphaPds)(
       pins.spacesPds,
       options.reportDirectory,
     )
+    failedStep = 'prepare-stack'
     const stackPath = join(atmosphere, 'stacks/feedgen-ng-e2e.yaml')
     const stack = await readFile(stackPath, 'utf8')
     if (!stack.includes('${SPACES_PDS_IMAGE_ID}'))
@@ -372,6 +380,7 @@ export async function runSandbox(
     await runStep('check', 'deno', ['task', 'sandbox', 'check'])
     await runStep('up', 'deno', ['task', 'sandbox', 'up', '--build'])
     await runStep('seed', 'deno', ['task', 'sandbox', 'seed'])
+    failedStep = 'prepare-browser-accounts'
     const state = JSON.parse(
       await readFile(join(atmosphere, 'state/accounts.json'), 'utf8'),
     ) as {
@@ -401,15 +410,17 @@ export async function runSandbox(
     )
     await chmod(browserAccounts, 0o444)
     for (const suite of suites) {
+      failedStep = `suite:${suite.id}`
       results[suite.id] = await suite.run({
         sandboxDirectory: atmosphere,
         projectName,
         reportDirectory: options.reportDirectory,
         runCommand: async (file, args, cwd) =>
-          (await command(file, args, cwd)).output,
+          (await command(file, args, cwd, childEnvironment)).output,
       })
       validateAssertions(suite, results[suite.id])
     }
+    failedStep = 'write-receipt'
     const summary = {
       candidateSha: candidate,
       baseSha: base,
@@ -442,6 +453,7 @@ export async function runSandbox(
           candidateSha: candidate,
           baseSha: base,
           projectName,
+          failedStep,
           completedSteps: steps,
           error: error instanceof Error ? error.message : String(error),
         },
@@ -465,6 +477,7 @@ export async function runSandbox(
         '--remove-orphans',
       ],
       atmosphere,
+      childEnvironment,
     ).catch(() => {})
     await rm(workspace, { recursive: true, force: true })
   }
