@@ -72,7 +72,10 @@ try {
   const card = page.locator('.room-card', { has: page.locator('a.room-link[href="/rooms/general"]') })
   await card.waitFor({ state: 'visible', timeout: 30_000 })
   const join = card.getByRole('button', { name: 'Join room' })
-  assert.ok(await visible(join), 'Second account was already a room member')
+  const actionDeadline = Date.now() + 30_000
+  while (Date.now() < actionDeadline && !(await visible(join))) await delay(250)
+  assert.ok(await visible(join) && await join.isEnabled(),
+    'Second account did not receive a room join action')
   await join.click()
   await completeOAuth(new URL(clubhouse).origin)
   const deadline = Date.now() + 90_000
