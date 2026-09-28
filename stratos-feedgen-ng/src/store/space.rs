@@ -242,7 +242,8 @@ pub(super) fn stage_usage(
 
 fn enforce_stage_budget(
     transaction: &rusqlite::Transaction<'_>,
-    page: &SpaceStagePage,
+    space_uri: &str,
+    actor_did: &str,
 ) -> Result<(), StoreError> {
     let maximum: i64 = transaction
         .query_row(
@@ -254,7 +255,7 @@ fn enforce_stage_budget(
         .map_err(StoreError::Open)?
         .unwrap_or(crate::config::MEMORY_RETENTION_MAX_BYTES as i64);
     let budget = stage_budget(transaction, maximum)?;
-    let target = stage_usage(transaction, Some(&page.space_uri), Some(&page.actor_did))?;
+    let target = stage_usage(transaction, Some(space_uri), Some(actor_did))?;
     let global = stage_usage(transaction, None, None)?;
     let published_bytes: i64 = transaction
         .query_row(
@@ -397,25 +398,7 @@ fn promote_space_stage_transaction(
     if pending.is_none() {
         return Err(StoreError::UnverifiedSpaceStage);
     }
-    let row_count: i64 = transaction
-        .query_row(
-            "SELECT COUNT(*) FROM space_sync_stage WHERE space_uri = ?1 AND did = ?2",
-            params![space_uri, actor_did],
-            |row| row.get(0),
-        )
-        .map_err(StoreError::Open)?;
-    let maximum: i64 = transaction
-        .query_row(
-            "SELECT value FROM retention_metadata WHERE key = 'projection_max_bytes'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(StoreError::Open)?
-        .unwrap_or(crate::config::MEMORY_RETENTION_MAX_BYTES as i64);
-    if row_count > stage_budget(transaction, maximum)?.target_rows {
-        return Err(StoreError::SpaceStageLimit);
-    }
+    enforce_stage_budget(transaction, space_uri, actor_did)?;
     let mut after_uri = None;
     loop {
         let stages =
@@ -908,7 +891,7 @@ impl EncryptedStore {
         if progressed {
             record_stage_progress(&transaction, &page)?;
         }
-        enforce_stage_budget(&transaction, &page)?;
+        enforce_stage_budget(&transaction, &page.space_uri, &page.actor_did)?;
         transaction.commit().map_err(StoreError::Open)
     }
 
@@ -1065,7 +1048,7 @@ impl EncryptedStore {
         if progressed {
             record_stage_progress(&transaction, &page)?;
         }
-        enforce_stage_budget(&transaction, &page)?;
+        enforce_stage_budget(&transaction, &page.space_uri, &page.actor_did)?;
         transaction.commit().map_err(StoreError::Open)
     }
 }
@@ -1827,6 +1810,79 @@ mod stage_limit_tests {
         assert!(matches!(
             store.promote_verified_space_stage(SPACE, DID, NOW),
             Err(StoreError::SpaceStageLimit)
+        ));
+        let published: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM post", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(published, 0);
+    }
+
+    #[test]
+    fn byte_oversized_legacy_stage_fails_promotion_before_publishing() {
+        let mut store = store(16_000);
+        let mut terminal = page("terminal");
+        terminal.next_cursor = None;
+        store
+            .stage_space_page(terminal, vec![upsert(0, 100)])
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "UPDATE space_sync_stage SET record_json = zeroblob(5000)",
+                [],
+            )
+            .unwrap();
+        assert!(matches!(
+            store.promote_verified_space_stage(SPACE, DID, NOW),
+            Err(StoreError::SpaceStageLimit),
+        ));
+        let published: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM post", [], |row| row.get(0))
+            .unwrap();
+        let staged: i64 = store
+            .connection
+            .query_row(
+                "SELECT length(record_json) FROM space_sync_stage",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(published, 0);
+        assert_eq!(staged, 5000);
+    }
+
+    #[test]
+    fn globally_oversized_legacy_stage_fails_promotion_before_publishing() {
+        let mut store = store(16_000);
+        for (key, value) in [
+            ("stage_target_max_bytes", 2_000),
+            ("stage_global_max_bytes", 3_000),
+        ] {
+            store
+                .connection
+                .execute(
+                    "INSERT INTO retention_metadata (key, value) VALUES (?1, ?2)",
+                    params![key, value],
+                )
+                .unwrap();
+        }
+        let mut terminal = page("terminal");
+        terminal.next_cursor = None;
+        store
+            .stage_space_page(terminal, vec![upsert(0, 100)])
+            .unwrap();
+        let other_did = "did:plc:jetblack";
+        store.connection.execute(
+            "INSERT INTO space_sync_stage (space_uri, did, uri, boundary, deleted, record_json, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 0, zeroblob(3000), ?5)",
+            params![SPACE, other_did,
+                format!("{SPACE}/{other_did}/zone.stratos.feed.post/0"), BOUNDARY, NOW],
+        ).unwrap();
+        assert!(matches!(
+            store.promote_verified_space_stage(SPACE, DID, NOW),
+            Err(StoreError::SpaceStageLimit),
         ));
         let published: i64 = store
             .connection
