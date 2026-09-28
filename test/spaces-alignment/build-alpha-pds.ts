@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -27,17 +27,20 @@ async function command(
   file: string,
   args: string[],
   cwd?: string,
+  env?: NodeJS.ProcessEnv,
 ): Promise<string> {
   try {
     const { stdout } = await exec(file, args, {
       cwd,
+      env: env ?? process.env,
       maxBuffer: 8 * 1024 * 1024,
       timeout: 45 * 60_000,
     })
     return stdout.trim()
   } catch (error) {
     const code = (error as { code?: string | number }).code ?? 'unknown'
-    throw new Error(`${file} failed with exit ${code}`)
+    const step = args[0] === 'image' ? 'image inspect' : (args[0] ?? 'command')
+    throw new Error(`${file} ${step} failed with exit ${code}`)
   }
 }
 
@@ -101,18 +104,26 @@ export async function buildAlphaPds(
     )
     const tag = `stratos-spaces-pds-${randomUUID()}:local`
     const imageIdPath = join(reportDirectory, 'pds-image.id')
-    await command('docker', [
-      'build',
-      '--file',
-      join(source, pin.dockerfile),
-      '--label',
-      `org.opencontainers.image.revision=${pin.revision}`,
-      '--iidfile',
-      imageIdPath,
-      '--tag',
-      tag,
-      source,
-    ])
+    const dockerConfig = join(acquisition, 'docker-config')
+    await mkdir(dockerConfig, { mode: 0o700 })
+    await command(
+      'docker',
+      [
+        'build',
+        '--progress=plain',
+        '--file',
+        join(source, pin.dockerfile),
+        '--label',
+        `org.opencontainers.image.revision=${pin.revision}`,
+        '--iidfile',
+        imageIdPath,
+        '--tag',
+        tag,
+        source,
+      ],
+      undefined,
+      { ...process.env, DOCKER_CONFIG: dockerConfig },
+    )
     const imageId = (await readFile(imageIdPath, 'utf8')).trim()
     if (!/^sha256:[0-9a-f]{64}$/.test(imageId))
       throw new Error('PDS build produced no immutable image ID')
