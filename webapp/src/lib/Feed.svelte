@@ -1,6 +1,6 @@
 <script lang="ts">
   import {Agent} from '@atproto/api'
-  import type {FeedPost} from './feed'
+  import type {FeedgenResult, FeedPost} from './feed'
   import {groupIntoThreads} from './feed'
   import PostCard from './PostCard.svelte'
 
@@ -10,12 +10,22 @@
     publicAgent?: Agent | null
     serviceUrl?: string
     loading: boolean
+    failure?: Extract<FeedgenResult, {ok: false}> | null
+    onretry?: () => Promise<void>
     currentDid: string
     onreply: (post: FeedPost) => void
     ondelete: (post: FeedPost) => Promise<void>
   }
 
-  let {posts, stratosAgent, publicAgent, serviceUrl, loading, currentDid, onreply, ondelete}: Props = $props()
+  let {posts, stratosAgent, publicAgent, serviceUrl, loading, failure, onretry, currentDid, onreply, ondelete}: Props = $props()
+
+  const failureMessages = {
+    'not-ready': 'Your private feed is getting ready. Try again shortly.',
+    authorization: 'Your private feed access has expired or was denied. Sign out and sign back in, or ask your administrator to check your access.',
+    network: 'Could not reach your private feed. Check your connection and try again.',
+    malformed: 'Your private feed returned an invalid response. Try again.',
+    unavailable: 'Your private feed is unavailable. Try again later.',
+  } as const
 
   let threads = $derived(groupIntoThreads(posts))
 </script>
@@ -39,11 +49,24 @@
 {/snippet}
 
 <div class="feed">
+    {#if failure}
+        <div class="feed-failure" role="status" aria-live="polite">
+            {#if failure.category === 'unavailable' && !failure.retryable}
+                <p>Your private feed request was rejected. Ask your administrator to check the feed configuration.</p>
+            {:else}
+                <p>{failureMessages[failure.category]}</p>
+            {/if}
+            {#if failure.retryable && onretry}
+                <button type="button" class="retry" onclick={onretry}>Retry private feed</button>
+            {/if}
+        </div>
+    {/if}
     {#if loading}
         <div class="loading" role="status">Loading posts…</div>
-    {:else if posts.length === 0}
+    {/if}
+    {#if posts.length === 0 && !loading && !failure}
         <div class="empty">No posts yet. Create your first post above!</div>
-    {:else}
+    {:else if posts.length > 0}
         {#each threads as node (node.post.uri)}
             <div class="thread-group">
                 {@render threadNode(node)}
@@ -64,6 +87,34 @@
         text-align: center;
         color: #666;
         font-size: 0.9rem;
+    }
+
+    .feed-failure {
+        margin: 1rem;
+        padding: 1rem;
+        border: 1px solid #d5d0e5;
+        border-radius: 6px;
+        color: #37304f;
+        overflow-wrap: anywhere;
+    }
+
+    .feed-failure p {
+        margin: 0 0 0.75rem;
+    }
+
+    .retry {
+        min-height: 44px;
+        padding: 0.6rem 0.9rem;
+        border: 1px solid #3730a3;
+        border-radius: 6px;
+        background: #fff;
+        color: #3730a3;
+        cursor: pointer;
+    }
+
+    .retry:focus-visible {
+        outline: 2px solid #3730a3;
+        outline-offset: 2px;
     }
 
     .thread-group {

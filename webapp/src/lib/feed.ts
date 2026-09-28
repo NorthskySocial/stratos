@@ -26,6 +26,52 @@ interface StratosTimelineResponse {
   cursor?: string
 }
 
+export type FeedgenFailureCategory =
+  | 'not-ready'
+  | 'authorization'
+  | 'network'
+  | 'malformed'
+  | 'unavailable'
+
+export type FeedgenResult =
+  | { ok: true; posts: FeedPost[]; cursor?: string }
+  | {
+      ok: false
+      posts: []
+      category: FeedgenFailureCategory
+      status?: number
+      retryable: boolean
+    }
+
+async function readErrorCode(response: Response): Promise<string | undefined> {
+  if (!response.body) return undefined
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let length = 0
+  try {
+    while (length < 4096) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const remaining = 4096 - length
+      chunks.push(value.subarray(0, remaining))
+      length += Math.min(value.length, remaining)
+      if (value.length > remaining) break
+    }
+    const body = new TextDecoder().decode(
+      Uint8Array.from(chunks.flatMap((chunk) => [...chunk])),
+    )
+    const parsed: unknown = JSON.parse(body)
+    if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+      return typeof parsed.error === 'string' ? parsed.error : undefined
+    }
+  } catch {
+    return undefined
+  } finally {
+    await reader.cancel().catch(() => undefined)
+  }
+  return undefined
+}
+
 export interface StrongRef {
   uri: string
   cid: string
@@ -274,6 +320,23 @@ function mapFeedViewPosts(
   })
 }
 
+function isFeedgenItem(value: unknown): value is FeedViewPost {
+  if (!value || typeof value !== 'object' || !('post' in value)) return false
+  const post = value.post
+  if (!post || typeof post !== 'object') return false
+  if (!('uri' in post) || typeof post.uri !== 'string') return false
+  if (!('cid' in post) || typeof post.cid !== 'string') return false
+  if (!('record' in post) || !post.record || typeof post.record !== 'object') {
+    return false
+  }
+  return (
+    'text' in post.record &&
+    typeof post.record.text === 'string' &&
+    'createdAt' in post.record &&
+    typeof post.record.createdAt === 'string'
+  )
+}
+
 /**
  * Fetch public posts from the repo
  * @param agent - Agent instance for interacting with the repo
@@ -417,14 +480,14 @@ export async function fetchAppviewStratosPosts(
  * @param feedgenDid - the feed generator's did:web
  * @param feed - the configured feed id to request
  * @param cursor - Cursor for pagination, if any
- * @returns Array of FeedPost objects and the next cursor
+ * @returns Typed success or failure, with a cursor on success
  */
 export async function fetchFeedgenPosts(
   session: OAuthSession,
   feedgenDid: string,
   feed: string,
   cursor?: string,
-): Promise<{ posts: FeedPost[]; cursor?: string }> {
+): Promise<FeedgenResult> {
   try {
     const path = '/xrpc/zone.stratos.feedgen.getFeed'
     const params = new URLSearchParams({ feed, limit: '50' })
@@ -435,15 +498,59 @@ export async function fetchFeedgenPosts(
       headers: { 'atproto-proxy': `${feedgenDid}#stratos_feedgen` },
     })
     if (!res.ok) {
-      const errText = await res.text().catch(() => '')
-      console.error(`[feedgen] getFeed failed: ${res.status} ${errText}`)
-      return { posts: [] }
+      const errorCode = await readErrorCode(res)
+      const category: FeedgenFailureCategory =
+        res.status === 401 || res.status === 403
+          ? 'authorization'
+          : errorCode === 'FeedNotReady'
+            ? 'not-ready'
+            : 'unavailable'
+      console.error(`[feedgen] getFeed failed: ${res.status} ${category}`)
+      return {
+        ok: false,
+        posts: [],
+        category,
+        status: res.status,
+        retryable:
+          category === 'not-ready' || res.status >= 500 || res.status === 429,
+      }
     }
 
-    const body = (await res.json()) as StratosTimelineResponse
-    console.log(`[feedgen] getFeed: ${body.feed?.length ?? 0} posts`)
+    let body: unknown
+    try {
+      body = await res.json()
+    } catch {
+      return {
+        ok: false,
+        posts: [],
+        category: 'malformed',
+        status: res.status,
+        retryable: true,
+      }
+    }
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      !('feed' in body) ||
+      !Array.isArray(body.feed) ||
+      !body.feed.every(isFeedgenItem) ||
+      ('cursor' in body &&
+        body.cursor !== undefined &&
+        typeof body.cursor !== 'string')
+    ) {
+      return {
+        ok: false,
+        posts: [],
+        category: 'malformed',
+        status: res.status,
+        retryable: true,
+      }
+    }
+    const timeline = body as StratosTimelineResponse
+    console.log(`[feedgen] getFeed: ${timeline.feed?.length ?? 0} posts`)
     return {
-      posts: mapFeedViewPosts(body.feed ?? [], true).map((post) => ({
+      ok: true,
+      posts: mapFeedViewPosts(timeline.feed ?? [], true).map((post) => ({
         ...post,
         loadFeedgenBlob: async (cid: string): Promise<Blob | undefined> => {
           if (!post.feedgenBlobs?.some((blob) => blob.cid === cid))
@@ -460,11 +567,11 @@ export async function fetchFeedgenPosts(
           return response.blob()
         },
       })),
-      cursor: body.cursor,
+      cursor: timeline.cursor,
     }
-  } catch (err) {
-    console.error('[feedgen] getFeed error:', err)
-    return { posts: [] }
+  } catch {
+    console.error('[feedgen] getFeed network or response error')
+    return { ok: false, posts: [], category: 'network', retryable: true }
   }
 }
 
