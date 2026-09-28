@@ -26,6 +26,7 @@ export const suite: ScenarioSuite = {
         '--project-directory',
         context.sandboxDirectory,
         'run',
+        '--build',
         '--rm',
         '--no-deps',
         'feedgen-e2e-browser',
