@@ -198,17 +198,28 @@ function proof(key, url, method, token) {
   return `${signingInput}.${signature.toString('base64url')}`
 }
 
-async function exchange(token, key, body = { space }, includeProof = true) {
+async function exchange(token, key, body = { space }) {
   const response = await fetch(mintUrl, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${token}`,
       'content-type': 'application/json',
-      ...(includeProof ? { dpop: proof(key, mintUrl, 'POST') } : {}),
+      dpop: proof(key, mintUrl, 'POST'),
     },
     body: JSON.stringify(body),
   })
   return response
+}
+
+async function exchangeWithoutProof(token) {
+  return fetch(mintUrl, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ space }),
+  })
 }
 
 async function main() {
@@ -263,12 +274,7 @@ async function main() {
     passed.push('delegation-replay-denied')
 
     const secondDelegation = await getDelegation(page)
-    const proofless = await exchange(
-      secondDelegation,
-      proofKey(),
-      { space },
-      false,
-    )
+    const proofless = await exchangeWithoutProof(secondDelegation)
     assert.equal(proofless.status, 400)
     const retry = await exchange(secondDelegation, proofKey())
     assert.equal(retry.status, 200)

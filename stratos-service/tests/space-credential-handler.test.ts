@@ -596,6 +596,44 @@ describe('getSpaceCredential — delegation-token path', () => {
     expect(retry.error).toBeUndefined()
   })
 
+  it('rejects body delegation combined with DPoP session identity, then accepts body-only retry', async () => {
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey })
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    const ambiguous = await invoke(
+      server,
+      { space: SPACE_URI, delegationToken: token },
+      USER_DID,
+      {
+        jkt: 'thumb-rei',
+        req: {
+          method: 'POST',
+          originalUrl: MINT_PATH,
+          headers: { authorization: 'DPoP session-access-token', dpop: proof },
+        },
+      },
+    )
+    expect(ambiguous.error?.name).toBe('InvalidRequest')
+    expect(ambiguous.error?.message).toBe(
+      'Use one delegation transport per request',
+    )
+
+    const bodyOnly = await invoke(
+      server,
+      { space: SPACE_URI, delegationToken: token },
+      undefined,
+      {
+        req: {
+          method: 'POST',
+          originalUrl: MINT_PATH,
+          headers: { dpop: proof },
+        },
+      },
+    )
+    expect(bodyOnly.error).toBeUndefined()
+    expect(bodyOnly.body?.credential).toBeTruthy()
+  })
+
   it('rejects an invalid Bearer token without consuming a valid retry', async () => {
     const { userKey, server } = await setup(true)
     const token = await mintDelegation({ userKey, typ: 'at+jwt' })
