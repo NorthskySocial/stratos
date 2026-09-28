@@ -18,6 +18,12 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.0.0(jiti@2.7.0)(supports-color@8.1.1))
+      '@stryker-mutator/core':
+        specifier: ^9.6.1
+        version: 9.6.1(@types/node@25.2.1)(supports-color@8.1.1)
+      '@stryker-mutator/vitest-runner':
+        specifier: ^9.6.1
+        version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.2.1)(supports-color@8.1.1))(vitest@4.0.18(@opentelemetry/api@1.9.1)(@types/node@25.2.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
       '@types/deno':
         specifier: ^2.5.0
         version: 2.5.0
@@ -134,6 +140,12 @@ importers:
         specifier: workspace:*
         version: link:../stratos-client
     devDependencies:
+      '@stryker-mutator/core':
+        specifier: ^9.6.1
+        version: 9.6.1(@types/node@25.2.1)(supports-color@8.1.1)
+      '@stryker-mutator/vitest-runner':
+        specifier: ^9.6.1
+        version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.2.1)(supports-color@8.1.1))(vitest@4.0.18(@opentelemetry/api@1.9.1)(@types/node@25.2.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
       typescript:
         specifier: npm:@typescript/typescript6@~6.0.2
         version: '@typescript/typescript6@6.0.2'
@@ -764,6 +776,12 @@ importers:
       '@playwright/test':
         specifier: ^1.60.0
         version: 1.60.0
+      '@stryker-mutator/core':
+        specifier: ^9.6.1
+        version: 9.6.1(@types/node@25.2.1)(supports-color@8.1.1)
+      '@stryker-mutator/vitest-runner':
+        specifier: ^9.6.1
+        version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.2.1)(supports-color@8.1.1))(vitest@4.0.18(@opentelemetry/api@1.9.1)(@types/node@25.2.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
       '@sveltejs/vite-plugin-svelte':
         specifier: ^5.0.3
         version: 5.1.1(supports-color@8.1.1)(svelte@5.53.9)(vite@6.4.1(@types/node@25.2.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
