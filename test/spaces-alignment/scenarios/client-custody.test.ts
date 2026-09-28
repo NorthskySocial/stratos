@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createECDH, createPublicKey, verify } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { mintListReposToken, normalizeLowS, suite } from './client-custody.js'
@@ -27,18 +27,22 @@ describe('client custody sandbox suite', () => {
       id,
       status: 'passed',
     }))
-    let mountedTokenPath = ''
+    let stagingDirectory = ''
     const runCommand = vi.fn(
       async (file: string, args: string[], cwd: string) => {
         expect(file).toBe('docker')
         expect(cwd).toBe(directory)
         const tokenMount = args.at(-3)
-        expect(tokenMount).toMatch(
-          /^\/tmp\/stratos-custody-token-[^:]+\/service-jwt:\/runner\/client-custody-service-jwt:ro$/,
+        const tokenPath = tokenMount!.split(':')[0]
+        stagingDirectory = dirname(tokenPath)
+        expect(
+          stagingDirectory.startsWith(join(directory, 'state/client-custody-')),
+        ).toBe(true)
+        expect(tokenMount).toBe(
+          `${tokenPath}:/runner/client-custody-service-jwt:ro,Z`,
         )
-        mountedTokenPath = tokenMount!.split(':')[0]
-        expect((await stat(mountedTokenPath)).mode & 0o777).toBe(0o444)
-        const jwt = await readFile(mountedTokenPath, 'utf8')
+        expect((await stat(tokenPath)).mode & 0o777).toBe(0o444)
+        const jwt = await readFile(tokenPath, 'utf8')
         const [header, claims, signature] = jwt.split('.')
         expect(JSON.parse(Buffer.from(header, 'base64url').toString())).toEqual(
           {
@@ -88,14 +92,38 @@ describe('client custody sandbox suite', () => {
           '--entrypoint',
           'node',
           '--volume',
-          `${join(directory, 'client-custody-sdk.mjs')}:/runner/client-custody-sdk.mjs:ro`,
+          `${join(stagingDirectory, 'client-custody-sdk.mjs')}:/runner/client-custody-sdk.mjs:ro,Z`,
           '--volume',
-          `${fileURLToPath(new URL('./client-custody.mjs', import.meta.url))}:/runner/client-custody.mjs:ro`,
+          `${join(stagingDirectory, 'client-custody.mjs')}:/runner/client-custody.mjs:ro,Z`,
           '--volume',
           tokenMount,
           'feedgen-e2e-browser',
           '/runner/client-custody.mjs',
         ])
+        expect(
+          await readFile(join(stagingDirectory, 'client-custody.mjs'), 'utf8'),
+        ).toBe(
+          await readFile(
+            fileURLToPath(new URL('./client-custody.mjs', import.meta.url)),
+            'utf8',
+          ),
+        )
+        expect(
+          await readFile(
+            join(stagingDirectory, 'client-custody-sdk.mjs'),
+            'utf8',
+          ),
+        ).toBe(
+          await readFile(join(directory, 'client-custody-sdk.mjs'), 'utf8'),
+        )
+        expect(
+          (await stat(join(stagingDirectory, 'client-custody-sdk.mjs'))).mode &
+            0o777,
+        ).toBe(0o444)
+        expect(
+          (await stat(join(stagingDirectory, 'client-custody.mjs'))).mode &
+            0o777,
+        ).toBe(0o444)
         return `Container ready\n  ${JSON.stringify({ suite: 'client-custody', assertions })}\n`
       },
     )
@@ -116,7 +144,7 @@ describe('client custody sandbox suite', () => {
       expect(typeof sdk.resolveRepositoryTarget).toBe('function')
       expect(suite.id).toBe('client-custody')
       expect(runCommand).toHaveBeenCalledOnce()
-      await expect(readFile(mountedTokenPath, 'utf8')).rejects.toMatchObject({
+      await expect(readFile(stagingDirectory, 'utf8')).rejects.toMatchObject({
         code: 'ENOENT',
       })
     } finally {
@@ -152,6 +180,31 @@ describe('client custody sandbox suite', () => {
           runCommand: async () => output,
         }),
       ).rejects.toThrow(expectedError)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('removes staged mounts when the browser fails', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'client-custody-scenario-'))
+    await seedFeedgenKey(directory)
+    let stagingDirectory = ''
+    try {
+      await expect(
+        suite.run({
+          sandboxDirectory: directory,
+          reportDirectory: directory,
+          projectName: 'stratos-test',
+          runCommand: async (_file, args) => {
+            stagingDirectory = dirname(args.at(-3)!.split(':')[0])
+            throw new Error('Browser failed')
+          },
+        }),
+      ).rejects.toThrow('Browser failed')
+      expect(stagingDirectory).not.toBe('')
+      await expect(stat(stagingDirectory)).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
