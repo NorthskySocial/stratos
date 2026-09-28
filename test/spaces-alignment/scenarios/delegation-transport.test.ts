@@ -37,7 +37,6 @@ describe('delegation transport browser scenario', () => {
           if (args.includes('feedgen-e2e-browser')) {
             return `Browser ready\n ${JSON.stringify({ suite: 'delegation-transport', assertions: browserAssertions })}\n`
           }
-          if (args.includes('feedgen-e2e-rust')) return `${'a'.repeat(64)}\n`
           expect(args).toEqual([
             'compose',
             '--project-name',
@@ -46,8 +45,6 @@ describe('delegation transport browser scenario', () => {
             '/tmp/delegation-sandbox',
             'exec',
             '-T',
-            '-e',
-            `DELEGATION_SIGNING_KEY=${'a'.repeat(64)}`,
             'feedgen-e2e-stratos',
             'sh',
             '-c',
@@ -55,10 +52,14 @@ describe('delegation transport browser scenario', () => {
             '_',
             expect.stringContaining('createServiceJwt'),
           ])
+          expect(args.at(-1)).toContain('Secp256k1Keypair.create()')
+          expect(args.at(-1)).toContain('claims.lxm')
+          expect(args.at(-1)).not.toContain('DELEGATION_SIGNING_KEY')
+          expect(args.at(-1)).not.toContain('feedgen-signing-key')
           return `  ${JSON.stringify({ suite: 'delegation-service-bearer', assertions: [assertions.at(-1)] })}  \n  __delegation_service_bearer_exit__=0  \n`
         },
       })
-      expect(calls).toHaveLength(3)
+      expect(calls).toHaveLength(2)
       expect(calls[0]).toEqual([
         'compose',
         '--project-name',
@@ -74,18 +75,6 @@ describe('delegation transport browser scenario', () => {
         'node',
         'feedgen-e2e-browser',
         '/scenario/driver.mjs',
-      ])
-      expect(calls[1]).toEqual([
-        'compose',
-        '--project-name',
-        'delegation-test',
-        '--project-directory',
-        '/tmp/delegation-sandbox',
-        'exec',
-        '-T',
-        'feedgen-e2e-rust',
-        'cat',
-        '/tmp/feedgen-signing-key',
       ])
       expect(await readFile(join(reportDirectory, 'keep'), 'utf8')).toBe(
         'sentinel',
@@ -163,13 +152,13 @@ describe('delegation transport browser scenario', () => {
     }
   })
 
-  it('rejects failed service-token checks without revealing the sandbox key', async () => {
+  it('rejects failed service-token checks without revealing a token', async () => {
     const reportDirectory = await mkdtemp(
       join(tmpdir(), 'delegation-scenario-'),
     )
-    const signingKey = 'a'.repeat(64)
+    const privateToken = 'signed.service.jwt'
     try {
-      const runWithServiceOutput = (serviceOutput: string, key = signingKey) =>
+      const runWithServiceOutput = (serviceOutput: string) =>
         suite.run({
           sandboxDirectory: '/tmp/delegation-sandbox',
           projectName: 'delegation-test',
@@ -181,31 +170,25 @@ describe('delegation transport browser scenario', () => {
                 assertions: [{ id: 'header-exchange', status: 'passed' }],
               })
             }
-            if (args.includes('feedgen-e2e-rust')) return key
             return serviceOutput
           },
         })
       await expect(
         runWithServiceOutput(
-          `AssertionError: ${signingKey}\n__delegation_service_bearer_exit__=1`,
+          `AssertionError: ${privateToken}\n__delegation_service_bearer_exit__=1`,
         ),
       ).rejects.toThrow('Service Bearer check failed: AssertionError')
       await expect(
         runWithServiceOutput(
-          `AssertionError: ${signingKey}\n__delegation_service_bearer_exit__=1`,
+          `AssertionError: ${privateToken}\n__delegation_service_bearer_exit__=1`,
         ),
-      ).rejects.not.toThrow(signingKey)
+      ).rejects.not.toThrow(privateToken)
       await expect(
         runWithServiceOutput('__delegation_service_bearer_exit__=0'),
       ).rejects.toThrow('no assertion receipt')
       await expect(
         runWithServiceOutput('__delegation_service_bearer_exit__=1'),
       ).rejects.toThrow('Service Bearer check failed: UnknownError')
-      for (const key of ['bad-key', `x${signingKey}`, `${signingKey}x`]) {
-        await expect(runWithServiceOutput('', key)).rejects.toThrow(
-          'Sandbox feedgen signing key was unavailable',
-        )
-      }
       for (const receipt of [
         '{"suite":"delegation-service-bearer","assertions":[{"id":"ordinary-bearer-denied","status":"passed"}],"suite":"wrong"}',
         { suite: 'delegation-service-bearer', assertions: {} },
