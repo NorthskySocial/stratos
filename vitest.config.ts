@@ -43,6 +43,7 @@ export default defineConfig({
       nodeProject('stratos-client'),
       nodeProject('stratos-indexer'),
       nodeProject('stratos-feedgen'),
+      join(rootDir, 'stratos-browser/vitest.config.ts'),
       join(rootDir, 'webapp/vite.config.ts'),
     ],
   },
