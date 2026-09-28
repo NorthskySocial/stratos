@@ -136,7 +136,9 @@ assert.ok(originalCaddy.includes(route), 'Pinned PDS route changed')
 const config = JSON.parse(await compose(['config', '--format', 'json']))
 const image = config.services['feedgen-e2e-pds-spaces']?.image
 assert.ok(typeof image === 'string' && image.length > 0)
-const accountScript = new URL('./staging-limits.account.mjs', import.meta.url).pathname
+const accountScript = join(sandbox, 'state/staging-limits.account.mjs')
+await writeFile(accountScript, await readFile(new URL('./staging-limits.account.mjs', import.meta.url)),
+  { mode: 0o444 })
 await writeFile(join(sandbox, 'state/staging-limits-account.yaml'),
   `services:\n  feedgen-e2e-browser:\n    volumes:\n      - ${JSON.stringify(`${accountScript}:/runner/staging-limits.account.mjs:ro`)}\n`,
   { mode: 0o600 })
