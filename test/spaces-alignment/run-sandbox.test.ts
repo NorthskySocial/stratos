@@ -26,6 +26,8 @@ afterEach(async () => {
   delete process.env.RUNNER_TEST_FAIL_STEP
   delete process.env.RUNNER_TEST_EMPTY_ASSERTIONS
   delete process.env.RUNNER_TEST_MISSING_ACCOUNT
+  delete process.env.RUNNER_TEST_INVALID_ACCOUNT
+  delete process.env.RUNNER_TEST_IMPOSTOR_ACCOUNT
   delete process.env.RUNNER_TEST_FAIL_PDS_BUILD
   delete process.env.RUNNER_TEST_DOCKER_LOG
   await Promise.all(
@@ -308,6 +310,23 @@ const fs = require('node:fs')
 const assert = require('node:assert/strict')
 assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-spaces-alignment-'))
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
+const args = process.argv.slice(2)
+if (args[0] !== 'task') process.exit(2)
+if (args[1] === 'install') assert.deepEqual(args, ['task', 'install'])
+if (args[1] === 'sandbox' && args[2] === 'create') {
+  assert.deepEqual(args.slice(0, -3), [
+    'task', 'sandbox', 'create', '--pds', '1', '--users-per-pds', '2',
+    '--preset', 'feedgen-ng-e2e', '--project'
+  ])
+  assert.match(args.at(-3), /^stratos-[0-9a-f]{12}$/)
+  assert.deepEqual(args.slice(-2), ['--subnet', 'auto'])
+}
+if (args[1] === 'sandbox' && args[2] === 'check') assert.deepEqual(args, ['task', 'sandbox', 'check'])
+if (args[1] === 'sandbox' && args[2] === 'check') {
+  assert.ok(fs.readFileSync('stacks/feedgen-ng-e2e.yaml', 'utf8').includes('image: sha256:${'a'.repeat(64)}'))
+}
+if (args[1] === 'sandbox' && args[2] === 'up') assert.deepEqual(args, ['task', 'sandbox', 'up', '--build'])
+if (args[1] === 'sandbox' && args[2] === 'seed') assert.deepEqual(args, ['task', 'sandbox', 'seed'])
 if (process.env.RUNNER_TEST_FAIL_STEP && process.argv.includes(process.env.RUNNER_TEST_FAIL_STEP)) process.exit(7)
 if (process.argv.includes('create')) {
   fs.mkdirSync('state', { recursive: true })
@@ -320,8 +339,13 @@ if (process.argv.includes('seed')) {
   fs.writeFileSync('state/accounts.json', JSON.stringify({ accounts: {
     'user1.pds1.atmosbox.test': { did: 'did:plc:faye', password: 'synthetic-one' },
     ...(process.env.RUNNER_TEST_MISSING_ACCOUNT ? {} : {
-      'user2.pds1.atmosbox.test': { did: 'did:plc:ed', password: 'synthetic-two' }
-    })
+    'user2.pds1.atmosbox.test': { did: process.env.RUNNER_TEST_INVALID_ACCOUNT ? '' : 'did:plc:ed', password: 'synthetic-two' }
+    }),
+    ...(process.env.RUNNER_TEST_IMPOSTOR_ACCOUNT ? {
+      'user3.pds1.atmosbox.test': { did: 'did:plc:jet', password: 'synthetic-three' },
+      'user2.pdsX.atmosbox.test': { did: 'did:plc:jet', password: 'synthetic-three' },
+      'prefix-user1.pds1.atmosbox.test': { did: 'did:plc:jet', password: 'synthetic-three' }
+    } : {})
   } }))
 }
 `
@@ -332,6 +356,7 @@ const args = process.argv.slice(2)
 assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-spaces-alignment-'))
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 if (args.includes('run')) {
+  assert.equal(fs.statSync('state/browser-accounts.json').mode & 0o777, 0o444)
   const accounts = JSON.parse(fs.readFileSync('state/browser-accounts.json', 'utf8')).accounts
   assert.equal(Object.keys(accounts).length, 2)
   assert.equal(accounts['user1.pds1.atmosbox.test'].password, 'synthetic-one')
@@ -402,6 +427,9 @@ if (args.includes('down')) {
       'not a commit',
     )
     await writeFile(reviewReceipt, JSON.stringify(review))
+    await expect(
+      runSandbox(options, { ...dependencies, runnerSource: sandboxRepo }),
+    ).rejects.toThrow('Runner must execute from the candidate checkout')
     await expect(
       runSandbox({ ...options, suite: 'unknown' }, dependencies),
     ).rejects.toThrow('Unknown or unavailable suite')
@@ -489,6 +517,20 @@ if (args.includes('down')) {
       ),
     ).rejects.toThrow('did not seed both ordinary PDS accounts')
     delete process.env.RUNNER_TEST_MISSING_ACCOUNT
+    process.env.RUNNER_TEST_INVALID_ACCOUNT = '1'
+    await expect(
+      runSandbox(
+        { ...options, reportDirectory: join(root, 'invalid-account-report') },
+        dependencies,
+      ),
+    ).rejects.toThrow('did not seed both ordinary PDS accounts')
+    delete process.env.RUNNER_TEST_INVALID_ACCOUNT
+    process.env.RUNNER_TEST_IMPOSTOR_ACCOUNT = '1'
+    await runSandbox(
+      { ...options, reportDirectory: join(root, 'impostor-account-report') },
+      dependencies,
+    )
+    delete process.env.RUNNER_TEST_IMPOSTOR_ACCOUNT
     await runSandbox(options, dependencies)
     const receipt = JSON.parse(
       await readFile(join(reportDirectory, 'receipt.json'), 'utf8'),
@@ -539,7 +581,38 @@ if (args.includes('down')) {
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
-    expect(dockerConfigs).toHaveLength(7)
-    expect(new Set(dockerConfigs).size).toBe(7)
+    expect(dockerConfigs).toHaveLength(9)
+    expect(new Set(dockerConfigs).size).toBe(9)
+
+    await writeFile(
+      join(
+        candidateRepo,
+        'test/spaces-alignment/templates/feedgen-ng-e2e.yaml',
+      ),
+      'services: {}\n',
+    )
+    git(candidateRepo, 'add', '.')
+    git(candidateRepo, 'commit', '-qm', 'Remove PDS image placeholder')
+    const withoutPlaceholder = git(candidateRepo, 'rev-parse', 'HEAD')
+    await writeFile(
+      reviewReceipt,
+      JSON.stringify({
+        ...review,
+        candidateSha: withoutPlaceholder,
+        reviews: {
+          standards: {
+            ...review.reviews.standards,
+            reviewedSha: withoutPlaceholder,
+          },
+          spec: { ...review.reviews.spec, reviewedSha: withoutPlaceholder },
+        },
+      }),
+    )
+    await expect(
+      runSandbox(
+        { ...options, reportDirectory: join(root, 'missing-image-report') },
+        dependencies,
+      ),
+    ).rejects.toThrow('PDS image placeholder is missing')
   })
 })
