@@ -278,6 +278,13 @@ impl PdsSpaceSynchronizer {
                                     &target.did,
                                 )
                                 .map_err(PdsSpaceSyncError::Store)?;
+                        }
+                        if matches!(
+                            error,
+                            StoreError::SpaceStageLimit
+                                | StoreError::ExpiredSpaceStage
+                                | StoreError::SpacePromotionLimit
+                        ) {
                             eprintln!("event=space_stage_promotion_limit rejected_targets=1");
                         }
                         return Err(PdsSpaceSyncError::Store(error));

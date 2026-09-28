@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::{MAX_SPACE_PROMOTION_STAGE_BYTES, MAX_SPACE_PROMOTION_STAGE_ROWS};
 
 type PreviousStage = (i64, Option<String>, Option<Vec<u8>>, Option<Vec<u8>>);
 
@@ -248,7 +249,7 @@ fn enforce_stage_budget(
     transaction: &rusqlite::Transaction<'_>,
     space_uri: &str,
     actor_did: &str,
-) -> Result<(), StoreError> {
+) -> Result<StageUsage, StoreError> {
     let maximum: i64 = transaction
         .query_row(
             "SELECT value FROM retention_metadata WHERE key = 'projection_max_bytes'",
@@ -292,7 +293,7 @@ fn enforce_stage_budget(
         );
         return Err(StoreError::SpaceStageLimit);
     }
-    Ok(())
+    Ok(target)
 }
 
 fn stage_budget(
@@ -436,7 +437,12 @@ fn promote_space_stage_transaction(
     if pending.is_none() {
         return Err(StoreError::UnverifiedSpaceStage);
     }
-    enforce_stage_budget(transaction, space_uri, actor_did)?;
+    let target = enforce_stage_budget(transaction, space_uri, actor_did)?;
+    if target.rows > MAX_SPACE_PROMOTION_STAGE_ROWS
+        || target.bytes > MAX_SPACE_PROMOTION_STAGE_BYTES
+    {
+        return Err(StoreError::SpacePromotionLimit);
+    }
     let mut after_uri = None;
     loop {
         let stages =
@@ -2137,5 +2143,146 @@ mod stage_limit_tests {
             .query_row("SELECT COUNT(*) FROM post", [], |row| row.get(0))
             .unwrap();
         assert_eq!(published, 0);
+    }
+
+    #[test]
+    fn promotion_over_work_row_cap_leaves_target_staged_and_allows_other_target() {
+        let mut store = store(16 * 1024 * 1024);
+        let other_did = "did:plc:jetblack";
+        store
+            .replace_pds_space_members(
+                BOUNDARY,
+                vec![
+                    PdsSpaceMember {
+                        did: DID.to_owned(),
+                    },
+                    PdsSpaceMember {
+                        did: other_did.to_owned(),
+                    },
+                ],
+                NOW,
+            )
+            .unwrap();
+        let deletes = |range: std::ops::Range<usize>| {
+            range
+                .map(|index| SpaceStageMutation::Delete {
+                    uri: format!("{SPACE}/{DID}/zone.stratos.feed.post/{index}"),
+                })
+                .collect()
+        };
+        store
+            .stage_authorized_space_page(page("first"), deletes(0..1_000))
+            .unwrap();
+        let terminal = SpaceStagePage {
+            next_cursor: None,
+            ..page("unused")
+        };
+        store
+            .stage_authorized_space_page(terminal, deletes(1_000..1_023))
+            .unwrap();
+        let staged_before: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM space_sync_stage WHERE did = ?1",
+                [DID],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(staged_before, 1_023);
+        assert!(matches!(
+            store.promote_authorized_space_stage(BOUNDARY, SPACE, DID, NOW),
+            Err(StoreError::SpacePromotionLimit)
+        ));
+        assert_eq!(
+            store.space_sync_cursor(BOUNDARY, SPACE, DID).unwrap(),
+            Some("first".to_owned())
+        );
+        let (staged_after, pending, published): (i64, i64, i64) = store
+            .connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM space_sync_stage WHERE did = ?1),
+                        (SELECT COUNT(*) FROM space_sync_pending_verification WHERE did = ?1),
+                        (SELECT COUNT(*) FROM post)",
+                [DID],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((staged_after, pending, published), (staged_before, 1, 0));
+
+        let other = SpaceStagePage {
+            actor_did: other_did.to_owned(),
+            next_cursor: None,
+            ..page("unused")
+        };
+        store
+            .stage_authorized_space_page(
+                other,
+                vec![SpaceStageMutation::Upsert {
+                    uri: format!("{SPACE}/{other_did}/zone.stratos.feed.post/0"),
+                    cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+                    sort_at: NOW.to_owned(),
+                    indexed_at: NOW.to_owned(),
+                    record_json: b"{}".to_vec(),
+                    blob_refs_json: b"[]".to_vec(),
+                }],
+            )
+            .unwrap();
+        store
+            .promote_authorized_space_stage(BOUNDARY, SPACE, other_did, NOW)
+            .unwrap();
+        let other_published: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM post WHERE author_did = ?1",
+                [other_did],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(other_published, 1);
+        let rejected_target_rows: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM space_sync_stage WHERE did = ?1",
+                [DID],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(rejected_target_rows, staged_before);
+    }
+
+    #[test]
+    fn promotion_over_work_byte_cap_fails_before_publishing() {
+        let mut store = store(64 * 1024 * 1024);
+        let terminal = SpaceStagePage {
+            next_cursor: None,
+            ..page("unused")
+        };
+        store
+            .stage_space_page(
+                terminal,
+                (0..170).map(|index| upsert(index, 50_000)).collect(),
+            )
+            .unwrap();
+        let usage = {
+            let transaction = store.connection.transaction().unwrap();
+            let usage = stage_usage(&transaction, Some(SPACE), Some(DID)).unwrap();
+            transaction.rollback().unwrap();
+            usage
+        };
+        assert!(usage.rows < MAX_SPACE_PROMOTION_STAGE_ROWS);
+        assert!(usage.bytes > MAX_SPACE_PROMOTION_STAGE_BYTES);
+        assert!(matches!(
+            store.promote_verified_space_stage(SPACE, DID, NOW),
+            Err(StoreError::SpacePromotionLimit)
+        ));
+        let (staged, published): (i64, i64) = store
+            .connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM space_sync_stage), (SELECT COUNT(*) FROM post)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((staged, published), (170, 0));
     }
 }
