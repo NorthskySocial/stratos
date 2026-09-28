@@ -623,12 +623,21 @@ async function assertNonmemberDenied(domain, clubhouseUrl, roomId, postText) {
     )
     feedUrl.searchParams.set('feed', roomId)
     feedUrl.searchParams.set('limit', '50')
-    const feedResponse = await fetch(feedUrl, {
-      headers: {
-        authorization: `Bearer ${session.accessJwt}`,
-        'atproto-proxy': `did:web:feedgen-e2e.${domain}#stratos_feedgen`,
-      },
-    })
+    const deadline = Date.now() + 30_000
+    let feedResponse
+    while (Date.now() < deadline) {
+      feedResponse = await fetch(feedUrl, {
+        headers: {
+          authorization: `Bearer ${session.accessJwt}`,
+          'atproto-proxy': `did:web:feedgen-e2e.${domain}#stratos_feedgen`,
+        },
+      })
+      if (feedResponse.ok) break
+      const body = await feedResponse.clone().json()
+      if (body.error !== 'FeedNotReady') break
+      await delay(500)
+    }
+    assert.ok(feedResponse, 'Unrelated-boundary feed was never requested')
     if (feedResponse.ok) {
       const body = await feedResponse.json()
       assert.ok(
