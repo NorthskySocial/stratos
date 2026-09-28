@@ -31,84 +31,9 @@ async function waitFor(check, label, timeout = 150_000) {
     if (await check()) return
     await delay(1_000)
   }
-  throw new Error(`${label} did not complete`)
+  const status = await control('status').catch(() => null)
+  throw new Error(`${label} did not complete: proxy ${JSON.stringify(status)}`)
 }
-
-const proxyScript = String.raw`
-import http from 'node:http'
-let mode = 'observe'
-let blockedCursor = null
-let pages = 0
-let interruptions = 0
-let firstRequests = 0
-const repos = new Set()
-const globalRepos = new Set()
-const cid = 'bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://proxy')
-  if (url.pathname === '/_control/mode') {
-    mode = url.searchParams.get('value')
-    blockedCursor = null
-    res.end('ok')
-    return
-  }
-  if (url.pathname === '/_control/status') {
-    res.setHeader('content-type', 'application/json')
-    res.end(JSON.stringify({ pages, interruptions, firstRequests,
-      targetCount: repos.size, globalTargetCount: globalRepos.size }))
-    return
-  }
-  const isPage = url.pathname === '/xrpc/com.atproto.space.listRepoOps'
-  if (isPage) {
-    repos.add(url.searchParams.get('repo'))
-    if (mode === 'global') globalRepos.add(url.searchParams.get('repo'))
-    if (!url.searchParams.has('cursor')) firstRequests += 1
-  }
-  if (isPage && mode !== 'observe') {
-    const cursor = url.searchParams.get('cursor')
-    if (blockedCursor !== null && blockedCursor === cursor) {
-      blockedCursor = null
-      interruptions += 1
-      res.writeHead(503, { 'content-type': 'application/json' })
-      res.end('{"error":"Unavailable"}')
-      return
-    }
-    const index = pages++
-    const next = mode + '-' + (index + 1)
-    blockedCursor = next
-    const count = mode === 'interrupted' ? 1 : 10
-    const ops = Array.from({ length: count }, (_, n) => ({
-      rev: 'synthetic', collection: 'zone.stratos.feed.post',
-      rkey: 'stage-' + index + '-' + n, cid,
-      value: { $type: 'zone.stratos.feed.post', text: 'x'.repeat(1200),
-        createdAt: new Date().toISOString() },
-    }))
-    res.setHeader('content-type', 'application/json')
-    res.end(JSON.stringify({ ops, cursor: next }))
-    return
-  }
-  try {
-    const chunks = []
-    for await (const chunk of req) chunks.push(chunk)
-    const headers = { ...req.headers }
-    delete headers.connection
-    const upstream = await fetch('http://feedgen-e2e-pds-spaces:3000' + req.url, {
-      method: req.method, headers,
-      body: chunks.length ? Buffer.concat(chunks) : undefined,
-    })
-    const body = Buffer.from(await upstream.arrayBuffer())
-    const responseHeaders = Object.fromEntries(upstream.headers)
-    delete responseHeaders['content-length']
-    delete responseHeaders['content-encoding']
-    delete responseHeaders['transfer-encoding']
-    res.writeHead(upstream.status, responseHeaders)
-    res.end(body)
-  } catch {
-    res.writeHead(502)
-    res.end()
-  }
-}).listen(3000, '0.0.0.0')
-`
 
 async function control(path) {
   const output = await withProxy([
@@ -147,9 +72,10 @@ await writeFile(join(sandbox, 'state/staging-limits-account.yaml'),
   `services:\n  feedgen-e2e-stratos:\n    environment:\n      IDENTITY_PRIVATE_ORIGINS: ${JSON.stringify(`${privateOrigins},${secondAccountOrigin}`)}\n  feedgen-e2e-browser:\n    volumes:\n      - ${JSON.stringify(`${accountScript}:/runner/staging-limits.account.mjs:ro`)}\n`,
   { mode: 0o600 })
 const proxyPath = join(sandbox, 'state/staging-limits-proxy.mjs')
-await writeFile(proxyPath, proxyScript, { mode: 0o600 })
+await writeFile(proxyPath, await readFile(new URL('./staging-limits.proxy.mjs', import.meta.url)),
+  { mode: 0o600 })
 await writeFile(join(sandbox, 'state/staging-limits-proxy.yaml'),
-  `services:\n  staging-limits-proxy:\n    image: ${JSON.stringify(image)}\n    entrypoint: ["node", "/proxy.mjs"]\n    networks: [atmosinabox]\n    volumes:\n      - ${JSON.stringify(`${proxyPath}:/proxy.mjs:ro`)}\n`, { mode: 0o600 })
+  `services:\n  staging-limits-proxy:\n    image: ${JSON.stringify(image)}\n    entrypoint: ["node", "--input-type=module", "-e", "import { createProxyServer } from '/proxy.mjs'; createProxyServer().listen(3000, '0.0.0.0')"]\n    networks: [atmosinabox]\n    volumes:\n      - ${JSON.stringify(`${proxyPath}:/proxy.mjs:ro`)}\n`, { mode: 0o600 })
 
 let proxyStarted = false
 let gatewayChanged = false
