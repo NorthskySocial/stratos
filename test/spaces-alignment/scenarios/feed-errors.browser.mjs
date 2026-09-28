@@ -12,6 +12,10 @@ const require = createRequire('/runner/feedgen-ng-e2e-browser.mjs')
 const { chromium } = require('playwright')
 const appUrl = 'https://webapp-e2e.atmosbox.internal'
 const control = '/runner/control'
+const tinyPng = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jFZkAAAAASUVORK5CYII=',
+  'base64',
+)
 
 async function trustSandboxCa() {
   const cert = '/ca/root.crt'
@@ -134,6 +138,21 @@ async function createFixtures(account, domain) {
   const nonce = randomUUID()
   const publicText = `Public feed error fixture ${nonce}`
   const privateText = `Private feed error fixture ${nonce}`
+  const image = await fetch(`${pds}/xrpc/com.atproto.repo.uploadBlob`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${session.accessJwt}`,
+      'content-type': 'image/png',
+    },
+    body: tinyPng,
+  })
+  assert.equal(
+    image.status,
+    200,
+    `Fixture blob upload failed (${image.status})`,
+  )
+  const uploaded = await image.json()
+  assert.ok(uploaded.blob, 'Fixture blob upload returned no blob reference')
   await requestJson(`${pds}/xrpc/com.atproto.repo.createRecord`, {
     method: 'POST',
     headers: {
@@ -164,10 +183,14 @@ async function createFixtures(account, domain) {
         $type: 'zone.stratos.feed.post',
         text: privateText,
         createdAt: new Date().toISOString(),
+        embed: {
+          $type: 'zone.stratos.embed.images',
+          images: [{ alt: 'Private feed fixture image', image: uploaded.blob }],
+        },
       },
     }),
   })
-  return { publicText, privateText }
+  return { did: session.did, publicText, privateText }
 }
 
 async function waitSignal(name) {
@@ -204,6 +227,14 @@ async function waitPrivateFixture(page, text) {
   throw new Error('Candidate webapp did not render the private fixture')
 }
 
+async function privateImage(page, text) {
+  const image = page
+    .locator('.post-card.private', { hasText: text })
+    .locator('img.post-image')
+  await image.waitFor({ state: 'attached', timeout: 30_000 })
+  return image
+}
+
 async function main() {
   const domain = process.env.SANDBOX_DOMAIN
   assert.equal(domain, 'atmosbox.test')
@@ -217,7 +248,8 @@ async function main() {
   const fixture = await createFixtures(account, domain)
   const browser = await chromium.launch({ headless: true })
   try {
-    const page = await browser.newPage()
+    const context = await browser.newContext()
+    const page = await context.newPage()
     await page.goto(appUrl, { waitUntil: 'domcontentloaded' })
     await page.locator('#handle').fill(account.username)
     await page.getByRole('button', { name: 'Sign In' }).click()
@@ -226,6 +258,7 @@ async function main() {
       .getByRole('button', { name: 'Log Out' })
       .waitFor({ timeout: 30_000 })
     await waitPrivateFixture(page, fixture.privateText)
+    await privateImage(page, fixture.privateText)
     await page.getByText(fixture.publicText).waitFor({ timeout: 30_000 })
     await writeFile(path.join(control, 'ready'), '')
 
@@ -269,6 +302,18 @@ async function main() {
     )
     assert.ok(await visible(page.getByText(fixture.publicText)))
 
+    const revocationContext = await browser.newContext()
+    const revocationPage = await revocationContext.newPage()
+    await revocationPage.goto(appUrl, { waitUntil: 'domcontentloaded' })
+    await revocationPage.locator('#handle').fill(account.username)
+    await revocationPage.getByRole('button', { name: 'Sign In' }).click()
+    await completeOAuth(revocationPage, account)
+    await revocationPage
+      .getByRole('button', { name: 'Log Out' })
+      .waitFor({ timeout: 30_000 })
+    await waitPrivateFixture(revocationPage, fixture.privateText)
+    await privateImage(revocationPage, fixture.privateText)
+
     let releaseLate
     const lateResponse = new Promise((resolve) => {
       releaseLate = resolve
@@ -298,6 +343,91 @@ async function main() {
     assert.equal(await visible(page.locator('.post-card.private')), false)
     await delay(500)
     assert.equal(await visible(page.locator('.post-card.private')), false)
+
+    const privateBlobUrl = await (
+      await privateImage(revocationPage, fixture.privateText)
+    ).getAttribute('src')
+    let releaseRevokedRequest
+    const revokedRequest = new Promise((resolve) => {
+      releaseRevokedRequest = resolve
+    })
+    let sawRevokedRequest = false
+    const feedPath = '**/xrpc/zone.stratos.feedgen.getFeed**'
+    const holdRevokedRequest = async (route) => {
+      sawRevokedRequest = true
+      await revokedRequest
+      await route.continue()
+    }
+    await revocationPage.route(feedPath, holdRevokedRequest, { times: 1 })
+    await publishPublic(
+      revocationPage,
+      `Saito checks a revoked grant ${randomUUID()}`,
+    )
+    const revokedDeadline = Date.now() + 15_000
+    while (!sawRevokedRequest && Date.now() < revokedDeadline) await delay(100)
+    assert.ok(
+      sawRevokedRequest,
+      'No Feedgen request was pending for grant revocation',
+    )
+    assert.ok(
+      await visible(revocationPage.getByRole('button', { name: 'Log Out' })),
+    )
+    await writeFile(path.join(control, 'revoke-did'), fixture.did)
+    await waitSignal('revoked')
+    const deniedResponse = revocationPage.waitForResponse(
+      (response) =>
+        response.url().includes('/xrpc/zone.stratos.feedgen.getFeed') &&
+        [401, 403].includes(response.status()),
+      { timeout: 30_000 },
+    )
+    releaseRevokedRequest()
+    await deniedResponse
+    const settledDeadline = Date.now() + 30_000
+    while (Date.now() < settledDeadline) {
+      if (
+        (await visible(
+          revocationPage.locator('.feed-failure[role="status"]'),
+        )) ||
+        (await visible(revocationPage.getByRole('button', { name: 'Sign In' })))
+      )
+        break
+      await delay(250)
+    }
+    assert.ok(
+      (await visible(revocationPage.locator('.feed-failure[role="status"]'))) ||
+        (await visible(
+          revocationPage.getByRole('button', { name: 'Sign In' }),
+        )),
+      'Authorization loss did not settle the signed-in feed',
+    )
+    assert.equal(
+      await visible(
+        revocationPage.locator('.post-card.private', {
+          hasText: fixture.privateText,
+        }),
+      ),
+      false,
+    )
+    assert.equal(
+      await revocationPage
+        .locator('img.post-image[alt="Private feed fixture image"]')
+        .count(),
+      0,
+    )
+    if (privateBlobUrl?.startsWith('blob:')) {
+      assert.equal(
+        await revocationPage.evaluate(
+          async (url) =>
+            fetch(url)
+              .then(() => true)
+              .catch(() => false),
+          privateBlobUrl,
+        ),
+        false,
+        'Private image blob URL remained usable after authorization loss',
+      )
+    }
+    await revocationPage.unroute(feedPath, holdRevokedRequest)
 
     console.log(
       JSON.stringify({
