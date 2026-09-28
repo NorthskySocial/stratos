@@ -136,11 +136,15 @@ assert.ok(originalCaddy.includes(route), 'Pinned PDS route changed')
 const config = JSON.parse(await compose(['config', '--format', 'json']))
 const image = config.services['feedgen-e2e-pds-spaces']?.image
 assert.ok(typeof image === 'string' && image.length > 0)
+const privateOrigins = config.services['feedgen-e2e-stratos']?.environment?.IDENTITY_PRIVATE_ORIGINS
+assert.ok(typeof privateOrigins === 'string' && privateOrigins.includes(`https://motoko.spaces-pds-e2e.${domain}`),
+  'Pinned Stratos private identity origins changed')
+const secondAccountOrigin = `https://rei.spaces-pds-e2e.${domain}`
 const accountScript = join(sandbox, 'state/staging-limits.account.mjs')
 await writeFile(accountScript, await readFile(new URL('./staging-limits.account.mjs', import.meta.url)),
   { mode: 0o444 })
 await writeFile(join(sandbox, 'state/staging-limits-account.yaml'),
-  `services:\n  feedgen-e2e-browser:\n    volumes:\n      - ${JSON.stringify(`${accountScript}:/runner/staging-limits.account.mjs:ro`)}\n`,
+  `services:\n  feedgen-e2e-stratos:\n    environment:\n      IDENTITY_PRIVATE_ORIGINS: ${JSON.stringify(`${privateOrigins},${secondAccountOrigin}`)}\n  feedgen-e2e-browser:\n    volumes:\n      - ${JSON.stringify(`${accountScript}:/runner/staging-limits.account.mjs:ro`)}\n`,
   { mode: 0o600 })
 const proxyPath = join(sandbox, 'state/staging-limits-proxy.mjs')
 await writeFile(proxyPath, proxyScript, { mode: 0o600 })
@@ -150,7 +154,10 @@ await writeFile(join(sandbox, 'state/staging-limits-proxy.yaml'),
 let proxyStarted = false
 let gatewayChanged = false
 let limitsChanged = false
+let accountConfigChanged = false
 try {
+  accountConfigChanged = true
+  await withAccount(['up', '-d', '--wait', '--no-deps', '--force-recreate', 'feedgen-e2e-stratos'])
   const added = await withAccount(['run', '--rm', '--no-deps', '--entrypoint', 'node',
     'feedgen-e2e-browser', '/runner/staging-limits.account.mjs'])
   assert.match(added, /"did":"did:/, 'Second spaces-PDS target was not provisioned')
@@ -238,5 +245,8 @@ try {
   if (proxyStarted) {
     await withProxy(['stop', 'staging-limits-proxy'])
     await withProxy(['rm', '-f', 'staging-limits-proxy'])
+  }
+  if (accountConfigChanged) {
+    await compose(['up', '-d', '--no-deps', '--force-recreate', 'feedgen-e2e-stratos'])
   }
 }
