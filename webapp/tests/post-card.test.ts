@@ -46,6 +46,44 @@ describe('PostCard.svelte', () => {
     await waitFor(() => expect(ondelete).toHaveBeenCalledWith(mockPost))
   })
 
+  it('shows the sign-in action when an old grant cannot delete', async () => {
+    render(PostCard, {
+      post: mockPost,
+      stratosAgent: null,
+      currentDid: mockPost.author,
+      onreply: () => {},
+      ondelete: vi
+        .fn()
+        .mockRejectedValue(
+          new Error(
+            'Sign out and sign in again to allow deletion of private posts.',
+          ),
+        ),
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete post' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Sign out and sign in again to allow deletion of private posts.',
+    )
+  })
+
+  it('keeps unrelated deletion failures generic', async () => {
+    render(PostCard, {
+      post: mockPost,
+      stratosAgent: null,
+      currentDid: mockPost.author,
+      onreply: () => {},
+      ondelete: vi
+        .fn()
+        .mockRejectedValue(new Error('PDS deletion failed (403)')),
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete post' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not delete the post. Try again.',
+    )
+  })
+
   it('attributes a space reply parent to its record author', () => {
     render(PostCard, {
       post: {

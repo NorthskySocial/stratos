@@ -1,6 +1,7 @@
 import type { Agent } from '@atproto/api'
 import type { OAuthSession } from '@atproto/oauth-client-browser'
 import { postDeleteTargetFromUri, type FeedPost } from './feed'
+import { getSpaceWriteScopeStatus } from './auth'
 
 export interface DeletePostInput {
   post: FeedPost
@@ -29,6 +30,17 @@ export async function deletePost({
   }
 
   if (target.space) {
+    const scopeStatus = await getSpaceWriteScopeStatus(session)
+    if (scopeStatus === 'missing') {
+      throw new Error(
+        'Sign out and sign in again to allow deletion of private posts.',
+      )
+    }
+    if (scopeStatus === 'unavailable') {
+      throw new Error(
+        'Could not check private post deletion permission. Try again.',
+      )
+    }
     const response = await session.fetchHandler(
       '/xrpc/com.atproto.space.deleteRecord',
       {
