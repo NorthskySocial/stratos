@@ -191,6 +191,51 @@ const MIGRATIONS: &[Migration] = &[
           SELECT boundary, did, 0 FROM membership_baseline WHERE custody = 'pds';
     "#,
     },
+    Migration {
+        version: 7,
+        sql: r#"
+        CREATE TABLE space_sync_stage_lifetime (
+          space_uri TEXT NOT NULL,
+          did TEXT NOT NULL,
+          boundary TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_progress_at TEXT NOT NULL,
+          PRIMARY KEY (space_uri, did)
+        ) WITHOUT ROWID;
+        CREATE INDEX space_sync_stage_lifetime_progress_idx
+          ON space_sync_stage_lifetime(last_progress_at, created_at);
+        INSERT INTO space_sync_stage_lifetime (space_uri, did, boundary, created_at, last_progress_at)
+          SELECT space_uri, did, boundary, MIN(updated_at), MAX(updated_at)
+          FROM (
+            SELECT space_uri, did, boundary, updated_at FROM space_sync_stage
+            UNION ALL
+            SELECT space_uri, did, boundary, updated_at FROM space_sync_stage_cursor
+            UNION ALL
+            SELECT space_uri, did, boundary, updated_at FROM space_sync_pending_verification
+          ) GROUP BY space_uri, did;
+        CREATE TRIGGER stage_lifetime_after_stage_delete AFTER DELETE ON space_sync_stage
+        BEGIN
+          DELETE FROM space_sync_stage_lifetime WHERE space_uri = OLD.space_uri AND did = OLD.did
+          AND NOT EXISTS (SELECT 1 FROM space_sync_stage WHERE space_uri = OLD.space_uri AND did = OLD.did)
+          AND NOT EXISTS (SELECT 1 FROM space_sync_stage_cursor WHERE space_uri = OLD.space_uri AND did = OLD.did)
+          AND NOT EXISTS (SELECT 1 FROM space_sync_pending_verification WHERE space_uri = OLD.space_uri AND did = OLD.did);
+        END;
+        CREATE TRIGGER stage_lifetime_after_cursor_delete AFTER DELETE ON space_sync_stage_cursor
+        BEGIN
+          DELETE FROM space_sync_stage_lifetime WHERE space_uri = OLD.space_uri AND did = OLD.did
+          AND NOT EXISTS (SELECT 1 FROM space_sync_stage WHERE space_uri = OLD.space_uri AND did = OLD.did)
+          AND NOT EXISTS (SELECT 1 FROM space_sync_stage_cursor WHERE space_uri = OLD.space_uri AND did = OLD.did)
+          AND NOT EXISTS (SELECT 1 FROM space_sync_pending_verification WHERE space_uri = OLD.space_uri AND did = OLD.did);
+        END;
+        CREATE TRIGGER stage_lifetime_after_pending_delete AFTER DELETE ON space_sync_pending_verification
+        BEGIN
+          DELETE FROM space_sync_stage_lifetime WHERE space_uri = OLD.space_uri AND did = OLD.did
+          AND NOT EXISTS (SELECT 1 FROM space_sync_stage WHERE space_uri = OLD.space_uri AND did = OLD.did)
+          AND NOT EXISTS (SELECT 1 FROM space_sync_stage_cursor WHERE space_uri = OLD.space_uri AND did = OLD.did)
+          AND NOT EXISTS (SELECT 1 FROM space_sync_pending_verification WHERE space_uri = OLD.space_uri AND did = OLD.did);
+        END;
+    "#,
+    },
 ];
 
 pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
@@ -230,13 +275,13 @@ mod tests {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
         let migration_count: u32 = connection
             .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(migration_count, 6);
+        assert_eq!(migration_count, 7);
         let post_boundary_sql: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_boundary'",
@@ -416,7 +461,7 @@ mod tests {
     #[test]
     fn rejects_a_database_from_a_newer_store_format() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection.pragma_update(None, "user_version", 7).unwrap();
+        connection.pragma_update(None, "user_version", 8).unwrap();
 
         assert!(apply(&mut connection).is_err());
     }

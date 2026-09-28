@@ -1,5 +1,7 @@
 use super::*;
 
+type PreviousStage = (i64, Option<String>, Option<Vec<u8>>, Option<Vec<u8>>);
+
 fn is_space_uri(value: &str) -> bool {
     let segments: Vec<_> = value
         .strip_prefix("at://")
@@ -27,7 +29,32 @@ fn stage_space_mutation(
     transaction: &rusqlite::Transaction<'_>,
     page: &SpaceStagePage,
     mutation: SpaceStageMutation,
-) -> Result<(), StoreError> {
+) -> Result<bool, StoreError> {
+    let uri = match &mutation {
+        SpaceStageMutation::Upsert { uri, .. } | SpaceStageMutation::Delete { uri } => uri,
+    };
+    let previous: Option<PreviousStage> = transaction
+        .query_row(
+            "SELECT deleted, cid, record_json, blob_refs_json FROM space_sync_stage WHERE space_uri = ?1 AND did = ?2 AND uri = ?3",
+            params![page.space_uri, page.actor_did, uri],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(StoreError::Open)?;
+    let changed = match &mutation {
+        SpaceStageMutation::Upsert {
+            cid,
+            record_json,
+            blob_refs_json,
+            ..
+        } => previous.as_ref().is_none_or(|old| {
+            old.0 != 0
+                || old.1.as_ref() != Some(cid)
+                || old.2.as_ref() != Some(record_json)
+                || old.3.as_ref() != Some(blob_refs_json)
+        }),
+        SpaceStageMutation::Delete { .. } => previous.as_ref().is_none_or(|old| old.0 != 1),
+    };
     match mutation {
         SpaceStageMutation::Upsert {
             uri,
@@ -84,7 +111,7 @@ fn stage_space_mutation(
                 .map_err(StoreError::Open)?;
         }
     }
-    Ok(())
+    Ok(changed)
 }
 
 fn validate_space_stage_uri(page: &SpaceStagePage, value: &str) -> Result<(), StoreError> {
@@ -102,7 +129,23 @@ fn validate_space_stage_uri(page: &SpaceStagePage, value: &str) -> Result<(), St
 fn update_space_stage_checkpoint(
     transaction: &rusqlite::Transaction<'_>,
     page: &SpaceStagePage,
-) -> Result<(), StoreError> {
+) -> Result<bool, StoreError> {
+    let previous_cursor: Option<String> = transaction
+        .query_row(
+            "SELECT cursor FROM space_sync_stage_cursor WHERE space_uri = ?1 AND did = ?2",
+            params![page.space_uri, page.actor_did],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StoreError::Open)?;
+    let pending: bool = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2)",
+        params![page.space_uri, page.actor_did], |row| row.get(0),
+    ).map_err(StoreError::Open)?;
+    let progressed = match &page.next_cursor {
+        Some(cursor) => previous_cursor.as_ref() != Some(cursor) || pending,
+        None => !pending,
+    };
     if let Some(cursor) = &page.next_cursor {
         transaction
             .execute(
@@ -127,6 +170,139 @@ fn update_space_stage_checkpoint(
                 params![page.space_uri, page.actor_did, page.boundary, page.updated_at],
             )
             .map_err(StoreError::Open)?;
+    }
+    Ok(progressed)
+}
+
+fn record_stage_lifetime(
+    transaction: &rusqlite::Transaction<'_>,
+    page: &SpaceStagePage,
+    progressed: bool,
+) -> Result<(), StoreError> {
+    transaction.execute(
+        "INSERT INTO space_sync_stage_lifetime (space_uri, did, boundary, created_at, last_progress_at)
+         VALUES (?1, ?2, ?3, ?4, ?4)
+         ON CONFLICT(space_uri, did) DO UPDATE SET boundary = excluded.boundary,
+           last_progress_at = CASE WHEN ?5 THEN excluded.last_progress_at ELSE space_sync_stage_lifetime.last_progress_at END",
+        params![page.space_uri, page.actor_did, page.boundary, page.updated_at, progressed],
+    ).map_err(StoreError::Open)?;
+    Ok(())
+}
+
+pub(super) fn stage_usage(
+    transaction: &rusqlite::Transaction<'_>,
+    space_uri: Option<&str>,
+    did: Option<&str>,
+) -> Result<(i64, i64), StoreError> {
+    let staged: (i64, i64) = transaction.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(length(space_uri) + length(did) + length(uri) + length(boundary) +
+          COALESCE(length(cid), 0) + COALESCE(length(sort_at), 0) + COALESCE(length(indexed_at), 0) +
+          COALESCE(length(record_json), 0) + COALESCE(length(blob_refs_json), 0)), 0)
+         FROM space_sync_stage WHERE (?1 IS NULL OR space_uri = ?1) AND (?2 IS NULL OR did = ?2)",
+        params![space_uri, did], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).map_err(StoreError::Open)?;
+    let checkpoints: (i64, i64) = transaction.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(length(lifetime.space_uri) + length(lifetime.did) +
+          length(lifetime.boundary) + length(lifetime.created_at) + length(lifetime.last_progress_at) +
+          COALESCE(length(cursor.cursor), 0)), 0)
+         FROM space_sync_stage_lifetime AS lifetime
+         LEFT JOIN space_sync_stage_cursor AS cursor
+           ON cursor.space_uri = lifetime.space_uri AND cursor.did = lifetime.did
+         WHERE (?1 IS NULL OR lifetime.space_uri = ?1) AND (?2 IS NULL OR lifetime.did = ?2)",
+        params![space_uri, did], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).map_err(StoreError::Open)?;
+    Ok((
+        staged
+            .0
+            .checked_add(checkpoints.0)
+            .ok_or(StoreError::SpaceStageLimit)?,
+        staged
+            .1
+            .checked_add(checkpoints.1)
+            .ok_or(StoreError::SpaceStageLimit)?,
+    ))
+}
+
+fn enforce_stage_budget(
+    transaction: &rusqlite::Transaction<'_>,
+    page: &SpaceStagePage,
+) -> Result<(), StoreError> {
+    let maximum: i64 = transaction
+        .query_row(
+            "SELECT value FROM retention_metadata WHERE key = 'projection_max_bytes'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StoreError::Open)?
+        .unwrap_or(DEFAULT_PROJECTION_MAX_BYTES);
+    let (target_rows, target_bytes) =
+        stage_usage(transaction, Some(&page.space_uri), Some(&page.actor_did))?;
+    let (global_rows, global_bytes) = stage_usage(transaction, None, None)?;
+    let published_bytes: i64 = transaction
+        .query_row(
+            "SELECT COALESCE(SUM(projection_bytes), 0) FROM post",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(StoreError::Open)?;
+    if target_rows > MAX_STAGED_ROWS_PER_TARGET
+        || global_rows > MAX_STAGED_ROWS_GLOBAL
+        || target_bytes > (maximum / 4).min(MAX_STAGED_BYTES_PER_TARGET)
+        || global_bytes
+            .checked_add(published_bytes)
+            .is_none_or(|used| used > maximum)
+    {
+        eprintln!(
+            "event=space_stage_budget_rejected target_rows={target_rows} target_bytes={target_bytes} global_rows={global_rows} global_bytes={global_bytes}"
+        );
+        return Err(StoreError::SpaceStageLimit);
+    }
+    Ok(())
+}
+
+fn ensure_stage_live(
+    transaction: &rusqlite::Transaction<'_>,
+    space_uri: &str,
+    actor_did: &str,
+    observed_at: &str,
+) -> Result<(), StoreError> {
+    let maximum_age_ms: Option<i64> = transaction
+        .query_row(
+            "SELECT value FROM retention_metadata WHERE key = 'projection_max_age_ms'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StoreError::Open)?;
+    let Some(maximum_age_ms) = maximum_age_ms else {
+        return Ok(());
+    };
+    let lifetime: Option<(String, String)> = transaction.query_row(
+        "SELECT created_at, last_progress_at FROM space_sync_stage_lifetime WHERE space_uri = ?1 AND did = ?2",
+        params![space_uri, actor_did], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional().map_err(StoreError::Open)?;
+    let Some((created_at, last_progress_at)) = lifetime else {
+        return Ok(());
+    };
+    let now =
+        time::OffsetDateTime::parse(observed_at, &time::format_description::well_known::Rfc3339)
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+    let cutoff = now
+        .checked_sub(time::Duration::milliseconds(maximum_age_ms))
+        .ok_or(StoreError::InvalidProjectionMutation)?;
+    let cutoff = format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        cutoff.year(),
+        u8::from(cutoff.month()),
+        cutoff.day(),
+        cutoff.hour(),
+        cutoff.minute(),
+        cutoff.second(),
+        cutoff.millisecond()
+    );
+    if created_at <= cutoff || last_progress_at <= cutoff {
+        return Err(StoreError::ExpiredSpaceStage);
     }
     Ok(())
 }
@@ -156,6 +332,16 @@ fn promote_space_stage_transaction(
         .map_err(StoreError::Open)?;
     if pending.is_none() {
         return Err(StoreError::UnverifiedSpaceStage);
+    }
+    let row_count: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM space_sync_stage WHERE space_uri = ?1 AND did = ?2",
+            params![space_uri, actor_did],
+            |row| row.get(0),
+        )
+        .map_err(StoreError::Open)?;
+    if row_count > MAX_STAGED_ROWS_PER_TARGET {
+        return Err(StoreError::SpaceStageLimit);
     }
     let mut after_uri = None;
     loop {
@@ -194,6 +380,12 @@ fn promote_space_stage_transaction(
     transaction
         .execute(
             "DELETE FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2",
+            params![space_uri, actor_did],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM space_sync_stage_lifetime WHERE space_uri = ?1 AND did = ?2",
             params![space_uri, actor_did],
         )
         .map_err(StoreError::Open)?;
@@ -622,10 +814,19 @@ impl EncryptedStore {
         if !has_pds_member_generation(&transaction, &page.boundary, &page.actor_did, generation)? {
             return Err(StoreError::UnauthorizedSpaceMember);
         }
+        ensure_stage_live(
+            &transaction,
+            &page.space_uri,
+            &page.actor_did,
+            &page.updated_at,
+        )?;
+        let mut progressed = false;
         for mutation in mutations {
-            stage_space_mutation(&transaction, &page, mutation)?;
+            progressed |= stage_space_mutation(&transaction, &page, mutation)?;
         }
-        update_space_stage_checkpoint(&transaction, &page)?;
+        progressed |= update_space_stage_checkpoint(&transaction, &page)?;
+        record_stage_lifetime(&transaction, &page, progressed)?;
+        enforce_stage_budget(&transaction, &page)?;
         transaction.commit().map_err(StoreError::Open)
     }
 
@@ -686,6 +887,35 @@ impl EncryptedStore {
         if !has_pds_member_generation(&transaction, boundary, actor_did, generation)? {
             return Err(StoreError::UnauthorizedSpaceMember);
         }
+        let maximum_age_ms: Option<i64> = transaction
+            .query_row(
+                "SELECT value FROM retention_metadata WHERE key = 'projection_max_age_ms'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StoreError::Open)?;
+        if let Some(maximum_age_ms) = maximum_age_ms {
+            let deadline = time::OffsetDateTime::parse(
+                retained_at,
+                &time::format_description::well_known::Rfc3339,
+            )
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+            let observed = deadline
+                .checked_sub(time::Duration::milliseconds(maximum_age_ms))
+                .ok_or(StoreError::InvalidProjectionMutation)?;
+            let observed = format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+                observed.year(),
+                u8::from(observed.month()),
+                observed.day(),
+                observed.hour(),
+                observed.minute(),
+                observed.second(),
+                observed.millisecond()
+            );
+            ensure_stage_live(&transaction, space_uri, actor_did, &observed)?;
+        }
         promote_space_stage_transaction(&transaction, space_uri, actor_did, retained_at)?;
         transaction.commit().map_err(StoreError::Open)
     }
@@ -723,6 +953,7 @@ impl EncryptedStore {
                 params![space_uri, actor_did, boundary],
             )
             .map_err(StoreError::Open)?;
+        transaction.execute("DELETE FROM space_sync_stage_lifetime WHERE space_uri = ?1 AND did = ?2 AND boundary = ?3", params![space_uri, actor_did, boundary]).map_err(StoreError::Open)?;
         transaction.commit().map_err(StoreError::Open)
     }
 
@@ -737,10 +968,19 @@ impl EncryptedStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StoreError::Open)?;
+        ensure_stage_live(
+            &transaction,
+            &page.space_uri,
+            &page.actor_did,
+            &page.updated_at,
+        )?;
+        let mut progressed = false;
         for mutation in mutations {
-            stage_space_mutation(&transaction, &page, mutation)?;
+            progressed |= stage_space_mutation(&transaction, &page, mutation)?;
         }
-        update_space_stage_checkpoint(&transaction, &page)?;
+        progressed |= update_space_stage_checkpoint(&transaction, &page)?;
+        record_stage_lifetime(&transaction, &page, progressed)?;
+        enforce_stage_budget(&transaction, &page)?;
         transaction.commit().map_err(StoreError::Open)
     }
 }
@@ -1060,5 +1300,342 @@ mod revocation_tests {
             ));
         }
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod stage_limit_tests {
+    use super::*;
+    use crate::store::StorageKey;
+
+    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const DID: &str = "did:plc:fayevalentine";
+    const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
+    const NOW: &str = "2026-09-22T00:00:00.000Z";
+
+    fn store(maximum: i64) -> EncryptedStore {
+        let store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+        store
+            .connection
+            .execute(
+                "INSERT INTO retention_metadata (key, value) VALUES ('projection_max_bytes', ?1)",
+                [maximum],
+            )
+            .unwrap();
+        store
+    }
+
+    fn page(cursor: &str) -> SpaceStagePage {
+        SpaceStagePage {
+            space_uri: SPACE.to_owned(),
+            actor_did: DID.to_owned(),
+            boundary: BOUNDARY.to_owned(),
+            next_cursor: Some(cursor.to_owned()),
+            updated_at: NOW.to_owned(),
+        }
+    }
+
+    fn upsert(index: usize, payload_bytes: usize) -> SpaceStageMutation {
+        SpaceStageMutation::Upsert {
+            uri: format!("{SPACE}/{DID}/zone.stratos.feed.post/{index}"),
+            cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+            sort_at: NOW.to_owned(),
+            indexed_at: NOW.to_owned(),
+            record_json: vec![b'x'; payload_bytes],
+            blob_refs_json: b"[]".to_vec(),
+        }
+    }
+
+    #[test]
+    fn stage_budget_persists_across_small_passes_and_rolls_back_rejected_page() {
+        let mut store = store(8_000);
+        let mut accepted = 0;
+        for index in 0..10 {
+            match store.stage_space_page(page(&format!("cursor-{index}")), vec![upsert(index, 400)])
+            {
+                Ok(()) => accepted += 1,
+                Err(StoreError::SpaceStageLimit) => break,
+                Err(error) => panic!("unexpected stage error: {error:?}"),
+            }
+        }
+        assert!(accepted > 1 && accepted < 10);
+        let rows: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(rows, accepted);
+        assert_eq!(
+            store.space_sync_cursor(BOUNDARY, SPACE, DID).unwrap(),
+            Some(format!("cursor-{}", accepted - 1))
+        );
+    }
+
+    #[test]
+    fn stage_replacement_and_delete_charge_current_payload_only() {
+        let mut store = store(6_000);
+        store
+            .stage_space_page(page("first"), vec![upsert(0, 600)])
+            .unwrap();
+        let original: i64 = store
+            .connection
+            .query_row(
+                "SELECT length(record_json) FROM space_sync_stage",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        store
+            .stage_space_page(page("second"), vec![upsert(0, 20)])
+            .unwrap();
+        let reduced: i64 = store
+            .connection
+            .query_row(
+                "SELECT length(record_json) FROM space_sync_stage",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reduced, 20);
+        assert!(original > reduced);
+        store
+            .stage_space_page(
+                page("third"),
+                vec![SpaceStageMutation::Delete {
+                    uri: format!("{SPACE}/{DID}/zone.stratos.feed.post/0"),
+                }],
+            )
+            .unwrap();
+        let (deleted, bytes): (i64, Option<i64>) = store
+            .connection
+            .query_row(
+                "SELECT deleted, length(record_json) FROM space_sync_stage",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(deleted, 1);
+        assert_eq!(bytes, None);
+    }
+
+    #[test]
+    fn expired_stage_removes_rows_checkpoint_and_pending_together() {
+        let mut store = store(16_000);
+        store
+            .stage_space_page(page("partial"), vec![upsert(0, 100)])
+            .unwrap();
+        let mut terminal = page("partial");
+        terminal.next_cursor = None;
+        store.stage_space_page(terminal, Vec::new()).unwrap();
+        store
+            .compact_projection(
+                "2026-09-24T00:00:00.000Z",
+                "2026-09-25T00:00:00.000Z",
+                16_000,
+                128,
+            )
+            .unwrap();
+        for table in [
+            "space_sync_stage",
+            "space_sync_stage_cursor",
+            "space_sync_pending_verification",
+            "space_sync_stage_lifetime",
+        ] {
+            let count: i64 = store
+                .connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table}");
+        }
+        assert_eq!(store.space_sync_cursor(BOUNDARY, SPACE, DID).unwrap(), None);
+    }
+
+    #[test]
+    fn expired_stage_cannot_resume_after_store_reopen() {
+        let path = std::env::temp_dir().join(format!(
+            "stratos-stage-expiry-{}-{}.sqlite",
+            std::process::id(),
+            time::OffsetDateTime::now_utc().unix_timestamp_nanos(),
+        ));
+        let key = || StorageKey::from_bytes([9; 32]);
+        {
+            let mut store = EncryptedStore::open(&path, key()).unwrap();
+            store
+                .stage_space_page(page("partial"), vec![upsert(0, 100)])
+                .unwrap();
+            store
+                .compact_projection(
+                    "2026-09-24T00:00:00.000Z",
+                    "2026-09-25T00:00:00.000Z",
+                    16_000,
+                    128,
+                )
+                .unwrap();
+        }
+        let store = EncryptedStore::open(&path, key()).unwrap();
+        assert_eq!(store.space_sync_cursor(BOUNDARY, SPACE, DID).unwrap(), None);
+        let count: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM space_sync_stage_lifetime",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+        drop(store);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn stage_expires_before_compactor_tick_on_a_later_page() {
+        let mut store = store(16_000);
+        store
+            .stage_space_page(page("partial"), vec![upsert(0, 100)])
+            .unwrap();
+        store
+            .compact_projection(NOW, "2026-09-22T00:00:01.000Z", 16_000, 128)
+            .unwrap();
+        let mut late = page("later");
+        late.updated_at = "2026-09-22T00:00:02.000Z".to_owned();
+        assert!(matches!(
+            store.stage_space_page(late, vec![upsert(1, 100)]),
+            Err(StoreError::ExpiredSpaceStage)
+        ));
+        assert_eq!(
+            store.space_sync_cursor(BOUNDARY, SPACE, DID).unwrap(),
+            Some("partial".to_owned())
+        );
+    }
+
+    #[test]
+    fn retrying_identical_page_does_not_extend_stage_lifetime() {
+        let mut store = store(16_000);
+        store
+            .stage_space_page(page("partial"), vec![upsert(0, 100)])
+            .unwrap();
+        let mut retry = page("partial");
+        retry.updated_at = "2026-09-23T00:00:00.000Z".to_owned();
+        let mut retried_record = upsert(0, 100);
+        if let SpaceStageMutation::Upsert {
+            sort_at,
+            indexed_at,
+            ..
+        } = &mut retried_record
+        {
+            *sort_at = retry.updated_at.clone();
+            *indexed_at = retry.updated_at.clone();
+        }
+        store.stage_space_page(retry, vec![retried_record]).unwrap();
+        let (created, progress): (String, String) = store
+            .connection
+            .query_row(
+                "SELECT created_at, last_progress_at FROM space_sync_stage_lifetime",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(created, NOW);
+        assert_eq!(progress, NOW);
+    }
+
+    #[test]
+    fn global_stage_budget_counts_many_individually_small_targets() {
+        let mut store = store(4_000);
+        let mut accepted = 0;
+        for index in 0..20 {
+            let did = format!("did:web:actor{index}.example.test");
+            let page = SpaceStagePage {
+                space_uri: SPACE.to_owned(),
+                actor_did: did.clone(),
+                boundary: BOUNDARY.to_owned(),
+                next_cursor: Some(format!("cursor-{index}")),
+                updated_at: NOW.to_owned(),
+            };
+            let mutation = SpaceStageMutation::Upsert {
+                uri: format!("{SPACE}/{did}/zone.stratos.feed.post/0"),
+                cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+                sort_at: NOW.to_owned(),
+                indexed_at: NOW.to_owned(),
+                record_json: vec![b'x'; 250],
+                blob_refs_json: b"[]".to_vec(),
+            };
+            match store.stage_space_page(page, vec![mutation]) {
+                Ok(()) => accepted += 1,
+                Err(StoreError::SpaceStageLimit) => break,
+                Err(error) => panic!("unexpected stage error: {error:?}"),
+            }
+        }
+        assert!(accepted > 1 && accepted < 20);
+        let rows: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(rows, accepted);
+    }
+
+    #[test]
+    fn over_budget_target_does_not_block_an_unrelated_target() {
+        let mut store = store(8_000);
+        store
+            .stage_space_page(page("first"), vec![upsert(0, 400)])
+            .unwrap();
+        store
+            .stage_space_page(page("second"), vec![upsert(1, 400)])
+            .unwrap();
+        assert!(matches!(
+            store.stage_space_page(page("third"), vec![upsert(2, 400)]),
+            Err(StoreError::SpaceStageLimit),
+        ));
+        let did = "did:web:jetblack.example.test";
+        let other = SpaceStagePage {
+            space_uri: SPACE.to_owned(),
+            actor_did: did.to_owned(),
+            boundary: BOUNDARY.to_owned(),
+            next_cursor: Some("other".to_owned()),
+            updated_at: NOW.to_owned(),
+        };
+        store
+            .stage_space_page(
+                other,
+                vec![SpaceStageMutation::Delete {
+                    uri: format!("{SPACE}/{did}/zone.stratos.feed.post/0"),
+                }],
+            )
+            .unwrap();
+        assert_eq!(
+            store.space_sync_cursor(BOUNDARY, SPACE, did).unwrap(),
+            Some("other".to_owned())
+        );
+    }
+
+    #[test]
+    fn oversized_legacy_stage_fails_atomic_promotion_closed() {
+        let mut store = store(16_000);
+        let mut terminal = page("unused");
+        terminal.next_cursor = None;
+        store.stage_space_page(terminal, Vec::new()).unwrap();
+        let transaction = store.connection.transaction().unwrap();
+        for index in 0..=MAX_STAGED_ROWS_PER_TARGET {
+            transaction.execute(
+                "INSERT INTO space_sync_stage (space_uri, did, uri, boundary, deleted, updated_at) VALUES (?1, ?2, ?3, ?4, 1, ?5)",
+                params![SPACE, DID, format!("{SPACE}/{DID}/zone.stratos.feed.post/{index}"), BOUNDARY, NOW],
+            ).unwrap();
+        }
+        transaction.commit().unwrap();
+        assert!(matches!(
+            store.promote_verified_space_stage(SPACE, DID, NOW),
+            Err(StoreError::SpaceStageLimit)
+        ));
+        let published: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM post", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(published, 0);
     }
 }

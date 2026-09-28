@@ -32,6 +32,75 @@ impl EncryptedStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StoreError::Open)?;
+        transaction
+            .execute(
+                "INSERT INTO retention_metadata (key, value) VALUES ('projection_max_bytes', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [max_bytes],
+            )
+            .map_err(StoreError::Open)?;
+        let now =
+            time::OffsetDateTime::parse(as_of, &time::format_description::well_known::Rfc3339)
+                .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        let maximum = time::OffsetDateTime::parse(
+            maximum_retained_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        let maximum_age_ms = i64::try_from((maximum - now).whole_milliseconds())
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        if maximum_age_ms <= 0 {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        transaction
+            .execute(
+                "INSERT INTO retention_metadata (key, value) VALUES ('projection_max_age_ms', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [maximum_age_ms],
+            )
+            .map_err(StoreError::Open)?;
+        let cutoff = now
+            .checked_sub(maximum - now)
+            .ok_or(StoreError::InvalidProjectionMutation)?;
+        let cutoff = format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+            cutoff.year(),
+            u8::from(cutoff.month()),
+            cutoff.day(),
+            cutoff.hour(),
+            cutoff.minute(),
+            cutoff.second(),
+            cutoff.millisecond()
+        );
+        let expired_targets: Vec<(String, String)> = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT space_uri, did FROM space_sync_stage_lifetime
+                 WHERE created_at <= ?1 OR last_progress_at <= ?1
+                 ORDER BY last_progress_at, space_uri, did LIMIT ?2",
+                )
+                .map_err(StoreError::Open)?;
+            statement
+                .query_map(params![cutoff, limit], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(StoreError::Open)?
+                .collect::<Result<_, _>>()
+                .map_err(StoreError::Open)?
+        };
+        for (space_uri, did) in &expired_targets {
+            for table in [
+                "space_sync_stage",
+                "space_sync_stage_cursor",
+                "space_sync_pending_verification",
+                "space_sync_stage_lifetime",
+            ] {
+                transaction
+                    .execute(
+                        &format!("DELETE FROM {table} WHERE space_uri = ?1 AND did = ?2"),
+                        params![space_uri, did],
+                    )
+                    .map_err(StoreError::Open)?;
+            }
+        }
         let expired = transaction
             .execute(
                 "DELETE FROM post WHERE uri IN (SELECT uri FROM post WHERE retained_at <= ?1 OR retained_at > ?2 ORDER BY retained_at ASC, uri ASC LIMIT ?3)",
@@ -41,13 +110,17 @@ impl EncryptedStore {
         let deleted = if expired != 0 {
             expired
         } else {
-            let bytes: i64 = transaction
+            let published_bytes: i64 = transaction
                 .query_row(
                     "SELECT COALESCE(SUM(projection_bytes), 0) FROM post",
                     [],
                     |row| row.get(0),
                 )
                 .map_err(StoreError::Open)?;
+            let staged_bytes = super::space::stage_usage(&transaction, None, None)?.1;
+            let bytes = published_bytes
+                .checked_add(staged_bytes)
+                .ok_or(StoreError::SpaceStageLimit)?;
             if bytes <= max_bytes {
                 0
             } else {
@@ -66,17 +139,29 @@ impl EncryptedStore {
                 |row| row.get(0),
             )
             .map_err(StoreError::Open)?;
-        let bytes_remaining: i64 = transaction
+        let published_bytes: i64 = transaction
             .query_row(
                 "SELECT COALESCE(SUM(projection_bytes), 0) FROM post",
                 [],
                 |row| row.get(0),
             )
             .map_err(StoreError::Open)?;
+        let staged_bytes = super::space::stage_usage(&transaction, None, None)?.1;
+        let bytes_remaining = published_bytes
+            .checked_add(staged_bytes)
+            .ok_or(StoreError::SpaceStageLimit)?;
         transaction.commit().map_err(StoreError::Open)?;
+        if !expired_targets.is_empty() {
+            eprintln!(
+                "event=space_stage_cleanup expired_targets={}",
+                expired_targets.len()
+            );
+        }
         Ok(ProjectionCompaction {
             deleted: deleted as u64,
-            has_more: expired_remaining || bytes_remaining > max_bytes,
+            has_more: expired_remaining
+                || bytes_remaining > max_bytes
+                || expired_targets.len() == limit as usize,
         })
     }
 
@@ -109,6 +194,12 @@ impl EncryptedStore {
         transaction
             .execute(
                 "DELETE FROM space_sync_stage WHERE boundary = ?1",
+                [boundary],
+            )
+            .map_err(StoreError::Open)?;
+        transaction
+            .execute(
+                "DELETE FROM space_sync_stage_lifetime WHERE boundary = ?1",
                 [boundary],
             )
             .map_err(StoreError::Open)?;

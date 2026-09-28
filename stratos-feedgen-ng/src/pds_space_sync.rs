@@ -224,9 +224,24 @@ impl PdsSpaceSynchronizer {
                     prepare_space_page(target, response.page, observed_at)
                         .map_err(PdsSpaceSyncError::Stage)
                 })?;
-            lifecycle
-                .stage_pds_space_page(prepared)
-                .map_err(PdsSpaceSyncError::Stage)?;
+            if let Err(error) = lifecycle.stage_pds_space_page(prepared) {
+                if matches!(
+                    error,
+                    SpaceSyncError::Store(
+                        StoreError::SpaceStageLimit | StoreError::ExpiredSpaceStage
+                    )
+                ) {
+                    lifecycle
+                        .discard_pds_space_stage(&target.boundary, &target.space_uri, &target.did)
+                        .map_err(PdsSpaceSyncError::Store)?;
+                    if matches!(error, SpaceSyncError::Store(StoreError::ExpiredSpaceStage)) {
+                        eprintln!("event=space_stage_expired rejected_targets=1");
+                    } else {
+                        eprintln!("event=space_stage_limit rejected_targets=1");
+                    }
+                }
+                return Err(PdsSpaceSyncError::Stage(error));
+            }
             if !terminal {
                 cursor = next_cursor;
                 continue;
@@ -241,15 +256,28 @@ impl PdsSpaceSynchronizer {
                 .await;
             return match verification {
                 CommitVerification::Verified => {
-                    lifecycle
-                        .promote_pds_space_stage_at_generation(
-                            &target.boundary,
-                            &target.space_uri,
-                            &target.did,
-                            retained_at,
-                            target.generation,
-                        )
-                        .map_err(PdsSpaceSyncError::Store)?;
+                    if let Err(error) = lifecycle.promote_pds_space_stage_at_generation(
+                        &target.boundary,
+                        &target.space_uri,
+                        &target.did,
+                        retained_at,
+                        target.generation,
+                    ) {
+                        if matches!(
+                            error,
+                            StoreError::SpaceStageLimit | StoreError::ExpiredSpaceStage
+                        ) {
+                            lifecycle
+                                .discard_pds_space_stage(
+                                    &target.boundary,
+                                    &target.space_uri,
+                                    &target.did,
+                                )
+                                .map_err(PdsSpaceSyncError::Store)?;
+                            eprintln!("event=space_stage_promotion_limit rejected_targets=1");
+                        }
+                        return Err(PdsSpaceSyncError::Store(error));
+                    }
                     Ok(PdsSpaceSyncOutcome::Promoted)
                 }
                 CommitVerification::DeferredKeyResolution => {

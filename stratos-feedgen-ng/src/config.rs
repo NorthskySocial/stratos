@@ -273,7 +273,13 @@ fn parse_retention(
         });
     }
     let max_age_ms = required_positive_u64(max_age_ms, "FEEDGEN_PROJECTION_MAX_AGE_MS")?;
+    if max_age_ms < 1_000 || max_age_ms % 1_000 != 0 {
+        return Err(ConfigError::InvalidProjectionRetention);
+    }
     let max_bytes = required_positive_u64(max_bytes, "FEEDGEN_PROJECTION_MAX_BYTES")?;
+    if max_bytes > i64::MAX as u64 {
+        return Err(ConfigError::InvalidProjectionRetention);
+    }
     Ok(ProjectionRetention {
         max_age: Duration::from_millis(max_age_ms),
         max_bytes,
@@ -401,7 +407,7 @@ mod tests {
 
     use super::{
         ConfigError, FeedgenConfig, StorageProfile, StorageValues, load_feed_registry_from_values,
-        parse_metrics_export_endpoint,
+        parse_metrics_export_endpoint, parse_retention,
     };
 
     #[test]
@@ -429,6 +435,31 @@ mod tests {
                 "{endpoint}"
             );
         }
+    }
+
+    #[test]
+    fn durable_retention_rejects_subsecond_age_and_unrepresentable_budget() {
+        let storage = StorageProfile::EncryptedVolume {
+            database_path: "/tmp/feedgen.sqlite".into(),
+            key_path: "/tmp/feedgen.key".into(),
+            writer_lock_path: "/tmp/feedgen.lock".into(),
+        };
+        assert_eq!(
+            parse_retention(&storage, Some("999".to_owned()), Some("1024".to_owned())),
+            Err(ConfigError::InvalidProjectionRetention)
+        );
+        assert_eq!(
+            parse_retention(&storage, Some("1500".to_owned()), Some("1024".to_owned())),
+            Err(ConfigError::InvalidProjectionRetention)
+        );
+        assert_eq!(
+            parse_retention(
+                &storage,
+                Some("1000".to_owned()),
+                Some((i64::MAX as u64 + 1).to_string())
+            ),
+            Err(ConfigError::InvalidProjectionRetention)
+        );
     }
 
     fn storage(
