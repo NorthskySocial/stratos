@@ -226,8 +226,10 @@ space delegation sends `Authorization: Bearer <delegation JWT>`, a standalone
 `DPoP` proof for this procedure, and a JSON body containing the `space` URI.
 The proof must omit `nonce` and `ath`. The delegation targets that exact space
 and is consumed after membership, app access, and proof checks pass. Existing
-clients may continue to send `delegationToken` in the JSON body. A request
-cannot send both forms. This custom Stratos endpoint does not advertise the
+clients may continue to send `delegationToken` in the JSON body with the same
+standalone `DPoP` proof and no `Authorization` header. A body delegation
+combined with any `Authorization` header, including a DPoP session token, is
+rejected. This custom Stratos endpoint does not advertise the
 upstream `com.atproto.space.*` namespace.
 
 ---

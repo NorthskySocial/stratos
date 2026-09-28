@@ -2194,7 +2194,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "procedure",
-      "description": "Issue a space credential (JWT) for a space the caller is a member of. The credential is multi-use until it expires and is bound to the caller's DPoP key (cnf.jkt, RFC 9449): it must be presented under the DPoP auth scheme with a per-request proof signed by that key. It is signed by the space authority's signing key so any repo host can verify it without contacting the authority. A client may present a space delegation as a Bearer Authorization header with a standalone nonce-free DPoP proof that omits ath, or as delegationToken in the JSON body for existing clients. Both forms together are rejected. Otherwise identity comes from the DPoP-authenticated user and the session proof key is bound. Membership is checked live against the enrollment store. App-axis (client attestation) gating is enforced here: spaces configured with an app allow-list require a valid client attestation whose attested client_id is listed; spaces that are open ignore any attestation supplied.",
+      "description": "Issue a space credential (JWT) for a space the caller is a member of. The credential is multi-use until it expires and is bound to the caller's DPoP key (cnf.jkt, RFC 9449): it must be presented under the DPoP auth scheme with a per-request proof signed by that key. It is signed by the space authority's signing key so any repo host can verify it without contacting the authority. A client may present a space delegation as a Bearer Authorization header with a standalone nonce-free DPoP proof that omits ath, or as delegationToken in the JSON body for existing clients with the same proof and no Authorization header. A body delegation combined with any Authorization header, including a DPoP session token, is rejected. Without delegation, identity comes from the DPoP-authenticated user and the session proof key is bound. Membership is checked live against the enrollment store. App-axis (client attestation) gating is enforced here: spaces configured with an app allow-list require a valid client attestation whose attested client_id is listed; spaces that are open ignore any attestation supplied.",
       "input": {
         "encoding": "application/json",
         "schema": {
@@ -2207,7 +2207,7 @@ export const stratosLexicons: LexiconDoc[] = [
             },
             "delegationToken": {
               "type": "string",
-              "description": "Compatibility transport for a space-delegation JWT. New clients send the delegation in a Bearer Authorization header. The token target must equal space. Do not send both forms."
+              "description": "Compatibility transport for a space-delegation JWT. New clients send the delegation in a Bearer Authorization header. The token target must equal space. When this field is present, omit Authorization entirely; a standalone DPoP proof is still required."
             },
             "clientAttestation": {
               "type": "string",
