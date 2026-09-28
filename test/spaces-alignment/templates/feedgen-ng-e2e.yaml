@@ -1,0 +1,223 @@
+services:
+  feedgen-e2e-identity:
+    build:
+      context: .
+      dockerfile: stacks/feedgen-ng-local/identity.Dockerfile
+    init: true
+    user: '0:0'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    command:
+      [
+        'deno',
+        'run',
+        '--cached-only',
+        '--allow-env=SANDBOX_DOMAIN,FEEDGEN_HOST_LABEL',
+        '--allow-read=/run/sandbox-secrets/feedgen-signing-key',
+        '--allow-write=/runtime',
+        '/app/feedgen-identity.mjs',
+      ]
+    environment:
+      FEEDGEN_HOST_LABEL: feedgen-e2e
+    volumes:
+      - feedgen-e2e-runtime:/runtime
+
+  feedgen-e2e-valkey:
+    image: valkey/valkey:8-alpine
+    user: '999:1000'
+    working_dir: /data
+    command: ['valkey-server', '--save', '', '--appendonly', 'no']
+    read_only: true
+    tmpfs:
+      - /data:rw,noexec,nosuid,size=32m,uid=999,gid=1000,mode=0750
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  feedgen-e2e-pds-spaces:
+    image: ${SPACES_PDS_IMAGE_ID}
+    init: true
+    entrypoint: ['dumb-init', '--', 'sh', '-ec']
+    command:
+      - |-
+        export PDS_HOSTNAME="spaces-pds-e2e.$${SANDBOX_DOMAIN}"
+        export PDS_DID_PLC_URL="$${SPACES_PDS_PLC_URL}"
+        export PDS_JWT_SECRET="$${SPACES_PDS_JWT_SECRET}"
+        export PDS_ADMIN_PASSWORD="$${SPACES_PDS_ADMIN_PASSWORD}"
+        export PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX="$${SPACES_PDS_ROTATION_KEY}"
+        export PDS_SERVICE_HANDLE_DOMAINS=".spaces-pds-e2e.$${SANDBOX_DOMAIN}"
+        exec node --heapsnapshot-signal=SIGUSR2 --enable-source-maps --import=@atproto/pds/telemetry index.ts
+    environment:
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+      LOG_LEVEL: warn
+      PDS_PORT: '3000'
+      PDS_DATA_DIRECTORY: /app/data
+      PDS_ACTOR_STORE_DIRECTORY: /app/data/actors
+      PDS_BLOBSTORE_DISK_LOCATION: /app/data/blocks
+      PDS_BLOBSTORE_DISK_TMP_LOCATION: /app/data/blob-tmp
+      PDS_DEV_MODE: 'true'
+      PDS_DISABLE_SSRF_PROTECTION: 'true'
+      PDS_RATE_LIMITS_ENABLED: 'false'
+      PDS_INVITE_REQUIRED: 'true'
+      PDS_CRAWLERS: ''
+    volumes:
+      - feedgen-e2e-pds-spaces-data:/app/data
+    depends_on:
+      plc:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3000/xrpc/_health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  feedgen-e2e-stratos:
+    build:
+      context: ../stratos
+      dockerfile: ../atmosphereinabox/stacks/feedgen-ng-local/stratos.Dockerfile
+      target: stratos
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    command:
+      - sh
+      - -ec
+      - |-
+        test -r /runtime/service-enrollments.json
+        export STRATOS_SERVICE_DID="did:web:stratos-e2e.$${SANDBOX_DOMAIN}"
+        export STRATOS_PUBLIC_URL="https://stratos-e2e.$${SANDBOX_DOMAIN}"
+        exec node dist/bin/stratos.js
+    environment:
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+      STRATOS_PORT: '3100'
+      STRATOS_VALKEY_URL: redis://feedgen-e2e-valkey:6379
+      STRATOS_ALLOWED_DOMAINS: general
+      STRATOS_RESERVED_DOMAIN: general
+      STRATOS_AUTO_ENROLL_DOMAINS: general
+      STRATOS_ENROLLMENT_MODE: open
+      STRATOS_RETENTION_DAYS: '1'
+      STRATOS_DEV_MODE: 'false'
+      STORAGE_BACKEND: sqlite
+      STRATOS_DATA_DIR: /app/data
+      STRATOS_SERVICE_ENROLLMENTS_FILE: /runtime/service-enrollments.json
+      LOG_LEVEL: info
+    volumes:
+      - feedgen-e2e-stratos-data:/app/data
+      - feedgen-e2e-runtime:/runtime:ro
+    depends_on:
+      feedgen-e2e-identity:
+        condition: service_completed_successfully
+      feedgen-e2e-valkey:
+        condition: service_healthy
+
+  feedgen-e2e-rust:
+    build:
+      context: ../stratos
+      dockerfile: stratos-feedgen-ng/Dockerfile
+    init: true
+    user: '65532:65532'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    cpus: '1.0'
+    mem_limit: 512m
+    pids_limit: 128
+    ulimits:
+      core: 0
+      nofile:
+        soft: 1024
+        hard: 1024
+    entrypoint:
+      - sh
+      - -ec
+      - |-
+        test -r /runtime/feedgen.env
+        set -a
+        . /runtime/feedgen.env
+        set +a
+        umask 077
+        cp /run/sandbox-secrets/feedgen-signing-key /tmp/feedgen-signing-key
+        cp /run/sandbox-secrets/feedgen-storage-key /tmp/feedgen-storage-key
+        chmod 0600 /tmp/feedgen-signing-key /tmp/feedgen-storage-key
+        export FEEDGEN_SIGNING_KEY_FILE=/tmp/feedgen-signing-key
+        export FEEDGEN_STORAGE_KEY_PATH=/tmp/feedgen-storage-key
+        export FEEDGEN_SERVICE_DID="did:web:feedgen-e2e.$${SANDBOX_DOMAIN}"
+        export FEEDGEN_PUBLIC_URL="https://feedgen-e2e.$${SANDBOX_DOMAIN}"
+        export STRATOS_SERVICE_URL="https://stratos-e2e.$${SANDBOX_DOMAIN}"
+        export STRATOS_PUBLIC_URL="https://stratos-e2e.$${SANDBOX_DOMAIN}"
+        export STRATOS_SERVICE_DID="did:web:stratos-e2e.$${SANDBOX_DOMAIN}"
+        export FEEDGEN_FEEDS_YAML="feeds:
+          - id: general
+            boundary: did:web:stratos-e2e.$${SANDBOX_DOMAIN}/general
+            displayName: General"
+        exec /usr/local/bin/stratos-feedgen-ng
+    environment:
+      SSL_CERT_FILE: /ca/root.crt
+      FEEDGEN_PORT: '3000'
+      FEEDGEN_SIGNING_KEY_FILE: /run/sandbox-secrets/feedgen-signing-key
+      FEEDGEN_STORAGE_BACKEND: sqlite
+      FEEDGEN_STORAGE_PROFILE: encrypted-volume
+      FEEDGEN_SQLITE_PATH: /var/lib/feedgen/projection.sqlite
+      FEEDGEN_STORAGE_KEY_PATH: /run/sandbox-secrets/feedgen-storage-key
+      FEEDGEN_WRITER_LOCK_PATH: /var/lib/feedgen/projection.sqlite.writer-lock
+      FEEDGEN_PROJECTION_MAX_AGE_MS: '86400000'
+      FEEDGEN_PROJECTION_MAX_BYTES: '33554432'
+      FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS: '4'
+    volumes:
+      - feedgen-e2e-rust-data:/var/lib/feedgen
+      - feedgen-e2e-runtime:/runtime:ro
+    depends_on:
+      feedgen-e2e-stratos:
+        condition: service_healthy
+
+  feedgen-e2e-browser:
+    profiles: ['spaces-alignment-test']
+    build:
+      context: .
+      dockerfile: stacks/feedgen-ng-e2e-browser.Dockerfile
+    init: true
+    user: '1001:1001'
+    read_only: true
+    shm_size: 256m
+    pids_limit: 128
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    environment:
+      XDG_CONFIG_HOME: /tmp/config
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+    volumes:
+      - ./state/browser-accounts.json:/sandbox-state/accounts.json:ro
+    depends_on:
+      feedgen-e2e-pds-spaces:
+        condition: service_healthy
+      feedgen-e2e-rust:
+        condition: service_started
+      feedgen-e2e-clubhouse:
+        condition: service_healthy
+
+volumes:
+  feedgen-e2e-stratos-data: {}
+  feedgen-e2e-rust-data: {}
+  feedgen-e2e-runtime: {}
+  feedgen-e2e-pds-spaces-data: {}

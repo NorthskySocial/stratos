@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "mutation": "stryker run",
     "test:e2e": "playwright test",
     "test:e2e:docker": "./scripts/e2e-docker.sh"
   },
@@ -27,6 +28,8 @@
     "@northskysocial/stratos-core": "workspace:*"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@eslint/js": "^10.0.1",
     "@northskysocial/stratos-client": "workspace:*",
     "@playwright/test": "^1.60.0",
