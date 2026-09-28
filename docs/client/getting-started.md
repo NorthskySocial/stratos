@@ -116,7 +116,10 @@ Using `@atproto/api` directly:
 import { Agent } from '@atproto/api'
 import type { OAuthSession } from '@atproto/oauth-client-browser'
 
-function createStratosAgent(session: OAuthSession, serviceUrl: string): Agent {
+function createRepositoryAgent(
+  session: OAuthSession,
+  serviceUrl: string,
+): Agent {
   return new Agent((url: string, init: RequestInit) => {
     const fullUrl = new URL(url, serviceUrl)
     return session.fetchHandler(fullUrl.href, init)
@@ -132,10 +135,10 @@ const target = resolveRepositoryTarget(enrollment, {
   sessionPdsUrl: pdsUrl,
 })
 if (target.kind === 'unresolved') throw new Error(target.reason)
-const stratosAgent = createStratosAgent(session, target.url)
+const repositoryAgent = createRepositoryAgent(session, target.url)
 
 if (target.kind === 'stratos')
-  await stratosAgent.com.atproto.repo.createRecord({
+  await repositoryAgent.com.atproto.repo.createRecord({
     repo: userDid,
     collection: 'zone.stratos.feed.post',
     record: {
@@ -188,9 +191,9 @@ URL.
 | `com.atproto.repo.getRecord`         | Yes (reads private records)       |
 | `com.atproto.repo.listRecords`       | Yes (lists private collections)   |
 | `com.atproto.repo.describeRepo`      | Yes (describes private repo)      |
-| `com.atproto.repo.createRecord`      | Yes (writes to Stratos)           |
-| `com.atproto.repo.deleteRecord`      | Yes (deletes from Stratos)        |
-| `com.atproto.repo.applyWrites`       | Yes (batch writes)                |
+| `com.atproto.repo.createRecord`      | Stratos custody only              |
+| `com.atproto.repo.deleteRecord`      | Stratos custody only              |
+| `com.atproto.repo.applyWrites`       | Stratos custody only              |
 | `com.atproto.sync.getRecord`         | Yes (CAR export for verification) |
 | `zone.stratos.space.listBlobs`       | Yes (lists blob CIDs in a space)  |
 | `zone.stratos.sync.getRepo`          | Yes (full repo export as CAR)     |
@@ -210,11 +213,16 @@ that origin rather than the PDS.
 
 ### Transport wrapper
 
+This authority transport applies to `stratos` custody only. For `pds` custody, route to the
+authenticated PDS host with space methods; see [Create a Private Post](#4-create-a-private-post).
+
 ```typescript
 import { createServiceFetchHandler } from '@northskysocial/stratos-client'
 
 // agent.handle is the FetchHandler from your OAuth session
-const handler = createServiceFetchHandler(agent.handle, enrollment.service)
+if (enrollment.custody !== 'stratos')
+  throw new Error('Expected Stratos custody')
+const handler = createServiceFetchHandler(agent.handle, authorityServiceUrl)
 ```
 
 `createServiceFetchHandler` accepts any `FetchHandler` from `@atcute/client` (a function
@@ -223,22 +231,8 @@ pathnames against the target service URL.
 
 ### Client construction
 
-```typescript
-import { Client } from '@atcute/client'
-import { createServiceFetchHandler } from '@northskysocial/stratos-client'
-
-const createServiceClient = (
-  agent: OAuthUserAgent,
-  enrollment: StratosEnrollment | null,
-): Client => {
-  if (enrollment) {
-    return new Client({
-      handler: createServiceFetchHandler(agent.handle, enrollment.service),
-    })
-  }
-  return new Client({ handler: agent })
-}
-```
+Construct the RPC client from the resolved target in [Create a Private Post](#4-create-a-private-post).
+The enrollment's authority `service` URL is not the PDS repository host.
 
 ## Minimum Viable Adoption Path
 
@@ -249,14 +243,15 @@ For apps that want to add basic Stratos support incrementally:
 1. Add enrollment discovery to session establishment
 2. Store enrollment state
 3. Add a Stratos mode toggle (settings or UI chrome)
-4. In record/thread views, when Stratos is active, route `getRecord` / `listRecords` through the
-   service client
-5. Handle empty collections gracefully (enrolled users always have a valid repo, but it may have no
-   records yet)
+4. For Stratos-custody records, route `getRecord` / `listRecords` through the authority client;
+   for PDS-custody space records, use the trusted PDS target
+5. Handle empty Stratos-custody collections gracefully (the enrolled repo may have no records yet)
 
 ### Step 2: Write routing
 
-1. Route `createRecord` / `deleteRecord` / `applyWrites` through service client when active
+1. For `stratos` custody, route repo `createRecord` / `deleteRecord` / `applyWrites` through the
+   authority client; for `pds` custody, use the corresponding space methods on the authenticated
+   PDS target shown in [Create a Private Post](#4-create-a-private-post)
 2. Add scope declarations to OAuth metadata
 3. Add scope selector UI with dependency gating
 
@@ -294,21 +289,10 @@ For a React Native/Expo app like Bluesky's social-app:
 
 ### Agent/transport
 
-In `src/state/session/agent.ts`, the `BskyAppAgent` wraps transport. For Stratos routing, create a
-parallel agent or intercept at the fetch handler level:
-
-```typescript
-import { createServiceFetchHandler } from '@northskysocial/stratos-client'
-import { Client } from '@atcute/client'
-
-const agent = useAgent()
-const { active, enrollment } = useStratos()
-const client = enrollment
-  ? new Client({
-      handler: createServiceFetchHandler(agent.handle, enrollment.service),
-    })
-  : new Client({ handler: agent })
-```
+In `src/state/session/agent.ts`, the `BskyAppAgent` wraps transport. In a query hook, resolve the
+repository target before constructing a client. Use authority repo methods for `stratos` custody;
+use authenticated PDS space methods for `pds` custody. See
+[Create a Private Post](#4-create-a-private-post) for the write route.
 
 ### View integration
 
@@ -317,7 +301,7 @@ const client = enrollment
 | Post thread     | `src/screens/PostThread/index.tsx` | Hydrate from Stratos when viewing boundary-scoped posts |
 | Feed            | `src/state/queries/post-feed.ts`   | Include Stratos records in feed via hydration           |
 | Settings        | `src/screens/Settings/`            | Stratos enrollment status, mode toggle                  |
-| Record creation | Post composer                      | Route `createRecord` through service client             |
+| Record creation | Post composer                      | Select repo or space `createRecord` by custody          |
 
 ### Key differences from pdsls
 
