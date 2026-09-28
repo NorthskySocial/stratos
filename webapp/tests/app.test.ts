@@ -18,10 +18,12 @@ const appState = vi.hoisted(() => {
     return promise
   })
   const createRecord = vi.fn().mockResolvedValue({})
+  const fetchFeedgenPosts = vi.fn().mockResolvedValue({ ok: true, posts: [] })
 
   return {
     session: { sub: 'did:plc:motoko' },
     createRecord,
+    fetchFeedgenPosts,
     fetchRepoPublicPosts,
     resolvePublicPosts: async (requestIndex: number, posts: unknown[]) => {
       const request = publicPostRequests[requestIndex]
@@ -40,6 +42,8 @@ const appState = vi.hoisted(() => {
       publicPostRequests.length = 0
       fetchRepoPublicPosts.mockClear()
       createRecord.mockClear()
+      fetchFeedgenPosts.mockReset()
+      fetchFeedgenPosts.mockResolvedValue({ ok: true, posts: [] })
     },
   }
 })
@@ -91,9 +95,12 @@ vi.mock('../src/lib/feed', () => ({
     ...publicPosts,
     ...stratosPosts,
   ],
-  feedStats: vi.fn(() => ({ postCount: 0, userCount: 0 })),
+  feedStats: vi.fn((posts: unknown[]) => ({
+    postCount: posts.length,
+    userCount: 0,
+  })),
   fetchAppviewStratosPosts: vi.fn(),
-  fetchFeedgenPosts: vi.fn(),
+  fetchFeedgenPosts: appState.fetchFeedgenPosts,
   fetchPublicPosts: vi.fn(),
   fetchRepoPublicPosts: appState.fetchRepoPublicPosts,
   fetchStratosPosts: vi.fn(),
@@ -120,6 +127,15 @@ function feedPost(text: string, rkey: string) {
 describe('App.svelte', () => {
   beforeEach(() => {
     appState.reset()
+    ;(
+      window as Window & {
+        __MOCK_SESSION__?: { sub: string; handle: string; feedgenDid: string }
+      }
+    ).__MOCK_SESSION__ = {
+      sub: 'did:plc:motoko',
+      handle: 'motoko.example',
+      feedgenDid: 'did:web:batou.test',
+    }
   })
 
   it('does not restore a completed feed after its session is deleted', async () => {
@@ -197,5 +213,233 @@ describe('App.svelte', () => {
     expect(screen.getByText('The newest briefing wins.')).toBeInTheDocument()
     expect(screen.queryByText('A late stale briefing.')).not.toBeInTheDocument()
     expect(screen.queryByText('Loading posts…')).not.toBeInTheDocument()
+  })
+
+  it('shows private feed failure alongside public results and recovers on retry', async () => {
+    appState.fetchFeedgenPosts
+      .mockResolvedValueOnce({
+        ok: false,
+        category: 'not-ready',
+        status: 503,
+        retryable: true,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        posts: [feedPost('The Major returns.', 'private')],
+      })
+    render(App)
+    await waitFor(() =>
+      expect(appState.fetchRepoPublicPosts).toHaveBeenCalledTimes(1),
+    )
+    await appState.resolvePublicPosts(0, [
+      feedPost('Public briefing remains.', 'public'),
+    ])
+
+    expect(
+      await screen.findByText(
+        'Your private feed is getting ready. Try again shortly.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Public briefing remains.')).toBeInTheDocument()
+    expect(
+      screen.queryByText('No posts yet. Create your first post above!'),
+    ).not.toBeInTheDocument()
+
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Retry private feed' }),
+    )
+    await waitFor(() =>
+      expect(appState.fetchRepoPublicPosts).toHaveBeenCalledTimes(2),
+    )
+    await appState.resolvePublicPosts(1, [
+      feedPost('Public briefing remains.', 'public'),
+    ])
+    expect(await screen.findByText('The Major returns.')).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        'Your private feed is getting ready. Try again shortly.',
+      ),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows the empty state only after an authorized empty feed succeeds', async () => {
+    appState.fetchFeedgenPosts.mockResolvedValueOnce({ ok: true, posts: [] })
+    render(App)
+    await waitFor(() =>
+      expect(appState.fetchRepoPublicPosts).toHaveBeenCalledTimes(1),
+    )
+    await appState.resolvePublicPosts(0, [])
+    expect(
+      await screen.findByText('No posts yet. Create your first post above!'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Retry private feed' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('does not describe an unavailable private feed as empty', async () => {
+    appState.fetchFeedgenPosts.mockResolvedValueOnce({
+      ok: false,
+      posts: [],
+      category: 'network',
+      retryable: true,
+    })
+    render(App)
+    await waitFor(() =>
+      expect(appState.fetchRepoPublicPosts).toHaveBeenCalledTimes(1),
+    )
+    await appState.resolvePublicPosts(0, [])
+    expect(
+      await screen.findByText(
+        'Could not reach your private feed. Check your connection and try again.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('No posts yet. Create your first post above!'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Retry private feed' }),
+    ).toBeInTheDocument()
+  })
+
+  it.each([
+    [
+      'authorization',
+      'Your private feed access has expired or was denied. Sign out and sign back in, or ask your administrator to check your access.',
+      false,
+    ],
+    [
+      'malformed',
+      'Your private feed returned an invalid response. Try again.',
+      true,
+    ],
+    [
+      'unavailable',
+      'Your private feed request was rejected. Ask your administrator to check the feed configuration.',
+      false,
+    ],
+    ['unavailable', 'Your private feed is unavailable. Try again later.', true],
+  ])(
+    'announces %s failure without showing an empty feed',
+    async (category, message, retryable) => {
+      appState.fetchFeedgenPosts.mockResolvedValueOnce({
+        ok: false,
+        posts: [],
+        category,
+        retryable,
+      })
+      render(App)
+      await waitFor(() =>
+        expect(appState.fetchRepoPublicPosts).toHaveBeenCalledTimes(1),
+      )
+      await appState.resolvePublicPosts(0, [])
+      expect(
+        (await screen.findByText(message)).closest('[role="status"]'),
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByText('No posts yet. Create your first post above!'),
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', { name: 'Retry private feed' }) !== null,
+      ).toBe(retryable)
+    },
+  )
+
+  it('clears private posts on authorization loss and ignores a later refresh after logout', async () => {
+    const privatePost = {
+      ...feedPost('Private Section Nine report.', 'private'),
+      isPrivate: true,
+    }
+    appState.fetchFeedgenPosts
+      .mockResolvedValueOnce({ ok: true, posts: [privatePost] })
+      .mockResolvedValueOnce({
+        ok: false,
+        category: 'authorization',
+        status: 401,
+        retryable: false,
+      })
+    render(App)
+    await waitFor(() =>
+      expect(appState.fetchRepoPublicPosts).toHaveBeenCalledTimes(1),
+    )
+    await appState.resolvePublicPosts(0, [
+      feedPost('Public Section Nine briefing.', 'public'),
+    ])
+    await screen.findByText('Private Section Nine report.')
+    expect(screen.getByText('Posts').parentElement).toHaveTextContent('2')
+    await fireEvent.click(
+      screen
+        .getByText('Private Section Nine report.')
+        .closest('.post-card')!
+        .querySelector('button.reply-btn')!,
+    )
+    expect(
+      screen.getByRole('button', { name: 'Cancel reply' }),
+    ).toBeInTheDocument()
+
+    await fireEvent.input(screen.getByPlaceholderText('Stratos Service URL'), {
+      target: { value: 'https://stratos.example' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Set URL' }))
+    await tick()
+    expect(
+      screen.queryByText('Private Section Nine report.'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByText('Public Section Nine briefing.'),
+    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Cancel reply' }),
+      ).not.toBeInTheDocument(),
+    )
+    await waitFor(() =>
+      expect(screen.getByText('Posts').parentElement).toHaveTextContent('1'),
+    )
+    await waitFor(() =>
+      expect(appState.fetchRepoPublicPosts).toHaveBeenCalledTimes(2),
+    )
+    await appState.resolvePublicPosts(1, [
+      feedPost('Public Section Nine briefing.', 'public'),
+    ])
+    expect(
+      await screen.findByText(
+        'Your private feed access has expired or was denied. Sign out and sign back in, or ask your administrator to check your access.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('Public Section Nine briefing.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Retry private feed' }),
+    ).not.toBeInTheDocument()
+
+    let resolveRefresh!: (value: unknown) => void
+    appState.fetchFeedgenPosts.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve
+        }),
+    )
+    await fireEvent.input(screen.getByPlaceholderText('Write a post…'), {
+      target: { value: 'Togusa requests a fresh briefing.' },
+    })
+    await fireEvent.click(
+      screen.getByRole('button', { name: /^Post$/ }),
+    )
+    await waitFor(() =>
+      expect(appState.fetchRepoPublicPosts).toHaveBeenCalledTimes(3),
+    )
+    await appState.resolvePublicPosts(2, [])
+    await waitFor(() =>
+      expect(appState.fetchFeedgenPosts).toHaveBeenCalledTimes(3),
+    )
+    appState.getOnSessionDeleted()?.()
+    resolveRefresh({ ok: true, posts: [privatePost] })
+    await tick()
+    expect(
+      screen.queryByText('Private Section Nine report.'),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign In' })).toBeInTheDocument()
   })
 })
