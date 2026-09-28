@@ -199,7 +199,7 @@ export const suite: ScenarioSuite = {
         '--rm',
         '--no-deps',
         '--volume',
-        `${context.reportDirectory}:/scenario:ro`,
+        `${context.reportDirectory}:/scenario:ro,Z`,
         '--entrypoint',
         'node',
         'feedgen-e2e-browser',
