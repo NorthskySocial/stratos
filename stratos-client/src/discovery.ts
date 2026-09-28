@@ -5,7 +5,7 @@ import type {
   ComAtprotoRepoListRecords,
 } from '@atcute/atproto'
 import type { ServiceAttestation, StratosEnrollment } from './types.js'
-import { serviceDIDToRkey } from './routing.js'
+import { normalizeHttpsOrigin, serviceDIDToRkey } from './routing.js'
 
 // forked from stratos-core/src/enrollment/discovery.ts — client can't depend
 // on stratos-core (see scripts/check-self-contained.mjs). kept honest by
@@ -70,26 +70,6 @@ const parseBoundaries = (val: unknown): Array<{ value: string }> => {
   return val.filter(isBoundary)
 }
 
-const parseRepoHost = (val: unknown): string | undefined => {
-  if (typeof val !== 'string') return undefined
-  try {
-    const url = new URL(val)
-    if (
-      url.protocol !== 'https:' ||
-      !url.hostname ||
-      url.username ||
-      url.password ||
-      url.pathname !== '/' ||
-      url.search ||
-      url.hash
-    )
-      return undefined
-    return url.origin
-  } catch {
-    return undefined
-  }
-}
-
 /**
  * Parses an enrollment record from a lexicon-compliant object.
  *
@@ -114,7 +94,10 @@ export const parseEnrollmentRecord = (
       : typeof obj.custody === 'string'
         ? obj.custody
         : 'unsupported'
-  const repoHost = custody === 'pds' ? parseRepoHost(obj.repoHost) : undefined
+  const repoHost =
+    custody === 'pds'
+      ? (normalizeHttpsOrigin(obj.repoHost) ?? undefined)
+      : undefined
   return {
     service: obj.service,
     custody,

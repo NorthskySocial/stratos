@@ -88,6 +88,14 @@ describe('discovery parity (client fork vs. core original)', () => {
         },
       ],
       [
+        'pds custody and URL object host',
+        {
+          ...validRecord,
+          custody: 'pds',
+          repoHost: new URL('https://pds.nerv.jp'),
+        },
+      ],
+      [
         'unsupported custody',
         { ...validRecord, custody: 'future', repoHost: 'https://pds.nerv.jp' },
       ],
