@@ -67,25 +67,16 @@ Discover enrollment records from the user's PDS:
 ```typescript
 import {
   getEnrollmentByServiceDid,
-  resolveServiceUrl,
   resolveRepositoryTarget,
 } from '@northskysocial/stratos-client'
 
 const enrollment = await getEnrollmentByServiceDid(did, pdsUrl, serviceDid)
-const serviceUrl = resolveServiceUrl(enrollment, pdsUrl)
-```
-
-`serviceUrl` identifies the Stratos authority. For repository writes, call
-`resolveRepositoryTarget(enrollment, { authorityServiceUrl, authoritativeRepoHost,
-sessionPdsUrl })`. Supply live authority answers or the PDS endpoint bound to the
-authenticated session. The published `repoHost` is a hint and is not attested.
-Stop when the result is `unresolved`.
-
-Or discover the Stratos service endpoint from your app configuration:
-
-```typescript
 const STRATOS_ENDPOINT = 'https://stratos.example.com'
 ```
+
+`STRATOS_ENDPOINT` is a trusted authority endpoint from app configuration. The published
+`enrollment.service` and `repoHost` are hints, not trusted repository hosts. Bind the PDS URL to
+the authenticated session, then resolve the repository target before forwarding credentials.
 
 See [User Enrollment](/client/enrollment) for the full enrollment record schema and all discovery
 variants.
@@ -96,19 +87,27 @@ When using `@atproto/api` with an OAuth session, you **must** wrap the session's
 route requests to the selected repository target URL.
 
 ::: warning Common mistake
-`new Agent(session)` followed by `agent.serviceUrl = new URL(stratosUrl)` will silently send
-requests to the PDS instead of Stratos. The `OAuthSession` always resolves URLs against the OAuth
-token's audience. Always use the wrapper pattern below.
+`new Agent(session)` followed by `agent.serviceUrl = new URL(target.url)` can still resolve
+requests against the OAuth token's audience instead of the selected target. Use the wrapper below
+to pass the target's absolute URL to the authenticated handler.
 :::
 
 Using `stratos-client` (with `@atcute/client`):
 
 ```typescript
+import { Client } from '@atcute/client'
 import { createServiceFetchHandler } from '@northskysocial/stratos-client'
 
-const handler = createServiceFetchHandler(authenticatedHandler, serviceUrl)
+const target = resolveRepositoryTarget(enrollment, {
+  authorityServiceUrl: STRATOS_ENDPOINT,
+  sessionPdsUrl: pdsUrl,
+})
+if (target.kind === 'unresolved') throw new Error(target.reason)
+const handler = createServiceFetchHandler(authenticatedHandler, target.url)
 const rpc = new Client({ handler })
 ```
+
+Use repo methods only when `target.kind === 'stratos'`; use space methods when it is `pds`.
 
 Using `@atproto/api` directly:
 
@@ -118,10 +117,10 @@ import type { OAuthSession } from '@atproto/oauth-client-browser'
 
 function createRepositoryAgent(
   session: OAuthSession,
-  serviceUrl: string,
+  targetUrl: string,
 ): Agent {
   return new Agent((url: string, init: RequestInit) => {
-    const fullUrl = new URL(url, serviceUrl)
+    const fullUrl = new URL(url, targetUrl)
     return session.fetchHandler(fullUrl.href, init)
   })
 }
@@ -130,11 +129,6 @@ function createRepositoryAgent(
 ### 4. Create a Private Post
 
 ```typescript
-const target = resolveRepositoryTarget(enrollment, {
-  authorityServiceUrl: STRATOS_ENDPOINT,
-  sessionPdsUrl: pdsUrl,
-})
-if (target.kind === 'unresolved') throw new Error(target.reason)
 const repositoryAgent = createRepositoryAgent(session, target.url)
 
 if (target.kind === 'stratos')
