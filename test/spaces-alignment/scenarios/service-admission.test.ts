@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { validateAssertions, type ScenarioContext } from '../rules.js'
 import { suite } from './service-admission.js'
 
-function context(output: string, signingKey = 'a'.repeat(64)): ScenarioContext {
+function context(
+  output: string,
+  signingKey = 'a'.repeat(64),
+  exitCode: number | null = 0,
+): ScenarioContext {
   return {
     sandboxDirectory: '/tmp/private-sandbox',
     projectName: 'stratos-private-test',
@@ -25,7 +29,7 @@ function context(output: string, signingKey = 'a'.repeat(64)): ScenarioContext {
         ])
         return `${signingKey}\n`
       }
-      expect(args.slice(0, -1)).toEqual([
+      expect(args.slice(0, -3)).toEqual([
         'compose',
         '--project-name',
         'stratos-private-test',
@@ -36,13 +40,16 @@ function context(output: string, signingKey = 'a'.repeat(64)): ScenarioContext {
         '-e',
         `ADMISSION_SIGNING_KEY=${signingKey}`,
         'feedgen-e2e-stratos',
-        'node',
-        '--input-type=module',
-        '-e',
+        'sh',
+        '-c',
       ])
+      expect(args.at(-3)).toContain('__service_admission_exit__=')
+      expect(args.at(-2)).toBe('_')
       expect(args.at(-1)).toContain('await checkDenied(actor.did)')
       expect(args.at(-1)).toContain('zone.stratos.space.listRepos')
-      return output
+      return exitCode === null
+        ? output
+        : `${output}\n  __service_admission_exit__=${exitCode}  \n`
     },
   }
 }
@@ -76,6 +83,42 @@ describe('service admission sandbox scenario', () => {
         ),
       ),
     ).rejects.toThrow('invalid assertion receipt')
+  })
+
+  it('reports a bounded diagnostic without exposing the signing key', async () => {
+    const signingKey = 'a'.repeat(64)
+    const output = `AssertionError [ERR_ASSERTION]: ${signingKey}\nactual: 401,\nexpected: 200,\n at file:///app/stratos-service/[eval1]:76:10`
+    await expect(suite.run(context(output, signingKey, 1))).rejects.toThrow(
+      'AssertionError ERR_ASSERTION script line 76 actual 401 expected 200',
+    )
+    await expect(suite.run(context(output, signingKey, 1))).rejects.not.toThrow(
+      signingKey,
+    )
+    await expect(
+      suite.run(
+        context('AssertionError\nactual: false\nexpected: true', signingKey, 1),
+      ),
+    ).rejects.toThrow('AssertionError actual false expected true')
+    await expect(
+      suite.run(context('SQLITE_BUSY: database is locked', signingKey, 1)),
+    ).rejects.toThrow('UnknownError SQLITE_BUSY')
+    try {
+      await suite.run(
+        context(
+          `unrelated failure\nsecretactual: 401,\nactual: 401,exposed\nsecretexpected: 200,\nsecret expected: 200,\nexpected: 200,exposed`,
+          signingKey,
+          1,
+        ),
+      )
+      expect.fail('The failed command was admitted')
+    } catch (error) {
+      expect((error as Error).message).toBe(
+        'Service admission command failed: UnknownError',
+      )
+    }
+    await expect(suite.run(context('', signingKey, null))).rejects.toThrow(
+      'no exit marker',
+    )
   })
 
   it('rejects missing or malformed signing keys before making requests', async () => {

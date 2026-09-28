@@ -8,6 +8,26 @@ const requiredAssertions = [
   'reactivated-admitted',
 ] as const
 
+const EXIT_MARKER = '__service_admission_exit__='
+
+function failureDetail(output: string): string {
+  const error =
+    output.match(/\b[A-Z][A-Za-z]{0,40}Error\b/)?.[0] ?? 'UnknownError'
+  const code = output.match(/\b(?:ERR_ASSERTION|SQLITE_BUSY)\b/)?.[0]
+  const line = output.match(/\[eval1\]:(\d+):\d+/)?.[1]
+  const actual = output.match(/^\s*actual: (true|false|\d+),?$/m)?.[1]
+  const expected = output.match(/^\s*expected: (true|false|\d+),?$/m)?.[1]
+  return [
+    error,
+    code,
+    line && `script line ${line}`,
+    actual && `actual ${actual}`,
+    expected && `expected ${expected}`,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
 // This script runs inside the disposable Stratos container. It uses its own
 // sandbox signing identity and database, and emits assertion IDs only.
 const exerciseAdmission = String.raw`
@@ -61,8 +81,18 @@ async function checkAdmitted(did) {
 
 try {
   const members = await store.listEnrollmentsByBoundary(all, { limit: 100 })
-  const actor = members.find((entry) => entry.did !== caller && entry.custody === 'stratos')
-  assert.ok(actor, 'Baseline left no Stratos-custody actor')
+  const actors = await Promise.all(
+    members
+      .filter((entry) => entry.did !== caller && entry.custody === 'stratos')
+      .map(async (entry) => ({
+        did: entry.did,
+        boundaries: await store.getBoundaries(entry.did),
+      })),
+  )
+  const actor = actors.find((entry) => !entry.boundaries.includes(other))
+  const otherActor = actors.find((entry) => entry.boundaries.includes(other))
+  assert.ok(actor, 'Baseline left no Stratos-custody actor outside the second boundary')
+  assert.ok(otherActor, 'Baseline left no Stratos-custody actor in the second boundary')
   await store.unenroll(caller)
   await store.setBoundaries(caller, [other])
   assert.equal(await store.getEnrollment(caller), null)
@@ -86,7 +116,7 @@ try {
   const otherRepos = await call('zone.stratos.space.listRepos', actor.did, other)
   assert.equal(otherRepos.status, 200)
   assert.ok(otherRepos.body.repos.every((entry) => entry.did !== actor.did))
-  assert.ok(otherRepos.body.repos.length > 0, 'Second boundary has no members')
+  assert.ok(otherRepos.body.repos.some((entry) => entry.did === otherActor.did))
   passed.push('active-second-boundary')
 
   await store.updateEnrollment(caller, { active: false })
@@ -141,13 +171,26 @@ export const suite: ScenarioSuite = {
         '-e',
         `ADMISSION_SIGNING_KEY=${signingKey}`,
         'feedgen-e2e-stratos',
-        'node',
-        '--input-type=module',
-        '-e',
+        'sh',
+        '-c',
+        `node --input-type=module -e "$1" 2>&1
+exit_code=$?
+printf '\\n${EXIT_MARKER}%s\\n' "$exit_code"
+exit 0`,
+        '_',
         exerciseAdmission,
       ],
       context.sandboxDirectory,
     )
+    const exitLine = output
+      .split('\n')
+      .map((line) => line.trim())
+      .findLast((line) => line.startsWith(EXIT_MARKER))
+    if (!exitLine) throw new Error('Service admission returned no exit marker')
+    if (exitLine !== `${EXIT_MARKER}0`)
+      throw new Error(
+        `Service admission command failed: ${failureDetail(output)}`,
+      )
     const receipt = output
       .split('\n')
       .map((line) => line.trim())
