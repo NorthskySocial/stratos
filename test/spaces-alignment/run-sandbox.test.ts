@@ -189,7 +189,26 @@ describe('sandbox preflight', () => {
     )
     git(candidateRepo, 'add', '.')
     git(candidateRepo, 'commit', '-qm', 'Add candidate')
+    await writeFile(join(candidateRepo, 'README.md'), 'Faye reviewed update\n')
+    git(candidateRepo, 'add', 'README.md')
+    git(candidateRepo, 'commit', '-qm', 'Refine candidate')
     const candidateSha = git(candidateRepo, 'rev-parse', 'HEAD')
+    git(candidateRepo, 'checkout', '-qb', 'unrelated', baseSha)
+    await writeFile(join(candidateRepo, 'unrelated.txt'), 'Different branch\n')
+    git(candidateRepo, 'add', 'unrelated.txt')
+    git(candidateRepo, 'commit', '-qm', 'Unrelated review base')
+    const unrelatedSha = git(candidateRepo, 'rev-parse', 'HEAD')
+    git(candidateRepo, 'checkout', '-q', candidateSha)
+    git(
+      candidateRepo,
+      'tag',
+      '-a',
+      '-m',
+      'Annotated review base',
+      'review-base',
+      baseSha,
+    )
+    const tagSha = git(candidateRepo, 'rev-parse', 'review-base')
 
     await mkdir(join(sandboxRepo, 'stacks'))
     await mkdir(join(sandboxRepo, 'runtime'))
@@ -227,31 +246,29 @@ describe('sandbox preflight', () => {
       },
     }
     const reviewReceipt = join(root, 'review.json')
-    await writeFile(
-      reviewReceipt,
-      JSON.stringify({
-        candidateSha,
-        baseSha,
-        reviews: {
-          standards: {
-            model: 'gpt-5.6-terra',
-            verdict: 'approved',
-            reviewedSha: candidateSha,
-            sessionId: 'standards-faye',
-            evidenceRef: 'private:standards-faye',
-            unresolvedBlockingFindings: 0,
-          },
-          spec: {
-            model: 'gpt-5.6-terra',
-            verdict: 'approved',
-            reviewedSha: candidateSha,
-            sessionId: 'spec-faye',
-            evidenceRef: 'private:spec-faye',
-            unresolvedBlockingFindings: 0,
-          },
+    const review = {
+      candidateSha,
+      baseSha,
+      reviews: {
+        standards: {
+          model: 'gpt-5.6-terra',
+          verdict: 'approved',
+          reviewedSha: candidateSha,
+          sessionId: 'standards-faye',
+          evidenceRef: 'private:standards-faye',
+          unresolvedBlockingFindings: 0,
         },
-      }),
-    )
+        spec: {
+          model: 'gpt-5.6-terra',
+          verdict: 'approved',
+          reviewedSha: candidateSha,
+          sessionId: 'spec-faye',
+          evidenceRef: 'private:spec-faye',
+          unresolvedBlockingFindings: 0,
+        },
+      },
+    }
+    await writeFile(reviewReceipt, JSON.stringify(review))
     const fakeDeno = `#!/usr/bin/env node
 const fs = require('node:fs')
 if (process.env.RUNNER_TEST_FAIL_STEP && process.argv.includes(process.env.RUNNER_TEST_FAIL_STEP)) process.exit(7)
@@ -309,6 +326,35 @@ if (args.includes('down')) {
         }
       },
     }
+    await writeFile(
+      reviewReceipt,
+      JSON.stringify({ ...review, baseSha: candidateSha }),
+    )
+    await expect(runSandbox(options, dependencies)).rejects.toThrow(
+      'distinct full Git SHAs',
+    )
+    await writeFile(
+      reviewReceipt,
+      JSON.stringify({ ...review, baseSha: unrelatedSha }),
+    )
+    await expect(runSandbox(options, dependencies)).rejects.toThrow(
+      'ancestor of the candidate',
+    )
+    await writeFile(
+      reviewReceipt,
+      JSON.stringify({ ...review, baseSha: 'a'.repeat(40) }),
+    )
+    await expect(runSandbox(options, dependencies)).rejects.toThrow(
+      'not a commit',
+    )
+    await writeFile(
+      reviewReceipt,
+      JSON.stringify({ ...review, baseSha: tagSha }),
+    )
+    await expect(runSandbox(options, dependencies)).rejects.toThrow(
+      'not a commit',
+    )
+    await writeFile(reviewReceipt, JSON.stringify(review))
     await expect(
       runSandbox({ ...options, suite: 'unknown' }, dependencies),
     ).rejects.toThrow('Unknown or unavailable suite')

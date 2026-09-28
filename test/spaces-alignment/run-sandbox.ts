@@ -267,7 +267,6 @@ export async function runSandbox(
   await ensureSeparatePaths(options)
   const source = await realpath(options.source)
   const candidate = await git(source, 'rev-parse', 'HEAD')
-  const base = await git(source, 'rev-parse', 'HEAD^')
   if (await git(source, 'status', '--porcelain', '--untracked-files=no'))
     throw new Error('Candidate tracked work is dirty')
   if (
@@ -277,11 +276,38 @@ export async function runSandbox(
     ))
   )
     throw new Error('Runner must execute from the candidate checkout')
+  const reviewData = JSON.parse(
+    await readFile(options.reviewReceipt, 'utf8'),
+  ) as unknown
+  const claimedBase =
+    reviewData !== null &&
+    typeof reviewData === 'object' &&
+    !Array.isArray(reviewData)
+      ? (reviewData as Record<string, unknown>).baseSha
+      : undefined
   const receipt = validateReviewReceipt(
-    JSON.parse(await readFile(options.reviewReceipt, 'utf8')) as unknown,
+    reviewData,
     candidate,
-    base,
+    typeof claimedBase === 'string' ? claimedBase : '',
   )
+  const base = receipt.baseSha
+  const resolvedBase = await git(
+    source,
+    'rev-parse',
+    '--verify',
+    `${base}^{commit}`,
+  ).catch(() => '')
+  if (resolvedBase !== base)
+    throw new Error('Review base is not a commit in the candidate checkout')
+  try {
+    await command(
+      'git',
+      ['merge-base', '--is-ancestor', base, candidate],
+      source,
+    )
+  } catch {
+    throw new Error('Review base must be an ancestor of the candidate')
+  }
   const suites = suiteExecutionOrder(
     options.suite,
     await discoverSuites(source),
