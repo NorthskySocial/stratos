@@ -402,7 +402,44 @@ async function main() {
 
     const other = await createSecondAccount(domain, password)
     const otherPage = await browser.newPage()
+    const syntheticText = `Other actor delete probe ${randomUUID()}`
+    const syntheticUri = retained.replace(`/${session.did}/`, `/${other.did}/`)
+    assert.notEqual(syntheticUri, retained)
+    // The second actor has no Stratos membership. Supply one local UI fixture so
+    // its real webapp OAuth session can issue a delete request to the PDS.
+    await otherPage.route(`**${feedPath}**`, async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue()
+        return
+      }
+      const upstream = await route.fetch()
+      await route.fulfill({
+        response: upstream,
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          feed: [
+            {
+              post: {
+                uri: syntheticUri,
+                cid: 'bafyreidummyfixture',
+                author: { did: other.did, handle: other.username },
+                record: {
+                  text: syntheticText,
+                  createdAt: new Date().toISOString(),
+                },
+                boundaries: ['general'],
+              },
+            },
+          ],
+        }),
+      })
+    })
     await signIn(otherPage, other, appUrl)
+    const syntheticCard = otherPage
+      .locator('.post-card', { hasText: syntheticText })
+      .first()
+    await syntheticCard.waitFor({ timeout: 30_000 })
     assert.equal(
       await visible(
         otherPage
@@ -411,19 +448,40 @@ async function main() {
       ),
       false,
     )
-    const denied = await fetch(`${other.pds}${deletePath}`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${other.session.accessJwt}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        ...deleteTarget,
-        rkey: retained.split('/').at(-1),
-      }),
+    const deniedTarget = {
+      ...deleteTarget,
+      rkey: retained.split('/').at(-1),
+    }
+    let oauthHeaders
+    let originalTarget
+    await otherPage.route(`**${deletePath}`, async (route) => {
+      if (route.request().method() !== 'POST') {
+        await route.continue()
+        return
+      }
+      oauthHeaders = route.request().headers()
+      originalTarget = route.request().postDataJSON()
+      // DPoP binds the browser grant to the URL and method, not the JSON body.
+      // Send the other actor's genuine OAuth request against the first actor's
+      // retained record and let the PDS reject the cross-account delete.
+      await route.continue({ postData: JSON.stringify(deniedTarget) })
     })
+    const deniedPromise = otherPage.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === deletePath,
+      { timeout: 45_000 },
+    )
+    await syntheticCard.getByRole('button', { name: 'Delete post' }).click()
+    const denied = await deniedPromise
+    assert.deepEqual(originalTarget, {
+      ...deniedTarget,
+      repo: other.did,
+    })
+    assert.match(oauthHeaders?.authorization ?? '', /^DPoP /i)
+    assert.ok(oauthHeaders?.dpop, 'Other actor request lacked a DPoP proof')
     assert.ok(
-      denied.status === 400 || denied.status === 401 || denied.status === 403,
+      [400, 401, 403].includes(denied.status()),
       'Other actor unexpectedly deleted the record',
     )
     await waitForFeed(page, feedResponses, retained, retainedText)
@@ -445,7 +503,12 @@ async function main() {
                 detail:
                   'Synthetic PDS session created fixture posts; candidate webapp OAuth deleted the target.',
               }
-            : {}),
+            : id === 'other-author-denied'
+              ? {
+                  detail:
+                    'Synthetic feed card prompted the second actor webapp OAuth request; PDS denied its cross-account delete.',
+                }
+              : {}),
         })),
       }),
     )

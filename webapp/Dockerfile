@@ -1,7 +1,7 @@
 # Build stage: Install dependencies and build webapp
 FROM node:24-alpine AS build
 
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /build
 
@@ -15,7 +15,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
 
 # Install dependencies (cached unless package.json/lockfile changes)
 # --ignore-scripts skips optional build scripts for dependencies (core-js, esbuild)
-RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN pnpm install --ignore-scripts
 
 # Copy lexicons (required by stratos-core lexicon imports)
 COPY lexicons/ ./lexicons/
