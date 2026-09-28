@@ -48,6 +48,9 @@ pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
 ```
 
 The report directory must not exist. The runner exports the pinned AiaB source and the exact candidate into a unique private directory. It overlays only reviewed templates from this checkout, builds the pinned alpha PDS from source, creates one ordinary PDS with two synthetic users, runs the selected suite, and removes its unique Compose project and volumes. It never modifies the supplied AiaB checkout. The output `receipt.json` contains source pins, image ID, review references, commands, and assertion counts. Archive files and image metadata stay private with the report.
+Each run uses a disposable private Docker client config for Compose. On failure,
+`failure.json` names the failed phase and completed phases without copying child
+stderr, account passwords, or environment values.
 
 The AiaB checkout must be clean at the SHA in `sources.json`. If the path is absent, the runner clones the pinned source into a disposable directory. The PDS source build always uses the pinned source revision. Do not replace it with an unproven public image digest.
 

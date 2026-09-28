@@ -272,6 +272,9 @@ describe('sandbox preflight', () => {
     await writeFile(reviewReceipt, JSON.stringify(review))
     const fakeDeno = `#!/usr/bin/env node
 const fs = require('node:fs')
+const assert = require('node:assert/strict')
+assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-spaces-alignment-'))
+assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 if (process.env.RUNNER_TEST_FAIL_STEP && process.argv.includes(process.env.RUNNER_TEST_FAIL_STEP)) process.exit(7)
 if (process.argv.includes('seed')) {
   fs.mkdirSync('state', { recursive: true })
@@ -287,6 +290,8 @@ if (process.argv.includes('seed')) {
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
 const args = process.argv.slice(2)
+assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-spaces-alignment-'))
+assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 if (args.includes('run')) {
   const accounts = JSON.parse(fs.readFileSync('state/browser-accounts.json', 'utf8')).accounts
   assert.equal(Object.keys(accounts).length, 2)
@@ -298,7 +303,7 @@ if (args.includes('down')) {
   assert.ok(args.includes('--project-name'))
   assert.ok(args.includes('--volumes'))
   assert.ok(args.includes('--remove-orphans'))
-  fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, 'down\\n')
+  fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, process.env.DOCKER_CONFIG + '\\n')
 }
 `
     await writeFile(join(bin, 'deno'), fakeDeno, { mode: 0o755 })
@@ -383,6 +388,7 @@ if (args.includes('down')) {
       await readFile(join(pdsFailedReport, 'failure.json'), 'utf8'),
     )
     expect(pdsFailure.completedSteps).toEqual([])
+    expect(pdsFailure.failedStep).toBe('build-pds')
     expect(pdsFailure.error).toBe('docker build failed with exit 17')
     delete process.env.RUNNER_TEST_FAIL_PDS_BUILD
     process.env.RUNNER_TEST_FAIL_STEP = 'install'
@@ -394,6 +400,20 @@ if (args.includes('down')) {
       await readFile(join(failedReport, 'failure.json'), 'utf8'),
     )
     expect(failure.completedSteps).toEqual([])
+    expect(failure.failedStep).toBe('install')
+    delete process.env.RUNNER_TEST_FAIL_STEP
+    process.env.RUNNER_TEST_FAIL_STEP = 'up'
+    const upFailedReport = join(root, 'up-failed-report')
+    await expect(
+      runSandbox({ ...options, reportDirectory: upFailedReport }, dependencies),
+    ).rejects.toThrow('deno task exited 7')
+    const upFailure = JSON.parse(
+      await readFile(join(upFailedReport, 'failure.json'), 'utf8'),
+    )
+    expect(upFailure.failedStep).toBe('up')
+    expect(
+      upFailure.completedSteps.map((step: { name: string }) => step.name),
+    ).toEqual(['install', 'create', 'check'])
     delete process.env.RUNNER_TEST_FAIL_STEP
     process.env.RUNNER_TEST_EMPTY_ASSERTIONS = '1'
     await expect(
@@ -457,8 +477,8 @@ if (args.includes('down')) {
     ])
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
-    expect((await readFile(dockerLog, 'utf8')).trim().split('\n')).toHaveLength(
-      5,
-    )
+    const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
+    expect(dockerConfigs).toHaveLength(6)
+    expect(new Set(dockerConfigs).size).toBe(6)
   })
 })
