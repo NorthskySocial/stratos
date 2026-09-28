@@ -100,13 +100,23 @@ try {
   await completeOAuth(new URL(clubhouse).origin)
   const deadline = Date.now() + 90_000
   while (Date.now() < deadline) {
-    if (await visible(page.locator('#room-post'))) break
+    const composer = page.locator('#room-post')
+    if (await visible(composer)) break
     const recheck = page.getByRole('button', { name: 'Check room again' })
-    if (await visible(recheck)) await recheck.click().catch(() => {})
-    await delay(2_000)
+    if (await visible(recheck)) {
+      await recheck.click()
+      await composer.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+      if (await visible(composer)) break
+    }
     await page.reload({ waitUntil: 'domcontentloaded' })
+    await composer.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
   }
-  assert.ok(await visible(page.locator('#room-post')), 'Second account did not join room')
+  if (!(await visible(page.locator('#room-post')))) {
+    const current = new URL(page.url())
+    const heading = await page.locator('.placeholder-panel h2').first().textContent().catch(() => null)
+    const live = await page.locator('.live-region').first().textContent().catch(() => null)
+    throw new Error(`Second account did not join room at ${current.origin}${current.pathname}: ${JSON.stringify({ heading, live })}`)
+  }
   console.log(JSON.stringify({ did }))
 } finally {
   await browser.close()
