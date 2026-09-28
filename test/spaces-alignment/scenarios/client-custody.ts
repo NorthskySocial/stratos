@@ -2,8 +2,14 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 import { createECDH, createPrivateKey, sign } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import {
+  chmod,
+  copyFile,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import type { AssertionResult, ScenarioSuite } from '../rules.js'
 
 const FEEDGEN_DID = 'did:web:feedgen-e2e.atmosbox.test'
@@ -98,14 +104,20 @@ export const suite: ScenarioSuite = {
       'state/apps/feedgen-ng-e2e/secret-files/feedgen-e2e-signing-key',
     )
     const secretHex = (await readFile(secretPath, 'utf8')).trim()
-    const tokenDirectory = await mkdtemp(
-      join(tmpdir(), 'stratos-custody-token-'),
+    const stagingDirectory = await mkdtemp(
+      join(context.sandboxDirectory, 'state/client-custody-'),
     )
-    const tokenPath = join(tokenDirectory, 'service-jwt')
+    const stagedBundle = join(stagingDirectory, 'client-custody-sdk.mjs')
+    const stagedScript = join(stagingDirectory, 'client-custody.mjs')
+    const tokenPath = join(stagingDirectory, 'service-jwt')
     let output: string
     try {
-      // The host directory is private; the file must be readable by the
-      // browser container's unprivileged UID through a read-only bind mount.
+      // Docker can bind files from disposable AiaB state on this host. Keep
+      // the signing key outside the mount and remove every staged file below.
+      await copyFile(bundle, stagedBundle)
+      await copyFile(script, stagedScript)
+      await chmod(stagedBundle, 0o444)
+      await chmod(stagedScript, 0o444)
       await writeFile(
         tokenPath,
         mintListReposToken(secretHex, Math.floor(Date.now() / 1000)),
@@ -125,18 +137,18 @@ export const suite: ScenarioSuite = {
           '--entrypoint',
           'node',
           '--volume',
-          `${bundle}:/runner/client-custody-sdk.mjs:ro`,
+          `${stagedBundle}:/runner/client-custody-sdk.mjs:ro,Z`,
           '--volume',
-          `${script}:/runner/client-custody.mjs:ro`,
+          `${stagedScript}:/runner/client-custody.mjs:ro,Z`,
           '--volume',
-          `${tokenPath}:/runner/client-custody-service-jwt:ro`,
+          `${tokenPath}:/runner/client-custody-service-jwt:ro,Z`,
           'feedgen-e2e-browser',
           '/runner/client-custody.mjs',
         ],
         context.sandboxDirectory,
       )
     } finally {
-      await rm(tokenDirectory, { recursive: true })
+      await rm(stagingDirectory, { recursive: true })
     }
     const line = output
       .split('\n')
