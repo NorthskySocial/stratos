@@ -25,6 +25,7 @@ import {
   generateKeyPair,
 } from 'jose'
 import { Secp256k1Keypair, verifySignature } from '@atproto/crypto'
+import { createServiceJwt } from '@atproto/xrpc-server'
 import type { Keypair } from '@atproto/crypto'
 import type { IdResolver } from '@atproto/identity'
 import { SqliteEnrollmentStore } from '../src/context.js'
@@ -79,7 +80,6 @@ interface InvokeOptions {
   /** DPoP session key thumbprint carried on the caller's auth credentials. */
   jkt?: string
   delegationToken?: string
-  authMissing?: boolean
   /** Request shape (method/url/headers) for mint-time DPoP proof checks. */
   req?: {
     method?: string
@@ -96,26 +96,41 @@ async function invoke(
   authDid?: string,
   opts?: InvokeOptions,
 ): Promise<InvokeResult> {
+  const auth = authDid
+    ? { credentials: { type: 'user', did: authDid, jkt: opts?.jkt } }
+    : opts?.delegationToken
+      ? {
+          credentials: {
+            type: 'delegation',
+            delegationToken: opts.delegationToken,
+          },
+        }
+      : { credentials: { type: 'anonymous' } }
+  return invokeHandler(server, input, auth, opts?.req)
+}
+
+async function invokeUnauthenticated(
+  server: MockXrpcServer,
+  input: Record<string, unknown> | undefined,
+  req?: InvokeOptions['req'],
+): Promise<InvokeResult> {
+  return invokeHandler(server, input, undefined, req)
+}
+
+async function invokeHandler(
+  server: MockXrpcServer,
+  input: Record<string, unknown> | undefined,
+  auth: unknown,
+  req?: InvokeOptions['req'],
+): Promise<InvokeResult> {
   const method = server.methods['zone.stratos.space.getSpaceCredential']
   if (!method) throw new Error('method not registered')
-  const auth = opts?.authMissing
-    ? undefined
-    : authDid
-      ? { credentials: { type: 'user', did: authDid, jkt: opts?.jkt } }
-      : opts?.delegationToken
-        ? {
-            credentials: {
-              type: 'delegation',
-              delegationToken: opts.delegationToken,
-            },
-          }
-        : { credentials: { type: 'anonymous' } }
   try {
     const result = await method.handler({
       input: input && { body: input, encoding: 'application/json' },
       params: {},
       auth,
-      req: opts?.req,
+      req,
     })
     return { body: result.body }
   } catch (err) {
@@ -304,16 +319,11 @@ describe('getSpaceCredential — DPoP path', () => {
     const ctx = createMockCtx({ signingKey })
     const server = createMockXrpcServer()
     registerSpaceCredentialHandlers(server as any, ctx)
+    expect((await invokeUnauthenticated(server, undefined)).error?.name).toBe(
+      'InvalidRequest',
+    )
     expect(
-      (await invoke(server, undefined, undefined, { authMissing: true })).error
-        ?.name,
-    ).toBe('InvalidRequest')
-    expect(
-      (
-        await invoke(server, { space: SPACE_URI }, undefined, {
-          authMissing: true,
-        })
-      ).error?.name,
+      (await invokeUnauthenticated(server, { space: SPACE_URI })).error?.name,
     ).toBe('AuthRequired')
   })
 
@@ -643,6 +653,40 @@ describe('getSpaceCredential — delegation-token path', () => {
       req: { method: 'POST', originalUrl: MINT_PATH, headers: { dpop: proof } },
     })
     expect(res.error?.name).toBe('InvalidToken')
+  })
+
+  it('rejects a valid signed service-auth Bearer JWT as a delegation', async () => {
+    const { server, ctx } = await setup(true)
+    const serviceKey = await Secp256k1Keypair.create({ exportable: true })
+    const token = await createServiceJwt({
+      iss: serviceKey.did(),
+      aud: SERVICE_DID,
+      lxm: 'zone.stratos.space.getSpaceCredential',
+      keypair: serviceKey,
+    })
+    const [header, payload, signature] = token.split('.')
+    expect(
+      await verifySignature(
+        serviceKey.did(),
+        new TextEncoder().encode(`${header}.${payload}`),
+        Buffer.from(signature, 'base64url'),
+      ),
+    ).toBe(true)
+
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    const response = await invoke(server, { space: SPACE_URI }, undefined, {
+      delegationToken: token,
+      req: {
+        method: 'POST',
+        originalUrl: MINT_PATH,
+        headers: { authorization: `Bearer ${token}`, dpop: proof },
+      },
+    })
+    expect(response.error?.name).toBe('InvalidToken')
+    expect(ctx.logger?.info).toHaveBeenCalledWith(
+      { err: expect.stringContaining('Invalid delegation token typ') },
+      'space-credential delegation token rejected',
+    )
   })
 
   it('does not consume a header delegation when app access rejects it', async () => {
