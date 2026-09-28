@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { copyFile, readFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, readFile, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -74,7 +74,11 @@ try {
 }
 `
 
-async function prepareBrowserRunner(reportDirectory: string): Promise<void> {
+async function prepareBrowserRunner(reportDirectory: string): Promise<string> {
+  const browserAssets = join(reportDirectory, 'browser-assets')
+  await rm(browserAssets, { recursive: true, force: true })
+  await mkdir(browserAssets)
+  await chmod(browserAssets, 0o755)
   const clubhouse = JSON.parse(await readFile(clubhousePackage, 'utf8')) as {
     name?: string
   }
@@ -87,8 +91,7 @@ async function prepareBrowserRunner(reportDirectory: string): Promise<void> {
   await build({
     configFile: false,
     build: {
-      emptyOutDir: false,
-      outDir: reportDirectory,
+      outDir: browserAssets,
       lib: {
         entry: join(scenarioDirectory, 'delegation-transport.browser.mjs'),
         name: 'DelegationScenarioAuth',
@@ -97,10 +100,16 @@ async function prepareBrowserRunner(reportDirectory: string): Promise<void> {
       },
     },
   })
+  const driverPath = join(browserAssets, 'driver.mjs')
   await copyFile(
     join(scenarioDirectory, 'delegation-transport.driver.mjs'),
-    join(reportDirectory, 'driver.mjs'),
+    driverPath,
   )
+  await Promise.all([
+    chmod(join(browserAssets, 'auth-client.iife.js'), 0o644),
+    chmod(driverPath, 0o644),
+  ])
+  return browserAssets
 }
 
 async function assertServiceBearerDenied(
@@ -186,7 +195,7 @@ export const suite: ScenarioSuite = {
   id: 'delegation-transport',
   requiredAssertions,
   async run(context): Promise<AssertionResult[]> {
-    await prepareBrowserRunner(context.reportDirectory)
+    const browserAssets = await prepareBrowserRunner(context.reportDirectory)
     const output = await context.runCommand(
       'docker',
       [
@@ -199,7 +208,7 @@ export const suite: ScenarioSuite = {
         '--rm',
         '--no-deps',
         '--volume',
-        `${context.reportDirectory}:/scenario:ro,Z`,
+        `${browserAssets}:/scenario:ro,Z`,
         '--entrypoint',
         'node',
         'feedgen-e2e-browser',
