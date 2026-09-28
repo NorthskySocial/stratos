@@ -5,6 +5,7 @@ export const suite: ScenarioSuite = {
   id: 'staging-limits',
   requiredAssertions: [
     'cumulative-pass-budget',
+    'multi-target-global-budget',
     'storage-accounting',
     'service-responsive',
     'interrupted-stage',

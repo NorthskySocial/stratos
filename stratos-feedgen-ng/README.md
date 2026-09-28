@@ -69,9 +69,13 @@ The validated `FEEDGEN_PROJECTION_MAX_BYTES` budget includes published posts,
 staged private payloads, and stage checkpoints. The memory profile uses its
 fixed 16 MiB projection budget; an encrypted volume requires an explicit
 positive byte budget and `FEEDGEN_PROJECTION_MAX_AGE_MS` in whole seconds,
-with a minimum of one second. Each PDS target may
-hold at most one quarter of the byte budget, capped at 16 MiB, and 2,048
-staged rows. Across targets, staging permits at most 8,192 rows. Checkpoints
+with a minimum of one second. `FEEDGEN_STAGE_TARGET_MAX_ROWS` (default 2,048),
+`FEEDGEN_STAGE_GLOBAL_MAX_ROWS` (default 8,192),
+`FEEDGEN_STAGE_TARGET_MAX_BYTES` (default one quarter of the projection budget,
+up to 16 MiB), and `FEEDGEN_STAGE_GLOBAL_MAX_BYTES` (default the projection
+budget) set the staging caps. All four values must be positive; the target caps
+must fit within the global caps, the target row cap cannot exceed 2,048, and
+the global byte cap cannot exceed the projection budget. Checkpoints
 count as rows, including those for pages without posts. The byte and row caps
 persist across sync passes and restarts. A rejected page rolls back, and the
 sync worker discards that target's incomplete stage.
