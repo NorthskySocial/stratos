@@ -26,6 +26,7 @@ afterEach(async () => {
   delete process.env.RUNNER_TEST_FAIL_STEP
   delete process.env.RUNNER_TEST_EMPTY_ASSERTIONS
   delete process.env.RUNNER_TEST_MISSING_ACCOUNT
+  delete process.env.RUNNER_TEST_FAIL_PDS_BUILD
   delete process.env.RUNNER_TEST_DOCKER_LOG
   await Promise.all(
     temporary
@@ -316,6 +317,8 @@ if (args.includes('down')) {
       sourcePins,
       runnerSource: candidateRepo,
       async buildPds() {
+        if (process.env.RUNNER_TEST_FAIL_PDS_BUILD)
+          throw new Error('docker build failed with exit 17')
         return {
           sourceSha: 'd'.repeat(40),
           dockerfileSha256: 'e'.repeat(64),
@@ -368,6 +371,20 @@ if (args.includes('down')) {
       'Report directory already exists',
     )
     await rm(reportDirectory, { recursive: true })
+    process.env.RUNNER_TEST_FAIL_PDS_BUILD = '1'
+    const pdsFailedReport = join(root, 'pds-failed-report')
+    await expect(
+      runSandbox(
+        { ...options, reportDirectory: pdsFailedReport },
+        dependencies,
+      ),
+    ).rejects.toThrow('docker build failed with exit 17')
+    const pdsFailure = JSON.parse(
+      await readFile(join(pdsFailedReport, 'failure.json'), 'utf8'),
+    )
+    expect(pdsFailure.completedSteps).toEqual([])
+    expect(pdsFailure.error).toBe('docker build failed with exit 17')
+    delete process.env.RUNNER_TEST_FAIL_PDS_BUILD
     process.env.RUNNER_TEST_FAIL_STEP = 'install'
     const failedReport = join(root, 'failed-report')
     await expect(
@@ -441,7 +458,7 @@ if (args.includes('down')) {
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     expect((await readFile(dockerLog, 'utf8')).trim().split('\n')).toHaveLength(
-      4,
+      5,
     )
   })
 })

@@ -17,6 +17,8 @@ async function directory(): Promise<string> {
 
 afterEach(async () => {
   process.env.PATH = originalPath
+  delete process.env.RUNNER_TEST_FAIL_DOCKER_BUILD
+  delete process.env.RUNNER_TEST_FAIL_DOCKER_INSPECT
   await Promise.all(
     temporary
       .splice(0)
@@ -58,16 +60,27 @@ const args = process.argv.slice(2)
 if (args[0] === 'pull') { assert.equal(args[1], 'node:24-alpine'); process.exit(0) }
 if (args[0] === 'image' && args[1] === 'inspect') {
   assert.deepEqual(args.slice(2), ['--format', '{{.Id}}', 'node:24-alpine'])
+  if (process.env.RUNNER_TEST_FAIL_DOCKER_INSPECT) {
+    console.error('synthetic private failure detail')
+    process.exit(19)
+  }
   console.log('sha256:${'b'.repeat(64)}')
   process.exit(0)
 }
 if (args[0] === 'build') {
+  assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-pds-source-'))
+  assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
+  assert.ok(args.includes('--progress=plain'))
   const index = args.indexOf('--iidfile')
   if (index < 0) process.exit(2)
   assert.ok(args[args.indexOf('--file') + 1].endsWith('/services/pds/Dockerfile'))
   assert.equal(args[args.indexOf('--label') + 1], 'org.opencontainers.image.revision=${revision}')
   assert.match(args[args.indexOf('--tag') + 1], /^stratos-spaces-pds-[0-9a-f-]+:local$/)
   assert.ok(args.at(-1).endsWith('/atproto'))
+  if (process.env.RUNNER_TEST_FAIL_DOCKER_BUILD) {
+    console.error('synthetic private failure detail')
+    process.exit(17)
+  }
   fs.writeFileSync(args[index + 1], 'sha256:${'c'.repeat(64)}\\n')
   process.exit(0)
 }
@@ -96,6 +109,32 @@ process.exit(2)
     expect((await readFile(join(report, 'pds-image.id'), 'utf8')).trim()).toBe(
       receipt.imageId,
     )
+
+    process.env.RUNNER_TEST_FAIL_DOCKER_BUILD = '1'
+    await expect(
+      buildAlphaPds(
+        {
+          url: source,
+          revision,
+          dockerfile: 'services/pds/Dockerfile',
+          lockfile: 'pnpm-lock.yaml',
+        },
+        report,
+      ),
+    ).rejects.toThrow(/^docker build failed with exit 17$/)
+    delete process.env.RUNNER_TEST_FAIL_DOCKER_BUILD
+    process.env.RUNNER_TEST_FAIL_DOCKER_INSPECT = '1'
+    await expect(
+      buildAlphaPds(
+        {
+          url: source,
+          revision,
+          dockerfile: 'services/pds/Dockerfile',
+          lockfile: 'pnpm-lock.yaml',
+        },
+        report,
+      ),
+    ).rejects.toThrow(/^docker image inspect failed with exit 19$/)
   })
 
   it('rejects an invalid revision before acquisition', async () => {
