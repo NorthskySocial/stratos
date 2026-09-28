@@ -966,20 +966,22 @@ impl EncryptedStore {
                 &time::format_description::well_known::Rfc3339,
             )
             .map_err(|_| StoreError::InvalidProjectionMutation)?;
-            let observed = deadline
+            // retained_at is the post's future retention deadline, not the
+            // promotion time. Recover the observation time before checking age.
+            let promotion_observed_at = deadline
                 .checked_sub(time::Duration::milliseconds(maximum_age_ms))
                 .ok_or(StoreError::InvalidProjectionMutation)?;
-            let observed = format!(
+            let promotion_observed_at = format!(
                 "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-                observed.year(),
-                u8::from(observed.month()),
-                observed.day(),
-                observed.hour(),
-                observed.minute(),
-                observed.second(),
-                observed.millisecond()
+                promotion_observed_at.year(),
+                u8::from(promotion_observed_at.month()),
+                promotion_observed_at.day(),
+                promotion_observed_at.hour(),
+                promotion_observed_at.minute(),
+                promotion_observed_at.second(),
+                promotion_observed_at.millisecond()
             );
-            ensure_stage_live(&transaction, space_uri, actor_did, &observed)?;
+            ensure_stage_live(&transaction, space_uri, actor_did, &promotion_observed_at)?;
         }
         promote_space_stage_transaction(&transaction, space_uri, actor_did, retained_at)?;
         transaction.commit().map_err(StoreError::Open)
@@ -1851,6 +1853,117 @@ mod stage_limit_tests {
             .unwrap();
         assert_eq!(published, 0);
         assert_eq!(staged, 5000);
+    }
+
+    #[test]
+    fn authorized_terminal_stage_expires_before_promotion_at_one_and_half_retention_ages() {
+        let mut store = store(16_000);
+        store
+            .connection
+            .execute(
+                "INSERT INTO retention_metadata (key, value) VALUES ('projection_max_age_ms', 1000)",
+                [],
+            )
+            .unwrap();
+        store
+            .replace_pds_space_members(
+                BOUNDARY,
+                vec![PdsSpaceMember {
+                    did: DID.to_owned(),
+                }],
+                NOW,
+            )
+            .unwrap();
+        let mut terminal = page("terminal");
+        terminal.next_cursor = None;
+        store
+            .stage_authorized_space_page(terminal, vec![upsert(0, 100)])
+            .unwrap();
+
+        // The scheduler passes a retention deadline one age window after the
+        // observation time (1.5 s after the stage was created).
+        assert!(matches!(
+            store.promote_authorized_space_stage(BOUNDARY, SPACE, DID, "2026-09-22T00:00:02.500Z",),
+            Err(StoreError::ExpiredSpaceStage)
+        ));
+        let published: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM post", [], |row| row.get(0))
+            .unwrap();
+        let staged: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(published, 0);
+        assert_eq!(staged, 1);
+    }
+
+    #[test]
+    fn successful_promotion_replaces_staged_usage_with_published_usage() {
+        let mut store = store(16_000);
+        store
+            .replace_pds_space_members(
+                BOUNDARY,
+                vec![PdsSpaceMember {
+                    did: DID.to_owned(),
+                }],
+                NOW,
+            )
+            .unwrap();
+        let mut terminal = page("terminal");
+        terminal.next_cursor = None;
+        store
+            .stage_authorized_space_page(terminal, vec![upsert(0, 100)])
+            .unwrap();
+        let staged_before = {
+            let transaction = store.connection.transaction().unwrap();
+            let usage = stage_usage(&transaction, None, None).unwrap();
+            transaction.rollback().unwrap();
+            usage
+        };
+        assert_eq!(staged_before.rows, 2); // post and target checkpoint
+        assert!(staged_before.bytes > 0);
+        let maximum = staged_before.bytes;
+        for (key, value) in [
+            ("projection_max_bytes", maximum),
+            ("stage_target_max_rows", 8),
+            ("stage_global_max_rows", 16),
+            ("stage_target_max_bytes", staged_before.bytes),
+            ("stage_global_max_bytes", staged_before.bytes),
+        ] {
+            store
+                .connection
+                .execute(
+                    "INSERT INTO retention_metadata (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![key, value],
+                )
+                .unwrap();
+        }
+        store
+            .promote_authorized_space_stage(BOUNDARY, SPACE, DID, NOW)
+            .unwrap();
+        let staged_after = {
+            let transaction = store.connection.transaction().unwrap();
+            let usage = stage_usage(&transaction, None, None).unwrap();
+            transaction.rollback().unwrap();
+            usage
+        };
+        let (published_rows, published_bytes): (i64, i64) = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(projection_bytes), 0) FROM post",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(staged_after.rows, 0);
+        assert_eq!(staged_after.bytes, 0);
+        assert_eq!(published_rows, 1);
+        assert!(published_bytes > 0 && published_bytes <= maximum);
+        assert!(published_bytes + staged_before.bytes > maximum);
     }
 
     #[test]
