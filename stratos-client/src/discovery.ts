@@ -70,6 +70,26 @@ const parseBoundaries = (val: unknown): Array<{ value: string }> => {
   return val.filter(isBoundary)
 }
 
+const parseRepoHost = (val: unknown): string | undefined => {
+  if (typeof val !== 'string') return undefined
+  try {
+    const url = new URL(val)
+    if (
+      url.protocol !== 'https:' ||
+      !url.hostname ||
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    )
+      return undefined
+    return url.origin
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Parses an enrollment record from a lexicon-compliant object.
  *
@@ -88,8 +108,17 @@ export const parseEnrollmentRecord = (
   if (typeof obj.signingKey !== 'string') return null
   const attestation = parseAttestation(obj.attestation)
   if (!attestation) return null
+  const custody =
+    obj.custody === undefined
+      ? 'stratos'
+      : typeof obj.custody === 'string'
+        ? obj.custody
+        : 'unsupported'
+  const repoHost = custody === 'pds' ? parseRepoHost(obj.repoHost) : undefined
   return {
     service: obj.service,
+    custody,
+    ...(repoHost === undefined ? {} : { repoHost }),
     boundaries: parseBoundaries(obj.boundaries),
     signingKey: obj.signingKey,
     attestation,

@@ -6,6 +6,10 @@ export type { FetchHandler, FetchHandlerObject } from '@atcute/client'
  */
 export interface StratosEnrollment {
   service: string
+  /** Unknown published values remain visible so repository routing can fail closed. */
+  custody: string
+  /** Valid published PDS host hint. This field is not covered by the attestation. */
+  repoHost?: string
   boundaries: Array<{ value: string }>
   signingKey: string
   attestation: ServiceAttestation

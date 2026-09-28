@@ -74,6 +74,24 @@ describe('discovery parity (client fork vs. core original)', () => {
 
     const cases: Array<[name: string, value: unknown]> = [
       ['valid record with boundaries', validRecord],
+      ['stratos custody', { ...validRecord, custody: 'stratos' }],
+      [
+        'pds custody and valid host',
+        { ...validRecord, custody: 'pds', repoHost: 'https://pds.nerv.jp' },
+      ],
+      [
+        'pds custody and invalid host',
+        {
+          ...validRecord,
+          custody: 'pds',
+          repoHost: 'https://pds.nerv.jp/path',
+        },
+      ],
+      [
+        'unsupported custody',
+        { ...validRecord, custody: 'future', repoHost: 'https://pds.nerv.jp' },
+      ],
+      ['invalid custody', { ...validRecord, custody: null }],
       [
         '$bytes-encoded attestation signature',
         {

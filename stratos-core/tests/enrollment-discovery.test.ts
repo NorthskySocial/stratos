@@ -74,6 +74,76 @@ describe('Enrollment Discovery', () => {
       expect(result?.service).toBe('did:web:nerv.tokyo.jp')
       expect(result?.rkey).toBe('rkey123')
       expect(result?.attestation.sig).toEqual(new Uint8Array([1, 2, 3]))
+      expect(result?.custody).toBe('stratos')
+    })
+
+    it('keeps PDS custody with a valid HTTPS host', () => {
+      expect(
+        parseEnrollmentRecord(
+          {
+            ...validRecord,
+            custody: 'pds',
+            repoHost: 'https://pds.nerv.jp/',
+          },
+          'nerv',
+        ),
+      ).toMatchObject({
+        custody: 'pds',
+        repoHost: 'https://pds.nerv.jp',
+      })
+      expect(
+        parseEnrollmentRecord(
+          {
+            ...validRecord,
+            custody: 'pds',
+            repoHost: 'https://pds.nerv.jp/path',
+          },
+          'nerv',
+        ),
+      ).not.toHaveProperty('repoHost')
+      for (const repoHost of [
+        'http://pds.nerv.jp',
+        'https://user@pds.nerv.jp',
+        'https://user:secret@pds.nerv.jp',
+        'https://pds.nerv.jp?query=1',
+        'https://pds.nerv.jp#fragment',
+        'not-a-url',
+        42,
+      ]) {
+        expect(
+          parseEnrollmentRecord(
+            { ...validRecord, custody: 'pds', repoHost },
+            'nerv',
+          ),
+        ).not.toHaveProperty('repoHost')
+      }
+      expect(
+        parseEnrollmentRecord(
+          {
+            ...validRecord,
+            custody: 'stratos',
+            repoHost: 'https://pds.nerv.jp',
+          },
+          'nerv',
+        ),
+      ).not.toHaveProperty('repoHost')
+    })
+
+    it('keeps unsupported custody visible without a host', () => {
+      const parsed = parseEnrollmentRecord(
+        {
+          ...validRecord,
+          custody: 'future',
+          repoHost: 'https://pds.nerv.jp',
+        },
+        'nerv',
+      )
+      expect(parsed?.custody).toBe('future')
+      expect(parsed).not.toHaveProperty('repoHost')
+      expect(
+        parseEnrollmentRecord({ ...validRecord, custody: null }, 'nerv')
+          ?.custody,
+      ).toBe('unsupported')
     })
 
     it('should handle $bytes in attestation signature', () => {

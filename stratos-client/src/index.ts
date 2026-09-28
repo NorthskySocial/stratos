@@ -31,9 +31,12 @@ export {
 export {
   createServiceFetchHandler,
   resolveServiceUrl,
+  resolveRepositoryTarget,
   findEnrollmentByService,
   serviceDIDToRkey,
   type ServiceFetchHandlerOptions,
+  type RepositoryTarget,
+  type TrustedRepositoryHosts,
 } from './routing.js'
 export {
   verifyCidIntegrity,

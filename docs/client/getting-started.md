@@ -68,11 +68,18 @@ Discover enrollment records from the user's PDS:
 import {
   getEnrollmentByServiceDid,
   resolveServiceUrl,
+  resolveRepositoryTarget,
 } from '@northskysocial/stratos-client'
 
 const enrollment = await getEnrollmentByServiceDid(did, pdsUrl, serviceDid)
 const serviceUrl = resolveServiceUrl(enrollment, pdsUrl)
 ```
+
+`serviceUrl` identifies the Stratos authority. For repository writes, call
+`resolveRepositoryTarget(enrollment, { authorityServiceUrl, authoritativeRepoHost,
+sessionPdsUrl })`. Supply live authority answers or the PDS endpoint bound to the
+authenticated session. The published `repoHost` is a hint and is not attested.
+Stop when the result is `unresolved`.
 
 Or discover the Stratos service endpoint from your app configuration:
 
@@ -120,32 +127,44 @@ function createStratosAgent(session: OAuthSession, serviceUrl: string): Agent {
 ### 4. Create a Private Post
 
 ```typescript
-const stratosAgent = createStratosAgent(session, STRATOS_ENDPOINT)
-
-await stratosAgent.com.atproto.repo.createRecord({
-  repo: userDid,
-  collection: 'zone.stratos.feed.post',
-  record: {
-    $type: 'zone.stratos.feed.post',
-    text: 'This is a private post for my community!',
-    boundary: {
-      $type: 'zone.stratos.boundary.defs#Domains',
-      values: [
-        {
-          $type: 'zone.stratos.boundary.defs#Domain',
-          value: 'did:web:stratos.example.com/general',
-        },
-      ],
-    },
-    createdAt: new Date().toISOString(),
-  },
+const target = resolveRepositoryTarget(enrollment, {
+  authorityServiceUrl: STRATOS_ENDPOINT,
+  sessionPdsUrl: pdsUrl,
 })
+if (target.kind === 'unresolved') throw new Error(target.reason)
+const stratosAgent = createStratosAgent(session, target.url)
+
+if (target.kind === 'stratos')
+  await stratosAgent.com.atproto.repo.createRecord({
+    repo: userDid,
+    collection: 'zone.stratos.feed.post',
+    record: {
+      $type: 'zone.stratos.feed.post',
+      text: 'This is a private post for my community!',
+      boundary: {
+        $type: 'zone.stratos.boundary.defs#Domains',
+        values: [
+          {
+            $type: 'zone.stratos.boundary.defs#Domain',
+            value: 'did:web:stratos.example.com/general',
+          },
+        ],
+      },
+      createdAt: new Date().toISOString(),
+    },
+  })
 ```
+
+For PDS custody, use `com.atproto.space.createRecord` on the trusted PDS endpoint.
+Pass `space: at://{authorityDid}/space/zone.stratos.space.feed/{spaceKey}`
+alongside `repo`, `collection`, and `record`. The returned record URI has seven
+segments and starts with the authority DID. A legacy repo write to the PDS
+origin does not create a space record.
 
 ## Service Routing
 
-The core routing decision is: _when reading/writing Stratos data and enrollment exists, route XRPC
-calls to the Stratos service URL instead of the user's PDS._
+Repository routing depends on custody. Stratos custody uses authority repo methods.
+PDS custody uses space methods on the user's PDS.
 
 When a user has multiple enrollments, select the target enrollment first (see
 `findEnrollmentByService` in [User Enrollment](/client/enrollment)), then route using that
