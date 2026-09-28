@@ -78,7 +78,11 @@ try {
       }
       await delay(250)
     }
-    throw new Error('Second-account OAuth timed out')
+    const current = new URL(page.url())
+    const title = await page.title()
+    const heading = await page.locator('h1').first().textContent().catch(() => null)
+    const live = await page.locator('[aria-live]').first().textContent().catch(() => null)
+    throw new Error(`Second-account OAuth timed out at ${current.origin}${current.pathname}: ${JSON.stringify({ title, heading, live })}`)
   }
   await page.goto(clubhouse, { waitUntil: 'domcontentloaded' })
   await page.locator('#handle').fill(account.username)
