@@ -18,8 +18,7 @@ import { createServiceDb, closeServiceDb } from './dist/db/index.js'
 import { SqliteEnrollmentStore } from './dist/storage/sqlite/enrollment-store.js'
 import { ReservedDomainEnrollmentStore } from './dist/infra/storage/reserved-domain-enrollment-store.js'
 
-const authority = process.env.STRATOS_SERVICE_DID
-assert.ok(authority)
+const authority = 'did:web:stratos-e2e.' + process.env.SANDBOX_DOMAIN
 const caller = 'did:web:feedgen-e2e.' + process.env.SANDBOX_DOMAIN
 const signingKey = process.env.ADMISSION_SIGNING_KEY
 assert.ok(signingKey)
