@@ -1,7 +1,63 @@
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
+import { createECDH, createPrivateKey, sign } from 'node:crypto'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import type { AssertionResult, ScenarioSuite } from '../rules.js'
+
+const FEEDGEN_DID = 'did:web:feedgen-e2e.atmosbox.test'
+const AUTHORITY_DID = 'did:web:stratos-e2e.atmosbox.test'
+const SERVICE_LXM = 'com.atproto.space.listRepos'
+const SECP256K1_ORDER = BigInt(
+  '0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141',
+)
+
+export function mintListReposToken(secretHex: string, now: number): string {
+  if (!/^[0-9a-fA-F]{64}$/.test(secretHex)) {
+    throw new Error('Invalid sandbox feedgen signing key format')
+  }
+  const privateKeyBytes = Buffer.from(secretHex, 'hex')
+  const curve = createECDH('secp256k1')
+  curve.setPrivateKey(privateKeyBytes)
+  const publicKey = curve.getPublicKey(undefined, 'uncompressed')
+  const key = createPrivateKey({
+    key: {
+      kty: 'EC',
+      crv: 'secp256k1',
+      d: privateKeyBytes.toString('base64url'),
+      x: publicKey.subarray(1, 33).toString('base64url'),
+      y: publicKey.subarray(33, 65).toString('base64url'),
+    },
+    format: 'jwk',
+  })
+  const header = Buffer.from(
+    JSON.stringify({ alg: 'ES256K', typ: 'JWT' }),
+  ).toString('base64url')
+  const claims = Buffer.from(
+    JSON.stringify({
+      iss: FEEDGEN_DID,
+      aud: AUTHORITY_DID,
+      exp: now + 60,
+      lxm: SERVICE_LXM,
+    }),
+  ).toString('base64url')
+  const signingInput = `${header}.${claims}`
+  const signature = sign('sha256', Buffer.from(signingInput), {
+    key,
+    dsaEncoding: 'ieee-p1363',
+  })
+  normalizeLowS(signature)
+  return `${signingInput}.${signature.toString('base64url')}`
+}
+
+export function normalizeLowS(signature: Buffer): void {
+  const s = BigInt(`0x${signature.subarray(32).toString('hex')}`)
+  if (s > SECP256K1_ORDER / 2n) {
+    const lowS = (SECP256K1_ORDER - s).toString(16).padStart(64, '0')
+    Buffer.from(lowS, 'hex').copy(signature, 32)
+  }
+}
 
 const requiredAssertions = [
   'sdk-discovers-both-custodies',
@@ -37,28 +93,51 @@ export const suite: ScenarioSuite = {
     const script = fileURLToPath(
       new URL('./client-custody.mjs', import.meta.url),
     )
-    const output = await context.runCommand(
-      'docker',
-      [
-        'compose',
-        '--project-name',
-        context.projectName,
-        '--project-directory',
-        context.sandboxDirectory,
-        'run',
-        '--rm',
-        '--no-deps',
-        '--entrypoint',
-        'node',
-        '--volume',
-        `${bundle}:/runner/client-custody-sdk.mjs:ro`,
-        '--volume',
-        `${script}:/runner/client-custody.mjs:ro`,
-        'feedgen-e2e-browser',
-        '/runner/client-custody.mjs',
-      ],
+    const secretPath = join(
       context.sandboxDirectory,
+      'state/apps/feedgen-ng-e2e/secret-files/feedgen-e2e-signing-key',
     )
+    const secretHex = (await readFile(secretPath, 'utf8')).trim()
+    const tokenDirectory = await mkdtemp(
+      join(tmpdir(), 'stratos-custody-token-'),
+    )
+    const tokenPath = join(tokenDirectory, 'service-jwt')
+    let output: string
+    try {
+      // The host directory is private; the file must be readable by the
+      // browser container's unprivileged UID through a read-only bind mount.
+      await writeFile(
+        tokenPath,
+        mintListReposToken(secretHex, Math.floor(Date.now() / 1000)),
+        { mode: 0o444 },
+      )
+      output = await context.runCommand(
+        'docker',
+        [
+          'compose',
+          '--project-name',
+          context.projectName,
+          '--project-directory',
+          context.sandboxDirectory,
+          'run',
+          '--rm',
+          '--no-deps',
+          '--entrypoint',
+          'node',
+          '--volume',
+          `${bundle}:/runner/client-custody-sdk.mjs:ro`,
+          '--volume',
+          `${script}:/runner/client-custody.mjs:ro`,
+          '--volume',
+          `${tokenPath}:/runner/client-custody-service-jwt:ro`,
+          'feedgen-e2e-browser',
+          '/runner/client-custody.mjs',
+        ],
+        context.sandboxDirectory,
+      )
+    } finally {
+      await rm(tokenDirectory, { recursive: true })
+    }
     const line = output
       .split('\n')
       .map((item) => item.trim())

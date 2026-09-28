@@ -26,6 +26,20 @@ async function session(url, identifier, password) {
 }
 
 async function main() {
+  const space = `at://${authorityDid}/space/zone.stratos.space.feed/general`
+  const serviceJwt = (
+    await readFile('/runner/client-custody-service-jwt', 'utf8')
+  ).trim()
+  const reposUrl = new URL(`${authorityUrl}/xrpc/zone.stratos.space.listRepos`)
+  reposUrl.searchParams.set('space', space)
+  reposUrl.searchParams.set('limit', '1000')
+  const reposResponse = await fetch(reposUrl, {
+    headers: { authorization: `Bearer ${serviceJwt}` },
+  })
+  assert.equal(reposResponse.status, 200, 'Authority repo lookup failed')
+  const authorityRepos = (await reposResponse.json()).repos
+  assert.ok(Array.isArray(authorityRepos))
+
   const ordinary = JSON.parse(
     await readFile('/sandbox-state/accounts.json', 'utf8'),
   ).accounts[`user1.pds1.${domain}`]
@@ -55,6 +69,22 @@ async function main() {
   assert.equal(pdsEnrollment?.custody, 'pds')
   assert.equal(stratosEnrollment?.custody, 'stratos')
   assert.equal(pdsEnrollment.repoHost, spacesPdsUrl)
+  const pdsAuthorityRepo = authorityRepos.find(
+    (entry) => entry.did === spacesSession.did,
+  )
+  const stratosAuthorityRepo = authorityRepos.find(
+    (entry) => entry.did === ordinarySession.did,
+  )
+  assert.ok(pdsAuthorityRepo, 'PDS member missing from authority repo list')
+  assert.ok(
+    stratosAuthorityRepo,
+    'Stratos member missing from authority repo list',
+  )
+  assert.equal(pdsAuthorityRepo.custody, pdsEnrollment.custody)
+  assert.equal(stratosAuthorityRepo.custody, stratosEnrollment.custody)
+  assert.equal(pdsAuthorityRepo.host, spacesPdsUrl)
+  assert.equal(pdsAuthorityRepo.hostSource, 'authority-override')
+  assert.equal(pdsEnrollment.repoHost, pdsAuthorityRepo.host)
   const assertions = [{ id: 'sdk-discovers-both-custodies', status: 'passed' }]
 
   for (const [did, enrollment] of [
@@ -76,6 +106,7 @@ async function main() {
     pdsEnrollment.service,
   )
   const pdsTarget = resolveRepositoryTarget(pdsEnrollment, {
+    authoritativeRepoHost: pdsAuthorityRepo.host,
     sessionPdsUrl: spacesPdsUrl,
   })
   const stratosTarget = resolveRepositoryTarget(stratosEnrollment, {
@@ -83,10 +114,16 @@ async function main() {
   })
   assert.deepEqual(pdsTarget, { kind: 'pds', url: spacesPdsUrl })
   assert.deepEqual(stratosTarget, { kind: 'stratos', url: authorityUrl })
+  assert.deepEqual(
+    resolveRepositoryTarget(pdsEnrollment, {
+      authoritativeRepoHost: pdsAuthorityRepo.host,
+      sessionPdsUrl: ordinaryPdsUrl,
+    }),
+    { kind: 'unresolved', reason: 'host-mismatch' },
+  )
   assertions.push({ id: 'authority-and-host-agree', status: 'passed' })
 
   const text = `Client custody ${randomUUID()}`
-  const space = `at://${authorityDid}/space/zone.stratos.space.feed/general`
   const write = await fetch(
     `${pdsTarget.url}/xrpc/com.atproto.space.createRecord`,
     {
@@ -171,6 +208,14 @@ async function main() {
       { custody: 'future' },
       { sessionPdsUrl: spacesPdsUrl },
       'unsupported-custody',
+    ],
+    [
+      { custody: 'pds' },
+      {
+        authoritativeRepoHost: pdsAuthorityRepo.host,
+        sessionPdsUrl: ordinaryPdsUrl,
+      },
+      'host-mismatch',
     ],
   ]) {
     assert.deepEqual(await attemptAuthenticatedWrite(enrollment, hosts), {
