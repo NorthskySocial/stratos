@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import {
+  createServiceFetchHandler,
   getEnrollmentByServiceDid,
   resolveRepositoryTarget,
   resolveServiceUrl,
@@ -125,13 +126,59 @@ async function main() {
   assert.ok(publicRead.status === 400 || publicRead.status === 404)
   assertions.push({ id: 'space-write-is-private', status: 'passed' })
 
-  let credentialForwards = 0
-  for (const custody of ['pds', 'future']) {
-    const unresolved = resolveRepositoryTarget({ custody }, {})
-    assert.equal(unresolved.kind, 'unresolved')
-    if (unresolved.kind !== 'unresolved') credentialForwards++
+  const forwardedRequests = []
+  const authenticatedHandler = async (url, init) => {
+    forwardedRequests.push({
+      url,
+      authorization: new Headers(init.headers).get('authorization'),
+    })
+    return new Response(null, { status: 204 })
   }
-  assert.equal(credentialForwards, 0)
+  const attemptAuthenticatedWrite = async (enrollment, hosts) => {
+    const target = resolveRepositoryTarget(enrollment, hosts)
+    if (target.kind === 'unresolved') return target
+    const handler = createServiceFetchHandler(authenticatedHandler, target.url)
+    await handler.handle('/xrpc/com.atproto.space.createRecord', {
+      method: 'POST',
+      headers: { authorization: 'Bearer synthetic-credential' },
+    })
+    return target
+  }
+
+  assert.deepEqual(
+    await attemptAuthenticatedWrite(
+      { custody: 'pds' },
+      { sessionPdsUrl: spacesPdsUrl },
+    ),
+    { kind: 'pds', url: spacesPdsUrl },
+  )
+  assert.deepEqual(forwardedRequests, [
+    {
+      url: `${spacesPdsUrl}/xrpc/com.atproto.space.createRecord`,
+      authorization: 'Bearer synthetic-credential',
+    },
+  ])
+  forwardedRequests.length = 0
+
+  for (const [enrollment, hosts, reason] of [
+    [{ custody: 'pds' }, {}, 'missing-trusted-host'],
+    [
+      { custody: 'pds' },
+      { sessionPdsUrl: 'http://invalid.example' },
+      'invalid-trusted-host',
+    ],
+    [
+      { custody: 'future' },
+      { sessionPdsUrl: spacesPdsUrl },
+      'unsupported-custody',
+    ],
+  ]) {
+    assert.deepEqual(await attemptAuthenticatedWrite(enrollment, hosts), {
+      kind: 'unresolved',
+      reason,
+    })
+    assert.equal(forwardedRequests.length, 0)
+  }
   assertions.push({
     id: 'unresolved-custody-sends-no-credentials',
     status: 'passed',
