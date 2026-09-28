@@ -9,7 +9,7 @@ Save a private JSON file outside the checkout after the two reviews finish:
 ```json
 {
   "candidateSha": "<full candidate commit SHA>",
-  "baseSha": "<full parent commit SHA>",
+  "baseSha": "<full reviewed branch-base commit SHA>",
   "reviews": {
     "standards": {
       "model": "gpt-5.6-terra",
@@ -32,6 +32,9 @@ Save a private JSON file outside the checkout after the two reviews finish:
 ```
 
 Write this file from the actual reviewer results. The evidence references identify their full private findings. Do not copy those findings into this receipt. The runner checks the receipt shape and SHA pair; it cannot attest that a named session occurred. Keep the full reviewer records for audit.
+The base must be an existing ancestor commit of the candidate; a reviewed
+multi-commit branch uses its fixed base, not necessarily the candidate's
+immediate parent.
 
 For example, write the receipt to a new private file with `umask 077` and an editor, then run:
 
