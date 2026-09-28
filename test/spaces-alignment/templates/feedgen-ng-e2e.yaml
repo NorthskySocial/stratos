@@ -108,9 +108,9 @@ services:
       NODE_EXTRA_CA_CERTS: /ca/root.crt
       STRATOS_PORT: '3100'
       STRATOS_VALKEY_URL: redis://feedgen-e2e-valkey:6379
-      STRATOS_ALLOWED_DOMAINS: general
-      STRATOS_RESERVED_DOMAIN: general
-      STRATOS_AUTO_ENROLL_DOMAINS: general
+      STRATOS_ALLOWED_DOMAINS: general,other
+      STRATOS_RESERVED_DOMAIN: all
+      STRATOS_AUTO_ENROLL_DOMAINS: other
       STRATOS_ENROLLMENT_MODE: open
       STRATOS_RETENTION_DAYS: '1'
       STRATOS_DEV_MODE: 'false'

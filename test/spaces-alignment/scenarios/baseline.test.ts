@@ -3,6 +3,11 @@ import { suite } from './baseline.js'
 import { validateAssertions, validateSuite } from '../rules.js'
 
 describe('baseline browser receipt', () => {
+  it('requires separate PDS grant and unrelated-boundary evidence', () => {
+    expect(suite.requiredAssertions).toContain('pds-space-grant')
+    expect(suite.requiredAssertions).toContain('unrelated-boundary-denied')
+  })
+
   it('runs the isolated browser service and accepts every required assertion', async () => {
     const assertions = suite.requiredAssertions.map((id) => ({
       id,
