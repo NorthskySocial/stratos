@@ -20,8 +20,15 @@ export function createProxyServer() {
     }
     if (url.pathname === '/_control/status') {
       res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ pages, interruptions, firstRequests,
-        targetCount: repos.size, globalTargetCount: globalRepos.size }))
+      res.end(
+        JSON.stringify({
+          pages,
+          interruptions,
+          firstRequests,
+          targetCount: repos.size,
+          globalTargetCount: globalRepos.size,
+        }),
+      )
       return
     }
     const isPage = url.pathname === '/xrpc/com.atproto.space.listRepoOps'
@@ -45,10 +52,15 @@ export function createProxyServer() {
       blockedCursors.set(repo, next)
       const count = mode === 'interrupted' ? 1 : 10
       const ops = Array.from({ length: count }, (_, n) => ({
-        rev: 'synthetic', collection: 'zone.stratos.feed.post',
-        rkey: 'stage-' + index + '-' + n, cid,
-        value: { $type: 'zone.stratos.feed.post', text: 'x'.repeat(1200),
-          createdAt: new Date().toISOString() },
+        rev: 'synthetic',
+        collection: 'zone.stratos.feed.post',
+        rkey: 'stage-' + index + '-' + n,
+        cid,
+        value: {
+          $type: 'zone.stratos.feed.post',
+          text: 'x'.repeat(1200),
+          createdAt: new Date().toISOString(),
+        },
       }))
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({ ops, cursor: next }))
@@ -59,10 +71,14 @@ export function createProxyServer() {
       for await (const chunk of req) chunks.push(chunk)
       const headers = { ...req.headers }
       delete headers.connection
-      const upstream = await fetch('http://feedgen-e2e-pds-spaces:3000' + req.url, {
-        method: req.method, headers,
-        body: chunks.length ? Buffer.concat(chunks) : undefined,
-      })
+      const upstream = await fetch(
+        'http://feedgen-e2e-pds-spaces:3000' + req.url,
+        {
+          method: req.method,
+          headers,
+          body: chunks.length ? Buffer.concat(chunks) : undefined,
+        },
+      )
       const body = Buffer.from(await upstream.arrayBuffer())
       const responseHeaders = Object.fromEntries(upstream.headers)
       delete responseHeaders['content-length']
