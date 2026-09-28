@@ -248,6 +248,10 @@ async function exportSources(
       'templates/feedgen-ng-e2e-browser.mjs',
       'runtime/feedgen-ng-e2e-browser.mjs',
     ],
+    [
+      'templates/feedgen-ng-e2e-clubhouse.definition.json',
+      'stacks/feedgen-ng-e2e-clubhouse.definition.json',
+    ],
   ]
   const templateHashes: Record<string, string> = {}
   for (const [from, to] of templateFiles) {
