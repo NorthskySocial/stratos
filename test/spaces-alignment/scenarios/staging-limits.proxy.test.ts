@@ -5,14 +5,16 @@ import { createProxyServer } from './staging-limits.proxy.mjs'
 const server = createProxyServer()
 
 afterEach(async () => {
-  if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()))
+  if (server.listening)
+    await new Promise<void>((resolve) => server.close(() => resolve()))
 })
 
 describe('staging limits proxy', () => {
   it('interrupts both repos when their pages interleave', async () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('Proxy did not bind a local port')
+    if (!address || typeof address === 'string')
+      throw new Error('Proxy did not bind a local port')
     const origin = `http://127.0.0.1:${address.port}`
     await fetch(`${origin}/_control/mode?value=limit`)
     const page = async (repo: string, cursor?: string) => {
