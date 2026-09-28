@@ -304,6 +304,21 @@ impl ControlLifecycle {
             .compact_projection(as_of, maximum_retained_at, max_bytes, limit)
     }
 
+    pub fn compact_projection_with_budget(
+        &self,
+        as_of: &str,
+        maximum_retained_at: &str,
+        max_bytes: u64,
+        limit: u16,
+        budget: &crate::config::SpaceStageBudget,
+    ) -> Result<crate::store::ProjectionCompaction, StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .compact_projection_with_budget(as_of, maximum_retained_at, max_bytes, limit, budget)
+    }
+
     pub fn actor_sync_state(
         &self,
         authority_did: &str,
