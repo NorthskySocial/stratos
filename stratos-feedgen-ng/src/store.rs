@@ -25,6 +25,10 @@ const MAX_ENCODED_KEY_BYTES: usize = STORAGE_KEY_BYTES * 2 + 1;
 const SQLITE_CACHE_KIB: u32 = 16 * 1024;
 const MAX_PURGE_BATCH: u16 = 512;
 const MAX_SPACE_PROMOTION_BATCH: u16 = 512;
+const MAX_STAGED_ROWS_PER_TARGET: i64 = 2_048;
+const MAX_STAGED_ROWS_GLOBAL: i64 = 8_192;
+const MAX_STAGED_BYTES_PER_TARGET: i64 = 16 * 1024 * 1024;
+const DEFAULT_PROJECTION_MAX_BYTES: i64 = 16 * 1024 * 1024;
 const MAX_ACTOR_ENROLLMENT_PAGE: u16 = 512;
 const MAX_PDS_SPACE_MEMBER_PAGE: usize = 1_000;
 const SQLITE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
@@ -89,6 +93,8 @@ pub enum StoreError {
     StaleCursor,
     EnrollmentConflict,
     UnverifiedSpaceStage,
+    SpaceStageLimit,
+    ExpiredSpaceStage,
     UnauthorizedSpaceMember,
 }
 
@@ -104,6 +110,8 @@ impl fmt::Debug for StoreError {
             Self::StaleCursor => "StaleCursor",
             Self::EnrollmentConflict => "EnrollmentConflict",
             Self::UnverifiedSpaceStage => "UnverifiedSpaceStage",
+            Self::SpaceStageLimit => "SpaceStageLimit",
+            Self::ExpiredSpaceStage => "ExpiredSpaceStage",
             Self::UnauthorizedSpaceMember => "UnauthorizedSpaceMember",
         };
         formatter.write_str(name)
@@ -130,6 +138,8 @@ impl fmt::Display for StoreError {
             Self::UnverifiedSpaceStage => {
                 formatter.write_str("space stage has not completed verification")
             }
+            Self::SpaceStageLimit => formatter.write_str("space stage exceeds the storage budget"),
+            Self::ExpiredSpaceStage => formatter.write_str("space stage has expired"),
             Self::UnauthorizedSpaceMember => {
                 formatter.write_str("space member is no longer authorized")
             }

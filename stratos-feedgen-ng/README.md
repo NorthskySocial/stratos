@@ -63,6 +63,26 @@ To poll a PDS on a private network, set both
 `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS` (the same CIDR format). This grant is
 separate from PLC trust and applies to that PDS origin only.
 
+## Staged space limits
+
+The validated `FEEDGEN_PROJECTION_MAX_BYTES` budget includes published posts,
+staged private payloads, and stage checkpoints. The memory profile uses its
+fixed 16 MiB projection budget; an encrypted volume requires an explicit
+positive byte budget and `FEEDGEN_PROJECTION_MAX_AGE_MS` in whole seconds,
+with a minimum of one second. Each PDS target may
+hold at most one quarter of the byte budget, capped at 16 MiB, and 2,048
+staged rows. Across targets, staging permits at most 8,192 rows. Checkpoints
+count as rows, including those for pages without posts. The byte and row caps
+persist across sync passes and restarts. A rejected page rolls back, and the
+sync worker discards that target's incomplete stage.
+
+Stages expire after the configured projection age from creation or the last
+actual progress, whichever occurs first. Replaying the same cursor and data
+does not extend that age. The compactor removes expired rows, checkpoints, and
+pending verification together in bounded batches at startup and every minute.
+Promotion is atomic and limited to the same target budget; a larger stage
+fails closed. Cleanup logs contain aggregate counts only.
+
 ## Private metrics export
 
 Feed-read timing is aggregate-only and disabled by default. Set
