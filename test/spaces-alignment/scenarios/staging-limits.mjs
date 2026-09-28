@@ -58,7 +58,7 @@ http.createServer(async (req, res) => {
   if (isPage && !url.searchParams.has('cursor')) firstRequests += 1
   if (isPage && mode !== 'observe') {
     const cursor = url.searchParams.get('cursor')
-    if (blockedCursor === cursor) {
+    if (blockedCursor !== null && blockedCursor === cursor) {
       blockedCursor = null
       interruptions += 1
       res.writeHead(503, { 'content-type': 'application/json' })
