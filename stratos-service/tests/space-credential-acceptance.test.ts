@@ -462,6 +462,52 @@ describe('space-credential acceptance', () => {
       } as any
     }
 
+    it('routes a Bearer delegation only through the credential mint verifier', async () => {
+      const verifiers = makeVerifiers()
+      const token = 'header.payload.signature'
+      expect(
+        (await verifiers.spaceCredentialMint(ctxWithHeader(`Bearer ${token}`)))
+          .credentials,
+      ).toEqual({ type: 'delegation', delegationToken: token })
+      expect(
+        (await verifiers.spaceCredentialMint(ctxWithHeader())).credentials,
+      ).toEqual({ type: 'anonymous' })
+    })
+
+    it('rejects malformed Bearer syntax before credential minting', async () => {
+      const verifiers = makeVerifiers()
+      await expect(
+        verifiers.spaceCredentialMint(ctxWithHeader('Bearer two tokens')),
+      ).rejects.toThrow('Invalid delegation authorization')
+      await expect(
+        verifiers.spaceCredentialMint(ctxWithHeader('Bearer fooBearer token')),
+      ).rejects.toThrow('Invalid delegation authorization')
+    })
+
+    it('preserves optional session auth on the mint endpoint', async () => {
+      const verifiers = makeVerifiers()
+      for (const header of [undefined, 'Other Bearer token', 'DPoP token']) {
+        expect(
+          (await verifiers.spaceCredentialMint(ctxWithHeader(header)))
+            .credentials,
+        ).toEqual({ type: 'anonymous' })
+      }
+      expect((await verifiers.spaceCredentialMint({})).credentials).toEqual({
+        type: 'anonymous',
+      })
+      expect(
+        (await verifiers.spaceCredentialMint({ req: {} })).credentials,
+      ).toEqual({ type: 'anonymous' })
+    })
+
+    it('preserves development DID bearer auth on the mint endpoint', async () => {
+      const verifiers = makeVerifiers({ devMode: true })
+      const result = await verifiers.spaceCredentialMint(
+        ctxWithHeader('Bearer did:plc:asuka'),
+      )
+      expect(result.credentials).toEqual({ type: 'user', did: 'did:plc:asuka' })
+    })
+
     it('spaceCredential accepts a BOUND credential presented under DPoP with a valid proof', async () => {
       const verifiers = makeVerifiers()
       const key = await makePresentationKey()

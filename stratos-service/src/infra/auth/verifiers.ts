@@ -46,6 +46,14 @@ export interface AuthVerifiers {
   optionalStandard: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string; did?: string; jkt?: string } }>
+  /** Accept a delegation Bearer only on the credential mint procedure. */
+  spaceCredentialMint: (
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
+  ) => Promise<{
+    credentials:
+      | { type: string; did?: string; jkt?: string }
+      | { type: 'delegation'; delegationToken: string }
+  }>
   /**
    * Space-credential auth: a multi-use, DPoP-key-bound JWT this service minted
    * for a single space, verified against our OWN signing key (no DID
@@ -169,6 +177,7 @@ export function createAuthVerifiers(
     standard,
     service,
     optionalStandard,
+    spaceCredentialMint: createSpaceCredentialMintVerifier(optionalStandard),
     spaceCredential,
     standardOrSpaceCredential: withSpaceCredentialFallback(
       standard,
@@ -191,6 +200,25 @@ export function createAuthVerifiers(
       logger,
     }),
     subscribeAuth: createSubscribeAuthVerifier(idResolver, serviceDid),
+  }
+}
+
+function createSpaceCredentialMintVerifier(
+  optionalStandard: AuthVerifiers['optionalStandard'],
+): AuthVerifiers['spaceCredentialMint'] {
+  return async (ctx) => {
+    const authorization = ctx.req?.headers?.authorization
+    if (authorization && /^Bearer\s/i.test(authorization)) {
+      const token = /^Bearer ([^\s]+)$/i.exec(authorization)?.[1]
+      if (!token)
+        throw new AuthRequiredError('Invalid delegation authorization')
+      // Preserve the existing development DID path. Every other Bearer must
+      // pass the delegation signature and claim checks in the mint handler.
+      if (!token.startsWith('did:')) {
+        return { credentials: { type: 'delegation', delegationToken: token } }
+      }
+    }
+    return optionalStandard(ctx)
   }
 }
 

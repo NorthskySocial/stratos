@@ -4,6 +4,7 @@ import {
   Server as XrpcServer,
 } from '@atproto/xrpc-server'
 import { parseSpaceUri } from '@northskysocial/stratos-core'
+import { decodeJwt } from 'jose'
 import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
@@ -45,13 +46,9 @@ interface GetSpaceCredentialInput {
 /**
  * Register the `zone.stratos.space.getSpaceCredential` handler.
  *
- * Method-auth binding: `optionalStandard`. Both supported identity paths must
- * flow through a single method, but only one of them (the DPoP path) presents
- * an `Authorization` header; the delegation-token path carries identity in the
- * request body. `standard` would hard-reject the delegation path (no header),
- * so we bind `optionalStandard` (which yields an authenticated `did` when a
- * valid DPoP session is present and `anonymous` otherwise) and perform explicit
- * identity resolution + rejection inside the handler.
+ * The mint verifier routes a Bearer delegation to this handler and preserves
+ * the existing DPoP session and body-delegation paths. The handler verifies
+ * delegation claims after validating the requested space.
  *
  * @param server - XRPC server.
  * @param ctx - Application context.
@@ -65,13 +62,12 @@ export function registerSpaceCredentialHandlers(
 
   xrpc.method(GET_SPACE_CREDENTIAL_METHOD, {
     type: 'procedure',
-    auth: ctx.authVerifier.optionalStandard,
+    auth: ctx.authVerifier.spaceCredentialMint,
     handler: createXrpcHandler<GetSpaceCredentialInput>(
       ctx,
       GET_SPACE_CREDENTIAL_METHOD,
       {
-        // Both identity paths are resolved explicitly below; the delegation
-        // path legitimately arrives with no authenticated DPoP `did`.
+        // A delegation carries identity without a DPoP session DID.
         requireAuth: false,
         handler: async ({ input, auth, req }) => {
           return handleGetSpaceCredential(
@@ -103,11 +99,11 @@ interface MintRequest {
 /**
  * Core issuance logic for {@link GET_SPACE_CREDENTIAL_METHOD}.
  *
- * Steps (interim/DPoP path is live; delegation path is dormant):
+ * Steps:
  *   1. Require a `space` input.
  *   2. Parse `space` as an `at://` space URI; its `spaceDid` MUST equal
  *      our configured service DID → else {@link UnknownSpace}.
- *   3. Resolve identity: if a `delegationToken` is present, verify it
+ *   3. Resolve identity: if a delegation is present, verify it
  *      (its target space MUST equal `space`) and take identity from it; else use
  *      the DPoP-authenticated user (reject anonymous). The token's single-use
  *      `jti` is NOT consumed here — it burns in step 7, after every other gate
@@ -136,14 +132,16 @@ interface MintRequest {
 async function handleGetSpaceCredential(
   ctx: AppContext,
   input: GetSpaceCredentialInput | undefined,
-  credentials: { did?: string; jkt?: string } | undefined,
+  credentials:
+    | { did?: string; jkt?: string; delegationToken?: string }
+    | undefined,
   req: MintRequest | undefined,
   proofChecker: SpaceDpopProofChecker,
 ): Promise<{ credential: string; expiresAt: string }> {
-  const space = input?.space
-  if (!space) {
+  if (!input?.space) {
     throw new InvalidRequestError('space parameter required', 'InvalidRequest')
   }
+  const space = input.space
 
   // Space URI must be a valid `at://` space URI targeting THIS service.
   const parsed = parseSpaceUri(space)
@@ -168,9 +166,17 @@ async function handleGetSpaceCredential(
     throw new InternalServerError('Space credentials are not available')
   }
 
-  // Resolve identity via delegation token (dormant) or DPoP session (live).
-  const delegation = input?.delegationToken
-    ? await resolveDelegationIdentity(ctx, input.delegationToken, space)
+  // Resolve identity via delegation token or DPoP session.
+  const headerToken = credentials?.delegationToken
+  if (input.delegationToken && req?.headers?.authorization) {
+    throw new InvalidRequestError(
+      'Use one delegation transport per request',
+      'InvalidRequest',
+    )
+  }
+  const delegationToken = headerToken ?? input.delegationToken
+  const delegation = delegationToken
+    ? await resolveDelegationIdentity(ctx, delegationToken, space)
     : undefined
   const userDid = delegation
     ? delegation.userDid
@@ -209,11 +215,11 @@ async function handleGetSpaceCredential(
       ? { kind: 'open' }
       : { kind: 'allowList', clientIds: definition.clientIds }
     : resolveAppAccess(ctx.cfg.stratos.spaceAppAccess, boundary)
-  await enforceAppAccess(ctx, access, input!.clientAttestation)
+  await enforceAppAccess(ctx, access, input.clientAttestation)
 
   // Key binding: the delegation path proves key possession with a standalone
   // mint-time DPoP proof; the DPoP path reuses the session proof's key.
-  const jkt = input?.delegationToken
+  const jkt = delegation
     ? await requireMintProofJkt(ctx, proofChecker, req)
     : credentials?.jkt
   if (!jkt && ctx.cfg.stratos.devMode !== true) {
@@ -272,6 +278,11 @@ async function requireMintProofJkt(
   req: MintRequest | undefined,
 ): Promise<string> {
   try {
+    const proofHeader = req?.headers?.dpop
+    const proofToken = Array.isArray(proofHeader) ? proofHeader[0] : proofHeader
+    if (proofToken && decodeJwt(proofToken).nonce !== undefined) {
+      throw new Error('Mint proof must omit nonce')
+    }
     const proof = await proofChecker.check({
       method: req?.method || 'POST',
       url: req?.originalUrl || req?.url || '/',
