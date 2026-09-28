@@ -175,6 +175,7 @@ impl ProjectionReader {
         space_uri: &str,
         actor_did: &str,
         retained_at: &str,
+        observed_at: &str,
         generation: u64,
     ) -> Result<(), StoreError> {
         self.store.promote_authorized_space_stage_at_generation(
@@ -182,6 +183,7 @@ impl ProjectionReader {
             space_uri,
             actor_did,
             retained_at,
+            observed_at,
             generation,
         )?;
         self.admission.invalidate_boundary(boundary);

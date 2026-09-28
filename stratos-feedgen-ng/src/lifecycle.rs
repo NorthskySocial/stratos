@@ -492,6 +492,7 @@ impl ControlLifecycle {
         space_uri: &str,
         actor_did: &str,
         retained_at: &str,
+        observed_at: &str,
         generation: u64,
     ) -> Result<(), StoreError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
@@ -503,6 +504,7 @@ impl ControlLifecycle {
                 space_uri,
                 actor_did,
                 retained_at,
+                observed_at,
                 generation,
             )
     }
