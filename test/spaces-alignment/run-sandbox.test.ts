@@ -191,6 +191,20 @@ describe('sandbox preflight', () => {
     await writeFile(
       join(
         candidateRepo,
+        'test/spaces-alignment/templates/feedgen-ng-e2e.definition.json',
+      ),
+      '{"routes":[{"hostname":"stratos-e2e.atmosbox.internal"}]}\n',
+    )
+    await writeFile(
+      join(
+        candidateRepo,
+        'test/spaces-alignment/templates/feedgen-ng-e2e-clubhouse.yaml',
+      ),
+      'services: {}\n',
+    )
+    await writeFile(
+      join(
+        candidateRepo,
         'test/spaces-alignment/templates/feedgen-ng-e2e-clubhouse.definition.json',
       ),
       '{"buildArguments":[{"name":"VITE_PLC_DIRECTORY"}]}\n',
@@ -224,6 +238,14 @@ describe('sandbox preflight', () => {
     await writeFile(join(sandboxRepo, 'deno.lock'), '{}\n')
     await writeFile(
       join(sandboxRepo, 'stacks/feedgen-ng-e2e.yaml'),
+      'services: {}\n',
+    )
+    await writeFile(
+      join(sandboxRepo, 'stacks/feedgen-ng-e2e.definition.json'),
+      '{}\n',
+    )
+    await writeFile(
+      join(sandboxRepo, 'stacks/feedgen-ng-e2e-clubhouse.yaml'),
       'services: {}\n',
     )
     await writeFile(
@@ -287,6 +309,12 @@ const assert = require('node:assert/strict')
 assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-spaces-alignment-'))
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 if (process.env.RUNNER_TEST_FAIL_STEP && process.argv.includes(process.env.RUNNER_TEST_FAIL_STEP)) process.exit(7)
+if (process.argv.includes('create')) {
+  fs.mkdirSync('state', { recursive: true })
+  fs.writeFileSync('state/manifest.json', JSON.stringify({
+    domain: process.env.RUNNER_TEST_WRONG_DOMAIN ? 'atmosbox.internal' : 'atmosbox.test'
+  }))
+}
 if (process.argv.includes('seed')) {
   fs.mkdirSync('state', { recursive: true })
   fs.writeFileSync('state/accounts.json', JSON.stringify({ accounts: {
@@ -426,6 +454,25 @@ if (args.includes('down')) {
       upFailure.completedSteps.map((step: { name: string }) => step.name),
     ).toEqual(['install', 'create', 'check'])
     delete process.env.RUNNER_TEST_FAIL_STEP
+    process.env.RUNNER_TEST_WRONG_DOMAIN = '1'
+    const wrongDomainReport = join(root, 'wrong-domain-report')
+    await expect(
+      runSandbox(
+        { ...options, reportDirectory: wrongDomainReport },
+        dependencies,
+      ),
+    ).rejects.toThrow(
+      'Pinned sandbox domain differs from the OAuth route templates',
+    )
+    const wrongDomainFailure = JSON.parse(
+      await readFile(join(wrongDomainReport, 'failure.json'), 'utf8'),
+    )
+    expect(
+      wrongDomainFailure.completedSteps.map(
+        (step: { name: string }) => step.name,
+      ),
+    ).toEqual(['install', 'create'])
+    delete process.env.RUNNER_TEST_WRONG_DOMAIN
     process.env.RUNNER_TEST_EMPTY_ASSERTIONS = '1'
     await expect(
       runSandbox(
@@ -492,7 +539,7 @@ if (args.includes('down')) {
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
-    expect(dockerConfigs).toHaveLength(6)
-    expect(new Set(dockerConfigs).size).toBe(6)
+    expect(dockerConfigs).toHaveLength(7)
+    expect(new Set(dockerConfigs).size).toBe(7)
   })
 })

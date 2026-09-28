@@ -7,13 +7,6 @@
       "environment": [],
       "buildArguments": [
         {
-          "name": "VITE_STRATOS_URL",
-          "source": {
-            "kind": "host-url",
-            "host": "stratos-e2e"
-          }
-        },
-        {
           "name": "VITE_STRATOS_SERVICE_DID",
           "source": {
             "kind": "web-did",
@@ -32,13 +25,6 @@
           "source": {
             "kind": "web-did",
             "host": "feedgen-e2e"
-          }
-        },
-        {
-          "name": "VITE_CLUBHOUSE_URL",
-          "source": {
-            "kind": "host-url",
-            "host": "clubhouse-e2e"
           }
         },
         {
@@ -73,6 +59,12 @@
       "id": "clubhouse",
       "service": "feedgen-e2e-clubhouse",
       "host": "clubhouse-e2e",
+      "port": 80
+    },
+    {
+      "id": "clubhouse-oauth",
+      "service": "feedgen-e2e-clubhouse",
+      "hostname": "clubhouse-e2e.atmosbox.internal",
       "port": 80
     }
   ],

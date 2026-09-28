@@ -381,7 +381,11 @@ async function unjoinedOrdinaryAccount(domain) {
   return { username, password: account.password, did: account.did }
 }
 
+const pdsSessions = new Map()
+
 async function pdsSession(domain, account) {
+  const cached = pdsSessions.get(account.username)
+  if (cached) return cached
   const pdsUrl = `https://spaces-pds-e2e.${domain}`
   const session = await requestJson(
     `${pdsUrl}/xrpc/com.atproto.server.createSession`,
@@ -399,6 +403,7 @@ async function pdsSession(domain, account) {
     session.accessJwt && session.did,
     'Space PDS session was incomplete',
   )
+  pdsSessions.set(account.username, session)
   return session
 }
 
@@ -425,9 +430,9 @@ async function pdsEnrollment(domain, account, authorityDid) {
 
 async function assertSpaceLexicon(domain, authorityDid, account) {
   const query = new URL(
-    `https://stratos-e2e.${domain}/xrpc/com.atproto.repo.getRecord`,
+    `https://authority.${domain}/xrpc/com.atproto.repo.getRecord`,
   )
-  query.searchParams.set('repo', authorityDid)
+  query.searchParams.set('repo', `schemas.authority.${domain}`)
   query.searchParams.set('collection', 'com.atproto.lexicon.schema')
   query.searchParams.set('rkey', 'zone.stratos.space.feed')
   const response = await fetch(query)
@@ -570,7 +575,7 @@ async function assertNonmemberDenied(domain, clubhouseUrl, roomId, postText) {
     const page = await browser.newPage()
     const responses = listenForFeedResponses(page)
     const authorization = new URL(
-      `https://stratos-e2e.${domain}/oauth/authorize`,
+      'https://stratos-e2e.atmosbox.internal/oauth/authorize',
     )
     authorization.searchParams.set('handle', account.username)
     await page.goto(authorization.toString(), {
@@ -657,7 +662,7 @@ async function main() {
   const domain = required('SANDBOX_DOMAIN')
   const account = await provisionAccount(domain)
   const clubhouseUrl = httpsUrl(
-    `https://clubhouse-e2e.${domain}`,
+    'https://clubhouse-e2e.atmosbox.internal',
     'Clubhouse URL',
   )
   const roomId = process.env.FEEDGEN_E2E_ROOM?.trim() || 'general'
