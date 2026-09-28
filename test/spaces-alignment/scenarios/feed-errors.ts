@@ -216,6 +216,43 @@ export const suite: ScenarioSuite = {
         context.sandboxDirectory,
       )
       await writeFile(join(control, 'restored'), '')
+      await signal(control, 'revoke-did', browser)
+      const did = (await readFile(join(control, 'revoke-did'), 'utf8')).trim()
+      if (!/^did:plc:[a-z2-7]+$/.test(did)) {
+        throw new Error(
+          'Browser supplied an invalid test account DID for revocation',
+        )
+      }
+      const revoke = `
+        const Database = require('better-sqlite3')
+        const db = new Database(process.env.PDS_DATA_DIRECTORY + '/account.sqlite')
+        db.pragma('busy_timeout = 5000')
+        const [did, clientId] = process.argv.slice(1)
+        const grant = db.prepare('SELECT count(*) AS count FROM token WHERE did = ? AND clientId = ?').get(did, clientId)
+        if (grant.count < 1) throw new Error('Test webapp OAuth grant was absent')
+        const deleted = db.prepare('DELETE FROM token WHERE did = ? AND clientId = ?').run(did, clientId)
+        if (deleted.changes !== grant.count) throw new Error('Test webapp OAuth grant changed during revocation')
+        console.log('revoked:' + deleted.changes)
+      `
+      const revocation = await context.runCommand(
+        'docker',
+        [
+          ...composeArgs,
+          'exec',
+          '-T',
+          'feedgen-e2e-pds-spaces',
+          'node',
+          '-e',
+          revoke,
+          did,
+          'https://webapp-e2e.atmosbox.internal/client-metadata.json',
+        ],
+        context.sandboxDirectory,
+      )
+      if (!/^revoked:[1-9][0-9]*\s*$/.test(revocation)) {
+        throw new Error('Test webapp OAuth grant revocation was not confirmed')
+      }
+      await writeFile(join(control, 'revoked'), '')
       const output = await browser
       const receipt = output
         .split('\n')
