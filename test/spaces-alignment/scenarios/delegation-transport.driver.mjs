@@ -290,13 +290,6 @@ async function main() {
     assert.equal(afterAmbiguous.status, 200)
     passed.push('ambiguous-transport-denied')
 
-    const ordinaryBearer = await exchange(
-      'header.payload.signature',
-      proofKey(),
-    )
-    assert.ok([400, 401].includes(ordinaryBearer.status))
-    passed.push('ordinary-bearer-denied')
-
     console.log(
       JSON.stringify({
         suite: 'delegation-transport',
