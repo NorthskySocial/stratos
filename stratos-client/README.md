@@ -232,6 +232,15 @@ combined with any `Authorization` header, including a DPoP session token, is
 rejected. This custom Stratos endpoint does not advertise the
 upstream `com.atproto.space.*` namespace.
 
+The issued credential covers one whole space until expiry (normally two
+hours), not just the member who requested it. Production reads require a fresh
+DPoP proof from the bound key; Bearer presentation is limited to development
+mode. Removing a member blocks new credentials and service-member requests,
+but does not revoke an already-issued capability on a foreign PDS. Stratos
+rejects a locally issued credential when its catalog boundary is deleted or
+revised; a foreign host does not understand that private revision claim. See
+[the current spaces contract](../docs/architecture/spaces-alignment.md).
+
 ---
 
 ## 3. DPoP-Aware Transport

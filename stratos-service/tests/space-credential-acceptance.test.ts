@@ -24,6 +24,7 @@ import {
 import { Secp256k1Keypair } from '@atproto/crypto'
 import { AuthRequiredError } from '@atproto/xrpc-server'
 import { encodeRecord, spaceUriToBoundary } from '@northskysocial/stratos-core'
+import type { BoundaryCatalogStore } from '@northskysocial/stratos-core'
 
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
 import {
@@ -39,6 +40,8 @@ import {
 import { registerHydrationHandlers } from '../src/features/index.js'
 import { HydrationServiceImpl } from '../src/features/hydration/adapter.js'
 import { mintSpaceCredential } from '../src/features/space-credential/minter.js'
+import { createSqliteBoundaryStore } from '../src/features/boundary/store.js'
+import { migrateSqliteBoundaries } from '../src/features/boundary/migrate.js'
 import { createAuthVerifiers } from '../src/infra/auth/verifiers.js'
 import { ReplayStore, type NxExStore } from '../src/infra/auth/replay-store.js'
 import { createMockBlobStore, createTestConfig } from './utils/index.js'
@@ -401,6 +404,7 @@ describe('space-credential acceptance', () => {
     function makeVerifiers(opts?: {
       devMode?: boolean
       withoutReplayStore?: boolean
+      boundaryStore?: BoundaryCatalogStore
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     }): any {
       return createAuthVerifiers(
@@ -441,6 +445,7 @@ describe('space-credential acceptance', () => {
           ? undefined
           : new ReplayStore(new MemoryNxExStore()),
         ctx.logger,
+        opts?.boundaryStore,
       )
     }
 
@@ -461,6 +466,104 @@ describe('space-credential acceptance', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any
     }
+
+    it('a still-valid credential reads after member removal, then local revision and deletion deny', async () => {
+      await actorStore.create(repoDid)
+      await seedRecord(
+        repoDid,
+        'zone.stratos.feed.post',
+        'asuka',
+        BOUNDARY_S.value,
+      )
+      await enrollmentStore.enroll({
+        did: repoDid,
+        enrolledAt: new Date().toISOString(),
+        boundaries: [BOUNDARY_S.value],
+        signingKeyDid: 'did:key:zAsuka',
+        active: true,
+      })
+      await migrateSqliteBoundaries(db)
+      const catalog = createSqliteBoundaryStore(db)
+      const now = new Date().toISOString()
+      const settings = {
+        displayName: 'Nerv',
+        description: 'Asuka and Shinji',
+        listed: true,
+        joinable: true,
+        autoEnroll: false,
+        appAccess: 'open' as const,
+        clientIds: [],
+      }
+      await catalog.initialize([
+        {
+          boundary: BOUNDARY_S.value,
+          roomId: 'alpha',
+          ...settings,
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+          revision: 1,
+        },
+      ])
+      const verifiers = makeVerifiers({ boundaryStore: catalog })
+      const key = await makePresentationKey()
+      const { credential } = await mintSpaceCredential({
+        signingKey,
+        issuerDid: SERVICE_DID,
+        spaceUri: SPACE_S,
+        ttlSeconds: 7_200,
+        boundaryRevision: 1,
+        jkt: key.jkt,
+      })
+      async function readWithCredential() {
+        const auth = await verifiers.spaceCredential(
+          ctxWithHeader(`DPoP ${credential}`, {
+            dpop: await key.buildProof(credential),
+          }),
+        )
+        const response = await listRecordPathsHandler(ctx)({
+          params: { did: repoDid, limit: 100 },
+          auth,
+        } as Parameters<ReturnType<typeof listRecordPathsHandler>>[0])
+        return (
+          response.body as { records: Array<{ rkey: string }> }
+        ).records.map((record) => record.rkey)
+      }
+      expect(await readWithCredential()).toEqual(['asuka'])
+      await enrollmentStore.removeBoundary(repoDid, BOUNDARY_S.value)
+      expect(await enrollmentStore.getBoundaries(repoDid)).not.toContain(
+        BOUNDARY_S.value,
+      )
+      expect(await readWithCredential()).toEqual(['asuka'])
+
+      expect(await catalog.update(BOUNDARY_S.value, settings, 1)).toBe(true)
+      await expect(readWithCredential()).rejects.toBeInstanceOf(
+        AuthRequiredError,
+      )
+
+      const renewed = await mintSpaceCredential({
+        signingKey,
+        issuerDid: SERVICE_DID,
+        spaceUri: SPACE_S,
+        ttlSeconds: 7_200,
+        boundaryRevision: 2,
+        jkt: key.jkt,
+      })
+      const renewedAuth = await verifiers.spaceCredential(
+        ctxWithHeader(`DPoP ${renewed.credential}`, {
+          dpop: await key.buildProof(renewed.credential),
+        }),
+      )
+      expect(renewedAuth.credentials.type).toBe('space-credential')
+      expect(await catalog.beginDeactivation(BOUNDARY_S.value, 2)).toBe(true)
+      await expect(
+        verifiers.spaceCredential(
+          ctxWithHeader(`DPoP ${renewed.credential}`, {
+            dpop: await key.buildProof(renewed.credential),
+          }),
+        ),
+      ).rejects.toBeInstanceOf(AuthRequiredError)
+    })
 
     it('routes a Bearer delegation only through the credential mint verifier', async () => {
       const verifiers = makeVerifiers()
