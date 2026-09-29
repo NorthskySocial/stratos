@@ -93,32 +93,31 @@ describe('delegation transport browser scenario', () => {
             '--entrypoint',
             'deno',
             'feedgen-e2e-identity',
-            'eval',
+            'run',
+            '--config=/app/deno.json',
             '--cached-only',
             '--allow-env=SANDBOX_DOMAIN',
             '--allow-read=/run/sandbox-secrets/feedgen-signing-key',
             '--allow-net=feedgen-e2e-stratos:3100',
-            expect.stringContaining('Secp256k1Keypair.import(signingKey)'),
+            expect.stringMatching(/^data:application\/javascript,/),
           ])
-          expect(args.at(-1)).toContain("'zone.stratos.space.listRepos'")
-          expect(args.at(-1)).toContain(
-            'requireEqual(admittedResponse.status, 200)',
+          const script = decodeURIComponent(
+            args.at(-1)?.slice('data:application/javascript,'.length) ?? '',
           )
-          expect(args.at(-1)).toContain(
-            "'zone.stratos.space.getSpaceCredential'",
-          )
-          expect(args.at(-1)).toContain(
-            "requireEqual(body.error, 'InvalidToken')",
-          )
-          expect(args.at(-1)).not.toContain('DELEGATION_SIGNING_KEY')
+          expect(script).toContain('Secp256k1Keypair.import(signingKey)')
+          expect(script).toContain("'zone.stratos.space.listRepos'")
+          expect(script).toContain('requireEqual(admittedResponse.status, 200)')
+          expect(script).toContain("'zone.stratos.space.getSpaceCredential'")
+          expect(script).toContain("requireEqual(body.error, 'InvalidToken')")
+          expect(script).not.toContain('DELEGATION_SIGNING_KEY')
           expect(
-            args.filter((arg) => arg.includes('feedgen-signing-key')),
-          ).toEqual([
-            '--allow-read=/run/sandbox-secrets/feedgen-signing-key',
-            expect.stringContaining(
-              "Deno.readTextFile('/run/sandbox-secrets/feedgen-signing-key')",
-            ),
-          ])
+            args
+              .slice(0, -1)
+              .filter((arg) => arg.includes('feedgen-signing-key')),
+          ).toEqual(['--allow-read=/run/sandbox-secrets/feedgen-signing-key'])
+          expect(script).toContain(
+            "Deno.readTextFile('/run/sandbox-secrets/feedgen-signing-key')",
+          )
           return `  ${JSON.stringify({ suite: 'delegation-service-bearer', assertions: [assertions.at(-1)] })}  \n`
         },
       })
@@ -133,7 +132,7 @@ describe('delegation transport browser scenario', () => {
         '--rm',
         '--no-deps',
         '--volume',
-        `${join(reportDirectory, 'browser-assets')}:/scenario:ro,Z`,
+        `${join(reportDirectory, 'browser-assets')}:/scenario:ro,z`,
         '--entrypoint',
         'node',
         'feedgen-e2e-browser',
