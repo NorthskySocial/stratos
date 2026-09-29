@@ -16,7 +16,10 @@ import { createRequire } from 'node:module'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { assertCurrentAuthorityDiscovery } from './authority-contract.discovery.mjs'
+import {
+  assertCurrentAuthorityDiscovery,
+  writerSigningKeyMultibase,
+} from './authority-contract.discovery.mjs'
 
 const require = createRequire('/runner/feedgen-ng-e2e-browser.mjs')
 const { chromium } = require('playwright')
@@ -265,11 +268,7 @@ async function verifySignedHead(commit, did) {
   )
   assert.equal(didResponse.status, 200)
   const document = await didResponse.json()
-  const method = document.verificationMethod?.find((entry) =>
-    entry.id.endsWith('#atproto'),
-  )
-  assert.ok(method?.publicKeyMultibase, 'PDS DID has no account signing key')
-  const multicodec = decodeBase58(method.publicKeyMultibase)
+  const multicodec = decodeBase58(writerSigningKeyMultibase(document, did))
   assert.equal(multicodec[0], 0xe7)
   assert.equal(multicodec[1], 0x01)
   const uncompressed = ECDH.convertKey(

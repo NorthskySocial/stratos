@@ -18,3 +18,8 @@ export function assertCurrentAuthorityDiscovery(
   authorityDid: string,
   endpoint: string,
 ): void
+
+export function writerSigningKeyMultibase(
+  document: Pick<AuthorityDidDocument, 'id' | 'verificationMethod'>,
+  writerDid: string,
+): string
