@@ -119,6 +119,25 @@ describe('current authority DID discovery', () => {
       ).toThrow()
     }
   })
+
+  it('rejects the PDS service that standard host discovery would fall back to', () => {
+    for (const id of ['#atproto_pds', `${authorityDid}#atproto_pds`]) {
+      const advertised = {
+        ...document,
+        service: [
+          ...document.service,
+          {
+            id,
+            type: 'AtprotoPersonalDataServer',
+            serviceEndpoint: endpoint,
+          },
+        ],
+      }
+      expect(() =>
+        assertCurrentAuthorityDiscovery(advertised, authorityDid, endpoint),
+      ).toThrow()
+    }
+  })
 })
 
 describe('writer signed-head key selection', () => {

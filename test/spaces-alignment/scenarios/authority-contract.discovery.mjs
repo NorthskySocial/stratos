@@ -34,7 +34,9 @@ export function assertCurrentAuthorityDiscovery(
     document.service.every(
       (service) =>
         service.id !== '#atproto_space_host' &&
-        service.id !== `${authorityDid}#atproto_space_host`,
+        service.id !== `${authorityDid}#atproto_space_host` &&
+        service.id !== '#atproto_pds' &&
+        service.id !== `${authorityDid}#atproto_pds`,
     ),
   )
 }
