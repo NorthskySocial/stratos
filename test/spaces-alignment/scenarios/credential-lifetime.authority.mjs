@@ -1,14 +1,12 @@
 import assert from 'node:assert/strict'
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import { pathToFileURL } from 'node:url'
+import { mkdtemp, rm, stat, symlink } from 'node:fs/promises'
+import { join } from 'node:path'
 
-const require = createRequire('/app/stratos-service/package.json')
-const cryptoPath = require.resolve('@atproto/crypto')
-const { Secp256k1Keypair } = await import(pathToFileURL(cryptoPath).href)
 const { mintSpaceCredential } =
   await import('/app/stratos-service/dist/features/space-credential/minter.js')
+const { openServiceSigningIdentity } =
+  await import('/app/stratos-service/dist/infra/signing/service-identity.js')
 const { createServiceDb, closeServiceDb } =
   await import('/app/stratos-service/dist/db/index.js')
 const { createSqliteBoundaryStore } =
@@ -67,14 +65,50 @@ async function main() {
   )
   url.searchParams.set('space', spaceUri)
 
-  // The authority key remains in this disposable Stratos container. The host
-  // sees only assertion IDs, never private material or signed credentials.
-  const stored = JSON.parse(
-    await readFile('/app/data/service-signing-identity.json', 'utf8'),
-  )
-  const signingKey = await Secp256k1Keypair.import(
-    Buffer.from(stored.privateKey, 'base64'),
-  )
+  // The production process owns the real identity lock. A private tmpfs
+  // directory gives its read-only, non-rotating sandbox peer an independent
+  // lock while the production identity loader alone handles key bytes. No
+  // identity file is copied and this fixture never calls rotate or writes it.
+  const identityFile = '/app/data/service-signing-identity.json'
+  const before = await stat(identityFile)
+  assert.equal(before.isFile(), true)
+  const identityDirectory = await mkdtemp('/tmp/credential-lifetime-')
+  try {
+    await symlink(
+      identityFile,
+      join(identityDirectory, 'service-signing-identity.json'),
+    )
+    const identity = await openServiceSigningIdentity(
+      identityDirectory,
+      issuerDid,
+    )
+    try {
+      await checkCredentialLifetime(
+        identity.signingKey,
+        boundary,
+        spaceUri,
+        issuerDid,
+        url,
+      )
+    } finally {
+      await identity.close()
+    }
+    const after = await stat(identityFile)
+    assert.equal(after.ino, before.ino)
+    assert.equal(after.size, before.size)
+    assert.equal(after.mtimeMs, before.mtimeMs)
+  } finally {
+    await rm(identityDirectory, { recursive: true, force: true })
+  }
+}
+
+async function checkCredentialLifetime(
+  signingKey,
+  boundary,
+  spaceUri,
+  issuerDid,
+  url,
+) {
   const db = createServiceDb('/app/data/service.sqlite')
   try {
     const catalog = createSqliteBoundaryStore(db)
