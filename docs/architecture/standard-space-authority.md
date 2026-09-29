@@ -53,7 +53,8 @@ root is neither the writer's LtHash digest nor a user-signed standard commit.
 Converting its CID or MST root bytes into `hash` would fabricate evidence.
 
 The sandbox-only adapter therefore admits a PDS-custody writer only after it
-has an actual upstream signed head and active Stratos membership for the space.
+has an actual upstream signed head bound to that exact space URI and active
+Stratos membership for the space.
 It excludes Stratos-custody writers from any **standard** `listRepos` view. It
 keeps them on the existing Stratos sync path. It never migrates their custody
 or signs for them. Whether a PDS-only standard writer set is useful enough to
@@ -65,6 +66,8 @@ enrollment plus the space boundary. A `notifyWrite` from any other repo is
 rejected, even when its service signature is valid. A notification can update
 only the verified `rev` and `hash` of an already admitted writer. It cannot add
 writers, reactivate enrollment, assign boundaries, or override the repo host.
+Retaining a writer row does not retain permission: each notification rechecks
+current enrollment and the space boundary before it advances that row.
 Stratos re-derives boundaries for PDS-custody records during ingest.
 
 ## Sandbox adapter and probes

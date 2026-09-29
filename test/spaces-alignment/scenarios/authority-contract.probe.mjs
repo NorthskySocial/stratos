@@ -57,7 +57,7 @@ try {
     active: true,
     boundaries: ['general'],
   }))
-  const plan = planStandardWriters(members, 'general', new Map())
+  const plan = planStandardWriters(members, 'general', space, new Map())
   assert.equal(plan.publishable, false)
   assert.equal(plan.rows.length, 0)
   assert.ok(plan.blockers.some((blocker) => blocker.startsWith('MST custody')))
@@ -83,6 +83,8 @@ try {
         },
         authorityDid,
         space,
+        'general',
+        members,
         {},
       ),
     /cannot discover a writer/,
