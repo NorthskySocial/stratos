@@ -43,6 +43,7 @@ async function prepareAssets(reportDirectory: string): Promise<string> {
   await Promise.all(
     [
       'authority-contract.browser.mjs',
+      'authority-contract.discovery.mjs',
       'authority-contract.probe.mjs',
       'authority-contract.adapter.ts',
     ].map(async (name) => {

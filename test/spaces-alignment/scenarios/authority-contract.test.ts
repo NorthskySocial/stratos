@@ -118,6 +118,7 @@ it('runs real browser and identity-container probes with a private fixture', asy
   for (const name of [
     'auth-client.iife.js',
     'authority-contract.browser.mjs',
+    'authority-contract.discovery.mjs',
     'authority-contract.probe.mjs',
     'authority-contract.adapter.ts',
   ]) {

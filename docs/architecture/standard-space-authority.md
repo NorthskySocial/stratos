@@ -21,9 +21,10 @@ The [proposal's space-authority rule](https://github.com/bluesky-social/proposal
 resolves `#atproto_space` for credential signatures and `#atproto_space_host`
 (`AtprotoSpaceHost`) for the host. Each absent entry falls back to `#atproto`
 or `#atproto_pds`, respectively. A malformed present entry must fail instead
-of falling back. Stratos currently publishes `#atproto_space` and only a
-`#stratos` service entry in `stratos-service/src/index.ts`. It must not add the
-host entry until the full role and its discovery tests pass.
+of falling back. Stratos currently publishes the fallback `#atproto` signing
+method and a `#stratos` service entry in `stratos-service/src/index.ts`. It
+publishes neither dedicated space role entry in the sandbox configuration.
+It must not add the host entry until the full role and its discovery tests pass.
 
 | Method and pinned schema                                                                                                                                                             | Wire input and output                                                                                                                                               | Auth and errors                                                                                                                                                                                                                                                                 | Current Stratos result                                                                                                                                                  |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

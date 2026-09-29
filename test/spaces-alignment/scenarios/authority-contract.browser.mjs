@@ -16,6 +16,7 @@ import { createRequire } from 'node:module'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
+import { assertCurrentAuthorityDiscovery } from './authority-contract.discovery.mjs'
 
 const require = createRequire('/runner/feedgen-ng-e2e-browser.mjs')
 const { chromium } = require('playwright')
@@ -303,14 +304,7 @@ async function main() {
   const didResponse = await fetch(`${authority}/.well-known/did.json`)
   assert.equal(didResponse.status, 200)
   const document = await didResponse.json()
-  assert.ok(
-    document.verificationMethod.some((method) =>
-      method.id.endsWith('#atproto_space'),
-    ),
-  )
-  assert.ok(
-    document.service.every((service) => service.id !== '#atproto_space_host'),
-  )
+  assertCurrentAuthorityDiscovery(document, authorityDid, authority)
   assertions.push('production-role-absent')
 
   const browser = await chromium.launch({ headless: true })
