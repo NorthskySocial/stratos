@@ -43,20 +43,39 @@ describe('delegation transport browser scenario', () => {
             'delegation-test',
             '--project-directory',
             '/tmp/delegation-sandbox',
-            'exec',
-            '-T',
-            'feedgen-e2e-stratos',
-            'sh',
-            '-c',
-            expect.stringContaining('__delegation_service_bearer_exit__='),
-            '_',
-            expect.stringContaining('createServiceJwt'),
+            'run',
+            '--rm',
+            '--no-deps',
+            '--entrypoint',
+            'deno',
+            'feedgen-e2e-identity',
+            'eval',
+            '--cached-only',
+            '--allow-env=SANDBOX_DOMAIN',
+            '--allow-read=/run/sandbox-secrets/feedgen-signing-key',
+            '--allow-net=feedgen-e2e-stratos:3100',
+            expect.stringContaining('Secp256k1Keypair.import(signingKey)'),
           ])
-          expect(args.at(-1)).toContain('Secp256k1Keypair.create()')
-          expect(args.at(-1)).toContain('claims.lxm')
+          expect(args.at(-1)).toContain("'zone.stratos.space.listRepos'")
+          expect(args.at(-1)).toContain(
+            'requireEqual(admittedResponse.status, 200)',
+          )
+          expect(args.at(-1)).toContain(
+            "'zone.stratos.space.getSpaceCredential'",
+          )
+          expect(args.at(-1)).toContain(
+            "requireEqual(body.error, 'InvalidToken')",
+          )
           expect(args.at(-1)).not.toContain('DELEGATION_SIGNING_KEY')
-          expect(args.at(-1)).not.toContain('feedgen-signing-key')
-          return `  ${JSON.stringify({ suite: 'delegation-service-bearer', assertions: [assertions.at(-1)] })}  \n  __delegation_service_bearer_exit__=0  \n`
+          expect(
+            args.filter((arg) => arg.includes('feedgen-signing-key')),
+          ).toEqual([
+            '--allow-read=/run/sandbox-secrets/feedgen-signing-key',
+            expect.stringContaining(
+              "Deno.readTextFile('/run/sandbox-secrets/feedgen-signing-key')",
+            ),
+          ])
+          return `  ${JSON.stringify({ suite: 'delegation-service-bearer', assertions: [assertions.at(-1)] })}  \n`
         },
       })
       expect(calls).toHaveLength(2)
@@ -152,7 +171,7 @@ describe('delegation transport browser scenario', () => {
     }
   })
 
-  it('rejects failed service-token checks without revealing a token', async () => {
+  it('rejects invalid service-token receipts without revealing a token', async () => {
     const reportDirectory = await mkdtemp(
       join(tmpdir(), 'delegation-scenario-'),
     )
@@ -174,21 +193,11 @@ describe('delegation transport browser scenario', () => {
           },
         })
       await expect(
-        runWithServiceOutput(
-          `AssertionError: ${privateToken}\n__delegation_service_bearer_exit__=1`,
-        ),
-      ).rejects.toThrow('Service Bearer check failed: AssertionError')
-      await expect(
-        runWithServiceOutput(
-          `AssertionError: ${privateToken}\n__delegation_service_bearer_exit__=1`,
-        ),
+        runWithServiceOutput(`AssertionError: ${privateToken}`),
       ).rejects.not.toThrow(privateToken)
-      await expect(
-        runWithServiceOutput('__delegation_service_bearer_exit__=0'),
-      ).rejects.toThrow('no assertion receipt')
-      await expect(
-        runWithServiceOutput('__delegation_service_bearer_exit__=1'),
-      ).rejects.toThrow('Service Bearer check failed: UnknownError')
+      await expect(runWithServiceOutput('')).rejects.toThrow(
+        'no assertion receipt',
+      )
       for (const receipt of [
         '{"suite":"delegation-service-bearer","assertions":[{"id":"ordinary-bearer-denied","status":"passed"}],"suite":"wrong"}',
         { suite: 'delegation-service-bearer', assertions: {} },
@@ -211,7 +220,7 @@ describe('delegation transport browser scenario', () => {
       ]) {
         await expect(
           runWithServiceOutput(
-            `${typeof receipt === 'string' ? receipt : JSON.stringify(receipt)}\n__delegation_service_bearer_exit__=0`,
+            `${typeof receipt === 'string' ? receipt : JSON.stringify(receipt)}\n`,
           ),
         ).rejects.toThrow('invalid assertion receipt')
       }
