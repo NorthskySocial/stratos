@@ -8,11 +8,55 @@ import {
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import { validateAssertions, validateSuite } from '../rules.js'
 import { suite } from './delegation-transport.js'
 
 describe('delegation transport browser scenario', () => {
+  it('passes the PDS URL to the OAuth session fetch contract', async () => {
+    const driver = await readFile(
+      new URL('./delegation-transport.driver.mjs', import.meta.url),
+      'utf8',
+    )
+    const start = driver.indexOf('async function getDelegation(page) {')
+    const end = driver.indexOf('\nfunction proofKey()', start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    const requestedSpace =
+      'at://did:web:stratos-e2e.atmosbox.test/space/zone.stratos.space.feed/general'
+    const pdsUrl = 'https://spaces-pds-e2e.atmosbox.test'
+    const session = {
+      async fetchHandler(pathname: string | URL, init?: RequestInit) {
+        const target = new URL(pathname, pdsUrl)
+        expect(target.pathname).toBe(
+          '/xrpc/com.atproto.space.getDelegationToken',
+        )
+        expect(target.searchParams.get('space')).toBe(requestedSpace)
+        expect(init?.method).toBe('GET')
+        return { ok: true, json: async () => ({ token: 'pds.signed.jwt' }) }
+      },
+    }
+    const getDelegation = runInNewContext(
+      `(${driver.slice(start, end).trim()})`,
+      {
+        pds: pdsUrl,
+        space: requestedSpace,
+        URL,
+        window: { delegationScenarioAuth: { getSession: () => session } },
+      },
+    ) as (page: {
+      evaluate: (
+        callback: (args: unknown) => Promise<string>,
+        args: unknown,
+      ) => Promise<string>
+    }) => Promise<string>
+    const token = await getDelegation({
+      evaluate: async (callback, args) => callback(args),
+    })
+    expect(token).toBe('pds.signed.jwt')
+  })
+
   it('bundles the public OAuth client and requires a PDS-issued delegation receipt', async () => {
     const reportDirectory = await mkdtemp(
       join(tmpdir(), 'delegation-scenario-'),
