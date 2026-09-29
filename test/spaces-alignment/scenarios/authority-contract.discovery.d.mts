@@ -23,3 +23,8 @@ export function writerSigningKeyMultibase(
   document: Pick<AuthorityDidDocument, 'id' | 'verificationMethod'>,
   writerDid: string,
 ): string
+
+export function assertStandardRouteUnsupported(
+  response: Response,
+  method: string,
+): Promise<void>

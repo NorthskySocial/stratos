@@ -85,7 +85,10 @@ delegation-transport OAuth fixture to exercise a real PDS delegation, DPoP
 credential exchange, foreign PDS read, and a cryptographically verified PDS
 signed head. It probes standard registration and
 withdrawal routes as **unsupported** on Stratos, then verifies an unsolicited
-notification cannot add a writer. These negative probes do not count as a
+notification cannot add a writer. The current XRPC server reports an
+unregistered standard method as `501 MethodNotImplemented`; the probe rejects
+other failure classes rather than accepting any non-success response. These
+negative probes do not count as a
 successful standard registration or a production interoperability claim.
 
 The scenario checks actual wire shapes before it records assertions. A wrong

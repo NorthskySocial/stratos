@@ -54,3 +54,14 @@ export function writerSigningKeyMultibase(document, writerDid) {
   assert.match(signingKey.publicKeyMultibase, /^z[1-9A-HJ-NP-Za-km-z]+$/)
   return signingKey.publicKeyMultibase
 }
+
+/** The current XRPC server reports an unregistered NSID as 501. */
+export async function assertStandardRouteUnsupported(response, method) {
+  assert.equal(response.status, 501, `Standard ${method} was exposed`)
+  assert.match(
+    response.headers.get('content-type') ?? '',
+    /^application\/json\b/,
+  )
+  const body = await response.json()
+  assert.equal(body.error, 'MethodNotImplemented')
+}

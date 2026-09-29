@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertCurrentAuthorityDiscovery,
+  assertStandardRouteUnsupported,
   writerSigningKeyMultibase,
 } from './authority-contract.discovery.mjs'
 
@@ -204,5 +205,45 @@ describe('writer signed-head key selection', () => {
         ),
       ).toThrow()
     }
+  })
+})
+
+describe('unimplemented standard XRPC methods', () => {
+  it('accepts the XRPC server unknown-method response', async () => {
+    const response = Response.json(
+      { error: 'MethodNotImplemented', message: 'Method Not Implemented' },
+      { status: 501 },
+    )
+    await expect(
+      assertStandardRouteUnsupported(response, 'getSpaceCredential'),
+    ).resolves.toBeUndefined()
+  })
+
+  it('rejects a generic 404, success, or unrelated server error', async () => {
+    for (const [status, error] of [
+      [404, 'NotFound'],
+      [200, 'MethodNotImplemented'],
+      [501, 'InternalServerError'],
+    ] as const) {
+      const response = Response.json({ error }, { status })
+      await expect(
+        assertStandardRouteUnsupported(response, 'listRepos'),
+      ).rejects.toThrow()
+    }
+    await expect(
+      assertStandardRouteUnsupported(
+        new Response('gateway error', { status: 501 }),
+        'registerNotify',
+      ),
+    ).rejects.toThrow()
+    await expect(
+      assertStandardRouteUnsupported(
+        new Response('{"error":"MethodNotImplemented"}', {
+          status: 501,
+          headers: { 'content-type': 'text/application/json' },
+        }),
+        'unregisterNotify',
+      ),
+    ).rejects.toThrow()
   })
 })

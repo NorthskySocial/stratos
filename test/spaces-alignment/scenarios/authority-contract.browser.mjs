@@ -18,6 +18,7 @@ import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
   assertCurrentAuthorityDiscovery,
+  assertStandardRouteUnsupported,
   writerSigningKeyMultibase,
 } from './authority-contract.discovery.mjs'
 
@@ -387,7 +388,7 @@ async function main() {
             }
           : {}),
       })
-      assert.equal(response.status, 404, `Standard ${method} was exposed`)
+      await assertStandardRouteUnsupported(response, method)
     }
     assertions.push('standard-routes-unsupported')
   } finally {
