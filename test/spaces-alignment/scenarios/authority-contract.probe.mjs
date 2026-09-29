@@ -5,6 +5,7 @@ import {
   advanceKnownWriter,
   planStandardWriters,
 } from './authority-contract.adapter.ts'
+import { assertStandardRouteUnsupported } from './authority-contract.discovery.mjs'
 
 const domain = Deno.env.get('SANDBOX_DOMAIN')
 assert.equal(domain, 'atmosbox.test')
@@ -103,7 +104,7 @@ try {
       hash: { $bytes: Buffer.alloc(32).toString('base64') },
     }),
   })
-  assert.equal(response.status, 404, 'Production notifyWrite route was exposed')
+  await assertStandardRouteUnsupported(response, method)
   const after = await listCustomRepos()
   assert.deepEqual(
     after.map((row) => row.did),
