@@ -22,60 +22,68 @@ const clubhousePackage = new URL(
   '../../../clubhouse/package.json',
   import.meta.url,
 )
-const SERVICE_BEARER_EXIT = '__delegation_service_bearer_exit__='
-
-// This runs in the disposable Stratos container. Its ephemeral service-JWT
-// key exists only in this process; neither key nor token is printed.
+// This runs in the disposable Feedgen identity container. Its signing key and
+// service JWTs remain in that container; only the assertion receipt is printed.
 const checkServiceBearer = String.raw`
-import assert from 'node:assert/strict'
 import { Secp256k1Keypair, verifySignature } from '@atproto/crypto'
-import { createServiceJwt } from '@atproto/xrpc-server'
+import { Buffer } from 'node:buffer'
+
+function requireEqual(actual, expected) {
+  if (actual !== expected) throw Error('AssertionError')
+}
+
+async function serviceJwt(keypair, issuer, audience, method) {
+  const now = Math.floor(Date.now() / 1000)
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url')
+  const header = encode({ typ: 'JWT', alg: keypair.jwtAlg })
+  const jti = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  const payload = encode({ iat: now, iss: issuer, aud: audience, exp: now + 60, lxm: method, jti })
+  const message = header + '.' + payload
+  const signature = await keypair.sign(new TextEncoder().encode(message))
+  requireEqual(JSON.parse(Buffer.from(header, 'base64url').toString()).typ, 'JWT')
+  requireEqual(JSON.parse(Buffer.from(header, 'base64url').toString()).alg, 'ES256K')
+  const claims = JSON.parse(Buffer.from(payload, 'base64url').toString())
+  requireEqual(claims.iss, issuer)
+  requireEqual(claims.aud, audience)
+  requireEqual(claims.lxm, method)
+  requireEqual(await verifySignature(keypair.did(), new TextEncoder().encode(message), signature), true)
+  return message + '.' + Buffer.from(signature).toString('base64url')
+}
 
 try {
-  const domain = process.env.SANDBOX_DOMAIN
-  assert.match(domain ?? '', /^[a-z0-9.-]+$/)
+  const domain = Deno.env.get('SANDBOX_DOMAIN')
+  if (!domain || !/^[a-z0-9.-]+$/.test(domain)) throw Error('InvalidDomain')
   const authorityDid = 'did:web:stratos-e2e.' + domain
-  const keypair = await Secp256k1Keypair.create()
-  const issuerDid = keypair.did()
-  const token = await createServiceJwt({
-    iss: issuerDid,
-    aud: authorityDid,
-    lxm: 'zone.stratos.space.getSpaceCredential',
-    keypair,
+  const issuerDid = 'did:web:feedgen-e2e.' + domain
+  const space = 'at://' + authorityDid + '/space/zone.stratos.space.feed/general'
+  const signingKey = (await Deno.readTextFile('/run/sandbox-secrets/feedgen-signing-key')).trim()
+  const keypair = await Secp256k1Keypair.import(signingKey)
+  const admittedToken = await serviceJwt(keypair, issuerDid, authorityDid, 'zone.stratos.space.listRepos')
+  const admittedResponse = await fetch('http://feedgen-e2e-stratos:3100/xrpc/zone.stratos.space.listRepos?space=' + encodeURIComponent(space), {
+    headers: { authorization: 'Bearer ' + admittedToken },
   })
-  const [header, payload, signature] = token.split('.')
-  const protectedHeader = JSON.parse(Buffer.from(header, 'base64url').toString('utf8'))
-  const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
-  assert.equal(protectedHeader.typ, 'JWT')
-  assert.equal(protectedHeader.alg, 'ES256K')
-  assert.equal(claims.iss, issuerDid)
-  assert.equal(claims.aud, authorityDid)
-  assert.equal(claims.lxm, 'zone.stratos.space.getSpaceCredential')
-  assert.equal(await verifySignature(
-    keypair.did(),
-    new TextEncoder().encode(header + '.' + payload),
-    Buffer.from(signature, 'base64url'),
-  ), true)
-  const response = await fetch('http://localhost:3100/xrpc/zone.stratos.space.getSpaceCredential', {
+  requireEqual(admittedResponse.status, 200)
+
+  const mintToken = await serviceJwt(keypair, issuerDid, authorityDid, 'zone.stratos.space.getSpaceCredential')
+  const response = await fetch('http://feedgen-e2e-stratos:3100/xrpc/zone.stratos.space.getSpaceCredential', {
     method: 'POST',
     headers: {
-      authorization: 'Bearer ' + token,
+      authorization: 'Bearer ' + mintToken,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      space: 'at://' + authorityDid + '/space/zone.stratos.space.feed/general',
-    }),
+    body: JSON.stringify({ space }),
   })
-  assert.equal(response.status, 400)
+  requireEqual(response.status, 400)
   const body = await response.json()
-  assert.equal(body.error, 'InvalidToken')
-  process.stdout.write(JSON.stringify({
+  requireEqual(body.error, 'InvalidToken')
+  Deno.stdout.writeSync(new TextEncoder().encode(JSON.stringify({
     suite: 'delegation-service-bearer',
     assertions: [{ id: 'ordinary-bearer-denied', status: 'passed' }],
-  }) + '\n')
+  }) + '\n'))
 } catch (error) {
-  process.stderr.write('Service Bearer check failed: ' + (error instanceof Error ? error.name : 'UnknownError') + '\n')
-  process.exitCode = 1
+  const kind = error instanceof Error ? error.name : 'UnknownError'
+  Deno.stderr.writeSync(new TextEncoder().encode('Service Bearer check failed: ' + kind + '\n'))
+  Deno.exit(1)
 }
 `
 
@@ -131,29 +139,22 @@ async function assertServiceBearerDenied(
     'docker',
     [
       ...compose,
-      'exec',
-      '-T',
-      'feedgen-e2e-stratos',
-      'sh',
-      '-c',
-      `node --input-type=module -e "$1" 2>&1
-exit_code=$?
-printf '\n${SERVICE_BEARER_EXIT}%s\n' "$exit_code"
-exit 0`,
-      '_',
+      'run',
+      '--rm',
+      '--no-deps',
+      '--entrypoint',
+      'deno',
+      'feedgen-e2e-identity',
+      'eval',
+      '--cached-only',
+      '--allow-env=SANDBOX_DOMAIN',
+      '--allow-read=/run/sandbox-secrets/feedgen-signing-key',
+      '--allow-net=feedgen-e2e-stratos:3100',
       checkServiceBearer,
     ],
     context.sandboxDirectory,
   )
   const lines = output.split('\n').map((line) => line.trim())
-  if (
-    lines.findLast((line) => line.startsWith(SERVICE_BEARER_EXIT)) !==
-    `${SERVICE_BEARER_EXIT}0`
-  ) {
-    const error =
-      output.match(/\b[A-Z][A-Za-z]{0,40}Error\b/)?.[0] ?? 'UnknownError'
-    throw new Error(`Service Bearer check failed: ${error}`)
-  }
   const receipt = lines.findLast((line) =>
     line.startsWith('{"suite":"delegation-service-bearer","assertions":'),
   )
