@@ -151,9 +151,7 @@ async function getDelegation(page) {
       if (!session) throw new Error('OAuth session is unavailable')
       const url = new URL('/xrpc/com.atproto.space.getDelegationToken', pdsUrl)
       url.searchParams.set('space', spaceUri)
-      const response = await session.fetchHandler(
-        new Request(url, { method: 'GET' }),
-      )
+      const response = await session.fetchHandler(url.href, { method: 'GET' })
       if (!response.ok)
         throw new Error(`PDS delegation request failed: ${response.status}`)
       const body = await response.json()
