@@ -31,8 +31,22 @@ describe('sandbox standard writer fixture', () => {
     const signed = { did: motoko, rev, hash: new Uint8Array(32).fill(7) }
     const confirmed = await confirmPdsHead(signed, verify)
     expect(verify).toHaveBeenCalledOnce()
+    expect(verify).toHaveBeenCalledWith({
+      did: motoko,
+      rev,
+      hash: new Uint8Array(32).fill(7),
+    })
     signed.hash.fill(0)
     expect(confirmed.hash[0]).toBe(7)
+    confirmed.hash.fill(0)
+    expect(confirmed.hash[0]).toBe(7)
+    const admitted = planStandardWriters(
+      [members[0]],
+      'general',
+      new Map([[motoko, confirmed]]),
+    )
+    expect(admitted.rows[0].hash).toEqual(new Uint8Array(32).fill(7))
+    expect(admitted.publishable).toBe(true)
     await expect(
       confirmPdsHead(signed, async () => {
         throw Error('bad signature')

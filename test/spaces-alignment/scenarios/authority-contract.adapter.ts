@@ -45,11 +45,16 @@ export async function confirmPdsHead(
   ) {
     throw new Error('Invalid standard PDS head')
   }
-  await verify(head)
+  const did = head.did
+  const rev = head.rev
+  const verifiedHash = Uint8Array.from(head.hash)
+  await verify({ did, rev, hash: Uint8Array.from(verifiedHash) })
   return Object.freeze({
-    did: head.did,
-    rev: head.rev,
-    hash: Uint8Array.from(head.hash),
+    did,
+    rev,
+    get hash() {
+      return Uint8Array.from(verifiedHash)
+    },
     [VERIFIED_HEAD]: true as const,
   })
 }
