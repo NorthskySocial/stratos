@@ -70,9 +70,12 @@ describe('credential lifetime sandbox scenario', () => {
         0o644,
       )
       const authority = await readFile(join(assets, 'authority.mjs'), 'utf8')
-      expect(authority).toContain(
-        "await readFile('/app/data/service-signing-identity.json'",
-      )
+      expect(authority).toContain('await openServiceSigningIdentity(')
+      expect(authority).toContain('await symlink(')
+      expect(authority).toContain('assert.equal(after.mtimeMs, before.mtimeMs)')
+      expect(authority).not.toContain('stored.privateKey')
+      expect(authority).not.toContain('readFile(')
+      expect(authority).not.toContain('rotate(')
       expect(authority).toContain('await catalog.update(')
       expect(authority).toContain('await catalog.beginDeactivation(')
       expect(authority).toContain("passed.push('local-deactivation-denied')")
