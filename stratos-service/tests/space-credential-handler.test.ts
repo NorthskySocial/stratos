@@ -25,7 +25,10 @@ import {
   generateKeyPair,
 } from 'jose'
 import { Secp256k1Keypair, verifySignature } from '@atproto/crypto'
-import { createServiceJwt } from '@atproto/xrpc-server'
+import {
+  createServiceJwt,
+  type Server as XrpcServer,
+} from '@atproto/xrpc-server'
 import type { Keypair } from '@atproto/crypto'
 import type { IdResolver } from '@atproto/identity'
 import { SqliteEnrollmentStore } from '../src/context.js'
@@ -318,7 +321,7 @@ describe('getSpaceCredential — DPoP path', () => {
     const signingKey = await Secp256k1Keypair.create()
     const ctx = createMockCtx({ signingKey })
     const server = createMockXrpcServer()
-    registerSpaceCredentialHandlers(server as any, ctx)
+    registerSpaceCredentialHandlers(server as unknown as XrpcServer, ctx)
     expect((await invokeUnauthenticated(server, undefined)).error?.name).toBe(
       'InvalidRequest',
     )
