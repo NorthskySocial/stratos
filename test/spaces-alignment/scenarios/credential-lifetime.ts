@@ -15,6 +15,9 @@ const requiredAssertions = [
   'local-credential-after-removal',
   'foreign-credential-after-removal',
   'wrong-key-denied',
+  'expired-local-credential-denied',
+  'local-revision-denied',
+  'local-deactivation-denied',
 ] as const
 
 const scenarioDirectory = dirname(fileURLToPath(import.meta.url))
@@ -54,11 +57,32 @@ async function prepareBrowserRunner(reportDirectory: string): Promise<string> {
     join(scenarioDirectory, 'credential-lifetime.driver.mjs'),
     driverPath,
   )
+  const authorityPath = join(browserAssets, 'authority.mjs')
+  await copyFile(
+    join(scenarioDirectory, 'credential-lifetime.authority.mjs'),
+    authorityPath,
+  )
   await Promise.all([
     chmod(join(browserAssets, 'auth-client.iife.js'), 0o644),
     chmod(driverPath, 0o644),
+    chmod(authorityPath, 0o644),
   ])
   return browserAssets
+}
+
+function assertionReceipt(output: string, suiteId: string): AssertionResult[] {
+  const receipt = output
+    .split('\n')
+    .map((line) => line.trim())
+    .findLast((line) => line.startsWith(`{"suite":"${suiteId}","assertions":`))
+  if (!receipt) throw new Error(`${suiteId} returned no assertion receipt`)
+  const parsed = JSON.parse(receipt) as {
+    suite?: string
+    assertions?: AssertionResult[]
+  }
+  if (parsed.suite !== suiteId || !Array.isArray(parsed.assertions))
+    throw new Error(`${suiteId} returned an invalid assertion receipt`)
+  return parsed.assertions
 }
 
 export const suite: ScenarioSuite = {
@@ -66,7 +90,7 @@ export const suite: ScenarioSuite = {
   requiredAssertions,
   async run(context): Promise<AssertionResult[]> {
     const browserAssets = await prepareBrowserRunner(context.reportDirectory)
-    const output = await context.runCommand(
+    const browserOutput = await context.runCommand(
       'docker',
       [
         'compose',
@@ -86,27 +110,33 @@ export const suite: ScenarioSuite = {
       ],
       context.sandboxDirectory,
     )
-    const receipt = output
-      .split('\n')
-      .map((line) => line.trim())
-      .findLast((line) =>
-        line.startsWith('{"suite":"credential-lifetime","assertions":'),
-      )
-    if (!receipt)
-      throw new Error(
-        'Credential lifetime browser returned no assertion receipt',
-      )
-    const parsed = JSON.parse(receipt) as {
-      suite?: string
-      assertions?: AssertionResult[]
-    }
-    if (
-      parsed.suite !== 'credential-lifetime' ||
-      !Array.isArray(parsed.assertions)
+    const browserAssertions = assertionReceipt(
+      browserOutput,
+      'credential-lifetime',
     )
-      throw new Error(
-        'Credential lifetime browser returned an invalid assertion receipt',
-      )
-    return parsed.assertions
+    const authorityOutput = await context.runCommand(
+      'docker',
+      [
+        'compose',
+        '--project-name',
+        context.projectName,
+        '--project-directory',
+        context.sandboxDirectory,
+        'run',
+        '--rm',
+        '--no-deps',
+        '--volume',
+        `${browserAssets}:/scenario:ro,z`,
+        '--entrypoint',
+        'node',
+        'feedgen-e2e-stratos',
+        '/scenario/authority.mjs',
+      ],
+      context.sandboxDirectory,
+    )
+    return [
+      ...browserAssertions,
+      ...assertionReceipt(authorityOutput, 'credential-lifetime-authority'),
+    ]
   },
 }
