@@ -13,6 +13,8 @@ export interface AuthorityDidDocument {
   }[]
 }
 
+export function didWebDocumentUrl(did: string): URL
+
 export function assertCurrentAuthorityDiscovery(
   document: AuthorityDidDocument,
   authorityDid: string,

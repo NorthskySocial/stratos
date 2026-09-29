@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   assertCurrentAuthorityDiscovery,
   assertStandardRouteUnsupported,
+  didWebDocumentUrl,
   writerSigningKeyMultibase,
 } from './authority-contract.discovery.mjs'
 
@@ -21,6 +22,25 @@ const document = {
     { id: '#stratos', type: 'StratosService', serviceEndpoint: endpoint },
   ],
 }
+
+describe('authority did:web resolution', () => {
+  it('fetches the DID host rather than the internal OAuth endpoint', () => {
+    expect(didWebDocumentUrl(authorityDid).href).toBe(
+      'https://stratos-e2e.atmosbox.test/.well-known/did.json',
+    )
+    expect(didWebDocumentUrl(authorityDid).origin).not.toBe(endpoint)
+  })
+
+  it('rejects a non-host DID before constructing an HTTPS URL', () => {
+    expect(() => didWebDocumentUrl('did:plc:motokokusangai00000000')).toThrow()
+    expect(() =>
+      didWebDocumentUrl('did:web:stratos-e2e.atmosbox.test%3A443'),
+    ).toThrow()
+    expect(() =>
+      didWebDocumentUrl('did:web:stratos-e2e.atmosbox.test/other'),
+    ).toThrow()
+  })
+})
 
 describe('current authority DID discovery', () => {
   it('accepts the fallback signing key without a dedicated space key or host', () => {

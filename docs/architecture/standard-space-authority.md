@@ -78,8 +78,9 @@ adapter accepts only an active member with a verified PDS signed head. It
 refuses an MST-only head and an unsolicited notification. This is an executable
 model for the planned standard boundary, not a deployed authority.
 
-The live scenario checks the published DID document and standard route absence
-on the candidate service. It samples the custom `listRepos` mixed-custody
+The live scenario resolves the authority's DID document through its public
+`did:web` HTTPS host and checks standard route absence on the candidate
+service. It samples the custom `listRepos` mixed-custody
 response and proves it lacks required standard hashes. It reuses the
 delegation-transport OAuth fixture to exercise a real PDS delegation, DPoP
 credential exchange, foreign PDS read, and a cryptographically verified PDS

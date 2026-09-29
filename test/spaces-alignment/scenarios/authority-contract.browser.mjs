@@ -19,6 +19,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import {
   assertCurrentAuthorityDiscovery,
   assertStandardRouteUnsupported,
+  didWebDocumentUrl,
   writerSigningKeyMultibase,
 } from './authority-contract.discovery.mjs'
 
@@ -301,7 +302,7 @@ async function verifySignedHead(commit, did) {
 
 async function main() {
   await trustSandboxCa()
-  const didResponse = await fetch(`${authority}/.well-known/did.json`)
+  const didResponse = await fetch(didWebDocumentUrl(authorityDid))
   assert.equal(didResponse.status, 200)
   const document = await didResponse.json()
   assertCurrentAuthorityDiscovery(document, authorityDid, authority)

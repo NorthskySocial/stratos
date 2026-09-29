@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict'
 
+/** Resolve this sandbox's host-form did:web to its public HTTPS document. */
+export function didWebDocumentUrl(did) {
+  assert.match(did, /^did:web:[a-z0-9][a-z0-9.-]*[a-z0-9]$/)
+  return new URL(`https://${did.slice('did:web:'.length)}/.well-known/did.json`)
+}
+
 /** Describe the existing signing identity without advertising a space host. */
 export function assertCurrentAuthorityDiscovery(
   document,
