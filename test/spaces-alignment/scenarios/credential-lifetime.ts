@@ -16,6 +16,7 @@ const requiredAssertions = [
   'foreign-credential-after-removal',
   'wrong-key-denied',
   'expired-local-credential-denied',
+  'expired-foreign-credential-denied',
   'local-revision-denied',
   'local-deactivation-denied',
 ] as const

@@ -209,17 +209,6 @@ async function exchange(token, key, body = { space }) {
   return response
 }
 
-async function exchangeWithoutProof(token) {
-  return fetch(mintUrl, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ space }),
-  })
-}
-
 async function main() {
   await trustSandboxCa()
   const browser = await chromium.launch({ headless: true })

@@ -53,6 +53,23 @@ async function readStatus(url, credential, key) {
   return response.status
 }
 
+async function foreignRecordsUrl(domain, spaceUri) {
+  const pds = `https://spaces-pds-e2e.${domain}`
+  const handle = `motoko.spaces-pds-e2e.${domain}`
+  const resolved = await fetch(
+    `${pds}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`,
+  )
+  assert.equal(resolved.status, 200)
+  const { did } = await resolved.json()
+  assert.equal(typeof did, 'string')
+
+  const url = new URL('/xrpc/com.atproto.space.listRecords', pds)
+  url.searchParams.set('space', spaceUri)
+  url.searchParams.set('repo', did)
+  url.searchParams.set('collection', 'zone.stratos.feed.post')
+  return url
+}
+
 async function main() {
   const domain = process.env.SANDBOX_DOMAIN
   assert.match(domain ?? '', /^[a-z0-9.-]+$/)
@@ -64,6 +81,7 @@ async function main() {
     'https://stratos-e2e.atmosbox.internal',
   )
   url.searchParams.set('space', spaceUri)
+  const foreignUrl = await foreignRecordsUrl(domain, spaceUri)
 
   // The production process owns the real identity lock. A private tmpfs
   // directory gives its read-only, non-rotating sandbox peer an independent
@@ -89,6 +107,7 @@ async function main() {
         spaceUri,
         issuerDid,
         url,
+        foreignUrl,
       )
     } finally {
       await identity.close()
@@ -108,6 +127,7 @@ async function checkCredentialLifetime(
   spaceUri,
   issuerDid,
   url,
+  foreignUrl,
 ) {
   const db = createServiceDb('/app/data/service.sqlite')
   try {
@@ -128,7 +148,11 @@ async function checkCredentialLifetime(
       iat: Math.floor(Date.now() / 1000) - 3_600,
     })
     assert.equal(await readStatus(url, expired.credential, key), 401)
-    const passed = ['expired-local-credential-denied']
+    assert.equal(await readStatus(foreignUrl, expired.credential, key), 401)
+    const passed = [
+      'expired-local-credential-denied',
+      'expired-foreign-credential-denied',
+    ]
 
     const current = await mintSpaceCredential({ ...common, ttlSeconds: 600 })
     assert.equal(await readStatus(url, current.credential, key), 200)

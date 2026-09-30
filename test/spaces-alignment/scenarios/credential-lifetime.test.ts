@@ -78,7 +78,18 @@ describe('credential lifetime sandbox scenario', () => {
       expect(authority).not.toContain('rotate(')
       expect(authority).toContain('await catalog.update(')
       expect(authority).toContain('await catalog.beginDeactivation(')
+      expect(authority).toContain('com.atproto.space.listRecords')
+      expect(authority).toContain(
+        'assert.equal(await readStatus(foreignUrl, expired.credential, key), 401)',
+      )
+      expect(authority).toContain(
+        "passed = [\n      'expired-local-credential-denied',\n      'expired-foreign-credential-denied',",
+      )
       expect(authority).toContain("passed.push('local-deactivation-denied')")
+      expect(authority.indexOf('foreignUrl, expired.credential')).toBeLessThan(
+        authority.indexOf('await catalog.update('),
+      )
+      expect(driver).not.toContain('exchangeWithoutProof')
       expect(driver.indexOf("passed.push('member-removed')")).toBeLessThan(
         driver.indexOf("passed.push('foreign-credential-after-removal')"),
       )
