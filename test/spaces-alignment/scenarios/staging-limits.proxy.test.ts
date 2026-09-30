@@ -3,10 +3,20 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createProxyServer } from './staging-limits.proxy.mjs'
 
 const server = createProxyServer()
+const servers = new Set([server])
 
 afterEach(async () => {
-  if (server.listening)
-    await new Promise<void>((resolve) => server.close(() => resolve()))
+  await Promise.all(
+    [...servers].map(
+      (active) =>
+        new Promise<void>((resolve) => {
+          if (active.listening) active.close(() => resolve())
+          else resolve()
+        }),
+    ),
+  )
+  servers.clear()
+  servers.add(server)
 })
 
 describe('staging limits proxy', () => {
@@ -33,5 +43,38 @@ describe('staging limits proxy', () => {
     expect((await page('did:example:motoko', cursorB)).status).toBe(503)
     const status = await (await fetch(`${origin}/_control/status`)).json()
     expect(status).toMatchObject({ pages: 2, interruptions: 2, targetCount: 2 })
+  })
+
+  it('uses the commit from the terminal upstream PDS page', async () => {
+    const upstreamCursors: Array<string | undefined> = []
+    const terminalCommit = { revision: 'terminal-revision' }
+    const commitServer = createProxyServer(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      const cursor = url.searchParams.get('cursor') ?? undefined
+      upstreamCursors.push(cursor)
+      return cursor
+        ? new Response(JSON.stringify({ ops: [], commit: terminalCommit }))
+        : new Response(JSON.stringify({ ops: [], cursor: 'upstream-next' }))
+    })
+    servers.add(commitServer)
+    await new Promise<void>((resolve) =>
+      commitServer.listen(0, '127.0.0.1', resolve),
+    )
+    const address = commitServer.address()
+    if (!address || typeof address === 'string')
+      throw new Error('Proxy did not bind a local port')
+    const origin = `http://127.0.0.1:${address.port}`
+    await fetch(`${origin}/_control/mode?value=replacement`)
+    const page = async (cursor?: string) => {
+      const url = new URL('/xrpc/com.atproto.space.listRepoOps', origin)
+      url.searchParams.set('repo', 'did:example:motoko')
+      if (cursor) url.searchParams.set('cursor', cursor)
+      return fetch(url)
+    }
+    const firstPage = await page()
+    expect((await firstPage.json()).cursor).toBe('replacement-1')
+    const terminalPage = await page('replacement-1')
+    expect((await terminalPage.json()).commit).toEqual(terminalCommit)
+    expect(upstreamCursors).toEqual([undefined, 'upstream-next'])
   })
 })
