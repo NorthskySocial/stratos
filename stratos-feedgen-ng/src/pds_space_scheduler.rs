@@ -13,6 +13,7 @@ use crate::{
     lifecycle::ControlLifecycle,
     membership_reconciler::{MembershipReconciler, MembershipReconciliationError},
     pds_space_sync::{PdsSpaceSyncError, PdsSpaceSyncOutcome, PdsSpaceSynchronizer},
+    telemetry::{FeedTelemetry, SpaceSyncOutcome},
 };
 
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(30);
@@ -109,6 +110,24 @@ impl PdsSpaceScheduler {
         boundaries: impl IntoIterator<Item = String>,
         retention: ProjectionRetention,
     ) -> Self {
+        Self::start_with_telemetry(
+            lifecycle,
+            membership,
+            synchronizer,
+            boundaries,
+            retention,
+            Arc::new(FeedTelemetry::disabled()),
+        )
+    }
+
+    pub fn start_with_telemetry(
+        lifecycle: Arc<ControlLifecycle>,
+        membership: Arc<MembershipReconciler>,
+        synchronizer: Arc<PdsSpaceSynchronizer>,
+        boundaries: impl IntoIterator<Item = String>,
+        retention: ProjectionRetention,
+        telemetry: Arc<FeedTelemetry>,
+    ) -> Self {
         let boundaries = boundaries.into_iter().collect::<BTreeSet<_>>();
         let (shutdown, receiver) = watch::channel(false);
         let status = Arc::new(Mutex::new(PdsSpaceSyncStatus::default()));
@@ -120,6 +139,7 @@ impl PdsSpaceScheduler {
             retention,
             receiver,
             Arc::clone(&status),
+            telemetry,
         ));
         Self {
             shutdown,
@@ -140,6 +160,7 @@ impl PdsSpaceScheduler {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Runtime wiring keeps each bounded adapter explicit.
 async fn run_forever(
     lifecycle: Arc<ControlLifecycle>,
     membership: Arc<MembershipReconciler>,
@@ -148,9 +169,11 @@ async fn run_forever(
     retention: ProjectionRetention,
     mut shutdown: watch::Receiver<bool>,
     status: Arc<Mutex<PdsSpaceSyncStatus>>,
+    telemetry: Arc<FeedTelemetry>,
 ) {
     let _task = SchedulerTaskGuard::start(Arc::clone(&status));
     loop {
+        let started = Instant::now();
         let pass = run_pass(
             Arc::clone(&lifecycle),
             Arc::clone(&membership),
@@ -161,6 +184,20 @@ async fn run_forever(
         tokio::select! {
             completed = pass => {
                 let healthy = completed.membership_failures == 0 && completed.target_failures == 0;
+                telemetry.record_space_sync(
+                    if healthy {
+                        SpaceSyncOutcome::Ok
+                    } else if completed.promoted != 0 || completed.deferred != 0 || completed.rejected != 0 {
+                        SpaceSyncOutcome::Partial
+                    } else {
+                        SpaceSyncOutcome::Failed
+                    },
+                    started.elapsed(),
+                    completed.promoted,
+                    completed.target_failures,
+                    completed.deferred,
+                    completed.rejected,
+                );
                 status
                     .lock()
                     .expect("PDS space scheduler status poisoned")

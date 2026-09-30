@@ -63,6 +63,49 @@ To poll a PDS on a private network, set both
 `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS` (the same CIDR format). This grant is
 separate from PLC trust and applies to that PDS origin only.
 
+## Private metrics export
+
+Feed-read timing is aggregate-only and disabled by default. Set
+`FEEDGEN_OTLP_METRICS_ENDPOINT` to a private Collector OTLP/HTTP endpoint
+ending in `/v1/metrics`, for example `http://collector:4318/v1/metrics`.
+The endpoint accepts a literal private IP address or the exact internal
+service name `collector`; public hosts, arbitrary DNS names, credentials,
+query strings, and other paths are rejected.
+The exporter runs on its own bounded background schedule (60-second interval,
+3-second export timeout), so Collector availability never blocks a feed
+request. No public `/metrics` endpoint is served.
+
+The resource `service.name` is fixed to `stratos-feedgen-ng`, and the scope is
+`stratos.feedgen.ng`; the metric namespace is
+`stratos.feedgen.*` for comparison with the previous TypeScript Feed Generator. The
+Collector adds `otel_scope_name=stratos.feedgen.ng`, allowing Rust and
+TypeScript series to be selected separately without changing metric names.
+The exporter has no listener of its own: route the private Collector to its
+existing private Prometheus exporter/scrape path, never through this service.
+
+| Metric                                                                                                                  | Rust Feed Generator behavior                                                                                 | TypeScript comparison                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `stratos.telemetry.heartbeat`, `stratos.feedgen.ready`                                                                  | 60-second callback gauges, including idle processes                                                          | Same name and intent                                                                                           |
+| `stratos.feedgen.subscription.connected`, `stratos.feedgen.subscription.reconnects`                                     | Service-stream WebSocket state plus service and failed actor-worker reconnects                               | Same name; intentional actor idle/lease rotation is not counted                                                |
+| `stratos.feedgen.actor_pool`                                                                                            | Active, waiting, and configured-capacity gauges after authoritative pool changes                             | Same name and labels                                                                                           |
+| `http.server.request.duration`, `http.server.active_requests`                                                           | Static method, route, and status dimensions for public routes                                                | Same name and bounded dimensions                                                                               |
+| `stratos.feedgen.feed.requests`, `stratos.feedgen.feed.posts_returned`                                                  | Completed projection reads; post count is carried from the bounded response before serialization             | Same name and intent                                                                                           |
+| `stratos.feedgen.cache.requests`                                                                                        | Viewer-authorization cache hits and authority-resolution misses                                              | Same name and intent                                                                                           |
+| `stratos.feedgen.index.operations`                                                                                      | Actor projection upserts and deletes after commit validation                                                 | Same name and intent                                                                                           |
+| `stratos.feedgen.reconciliation.duration`, `stratos.feedgen.reconciliation.outcomes`                                    | Authority-session reconciliation                                                                             | Same name and intent                                                                                           |
+| `stratos.feedgen.space_sync.duration`, `stratos.feedgen.space_sync.outcomes`, `stratos.feedgen.space_sync.last_success` | Authority-listed PDS target passes and outcomes                                                              | Same name; Rust distinguishes deferred and rejected member results                                             |
+| `process.resident_memory`, `process.cpu.time`                                                                           | Linux-only current RSS bytes from `/proc/self/statm` and process CPU seconds from `CLOCK_PROCESS_CPUTIME_ID` | Matches the standard OTel runtime metric names; Collector Prometheus naming follows its configured translation |
+
+`stratos.feedgen.shadow_feed.reads` is TypeScript-only: the Rust service is
+the production implementation and has no shadow comparison path. Process RSS
+and CPU metrics are emitted only on Linux. Other platforms emit no process
+resource series because a portable Rust source would not provide a current,
+semantically comparable value (`getrusage` RSS is only a high-water mark).
+Obtain portable container resource telemetry from the Collector or orchestrator.
+
+All attributes are fixed by code: no metric includes DIDs, feed IDs,
+boundaries, record URIs, tokens, queries, response bodies, or hostnames.
+
 ## Constrained rehearsal container
 
 Build the production-shaped rehearsal image from the workspace root:

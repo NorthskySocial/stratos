@@ -265,6 +265,9 @@ mod tests {
                     max_bytes: 16 * 1024 * 1024,
                 },
                 actor_max_connections: 8,
+                metrics_export: crate::config::MetricsExportConfig {
+                    otlp_http_endpoint: None,
+                },
             },
             FeedRegistry::new(Vec::new()).unwrap(),
             Arc::new(Mutex::new(FeedReadinessGate::default())),

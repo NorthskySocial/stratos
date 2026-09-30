@@ -3,8 +3,9 @@ use std::sync::{Arc, Mutex};
 use axum::{
     Json, Router,
     body::Body,
-    extract::{RawQuery, State},
+    extract::{RawQuery, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -22,6 +23,7 @@ use crate::{
     lifecycle::ControlLifecycle,
     pds_space_scheduler::{PdsSpacePass, PdsSpaceSyncStatus},
     readiness::FeedReadinessGate,
+    telemetry::FeedTelemetry,
 };
 
 mod authorization;
@@ -55,6 +57,7 @@ pub struct FeedRuntime {
     pub authority: Arc<dyn AuthorityClient>,
     pub pds_space_sync: Arc<Mutex<PdsSpaceSyncStatus>>,
     pub blobs: Arc<BlobService>,
+    pub telemetry: Arc<FeedTelemetry>,
 }
 
 const MAX_FEED_ID_BYTES: usize = 256;
@@ -71,6 +74,7 @@ pub(super) struct FeedServerState {
     pub(super) request_permits: Arc<Semaphore>,
     pub(super) blobs: Option<Arc<BlobService>>,
     pub(super) authority: Option<Arc<dyn AuthorityClient>>,
+    pub(super) telemetry: Arc<FeedTelemetry>,
 }
 
 pub fn router(
@@ -92,6 +96,10 @@ pub fn router(
             get(describe_feed),
         )
         .with_state(state)
+        .layer(middleware::from_fn_with_state(
+            Arc::new(FeedTelemetry::disabled()),
+            record_http_request,
+        ))
 }
 
 pub fn router_with_feed(
@@ -113,6 +121,7 @@ pub fn router_with_feed(
         MAX_CONCURRENT_FEED_REQUESTS,
         None,
         None,
+        Arc::new(FeedTelemetry::disabled()),
     )
 }
 
@@ -134,6 +143,7 @@ pub fn router_with_feed_with_pds_space_sync(
         MAX_CONCURRENT_FEED_REQUESTS,
         Some(runtime.blobs),
         Some(runtime.authority),
+        runtime.telemetry,
     )
 }
 
@@ -144,9 +154,18 @@ fn router_with_feed_with_request_limit(
     request_limit: usize,
     blobs: Option<Arc<BlobService>>,
     authority: Option<Arc<dyn AuthorityClient>>,
+    telemetry: Arc<FeedTelemetry>,
 ) -> Router {
     let server = Arc::new(server);
-    let state = feed_server_state(server, lifecycle, verifier, request_limit, blobs, authority);
+    let state = feed_server_state(
+        server,
+        lifecycle,
+        verifier,
+        request_limit,
+        blobs,
+        authority,
+        Arc::clone(&telemetry),
+    );
     Router::new()
         .route("/health", get(feed_health))
         .route("/.well-known/did.json", get(feed_did_document))
@@ -157,6 +176,36 @@ fn router_with_feed_with_request_limit(
         .route("/xrpc/zone.stratos.feedgen.getFeed", get(get_feed))
         .route("/xrpc/zone.stratos.feedgen.getBlob", get(get_blob))
         .with_state(state)
+        .layer(middleware::from_fn_with_state(
+            telemetry,
+            record_http_request,
+        ))
+}
+
+async fn record_http_request(
+    State(telemetry): State<Arc<FeedTelemetry>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let method = match request.method().as_str() {
+        "GET" => "GET",
+        "POST" => "POST",
+        "PUT" => "PUT",
+        "DELETE" => "DELETE",
+        _ => "OTHER",
+    };
+    let route = match request.uri().path() {
+        "/health" => "/health",
+        "/.well-known/did.json" => "/.well-known/did.json",
+        "/xrpc/zone.stratos.feedgen.describeFeed" => "/xrpc/zone.stratos.feedgen.describeFeed",
+        "/xrpc/zone.stratos.feedgen.getFeed" => "/xrpc/zone.stratos.feedgen.getFeed",
+        "/xrpc/zone.stratos.feedgen.getBlob" => "/xrpc/zone.stratos.feedgen.getBlob",
+        _ => "/unmatched",
+    };
+    let timer = telemetry.begin_http_request();
+    let response = next.run(request).await;
+    timer.complete(method, route, response.status().as_u16());
+    response
 }
 
 fn feed_server_state(
@@ -166,6 +215,7 @@ fn feed_server_state(
     request_limit: usize,
     blobs: Option<Arc<BlobService>>,
     authority: Option<Arc<dyn AuthorityClient>>,
+    telemetry: Arc<FeedTelemetry>,
 ) -> Arc<FeedServerState> {
     Arc::new(FeedServerState {
         server,
@@ -174,6 +224,7 @@ fn feed_server_state(
         request_permits: Arc::new(Semaphore::new(request_limit)),
         blobs,
         authority,
+        telemetry,
     })
 }
 

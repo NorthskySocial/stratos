@@ -16,6 +16,7 @@ use crate::{
         ActorEnrollment, ActorPage, ActorSyncState, EnrollmentReconciliation, PdsSpaceMember,
         StoreError, StoreInterrupt,
     },
+    telemetry::FeedTelemetry,
 };
 
 #[derive(Debug)]
@@ -45,6 +46,7 @@ pub struct ControlLifecycle {
     projection: Arc<Mutex<ProjectionReader>>,
     interrupt: StoreInterrupt,
     authority_did: Option<String>,
+    telemetry: Arc<FeedTelemetry>,
 }
 
 impl ControlLifecycle {
@@ -54,6 +56,7 @@ impl ControlLifecycle {
             readiness,
             ViewerAuthorizations::new(crate::authorization::DEFAULT_AUTHORIZATION_BYTES),
             None,
+            Arc::new(FeedTelemetry::disabled()),
         )
     }
 
@@ -62,6 +65,20 @@ impl ControlLifecycle {
         readiness: Arc<Mutex<FeedReadinessGate>>,
         authority_did: impl Into<String>,
     ) -> Result<Self, crate::identifier::IdentifierError> {
+        Self::for_authority_with_telemetry(
+            projection,
+            readiness,
+            authority_did,
+            Arc::new(FeedTelemetry::disabled()),
+        )
+    }
+
+    pub fn for_authority_with_telemetry(
+        projection: ProjectionReader,
+        readiness: Arc<Mutex<FeedReadinessGate>>,
+        authority_did: impl Into<String>,
+        telemetry: Arc<FeedTelemetry>,
+    ) -> Result<Self, crate::identifier::IdentifierError> {
         let authority_did = authority_did.into();
         Did::parse(authority_did.clone())?;
         Ok(Self::with_authorizations(
@@ -69,6 +86,7 @@ impl ControlLifecycle {
             readiness,
             ViewerAuthorizations::new(crate::authorization::DEFAULT_AUTHORIZATION_BYTES),
             Some(authority_did),
+            telemetry,
         ))
     }
 
@@ -77,6 +95,7 @@ impl ControlLifecycle {
         readiness: Arc<Mutex<FeedReadinessGate>>,
         authorizations: ViewerAuthorizations,
         authority_did: Option<String>,
+        telemetry: Arc<FeedTelemetry>,
     ) -> Self {
         let interrupt = projection.interrupt_handle();
         Self {
@@ -86,6 +105,7 @@ impl ControlLifecycle {
             projection: Arc::new(Mutex::new(projection)),
             interrupt,
             authority_did,
+            telemetry,
         }
     }
 
@@ -100,7 +120,7 @@ impl ControlLifecycle {
         did: &str,
         feeds: &FeedRegistry,
         query: FeedQuery<'_>,
-    ) -> Result<Vec<u8>, FeedServiceError> {
+    ) -> Result<(Vec<u8>, usize), FeedServiceError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         if !self
             .readiness
@@ -205,6 +225,8 @@ impl ControlLifecycle {
         let mut projection = self.projection.lock().expect("projection lock poisoned");
         readiness.mark_session_established();
         projection.close_session();
+        self.telemetry.mark_service_connected();
+        self.telemetry.mark_unready();
     }
 
     pub fn begin_reconciliation(&self) -> u64 {
@@ -212,6 +234,7 @@ impl ControlLifecycle {
         let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
         let mut projection = self.projection.lock().expect("projection lock poisoned");
         projection.close_session();
+        self.telemetry.mark_unready();
         readiness.begin_reconciliation()
     }
 
@@ -222,26 +245,49 @@ impl ControlLifecycle {
         let ready = readiness.complete_reconciliation(generation, outcome);
         if ready {
             projection.establish_session();
+            self.telemetry.mark_ready();
         } else {
             projection.close_session();
+            self.telemetry.mark_unready();
         }
         ready
     }
 
     pub fn mark_unavailable(&self) {
+        self.close_reads();
+        self.telemetry.mark_service_disconnected();
+    }
+
+    /// Closes feed admission after a projection failure while retaining the
+    /// independent service-stream connection signal.
+    pub fn mark_read_unavailable(&self) {
+        self.close_reads();
+    }
+
+    fn close_reads(&self) {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
         let mut projection = self.projection.lock().expect("projection lock poisoned");
         readiness.mark_unavailable();
         projection.close_session();
+        self.telemetry.mark_unready();
     }
 
     pub fn apply_actor_page(&self, page: ActorPage) -> Result<(), StoreError> {
+        let upserts = page.upserts.len();
+        let deletes = page.deletes.len();
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
+        let result = self
+            .projection
             .lock()
             .expect("projection lock poisoned")
-            .apply_actor_page(page)
+            .apply_actor_page(page);
+        self.telemetry.record_index_operations(
+            upserts,
+            deletes,
+            if result.is_ok() { "ok" } else { "error" },
+        );
+        result
     }
 
     pub fn compact_projection(
@@ -297,9 +343,17 @@ impl ControlLifecycle {
         else {
             return Ok(ActorFrameResult::Ignored);
         };
-        projection
+        let upserts = page.upserts.len();
+        let deletes = page.deletes.len();
+        let result = projection
             .apply_actor_page(page)
-            .map_err(ActorFrameError::Store)?;
+            .map_err(ActorFrameError::Store);
+        self.telemetry.record_index_operations(
+            upserts,
+            deletes,
+            if result.is_ok() { "ok" } else { "error" },
+        );
+        result?;
         Ok(ActorFrameResult::Applied)
     }
 
@@ -481,6 +535,7 @@ mod tests {
         service::{ProjectionReader, ReadRequest},
         service_event::{EnrollmentAction, EnrollmentEvent},
         store::{ActorPage, EncryptedStore, ProjectionPost, StorageKey},
+        telemetry::FeedTelemetry,
     };
 
     fn request() -> ReadRequest<'static> {
@@ -716,6 +771,7 @@ mod tests {
             readiness,
             ViewerAuthorizations::new(310),
             None,
+            Arc::new(FeedTelemetry::disabled()),
         );
         lifecycle.session_established();
         let generation = lifecycle.begin_reconciliation();
@@ -751,6 +807,52 @@ mod tests {
             Err(AuthorizationError::CapacityExceeded)
         );
         assert!(lifecycle.read(|projection| projection.release(token, page, 2).is_none()));
+    }
+
+    #[test]
+    fn unavailable_lifecycle_transition_closes_the_telemetry_readiness_gauge() {
+        let telemetry = Arc::new(FeedTelemetry::disabled());
+        let lifecycle = ControlLifecycle::for_authority_with_telemetry(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            "did:plc:spike",
+            Arc::clone(&telemetry),
+        )
+        .unwrap();
+        lifecycle.session_established();
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+        assert!(telemetry.is_ready());
+        lifecycle.mark_unavailable();
+        assert!(!telemetry.is_ready());
+    }
+
+    #[test]
+    fn read_timeout_transition_preserves_the_service_connection_gauge() {
+        let telemetry = Arc::new(FeedTelemetry::disabled());
+        let lifecycle = ControlLifecycle::for_authority_with_telemetry(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            "did:plc:spike",
+            Arc::clone(&telemetry),
+        )
+        .unwrap();
+        lifecycle.session_established();
+        lifecycle.mark_read_unavailable();
+        assert!(telemetry.is_service_connected());
+        assert!(!telemetry.is_ready());
+        lifecycle.mark_unavailable();
+        assert!(!telemetry.is_service_connected());
     }
 
     #[test]

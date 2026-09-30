@@ -26,6 +26,7 @@ use stratos_feedgen_ng::{
     service_stream::{ServiceStream, ServiceStreamConfig},
     space_commit::SpaceCommitVerifier,
     space_membership::HttpSpaceMembershipClient,
+    telemetry::MetricsRuntime,
     writer_lock::WriterLock,
 };
 
@@ -47,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
     let feeds = FeedgenConfig::load_feed_registry_from_env()?;
+    let metrics = MetricsRuntime::initialize(&config.metrics_export)?;
     let shutdown = shutdown_signal()?;
     let projection = ProjectionReader::new(open_projection_store(&config.storage)?);
     let port = std::env::var("FEEDGEN_PORT")
@@ -58,10 +60,11 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
 
     // Feeds remain unavailable until verified reconciliation completes.
     let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
-    let lifecycle = Arc::new(ControlLifecycle::for_authority(
+    let lifecycle = Arc::new(ControlLifecycle::for_authority_with_telemetry(
         projection,
         Arc::clone(&readiness),
         config.stratos_service_did.clone(),
+        metrics.telemetry(),
     )?);
     let resolver = Arc::new(HttpIdentityKeyResolver::new(
         Some(&config.plc_url),
@@ -108,7 +111,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
         config.service_did.clone(),
         config.signing_key.clone(),
     )?);
-    let actors = ActorPool::start(
+    let actors = ActorPool::start_with_telemetry(
         ActorStreamConfig {
             service_url: config.stratos_service_url.clone(),
             service_did: config.stratos_service_did.clone(),
@@ -118,8 +121,9 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
             max_connections: config.actor_max_connections,
         },
         Arc::clone(&lifecycle),
+        metrics.telemetry(),
     )?;
-    let stream = match ServiceStream::start(
+    let stream = match ServiceStream::start_with_telemetry(
         ServiceStreamConfig {
             service_url: config.stratos_service_url.clone(),
             service_did: config.stratos_service_did.clone(),
@@ -130,6 +134,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&lifecycle),
         Arc::clone(&authority),
         Arc::clone(&actors),
+        metrics.telemetry(),
     ) {
         Ok(stream) => stream,
         Err(error) => {
@@ -154,12 +159,13 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
             }
         };
     let blob_sweeper = BlobCacheSweeper::start(blob_cache);
-    let pds_scheduler = PdsSpaceScheduler::start(
+    let pds_scheduler = PdsSpaceScheduler::start_with_telemetry(
         Arc::clone(&lifecycle),
         membership,
         synchronizer,
         feeds.list().map(|feed| feed.boundary.clone()),
         config.retention.clone(),
+        metrics.telemetry(),
     );
     let result = axum::serve(
         listener,
@@ -173,6 +179,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
                 authority,
                 pds_space_sync: pds_scheduler.status(),
                 blobs: blob_service,
+                telemetry: metrics.telemetry(),
             },
         ),
     )
@@ -182,6 +189,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
     blob_sweeper.stop().await;
     compactor.stop().await;
     stream.stop().await;
+    let _ = tokio::task::spawn_blocking(move || metrics.shutdown()).await;
     result?;
     Ok(())
 }
