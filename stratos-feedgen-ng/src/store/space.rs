@@ -1484,6 +1484,46 @@ mod stage_limit_tests {
     }
 
     #[test]
+    fn compaction_reserves_global_stage_capacity_before_published_posts_fill_the_cap() {
+        let mut store = store(10_000);
+        store
+            .connection
+            .execute(
+                "INSERT INTO post (uri, author_did, cid, sort_at, indexed_at, retained_at, projection_bytes, record_json, blob_refs_json, row_version)
+                 VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, 0)",
+                params![
+                    format!("{SPACE}/{DID}/zone.stratos.feed.post/old"),
+                    DID,
+                    "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    NOW,
+                    "2026-09-22T12:00:00.000Z",
+                    6_500,
+                    vec![b'x'; 100],
+                    b"[]".as_slice(),
+                ],
+            )
+            .unwrap();
+        let budget = crate::config::SpaceStageBudget {
+            target_rows: 100,
+            global_rows: 200,
+            target_bytes: 2_000,
+            global_bytes: 4_000,
+        };
+
+        let result = store
+            .compact_projection_with_budget(NOW, "2026-09-23T00:00:00.000Z", 10_000, 1, &budget)
+            .unwrap();
+
+        assert_eq!(result.deleted, 1);
+        assert!(!result.has_more);
+        let remaining: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM post", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
     fn stage_replacement_and_delete_charge_current_payload_only() {
         let mut store = store(6_000);
         store
@@ -2146,7 +2186,7 @@ mod stage_limit_tests {
     }
 
     #[test]
-    fn promotion_over_work_row_cap_leaves_target_staged_and_allows_other_target() {
+    fn stage_row_cap_rejects_unpromotable_target_and_allows_other_target() {
         let mut store = store(16 * 1024 * 1024);
         let other_did = "did:plc:jetblack";
         store
@@ -2177,9 +2217,10 @@ mod stage_limit_tests {
             next_cursor: None,
             ..page("unused")
         };
-        store
-            .stage_authorized_space_page(terminal, deletes(1_000..1_023))
-            .unwrap();
+        assert!(matches!(
+            store.stage_authorized_space_page(terminal, deletes(1_000..1_023)),
+            Err(StoreError::SpaceStageLimit)
+        ));
         let staged_before: i64 = store
             .connection
             .query_row(
@@ -2188,11 +2229,7 @@ mod stage_limit_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(staged_before, 1_023);
-        assert!(matches!(
-            store.promote_authorized_space_stage(BOUNDARY, SPACE, DID, NOW),
-            Err(StoreError::SpacePromotionLimit)
-        ));
+        assert_eq!(staged_before, 1_000);
         assert_eq!(
             store.space_sync_cursor(BOUNDARY, SPACE, DID).unwrap(),
             Some("first".to_owned())
@@ -2207,7 +2244,7 @@ mod stage_limit_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!((staged_after, pending, published), (staged_before, 1, 0));
+        assert_eq!((staged_after, pending, published), (staged_before, 0, 0));
 
         let other = SpaceStagePage {
             actor_did: other_did.to_owned(),
@@ -2251,18 +2288,19 @@ mod stage_limit_tests {
     }
 
     #[test]
-    fn promotion_over_work_byte_cap_fails_before_publishing() {
+    fn stage_byte_cap_rejects_unpromotable_target_before_publishing() {
         let mut store = store(64 * 1024 * 1024);
         let terminal = SpaceStagePage {
             next_cursor: None,
             ..page("unused")
         };
-        store
-            .stage_space_page(
+        assert!(matches!(
+            store.stage_space_page(
                 terminal,
                 (0..170).map(|index| upsert(index, 50_000)).collect(),
-            )
-            .unwrap();
+            ),
+            Err(StoreError::SpaceStageLimit)
+        ));
         let usage = {
             let transaction = store.connection.transaction().unwrap();
             let usage = stage_usage(&transaction, Some(SPACE), Some(DID)).unwrap();
@@ -2270,11 +2308,7 @@ mod stage_limit_tests {
             usage
         };
         assert!(usage.rows < MAX_SPACE_PROMOTION_STAGE_ROWS);
-        assert!(usage.bytes > MAX_SPACE_PROMOTION_STAGE_BYTES);
-        assert!(matches!(
-            store.promote_verified_space_stage(SPACE, DID, NOW),
-            Err(StoreError::SpacePromotionLimit)
-        ));
+        assert!(usage.bytes <= MAX_SPACE_PROMOTION_STAGE_BYTES);
         let (staged, published): (i64, i64) = store
             .connection
             .query_row(
@@ -2283,6 +2317,6 @@ mod stage_limit_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!((staged, published), (170, 0));
+        assert_eq!((staged, published), (0, 0));
     }
 }
