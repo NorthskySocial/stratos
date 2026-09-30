@@ -311,7 +311,9 @@ describe('sandbox preflight', () => {
     const fakeDeno = `#!/usr/bin/env node
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
-assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-spaces-alignment-'))
+assert.ok(process.env.DOCKER_CONFIG?.startsWith(${JSON.stringify(
+      join(tmpdir(), 'stratos-spaces-alignment-'),
+    )}))
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 assert.equal(process.env.COMPOSE_FILE, undefined)
 assert.equal(process.env.COMPOSE_PROJECT_NAME, undefined)
@@ -359,7 +361,9 @@ if (process.argv.includes('seed')) {
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
 const args = process.argv.slice(2)
-assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-spaces-alignment-'))
+assert.ok(process.env.DOCKER_CONFIG?.startsWith(${JSON.stringify(
+      join(tmpdir(), 'stratos-spaces-alignment-'),
+    )}))
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 assert.equal(process.env.COMPOSE_FILE, undefined)
 assert.equal(process.env.COMPOSE_PROJECT_NAME, undefined)
@@ -383,6 +387,10 @@ if (args.includes('down')) {
   assert.ok(args.includes('--remove-orphans'))
   fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, process.env.DOCKER_CONFIG + '\\n')
   if (process.env.RUNNER_TEST_FAIL_CLEANUP) process.exit(9)
+}
+if (args[0] === 'image' && args[1] === 'rm') {
+  assert.match(args[2], /^stratos-spaces-pds-[0-9a-f-]+:local$/)
+  fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, 'image rm ' + args[2] + '\\n')
 }
 `
     await writeFile(join(bin, 'deno'), fakeDeno, { mode: 0o755 })
@@ -410,6 +418,8 @@ if (args.includes('down')) {
           dockerfileSha256: 'e'.repeat(64),
           lockfileSha256: 'f'.repeat(64),
           imageId: `sha256:${'a'.repeat(64)}`,
+          imageTag:
+            'stratos-spaces-pds-00000000-0000-0000-0000-000000000000:local',
           baseImages: [`sha256:${'b'.repeat(64)}`],
           buildExitCode: 0 as const,
         }
@@ -595,12 +605,22 @@ if (args.includes('down')) {
       'up',
       'seed',
     ])
-    expect(receipt.cleanup).toEqual({ status: 'passed', exitCode: 0 })
+    expect(receipt.cleanup).toEqual({
+      status: 'passed',
+      compose: { status: 'passed', exitCode: 0 },
+      image: {
+        status: 'passed',
+        exitCode: 0,
+        tag: 'stratos-spaces-pds-00000000-0000-0000-0000-000000000000:local',
+      },
+    })
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
-    expect(dockerConfigs).toHaveLength(7)
-    expect(new Set(dockerConfigs).size).toBe(7)
+    expect(dockerConfigs).toHaveLength(15)
+    expect(
+      dockerConfigs.filter((line) => line.startsWith('image rm ')),
+    ).toHaveLength(8)
 
     process.env.RUNNER_TEST_FAIL_CLEANUP = '1'
     const cleanupFailedReport = join(root, 'cleanup-failed-report')
@@ -614,7 +634,15 @@ if (args.includes('down')) {
       await readFile(join(cleanupFailedReport, 'failure.json'), 'utf8'),
     )
     expect(cleanupFailure.cleanup.status).toBe('failed')
-    expect(cleanupFailure.cleanup.error).toBe('docker compose exited 9')
+    expect(cleanupFailure.cleanup.compose).toEqual({
+      status: 'failed',
+      error: 'docker compose exited 9',
+    })
+    expect(cleanupFailure.cleanup.image).toEqual({
+      status: 'passed',
+      exitCode: 0,
+      tag: 'stratos-spaces-pds-00000000-0000-0000-0000-000000000000:local',
+    })
     expect(cleanupFailure.cleanup.recoveryComposeFile).toMatch(/compose\.yaml$/)
     expect(await stat(cleanupFailure.cleanup.recoveryComposeFile)).toBeDefined()
     await rm(dirname(dirname(cleanupFailure.cleanup.recoveryComposeFile)), {

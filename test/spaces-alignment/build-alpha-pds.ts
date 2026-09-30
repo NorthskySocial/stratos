@@ -16,6 +16,7 @@ export interface PdsBuildReceipt {
   dockerfileSha256: string
   lockfileSha256: string
   imageId: string
+  imageTag: string
   baseImages: string[]
   buildExitCode: 0
 }
@@ -71,16 +72,21 @@ export async function buildAlphaPds(
     const dockerfileSha256 = await sha256File(join(source, pin.dockerfile))
     const lockfileSha256 = await sha256File(join(source, pin.lockfile))
     const dockerfile = await readFile(join(source, pin.dockerfile), 'utf8')
-    const baseTags = [
-      ...dockerfile.matchAll(/^FROM\s+([^\s]+)(?:\s+AS\s+[^\s]+)?/gim),
+    const fromLines = [
+      ...dockerfile.matchAll(/^FROM[ \t]+(\S+)(?:[ \t]+AS[ \t]+(\S+))?/gim),
     ]
-      .map((match) => match[1])
-      .filter(
-        (tag) =>
-          !tag.startsWith('$') &&
-          !tag.includes('base') &&
-          !tag.includes('build'),
-      )
+    const stageNames = new Set(
+      fromLines.map((match) => match[2]?.toLowerCase()).filter(Boolean),
+    )
+    const baseTags = [
+      ...new Set(
+        fromLines
+          .map((match) => match[1])
+          .filter(
+            (tag) => !tag.startsWith('$') && !stageNames.has(tag.toLowerCase()),
+          ),
+      ),
+    ]
     const baseImages = await Promise.all(
       baseTags.map(async (tag) => {
         await command('docker', ['pull', tag])
@@ -123,6 +129,7 @@ export async function buildAlphaPds(
       dockerfileSha256,
       lockfileSha256,
       imageId,
+      imageTag: tag,
       baseImages,
       buildExitCode: 0,
     }

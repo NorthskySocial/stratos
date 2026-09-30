@@ -45,7 +45,7 @@ describe('pinned PDS build', () => {
     await mkdir(bin)
     await mkdir(report)
     const dockerfile =
-      'ARG BASE=node:24-alpine\nFROM $BASE AS base\nFROM node:24-alpine AS build\nFROM base\nFROM build\n# FROM ignored:latest\n'
+      'ARG BASE=node:24-alpine\nFROM $BASE AS base\nFROM   docker/buildkit:latest   AS  build\nFROM example.test/node-build:24 AS final\nFROM example.test/base-image:1\nFROM base\nFROM build\nFROM final\nFROM example.test/node-build:24 AS duplicate\n# FROM ignored:latest\n'
     const lockfile = 'lockfileVersion: 9.0\n'
     await writeFile(join(source, 'services/pds/Dockerfile'), dockerfile)
     await writeFile(join(source, 'pnpm-lock.yaml'), lockfile)
@@ -67,9 +67,24 @@ describe('pinned PDS build', () => {
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
 const args = process.argv.slice(2)
-if (args[0] === 'pull') { assert.equal(args[1], 'node:24-alpine'); process.exit(0) }
+if (args[0] === 'pull') {
+  assert.ok(
+    [
+      'docker/buildkit:latest',
+      'example.test/node-build:24',
+      'example.test/base-image:1',
+    ].includes(args[1]),
+  )
+  process.exit(0)
+}
 if (args[0] === 'image' && args[1] === 'inspect') {
-  assert.deepEqual(args.slice(2), ['--format', '{{.Id}}', 'node:24-alpine'])
+  assert.ok(
+    [
+      'docker/buildkit:latest',
+      'example.test/node-build:24',
+      'example.test/base-image:1',
+    ].includes(args.at(-1)),
+  )
   if (process.env.RUNNER_TEST_FAIL_DOCKER_INSPECT) {
     console.error('synthetic private failure detail')
     process.exit(19)
@@ -78,7 +93,9 @@ if (args[0] === 'image' && args[1] === 'inspect') {
   process.exit(0)
 }
 if (args[0] === 'build') {
-  assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-pds-source-'))
+  assert.ok(process.env.DOCKER_CONFIG?.startsWith(${JSON.stringify(
+    join(tmpdir(), 'stratos-pds-source-'),
+  )}))
   assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
   assert.ok(args.includes('--progress=plain'))
   const index = args.indexOf('--iidfile')
@@ -116,7 +133,12 @@ process.exit(2)
       dockerfileSha256: createHash('sha256').update(dockerfile).digest('hex'),
       lockfileSha256: createHash('sha256').update(lockfile).digest('hex'),
       imageId: `sha256:${'c'.repeat(64)}`,
-      baseImages: [`sha256:${'b'.repeat(64)}`],
+      imageTag: expect.stringMatching(/^stratos-spaces-pds-[0-9a-f-]+:local$/),
+      baseImages: [
+        `sha256:${'b'.repeat(64)}`,
+        `sha256:${'b'.repeat(64)}`,
+        `sha256:${'b'.repeat(64)}`,
+      ],
       buildExitCode: 0,
     })
     expect((await readFile(join(report, 'pds-image.id'), 'utf8')).trim()).toBe(

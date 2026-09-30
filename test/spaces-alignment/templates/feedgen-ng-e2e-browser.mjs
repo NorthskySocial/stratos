@@ -275,11 +275,7 @@ async function waitForFeed(page, responses, text, uri) {
               item?.post?.uri === uri && item?.post?.record?.text === text,
           ),
       )
-      assert.ok(
-        delivered,
-        'Clubhouse rendered the post without a successful Rust Feedgen response containing it',
-      )
-      return
+      if (delivered) return
     }
     await page.reload({ waitUntil: 'domcontentloaded' })
     await post.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => {})

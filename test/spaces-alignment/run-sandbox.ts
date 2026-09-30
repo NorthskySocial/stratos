@@ -339,6 +339,7 @@ export async function runSandbox(
   const childEnvironment = sandboxEnvironment(dockerConfig)
   const steps: Array<{ name: string; exitCode: 0 }> = []
   const results: Record<string, AssertionResult[]> = {}
+  let pds: PdsBuildReceipt | undefined
   let failedStep = 'docker-config'
   let gateError: unknown
   let summary: Record<string, unknown> | undefined
@@ -364,7 +365,7 @@ export async function runSandbox(
       pins,
     )
     failedStep = 'build-pds'
-    const pds = await (dependencies.buildPds ?? buildAlphaPds)(
+    pds = await (dependencies.buildPds ?? buildAlphaPds)(
       pins.spacesPds,
       options.reportDirectory,
     )
@@ -471,7 +472,8 @@ export async function runSandbox(
     gateError = error
   }
 
-  let cleanup: Record<string, unknown>
+  const cleanup: Record<string, unknown> = {}
+  const cleanupErrors: Error[] = []
   if (existsSync(composeFile)) {
     try {
       await command(
@@ -491,23 +493,45 @@ export async function runSandbox(
         atmosphere,
         childEnvironment,
       )
-      cleanup = { status: 'passed', exitCode: 0 }
+      cleanup.compose = { status: 'passed', exitCode: 0 }
     } catch (error) {
-      cleanup = {
-        status: 'failed',
-        error: error instanceof Error ? error.message : String(error),
-        recoveryComposeFile: composeFile,
-      }
-      const cleanupError = new Error(`Sandbox cleanup failed: ${cleanup.error}`)
-      gateError = gateError
-        ? new AggregateError(
-            [gateError, cleanupError],
-            'Sandbox gate and cleanup failed',
-          )
-        : cleanupError
+      const message = error instanceof Error ? error.message : String(error)
+      cleanup.compose = { status: 'failed', error: message }
+      cleanup.recoveryComposeFile = composeFile
+      cleanupErrors.push(new Error(`Sandbox cleanup failed: ${message}`))
     }
   } else {
-    cleanup = { status: 'not-needed' }
+    cleanup.compose = { status: 'not-needed' }
+  }
+  if (pds) {
+    try {
+      await command(
+        'docker',
+        ['image', 'rm', pds.imageTag],
+        atmosphere,
+        childEnvironment,
+      )
+      cleanup.image = { status: 'passed', exitCode: 0, tag: pds.imageTag }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      cleanup.image = { status: 'failed', error: message, tag: pds.imageTag }
+      cleanupErrors.push(new Error(`PDS image cleanup failed: ${message}`))
+    }
+  } else {
+    cleanup.image = { status: 'not-needed' }
+  }
+  cleanup.status = cleanupErrors.length === 0 ? 'passed' : 'failed'
+  if (cleanupErrors.length > 0) {
+    const cleanupError =
+      cleanupErrors.length === 1
+        ? cleanupErrors[0]
+        : new AggregateError(cleanupErrors, 'Sandbox cleanup failed')
+    gateError = gateError
+      ? new AggregateError(
+          [gateError, cleanupError],
+          'Sandbox gate and cleanup failed',
+        )
+      : cleanupError
   }
 
   if (gateError) {
