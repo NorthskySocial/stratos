@@ -8,8 +8,8 @@ import type { ScenarioSuite } from './rules.js'
 
 const sha = 'a'.repeat(40)
 const base = 'b'.repeat(40)
-const review = (sessionId: string) => ({
-  model: 'gpt-5.6-terra',
+const review = (sessionId: string, model = 'gpt-5.6-terra') => ({
+  model,
   verdict: 'approved',
   reviewedSha: sha,
   sessionId,
@@ -30,15 +30,29 @@ const suite = (id: string, requiredAssertions = ['passes']): ScenarioSuite => ({
 })
 
 describe('review receipt gate', () => {
-  it('requires separate Terra approvals for the exact candidate and parent', () => {
+  it('requires separate approved-model reviews for the exact candidate and parent', () => {
     expect(validateReviewReceipt(receipt(), sha, base).candidateSha).toBe(sha)
     expect(() => validateReviewReceipt(receipt(), base, sha)).toThrow(
       'Review receipt does not match',
     )
+    const solReviews = {
+      candidateSha: sha,
+      baseSha: base,
+      reviews: {
+        standards: review('standards-sol', 'gpt-6.1-sol'),
+        spec: review('spec-sol', 'gpt-6.1-sol'),
+      },
+    }
+    expect(validateReviewReceipt(solReviews, sha, base).candidateSha).toBe(sha)
     const wrongModel = receipt()
     wrongModel.reviews.spec.model = 'gpt-6-sol'
     expect(() => validateReviewReceipt(wrongModel, sha, base)).toThrow(
-      'spec review does not approve',
+      'spec review does not approve this candidate with an accepted model',
+    )
+    const invalidModelType = receipt()
+    invalidModelType.reviews.spec.model = 5 as never
+    expect(() => validateReviewReceipt(invalidModelType, sha, base)).toThrow(
+      'spec review model must be a string',
     )
     const blocked = receipt()
     blocked.reviews.spec.unresolvedBlockingFindings = 1
@@ -89,12 +103,12 @@ describe('review receipt gate', () => {
     const wrongVerdict = receipt()
     wrongVerdict.reviews.standards.verdict = 'changes-requested'
     expect(() => validateReviewReceipt(wrongVerdict, sha, base)).toThrow(
-      'standards review does not approve',
+      'standards review does not approve this candidate with an accepted model',
     )
     const wrongReviewedSha = receipt()
     wrongReviewedSha.reviews.spec.reviewedSha = base
     expect(() => validateReviewReceipt(wrongReviewedSha, sha, base)).toThrow(
-      'spec review does not approve',
+      'spec review does not approve this candidate with an accepted model',
     )
     const missingSession = receipt()
     missingSession.reviews.spec.sessionId = ''

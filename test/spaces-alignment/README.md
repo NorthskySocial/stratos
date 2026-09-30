@@ -1,6 +1,6 @@
 # Spaces alignment sandbox gate
 
-Run this gate only after the candidate commit has separate Terra Standards and Spec approvals. The runner requires a clean candidate checkout. It rejects an earlier commit's review receipt, an unknown suite, reused report paths, skipped assertions, and any failed child command.
+Run this gate only after the candidate commit has separate Standards and Spec approvals from an accepted reviewer model. The runner requires a clean candidate checkout. It rejects an earlier commit's review receipt, an unknown suite, reused report paths, skipped assertions, and any failed child command.
 
 ## Review receipt
 
@@ -12,7 +12,7 @@ Save a private JSON file outside the checkout after the two reviews finish:
   "baseSha": "<full reviewed branch-base commit SHA>",
   "reviews": {
     "standards": {
-      "model": "gpt-5.6-terra",
+      "model": "gpt-6.1-sol",
       "verdict": "approved",
       "reviewedSha": "<same candidate SHA>",
       "sessionId": "<Standards review session ID>",
@@ -20,7 +20,7 @@ Save a private JSON file outside the checkout after the two reviews finish:
       "unresolvedBlockingFindings": 0
     },
     "spec": {
-      "model": "gpt-5.6-terra",
+      "model": "gpt-6.1-sol",
       "verdict": "approved",
       "reviewedSha": "<same candidate SHA>",
       "sessionId": "<different Spec review session ID>",
@@ -30,6 +30,9 @@ Save a private JSON file outside the checkout after the two reviews finish:
   }
 }
 ```
+
+Accepted reviewer models are GPT-5.6 Terra and GPT-6.1 Sol. Record the actual
+model used for both independent reviews; do not substitute or relabel one.
 
 Write this file from the actual reviewer results. The evidence references identify their full private findings. Do not copy those findings into this receipt. The runner checks the receipt shape and SHA pair; it cannot attest that a named session occurred. Keep the full reviewer records for audit.
 The base must be an existing ancestor commit of the candidate; a reviewed
