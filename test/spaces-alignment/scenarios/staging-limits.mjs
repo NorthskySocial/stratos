@@ -353,7 +353,11 @@ server.on('request', async (req, res) => {
   if (url.pathname === '/_control/mode') {
     mode = url.searchParams.get('value') || 'observe';
     pageCounts.clear();
+    gate = 'open';
     await handler(req, res);
+    const waiting = pending;
+    pending = [];
+    for (const resume of waiting) resume();
     return;
   }
   if (url.pathname === '/xrpc/com.atproto.space.listRepoOps') {
