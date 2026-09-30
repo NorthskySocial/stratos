@@ -640,6 +640,7 @@ try {
       ),
     'expired stage cleanup',
   )
+  await configureLimits({ FEEDGEN_PROJECTION_MAX_AGE_MS: 1_000 })
   await waitFor(
     async () => (await control('status')).firstRequests > firstBefore,
     'restart without staged cursor',
