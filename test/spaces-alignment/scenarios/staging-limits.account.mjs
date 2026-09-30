@@ -190,6 +190,26 @@ try {
       `Second account did not join room at ${current.origin}${current.pathname}: ${JSON.stringify({ heading, live })}`,
     )
   }
+  const seedText = 'Staging limits secondary repo seed'
+  const seedWrite = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname ===
+        '/xrpc/com.atproto.repo.createRecord' &&
+      response.ok(),
+    { timeout: 45_000 },
+  )
+  await page.locator('#room-post').fill(seedText)
+  await page.getByRole('button', { name: 'Post topic' }).click()
+  const seedResult = await (await seedWrite).json()
+  assert.ok(
+    typeof seedResult.uri === 'string' && typeof seedResult.cid === 'string',
+    'Second account did not seed its space repo',
+  )
+  await page.getByText(seedText, { exact: true }).waitFor({
+    state: 'visible',
+    timeout: 30_000,
+  })
   console.log(JSON.stringify({ did }))
 } finally {
   await browser.close()
