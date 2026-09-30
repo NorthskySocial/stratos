@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import {
@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { buildAlphaPds } from './build-alpha-pds.js'
 import type { PdsBuildReceipt, PdsSourcePin } from './build-alpha-pds.js'
+import { sha256 } from './hash.js'
 import {
   suiteExecutionOrder,
   validateAssertions,
@@ -61,6 +62,20 @@ interface Options {
 interface CommandResult {
   output: string
   exitCode: 0
+}
+
+interface TeardownResult {
+  exitCode: number | string
+  error?: string
+}
+
+class CommandError extends Error {
+  constructor(
+    readonly exitCode: number | string,
+    message: string,
+  ) {
+    super(message)
+  }
 }
 
 export function parseOptions(args: string[]): Options {
@@ -110,16 +125,12 @@ export async function command(
     })
     return { output: stdout, exitCode: 0 }
   } catch (error) {
-    throw new Error(
+    const exitCode = (error as { code?: number | string }).code ?? 'unknown'
+    throw new CommandError(
+      exitCode,
       `${file} ${args[0] ?? ''} exited ${(error as { code?: number | string }).code ?? 'unknown'}`,
     )
   }
-}
-
-async function sha256(path: string): Promise<string> {
-  return createHash('sha256')
-    .update(await readFile(path))
-    .digest('hex')
 }
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -333,10 +344,13 @@ export async function runSandbox(
   const projectName = `stratos-${randomUUID().replaceAll('-', '').slice(0, 12)}`
   const atmosphere = join(workspace, 'atmosphereinabox')
   const dockerConfig = join(workspace, 'docker-config')
-  const childEnvironment = { ...process.env, DOCKER_CONFIG: dockerConfig }
+  const childEnvironment = composeEnvironment(dockerConfig)
   const steps: Array<{ name: string; exitCode: 0 }> = []
   const results: Record<string, AssertionResult[]> = {}
+  const composePath = join(atmosphere, 'compose.yaml')
   let failedStep = 'docker-config'
+  let summary: Record<string, unknown> | undefined
+  let executionError: Error | undefined
   const runStep = async (
     name: string,
     file: string,
@@ -440,7 +454,7 @@ export async function runSandbox(
       validateAssertions(suite, results[suite.id])
     }
     failedStep = 'write-receipt'
-    const summary = {
+    summary = {
       candidateSha: candidate,
       baseSha: base,
       reviewedSha: receipt.candidateSha,
@@ -459,12 +473,22 @@ export async function runSandbox(
       })),
       steps,
     }
-    await writeFile(
-      join(options.reportDirectory, 'receipt.json'),
-      JSON.stringify(summary, null, 2),
-      { mode: 0o600 },
-    )
   } catch (error) {
+    executionError = toError(error)
+  }
+
+  const teardown = await teardownSandbox(
+    atmosphere,
+    composePath,
+    projectName,
+    childEnvironment,
+  )
+  if (teardown.error && !executionError) {
+    executionError = new Error(`Sandbox teardown failed: ${teardown.error}`)
+    failedStep = 'teardown'
+  }
+
+  if (executionError) {
     await writeFile(
       join(options.reportDirectory, 'failure.json'),
       JSON.stringify(
@@ -474,31 +498,80 @@ export async function runSandbox(
           projectName,
           failedStep,
           completedSteps: steps,
-          error: error instanceof Error ? error.message : String(error),
+          teardown,
+          recoveryConfigurationRetained: Boolean(teardown.error),
+          error: executionError.message,
         },
         null,
         2,
       ),
       { mode: 0o600 },
     )
-    throw error
-  } finally {
-    await command(
-      'docker',
-      [
-        'compose',
-        '--project-name',
-        projectName,
-        '--project-directory',
-        atmosphere,
-        'down',
-        '--volumes',
-        '--remove-orphans',
-      ],
-      atmosphere,
-      childEnvironment,
-    ).catch(() => {})
-    await rm(workspace, { recursive: true, force: true })
+    if (!teardown.error)
+      await rm(workspace, { recursive: true, force: true })
+    throw executionError
+  }
+
+  if (!summary) throw new Error('Sandbox receipt was not prepared')
+  await writeFile(
+    join(options.reportDirectory, 'receipt.json'),
+    JSON.stringify({ ...summary, teardown }, null, 2),
+    { mode: 0o600 },
+  )
+  await rm(workspace, { recursive: true, force: true })
+}
+
+function composeEnvironment(dockerConfig: string): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    DOCKER_CONFIG: dockerConfig,
+  }
+  delete environment.COMPOSE_FILE
+  delete environment.COMPOSE_PROJECT_NAME
+  delete environment.COMPOSE_PROFILES
+  delete environment.COMPOSE_PATH_SEPARATOR
+  delete environment.COMPOSE_ENV_FILES
+  return environment
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error('Sandbox execution failed')
+}
+
+async function teardownSandbox(
+  atmosphere: string,
+  composePath: string,
+  projectName: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<TeardownResult> {
+  if (!existsSync(composePath)) return { exitCode: 0 }
+  try {
+    return {
+      exitCode: (
+        await command(
+          'docker',
+          [
+            'compose',
+            '--file',
+            composePath,
+            '--project-directory',
+            atmosphere,
+            '--project-name',
+            projectName,
+            'down',
+            '--volumes',
+            '--remove-orphans',
+          ],
+          atmosphere,
+          environment,
+        )
+      ).exitCode,
+    }
+  } catch (error) {
+    return {
+      exitCode: error instanceof CommandError ? error.exitCode : 'unknown',
+      error: error instanceof Error ? error.message : String(error),
+    }
   }
 }
 

@@ -167,6 +167,8 @@ it('adds the candidate webapp with private OAuth routing', async () => {
   ])
   expect(runCommand.mock.calls[2]?.[1]).toEqual([
     'compose',
+    '--file',
+    `${sandboxDirectory}/compose.yaml`,
     '--project-name',
     'space-delete-test',
     '--project-directory',
@@ -177,6 +179,8 @@ it('adds the candidate webapp with private OAuth routing', async () => {
   ])
   expect(runCommand.mock.calls[3]?.[1]).toEqual([
     'compose',
+    '--file',
+    `${sandboxDirectory}/compose.yaml`,
     '--project-name',
     'space-delete-test',
     '--project-directory',
@@ -188,6 +192,8 @@ it('adds the candidate webapp with private OAuth routing', async () => {
   expect(runCommand.mock.calls[5]?.[1]).toEqual(
     expect.arrayContaining([
       'compose',
+      '--file',
+      `${sandboxDirectory}/compose.yaml`,
       '--project-name',
       'space-delete-test',
       '--project-directory',

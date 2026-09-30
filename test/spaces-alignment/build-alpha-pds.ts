@@ -1,9 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { sha256 } from './hash.js'
 
 const exec = promisify(execFile)
 
@@ -40,14 +41,10 @@ async function command(
   } catch (error) {
     const code = (error as { code?: string | number }).code ?? 'unknown'
     const step = args[0] === 'image' ? 'image inspect' : (args[0] ?? 'command')
-    throw new Error(`${file} ${step} failed with exit ${code}`)
+    throw new Error(`${file} ${step} failed with exit ${code}`, {
+      cause: error,
+    })
   }
-}
-
-async function sha256(path: string): Promise<string> {
-  return createHash('sha256')
-    .update(await readFile(path))
-    .digest('hex')
 }
 
 export async function buildAlphaPds(

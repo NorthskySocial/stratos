@@ -116,6 +116,8 @@ export const suite: ScenarioSuite = {
       'docker',
       [
         'compose',
+        '--file',
+        join(context.sandboxDirectory, 'compose.yaml'),
         '--project-name',
         context.projectName,
         '--project-directory',
@@ -130,6 +132,8 @@ export const suite: ScenarioSuite = {
       'docker',
       [
         'compose',
+        '--file',
+        join(context.sandboxDirectory, 'compose.yaml'),
         '--project-name',
         context.projectName,
         '--project-directory',
@@ -157,6 +161,8 @@ export const suite: ScenarioSuite = {
       'docker',
       [
         'compose',
+        '--file',
+        join(context.sandboxDirectory, 'compose.yaml'),
         '--project-name',
         context.projectName,
         '--project-directory',

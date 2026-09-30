@@ -169,7 +169,10 @@ process.exit(2)
         },
         report,
       ),
-    ).rejects.toThrow(/^docker image inspect failed with exit 19$/)
+    ).rejects.toMatchObject({
+      message: 'docker image inspect failed with exit 19',
+      cause: expect.objectContaining({ code: 19 }),
+    })
   })
 
   it('rejects an invalid revision before acquisition', async () => {

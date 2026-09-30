@@ -21,6 +21,8 @@ export const suite: ScenarioSuite = {
       'docker',
       [
         'compose',
+        '--file',
+        `${context.sandboxDirectory}/compose.yaml`,
         '--project-name',
         context.projectName,
         '--project-directory',

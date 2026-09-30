@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   command,
@@ -30,6 +30,13 @@ afterEach(async () => {
   delete process.env.RUNNER_TEST_IMPOSTOR_ACCOUNT
   delete process.env.RUNNER_TEST_FAIL_PDS_BUILD
   delete process.env.RUNNER_TEST_DOCKER_LOG
+  delete process.env.RUNNER_TEST_FAIL_TEARDOWN
+  delete process.env.RUNNER_TEST_TEARDOWN_CWD
+  delete process.env.COMPOSE_FILE
+  delete process.env.COMPOSE_PROJECT_NAME
+  delete process.env.COMPOSE_PROFILES
+  delete process.env.COMPOSE_PATH_SEPARATOR
+  delete process.env.COMPOSE_ENV_FILES
   await Promise.all(
     temporary
       .splice(0)
@@ -170,7 +177,7 @@ describe('sandbox preflight', () => {
     await writeFile(
       join(candidateRepo, 'test/spaces-alignment/scenarios/baseline.ts'),
       `export const suite = { id: 'baseline', requiredAssertions: ['browser-pass'], async run(context) {
-        const output = await context.runCommand('docker', ['compose', 'run'], context.sandboxDirectory)
+        const output = await context.runCommand('docker', ['compose', '--file', context.sandboxDirectory + '/compose.yaml', 'run'], context.sandboxDirectory)
         if (!output.includes('browser-ok')) throw new Error('Browser failed')
         if (process.env.RUNNER_TEST_EMPTY_ASSERTIONS) return []
         return [{ id: 'browser-pass', status: 'passed' }]
@@ -330,6 +337,7 @@ if (args[1] === 'sandbox' && args[2] === 'seed') assert.deepEqual(args, ['task',
 if (process.env.RUNNER_TEST_FAIL_STEP && process.argv.includes(process.env.RUNNER_TEST_FAIL_STEP)) process.exit(7)
 if (process.argv.includes('create')) {
   fs.mkdirSync('state', { recursive: true })
+  fs.writeFileSync('compose.yaml', 'services: {}\\n')
   fs.writeFileSync('state/manifest.json', JSON.stringify({
     domain: process.env.RUNNER_TEST_WRONG_DOMAIN ? 'atmosbox.internal' : 'atmosbox.test'
   }))
@@ -355,6 +363,10 @@ const assert = require('node:assert/strict')
 const args = process.argv.slice(2)
 assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-spaces-alignment-'))
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
+for (const key of ['COMPOSE_FILE', 'COMPOSE_PROJECT_NAME', 'COMPOSE_PROFILES', 'COMPOSE_PATH_SEPARATOR', 'COMPOSE_ENV_FILES']) {
+  assert.equal(process.env[key], undefined)
+}
+assert.equal(args[args.indexOf('--file') + 1], require('node:path').join(process.cwd(), 'compose.yaml'))
 if (args.includes('run')) {
   assert.equal(fs.statSync('state/browser-accounts.json').mode & 0o777, 0o444)
   const accounts = JSON.parse(fs.readFileSync('state/browser-accounts.json', 'utf8')).accounts
@@ -368,11 +380,18 @@ if (args.includes('down')) {
   assert.ok(args.includes('--volumes'))
   assert.ok(args.includes('--remove-orphans'))
   fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, process.env.DOCKER_CONFIG + '\\n')
+  if (process.env.RUNNER_TEST_TEARDOWN_CWD) fs.writeFileSync(process.env.RUNNER_TEST_TEARDOWN_CWD, process.cwd())
+  if (process.env.RUNNER_TEST_FAIL_TEARDOWN) process.exit(8)
 }
 `
     await writeFile(join(bin, 'deno'), fakeDeno, { mode: 0o755 })
     await writeFile(join(bin, 'docker'), fakeDocker, { mode: 0o755 })
     process.env.PATH = `${bin}:${originalPath}`
+    process.env.COMPOSE_FILE = '/tmp/inherited-compose.yaml'
+    process.env.COMPOSE_PROJECT_NAME = 'inherited-project'
+    process.env.COMPOSE_PROFILES = 'inherited-profile'
+    process.env.COMPOSE_PATH_SEPARATOR = ':'
+    process.env.COMPOSE_ENV_FILES = '/tmp/inherited.env'
     const dockerLog = join(root, 'docker.log')
     process.env.RUNNER_TEST_DOCKER_LOG = dockerLog
     const options = {
@@ -578,11 +597,39 @@ if (args.includes('down')) {
       'up',
       'seed',
     ])
+    expect(receipt.teardown).toEqual({ exitCode: 0 })
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
-    expect(dockerConfigs).toHaveLength(9)
-    expect(new Set(dockerConfigs).size).toBe(9)
+    expect(dockerConfigs).toHaveLength(7)
+    expect(new Set(dockerConfigs).size).toBe(7)
+
+    process.env.RUNNER_TEST_FAIL_TEARDOWN = '1'
+    const teardownFailureReport = join(root, 'teardown-failure-report')
+    const teardownWorkspace = join(root, 'teardown-workspace')
+    process.env.RUNNER_TEST_TEARDOWN_CWD = teardownWorkspace
+    await expect(
+      runSandbox(
+        { ...options, reportDirectory: teardownFailureReport },
+        dependencies,
+      ),
+    ).rejects.toThrow('Sandbox teardown failed: docker compose exited 8')
+    const teardownFailure = JSON.parse(
+      await readFile(join(teardownFailureReport, 'failure.json'), 'utf8'),
+    )
+    expect(teardownFailure.failedStep).toBe('teardown')
+    expect(teardownFailure.teardown).toEqual({
+      exitCode: 8,
+      error: 'docker compose exited 8',
+    })
+    expect(teardownFailure.recoveryConfigurationRetained).toBe(true)
+    await expect(readFile(join(teardownFailureReport, 'receipt.json'))).rejects.toThrow()
+    const recoveryWorkspace = await readFile(teardownWorkspace, 'utf8')
+    await expect(
+      readFile(join(recoveryWorkspace, 'compose.yaml'), 'utf8'),
+    ).resolves.toContain('services: {}')
+    await rm(dirname(recoveryWorkspace), { recursive: true, force: true })
+    delete process.env.RUNNER_TEST_FAIL_TEARDOWN
 
     await writeFile(
       join(

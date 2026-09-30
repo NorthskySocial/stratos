@@ -29,6 +29,8 @@ describe('baseline browser receipt', () => {
         cwd: '/tmp/faye-sandbox',
         args: [
           'compose',
+          '--file',
+          '/tmp/faye-sandbox/compose.yaml',
           '--project-name',
           'faye-test',
           '--project-directory',
