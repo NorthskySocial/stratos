@@ -60,24 +60,31 @@ const proxyScript = String.raw`
 import http from 'node:http'
 const held = []
 let pending = 0
-let armed = false
+let armed = null
 let aborted = 0
+let terminalResponses = 0
 http.createServer(async (req, res) => {
   res.on('close', () => { if (!res.writableEnded) aborted += 1 })
   const path = new URL(req.url, 'http://proxy').pathname
   if (path === '/_control/hold') {
-    armed = true
+    armed = 'page'
+    aborted = 0
+    res.end('ok')
+    return
+  }
+  if (path === '/_control/hold-terminal') {
+    armed = 'terminal'
     aborted = 0
     res.end('ok')
     return
   }
   if (path === '/_control/status') {
     res.setHeader('content-type', 'application/json')
-    res.end(JSON.stringify({ pending, armed, aborted }))
+    res.end(JSON.stringify({ pending, armed: armed !== null, aborted, terminalResponses }))
     return
   }
   if (path === '/_control/release') {
-    armed = false
+    armed = null
     for (const release of held.splice(0)) release()
     res.end('ok')
     return
@@ -95,8 +102,12 @@ http.createServer(async (req, res) => {
       console.error('event=revocation_proxy_page status=' + upstream.status)
     }
     const body = Buffer.from(await upstream.arrayBuffer())
-    if (armed && path === '/xrpc/com.atproto.space.listRepoOps') {
-      armed = false
+    const terminal = path === '/xrpc/com.atproto.space.listRepoOps' &&
+      (() => { try { return JSON.parse(body).commit !== undefined } catch { return false } })()
+    if (terminal) terminalResponses += 1
+    if (armed !== null && path === '/xrpc/com.atproto.space.listRepoOps' &&
+        (armed === 'page' || terminal)) {
+      armed = null
       pending += 1
       await new Promise((resolve) => held.push(resolve))
       pending -= 1
@@ -312,6 +323,17 @@ async function control(action) {
   return action === 'status' ? JSON.parse(output.trim()) : undefined
 }
 
+async function targetFailureCount() {
+  const logs = await compose(
+    ['logs', '--no-color', 'feedgen-e2e-rust'],
+    'read feedgen target failures',
+  )
+  return logs
+    .split('\n')
+    .filter((line) => line.includes('event=pds_space_target_failed kind=target'))
+    .length
+}
+
 async function waitFor(check, label, timeout = 45_000) {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
@@ -374,18 +396,23 @@ try {
   )
   await compose(['restart', 'gateway'], 'route private PDS through proxy')
 
-  await control('hold')
+  await control('hold-terminal')
   parsedLine(await browser('write'), '{"kind":"revocation-write",')
   await waitFor(
-    async () => (await control('status')).pending === 1,
-    'paused PDS response',
+    async () => {
+      const status = await control('status')
+      return status.pending === 1 && status.terminalResponses > 0
+    },
+    'paused terminal PDS response',
   )
   await admin('remove', adminAccess)
-  assert.deepEqual(await control('status'), {
-    pending: 1,
-    armed: false,
-    aborted: 0,
-  })
+  {
+    const status = await control('status')
+    assert.equal(status.pending, 1)
+    assert.equal(status.armed, false)
+    assert.equal(status.aborted, 0)
+    assert.ok(status.terminalResponses >= 1)
+  }
   await control('release')
   await waitFor(
     async () => {
@@ -397,6 +424,7 @@ try {
   )
   assertions.push('other-member-preserved')
   assertions.push('late-page-revoked')
+  assertions.push('late-terminal-verification-revoked')
 
   await compose(['restart', 'feedgen-e2e-rust'], 'restart feedgen')
   await waitFor(async () => {
@@ -421,21 +449,28 @@ try {
   )
   await admin('remove', adminAccess)
   await admin('add', adminAccess)
-  assert.deepEqual(await control('status'), {
-    pending: 1,
-    armed: false,
-    aborted: 0,
-  })
+  {
+    const status = await control('status')
+    assert.equal(status.pending, 1)
+    assert.equal(status.armed, false)
+    assert.equal(status.aborted, 0)
+  }
+  const failuresBeforeRelease = await targetFailureCount()
   await control('release')
+  await waitFor(
+    async () => (await targetFailureCount()) > failuresBeforeRelease,
+    'held old generation rejection',
+    60_000,
+  )
   await waitFor(
     async () => {
       const result = await feed()
-      return result.pds === 0
+      return result.pds === 0 && result.other > 0
     },
-    'old generation rejection',
+    'old generation rejection before fresh sync',
     60_000,
   )
-  assertions.push('old-generation-rejected')
+  assertions.push('old-generation-rejection-observed')
   await waitFor(
     async () => (await feed()).pds > 0,
     'new generation recovery',

@@ -778,6 +778,17 @@ mod revocation_tests {
         }
     }
 
+    fn private_mutation() -> SpaceStageMutation {
+        SpaceStageMutation::Upsert {
+            uri: format!("{SPACE}/{DID}/zone.stratos.feed.post/see-you"),
+            cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+            sort_at: NOW.to_owned(),
+            indexed_at: NOW.to_owned(),
+            record_json: br#"{"$type":"zone.stratos.feed.post"}"#.to_vec(),
+            blob_refs_json: b"[]".to_vec(),
+        }
+    }
+
     #[test]
     fn enrollment_shrink_invalidates_only_the_removed_boundary() {
         let mut store = store();
@@ -799,7 +810,25 @@ mod revocation_tests {
             .unwrap();
         let generation = store.pds_member_generation(BOUNDARY, DID).unwrap().unwrap();
         store
-            .stage_authorized_space_page_at_generation(page(), Vec::new(), generation)
+            .stage_authorized_space_page_at_generation(page(), vec![private_mutation()], generation)
+            .unwrap();
+        assert_eq!(
+            store
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM space_sync_stage WHERE boundary = ?1 AND did = ?2",
+                    params![BOUNDARY, DID],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        let other_generation = store.pds_member_generation(OTHER, DID).unwrap().unwrap();
+        let mut other_page = page();
+        other_page.boundary = OTHER.to_owned();
+        other_page.space_uri = SPACE.replace("/bebop", "/crew");
+        store
+            .stage_authorized_space_page_at_generation(other_page, Vec::new(), other_generation)
             .unwrap();
         store
             .reconcile_actor_enrollment(
@@ -815,12 +844,29 @@ mod revocation_tests {
 
         assert_eq!(store.pds_member_generation(BOUNDARY, DID).unwrap(), None);
         assert!(store.is_current_pds_space_member(OTHER, DID).unwrap());
+        assert_eq!(
+            store
+                .space_sync_cursor(OTHER, &SPACE.replace("/bebop", "/crew"), DID)
+                .unwrap(),
+            Some("pending".to_owned())
+        );
         assert!(
             store
                 .is_current_pds_space_member(BOUNDARY, OTHER_DID)
                 .unwrap()
         );
         assert_eq!(store.space_sync_cursor(BOUNDARY, SPACE, DID).unwrap(), None);
+        assert_eq!(
+            store
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM space_sync_stage WHERE boundary = ?1 AND did = ?2",
+                    params![BOUNDARY, DID],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
         assert!(matches!(
             store.stage_authorized_space_page_at_generation(page(), Vec::new(), generation),
             Err(StoreError::UnauthorizedSpaceMember)

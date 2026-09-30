@@ -3,8 +3,9 @@ import type { AssertionResult, ScenarioSuite } from '../rules.js'
 
 const requiredAssertions = [
   'late-page-revoked',
+  'late-terminal-verification-revoked',
   'other-member-preserved',
-  'old-generation-rejected',
+  'old-generation-rejection-observed',
   'fresh-generation-recovers',
   'restart-keeps-revocation',
 ] as const

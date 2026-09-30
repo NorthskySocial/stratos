@@ -596,7 +596,7 @@ mod tests {
 
     #[tokio::test]
     async fn refreshes_membership_before_promoting_an_authority_target() {
-        let credentials = credentials();
+        let initial_credentials = credentials();
         let membership = Arc::new(MembershipReconciler::new(
             Arc::new(MembershipPages(Mutex::new(
                 [Ok(SpaceMembershipPage {
@@ -609,11 +609,11 @@ mod tests {
                 })]
                 .into(),
             ))),
-            Arc::clone(&credentials),
+            Arc::clone(&initial_credentials),
         ));
         let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
             Arc::new(EmptyPages),
-            credentials,
+            initial_credentials,
             Arc::new(VerifiedCommit),
         ));
         let lifecycle = lifecycle();
@@ -647,19 +647,23 @@ mod tests {
                 "2026-09-22T00:00:00.000Z",
             )
             .unwrap();
+        let old_generation = lifecycle
+            .pds_member_generation(BOUNDARY, DID)
+            .unwrap()
+            .unwrap();
         let (started_tx, started_rx) = oneshot::channel();
         let (release_tx, release_rx) = oneshot::channel();
-        let credentials = credentials();
+        let initial_credentials = credentials();
         let membership = Arc::new(MembershipReconciler::new(
             Arc::new(PausedMembershipPage {
                 started: Mutex::new(Some(started_tx)),
                 release: Mutex::new(Some(release_rx)),
             }),
-            Arc::clone(&credentials),
+            Arc::clone(&initial_credentials),
         ));
         let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
             Arc::new(EmptyPages),
-            credentials,
+            initial_credentials,
             Arc::new(VerifiedCommit),
         ));
         let task_lifecycle = Arc::clone(&lifecycle);
@@ -677,16 +681,60 @@ mod tests {
         lifecycle
             .replace_pds_space_members(BOUNDARY, Vec::new(), "2026-09-22T00:01:00.000Z")
             .unwrap();
+        lifecycle
+            .replace_pds_space_members(
+                BOUNDARY,
+                vec![crate::store::PdsSpaceMember {
+                    did: DID.to_owned(),
+                }],
+                "2026-09-22T00:02:00.000Z",
+            )
+            .unwrap();
+        let fresh_generation = lifecycle
+            .pds_member_generation(BOUNDARY, DID)
+            .unwrap()
+            .unwrap();
+        assert_ne!(fresh_generation, old_generation);
         release_tx.send(()).unwrap();
         let pass = task.await.unwrap();
         assert_eq!(pass.membership_failures, 1);
         assert_eq!(pass.targets, 0);
-        assert!(
-            lifecycle
-                .pds_member_generation(BOUNDARY, DID)
-                .unwrap()
-                .is_none()
+        assert_eq!(
+            lifecycle.pds_member_generation(BOUNDARY, DID).unwrap(),
+            Some(fresh_generation)
         );
+
+        let credentials = credentials();
+        let membership = Arc::new(MembershipReconciler::new(
+            Arc::new(MembershipPages(Mutex::new(
+                [Ok(SpaceMembershipPage {
+                    members: vec![SpaceRepoMember {
+                        did: DID.to_owned(),
+                        custody: RepoCustody::Pds,
+                        host: Some("https://pds.example.test/".to_owned()),
+                    }],
+                    next_cursor: None,
+                })]
+                .into(),
+            ))),
+            Arc::clone(&credentials),
+        ));
+        let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
+            Arc::new(EmptyPages),
+            credentials,
+            Arc::new(VerifiedCommit),
+        ));
+        let recovered = run_pass(
+            Arc::clone(&lifecycle),
+            membership,
+            synchronizer,
+            &[BOUNDARY.to_owned()].into_iter().collect(),
+            &retention(),
+        )
+        .await;
+        assert_eq!(recovered.membership_failures, 0);
+        assert_eq!(recovered.targets, 1);
+        assert_eq!(recovered.promoted, 1);
     }
 
     #[tokio::test]
