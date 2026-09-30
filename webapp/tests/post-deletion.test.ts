@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@atproto/api'
 import type { OAuthSession } from '@atproto/oauth-client-browser'
 import { deletePost } from '../src/lib/post-deletion'
+import { SPACE_WRITE_SCOPE } from '../src/lib/auth'
 import type { FeedPost } from '../src/lib/feed'
 
 const DID = 'did:plc:misato'
@@ -27,8 +28,15 @@ function agent(deleteRecord = vi.fn().mockResolvedValue({})): Agent {
   } as unknown as Agent
 }
 
-function session(fetchHandler = vi.fn()): OAuthSession {
-  return { sub: DID, fetchHandler } as unknown as OAuthSession
+function session(
+  fetchHandler = vi.fn(),
+  scope = SPACE_WRITE_SCOPE,
+): OAuthSession {
+  return {
+    sub: DID,
+    fetchHandler,
+    getTokenInfo: vi.fn().mockResolvedValue({ scope }),
+  } as unknown as OAuthSession
 }
 
 describe('deletePost', () => {
@@ -148,5 +156,44 @@ describe('deletePost', () => {
         stratosAgent: null,
       }),
     ).rejects.toThrow('PDS deletion failed (403)')
+  })
+
+  it('asks an old grant to sign in again before a PDS deletion', async () => {
+    const fetchHandler = vi.fn()
+    await expect(
+      deletePost({
+        post: post({
+          uri: `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
+          isPrivate: true,
+        }),
+        session: session(
+          fetchHandler,
+          SPACE_WRITE_SCOPE.replace('&action=delete', ''),
+        ),
+        publicAgent: agent(),
+        stratosAgent: null,
+      }),
+    ).rejects.toThrow('Sign out and sign in again to allow deletion')
+    expect(fetchHandler).not.toHaveBeenCalled()
+  })
+
+  it('does not send a PDS deletion when scope lookup fails', async () => {
+    const fetchHandler = vi.fn()
+    const staleSession = {
+      ...session(fetchHandler),
+      getTokenInfo: vi.fn().mockRejectedValue(new Error('Offline')),
+    } as unknown as OAuthSession
+    await expect(
+      deletePost({
+        post: post({
+          uri: `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
+          isPrivate: true,
+        }),
+        session: staleSession,
+        publicAgent: agent(),
+        stratosAgent: null,
+      }),
+    ).rejects.toThrow('Could not check private post deletion permission')
+    expect(fetchHandler).not.toHaveBeenCalled()
   })
 })
