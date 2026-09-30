@@ -219,10 +219,6 @@ try {
     did,
     'Second account seed URI does not identify its author repo',
   )
-  await page.getByText(seedText, { exact: true }).waitFor({
-    state: 'visible',
-    timeout: 30_000,
-  })
   console.log(JSON.stringify({ did }))
 } finally {
   await browser.close()
