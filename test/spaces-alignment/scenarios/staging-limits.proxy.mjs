@@ -87,27 +87,18 @@ export function createProxyServer(upstreamFetch = fetch) {
         if (terminal && mode !== 'rollback') {
           try {
             const query = new URL(req.url, 'http://proxy')
+            query.pathname = '/xrpc/com.atproto.space.getLatestCommit'
             query.searchParams.delete('cursor')
             const headers = { ...req.headers }
             delete headers.connection
-            for (let page = 0; page < 256; page += 1) {
-              const upstream = await upstreamFetch(
-                `http://feedgen-e2e-pds-spaces:3000${query.pathname}${query.search}`,
-                { headers },
-              )
-              if (!upstream.ok) throw new Error('Upstream PDS request failed')
-              const upstreamPage = await upstream.json()
-              if (
-                upstreamPage.cursor === undefined ||
-                upstreamPage.cursor === null
-              ) {
-                commit = upstreamPage.commit
-                break
-              }
-              query.searchParams.set('cursor', String(upstreamPage.cursor))
-            }
+            const upstream = await upstreamFetch(
+              `http://feedgen-e2e-pds-spaces:3000${query.pathname}${query.search}`,
+              { headers },
+            )
+            if (!upstream.ok) throw new Error('Upstream PDS request failed')
+            commit = (await upstream.json()).commit
             if (!commit)
-              throw new Error('Upstream PDS returned no terminal commit')
+              throw new Error('Upstream PDS returned no latest commit')
           } catch (error) {
             console.error(
               `event=staging_limits_proxy_commit_failed error=${JSON.stringify(error instanceof Error ? error.message : String(error))}`,
