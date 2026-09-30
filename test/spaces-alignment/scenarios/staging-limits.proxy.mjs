@@ -85,28 +85,37 @@ export function createProxyServer(upstreamFetch = fetch) {
               : [record]
         let commit
         if (terminal && mode !== 'rollback') {
-          const query = new URL(req.url, 'http://proxy')
-          query.searchParams.delete('cursor')
-          const headers = { ...req.headers }
-          delete headers.connection
-          for (let page = 0; page < 256; page += 1) {
-            const upstream = await upstreamFetch(
-              `http://feedgen-e2e-pds-spaces:3000${query.pathname}${query.search}`,
-              { headers },
-            )
-            if (!upstream.ok) throw new Error('Upstream PDS request failed')
-            const upstreamPage = await upstream.json()
-            if (
-              upstreamPage.cursor === undefined ||
-              upstreamPage.cursor === null
-            ) {
-              commit = upstreamPage.commit
-              break
+          try {
+            const query = new URL(req.url, 'http://proxy')
+            query.searchParams.delete('cursor')
+            const headers = { ...req.headers }
+            delete headers.connection
+            for (let page = 0; page < 256; page += 1) {
+              const upstream = await upstreamFetch(
+                `http://feedgen-e2e-pds-spaces:3000${query.pathname}${query.search}`,
+                { headers },
+              )
+              if (!upstream.ok) throw new Error('Upstream PDS request failed')
+              const upstreamPage = await upstream.json()
+              if (
+                upstreamPage.cursor === undefined ||
+                upstreamPage.cursor === null
+              ) {
+                commit = upstreamPage.commit
+                break
+              }
+              query.searchParams.set('cursor', String(upstreamPage.cursor))
             }
-            query.searchParams.set('cursor', String(upstreamPage.cursor))
+            if (!commit)
+              throw new Error('Upstream PDS returned no terminal commit')
+          } catch (error) {
+            console.error(
+              `event=staging_limits_proxy_commit_failed error=${JSON.stringify(error instanceof Error ? error.message : String(error))}`,
+            )
+            res.writeHead(502)
+            res.end()
+            return
           }
-          if (!commit)
-            throw new Error('Upstream PDS returned no terminal commit')
         }
         res.setHeader('content-type', 'application/json')
         res.end(
