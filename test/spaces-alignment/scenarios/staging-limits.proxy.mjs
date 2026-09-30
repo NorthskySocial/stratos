@@ -156,7 +156,10 @@ export function createProxyServer(upstreamFetch = fetch) {
       delete responseHeaders['transfer-encoding']
       res.writeHead(upstream.status, responseHeaders)
       res.end(body)
-    } catch {
+    } catch (error) {
+      console.error(
+        `event=staging_limits_proxy_upstream_failed error=${JSON.stringify(error instanceof Error ? error.message : String(error))}`,
+      )
       res.writeHead(502)
       res.end()
     }
