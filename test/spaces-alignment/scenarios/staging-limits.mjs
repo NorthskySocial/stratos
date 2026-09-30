@@ -353,7 +353,7 @@ server.on('request', async (req, res) => {
   if (url.pathname === '/_control/mode') {
     mode = url.searchParams.get('value') || 'observe';
     pageCounts.clear();
-    gate = 'open';
+    gate = url.searchParams.get('gate') === 'terminal' ? 'terminal' : 'open';
     await handler(req, res);
     const waiting = pending;
     pending = [];
@@ -454,8 +454,7 @@ try {
     0,
     'Baseline has an unfinished stage',
   )
-  await control('mode?value=replacement')
-  await control('hold-terminal')
+  await control('mode?value=replacement&gate=terminal')
   await waitFor(
     async () =>
       syntheticUsage(await storageUsage(), 'replacement').staged ===
@@ -507,8 +506,7 @@ try {
     'Same-path replacement did not publish only its final value',
   )
 
-  await control('mode?value=delete')
-  await control('hold-terminal')
+  await control('mode?value=delete&gate=terminal')
   await waitFor(
     async () =>
       syntheticUsage(await storageUsage(), 'deleted').staged ===
@@ -542,8 +540,7 @@ try {
   await configureLimits({
     FEEDGEN_STAGE_TARGET_MAX_BYTES: 3_500,
   })
-  await control('mode?value=rollback')
-  await control('hold-terminal')
+  await control('mode?value=rollback&gate=terminal')
   await waitFor(
     async () =>
       syntheticUsage(await storageUsage(), 'rolled-back').staged ===
