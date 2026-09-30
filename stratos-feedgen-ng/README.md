@@ -63,6 +63,34 @@ To poll a PDS on a private network, set both
 `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS` (the same CIDR format). This grant is
 separate from PLC trust and applies to that PDS origin only.
 
+## Staged space limits
+
+The validated `FEEDGEN_PROJECTION_MAX_BYTES` budget includes published posts,
+staged private payloads, and stage checkpoints. The memory profile uses its
+fixed 16 MiB projection budget; an encrypted volume requires an explicit
+positive byte budget and `FEEDGEN_PROJECTION_MAX_AGE_MS` in whole seconds,
+with a minimum of one second. `FEEDGEN_STAGE_TARGET_MAX_ROWS` (default 1,024),
+`FEEDGEN_STAGE_GLOBAL_MAX_ROWS` (default 8,192),
+`FEEDGEN_STAGE_TARGET_MAX_BYTES` (default one quarter of the projection budget,
+up to 8 MiB), and `FEEDGEN_STAGE_GLOBAL_MAX_BYTES` (default half the projection
+budget) set the staging caps. All four values must be positive; the target caps
+must fit within the global caps, the target row cap cannot exceed 1,024, the
+target byte cap cannot exceed 8 MiB, and the global byte cap cannot exceed half
+the projection budget. The compactor preserves that global byte allowance for
+staged data by evicting the oldest published posts as needed. Checkpoints
+count as rows, including those for pages without posts. The byte and row caps
+persist across sync passes and restarts. A rejected page rolls back, and the
+sync worker discards that target's incomplete stage.
+
+Stages expire after the configured projection age from creation or the last
+actual progress, whichever occurs first. Replaying the same cursor and data
+does not extend that age. The compactor removes expired rows, checkpoints, and
+pending verification together in bounded batches at startup and every minute.
+Promotion is atomic and has a fixed work ceiling of 1,024 staged rows
+(including checkpoints) and 8 MiB of staged bytes. The validated target caps
+fit within that ceiling, so accepted stages remain promotable. Cleanup logs
+contain aggregate counts only.
+
 ## Private metrics export
 
 Feed-read timing is aggregate-only and disabled by default. Set
