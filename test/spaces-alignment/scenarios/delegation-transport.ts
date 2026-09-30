@@ -7,9 +7,16 @@ import type { AssertionResult, ScenarioSuite } from '../rules.js'
 
 const requiredAssertions = [
   'oauth-space-session',
+  'authorization-server-pds-separation',
   'pds-issued-delegation',
   'header-exchange',
   'foreign-repo-read',
+  'wrong-delegation-type-denied',
+  'wrong-delegation-issuer-denied',
+  'wrong-delegation-signature-denied',
+  'wrong-delegation-space-denied',
+  'wrong-delegation-audience-denied',
+  'expired-delegation-denied',
   'wrong-key-denied',
   'delegation-replay-denied',
   'missing-proof-preserves-delegation',

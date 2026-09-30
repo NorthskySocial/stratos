@@ -161,7 +161,20 @@ describe('delegation transport browser scenario', () => {
         await readFile(join(browserAssets, 'driver.mjs'), 'utf8'),
       ).toContain('getDelegationToken')
       expect(suite.requiredAssertions).toContain('pds-issued-delegation')
+      expect(suite.requiredAssertions).toContain(
+        'authorization-server-pds-separation',
+      )
       expect(suite.requiredAssertions).toContain('foreign-repo-read')
+      for (const assertion of [
+        'wrong-delegation-type-denied',
+        'wrong-delegation-issuer-denied',
+        'wrong-delegation-signature-denied',
+        'wrong-delegation-space-denied',
+        'wrong-delegation-audience-denied',
+        'expired-delegation-denied',
+      ]) {
+        expect(suite.requiredAssertions).toContain(assertion)
+      }
       expect(() => validateSuite(suite)).not.toThrow()
       expect(() => validateAssertions(suite, results)).not.toThrow()
     } finally {

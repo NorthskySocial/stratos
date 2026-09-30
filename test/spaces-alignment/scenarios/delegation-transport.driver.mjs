@@ -177,6 +177,19 @@ function base64url(value) {
   ).toString('base64url')
 }
 
+function alteredDelegation(token, alter) {
+  const [header, payload, signature] = token.split('.')
+  assert.ok(header && payload && signature, 'PDS returned an invalid JWT')
+  const decodedHeader = JSON.parse(Buffer.from(header, 'base64url'))
+  const decodedPayload = JSON.parse(Buffer.from(payload, 'base64url'))
+  const altered = alter(decodedHeader, decodedPayload)
+  return [
+    base64url(altered.header ?? decodedHeader),
+    base64url(altered.payload ?? decodedPayload),
+    altered.signature ?? signature,
+  ].join('.')
+}
+
 function proof(key, url, method, token) {
   const header = { typ: 'dpop+jwt', alg: 'ES256', jwk: key.jwk }
   const claims = {
@@ -220,12 +233,25 @@ async function exchangeWithoutProof(token) {
   })
 }
 
+async function assertDelegationDenied(page, key, alter, assertion) {
+  const token = await getDelegation(page)
+  const response = await exchange(alteredDelegation(token, alter), key)
+  assert.equal(response.status, 400, `${assertion} was accepted`)
+  passed.push(assertion)
+}
+
 async function main() {
   await trustSandboxCa()
   const browser = await chromium.launch({ headless: true })
   try {
     const page = await browser.newPage()
     const did = await oauthSession(page)
+    assert.notEqual(
+      clubhouse,
+      pds,
+      'OAuth authorization server must differ from the PDS endpoint',
+    )
+    passed.push('authorization-server-pds-separation')
     const firstDelegation = await getDelegation(page)
     const payload = JSON.parse(
       Buffer.from(firstDelegation.split('.')[1], 'base64url'),
@@ -256,6 +282,56 @@ async function main() {
     const records = (await recordsResponse.json()).records
     assert.ok(Array.isArray(records) && records.length > 0)
     passed.push('foreign-repo-read')
+
+    await assertDelegationDenied(
+      page,
+      proofKey(),
+      (header) => ({ header: { ...header, typ: 'at+jwt' } }),
+      'wrong-delegation-type-denied',
+    )
+    await assertDelegationDenied(
+      page,
+      proofKey(),
+      (_header, payload) => ({ payload: { ...payload, iss: 'did:plc:rei' } }),
+      'wrong-delegation-issuer-denied',
+    )
+    await assertDelegationDenied(
+      page,
+      proofKey(),
+      () => ({ signature: 'tampered-signature' }),
+      'wrong-delegation-signature-denied',
+    )
+    await assertDelegationDenied(
+      page,
+      proofKey(),
+      (_header, payload) => ({
+        payload: {
+          ...payload,
+          sub: `at://${authorityDid}/space/zone.stratos.space.feed/other`,
+        },
+      }),
+      'wrong-delegation-space-denied',
+    )
+    await assertDelegationDenied(
+      page,
+      proofKey(),
+      (_header, payload) => ({
+        payload: { ...payload, aud: `${authorityDid}#wrong-audience` },
+      }),
+      'wrong-delegation-audience-denied',
+    )
+    await assertDelegationDenied(
+      page,
+      proofKey(),
+      (_header, payload) => ({
+        payload: {
+          ...payload,
+          iat: Math.floor(Date.now() / 1000) - 1_000,
+          exp: Math.floor(Date.now() / 1000) - 500,
+        },
+      }),
+      'expired-delegation-denied',
+    )
 
     const wrongKey = proofKey()
     const wrongKeyResponse = await fetch(recordsUrl, {
