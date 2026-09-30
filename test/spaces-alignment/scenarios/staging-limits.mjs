@@ -213,6 +213,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             stages.push(json!({"space":space,"did":did,"table":table,"rows":rows,"bytes":bytes}));
         }
     }
+    let mut staged_cursors = Vec::new();
+    let mut query = db.prepare("SELECT space_uri,did,boundary,cursor FROM space_sync_stage_cursor ORDER BY space_uri,did")?;
+    for row in query.query_map([], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?)))? {
+        let (space,did,boundary,cursor) = row?;
+        staged_cursors.push(json!({"space":space,"did":did,"boundary":boundary,"cursor":cursor}));
+    }
+    let mut verified_cursors = Vec::new();
+    let mut query = db.prepare("SELECT space_uri,did,boundary,cursor FROM space_cursor ORDER BY space_uri,did")?;
+    for row in query.query_map([], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?)))? {
+        let (space,did,boundary,cursor) = row?;
+        verified_cursors.push(json!({"space":space,"did":did,"boundary":boundary,"cursor":cursor}));
+    }
     let mut synthetic = Vec::new();
     for rkey in ["replacement","deleted","rolled-back"] {
         let suffix = format!("%/{rkey}");
@@ -230,7 +242,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (key,value) = row?;
         limits.insert(key, json!(value));
     }
-    println!("{}",json!({"stages":stages,"publishedBytes":published,"publishedMeasuredBytes":measured,"synthetic":synthetic,"rolledBackRows":rolled_back,"limits":limits}));
+    println!("{}",json!({"stages":stages,"stagedCursors":staged_cursors,"verifiedCursors":verified_cursors,"publishedBytes":published,"publishedMeasuredBytes":measured,"synthetic":synthetic,"rolledBackRows":rolled_back,"limits":limits}));
     db.execute_batch("ROLLBACK;")?;
     Ok(())
 }
@@ -622,15 +634,30 @@ try {
   assert.ok([200, 503].includes(response.status) && response.elapsed < 2_000)
   assertions.push('service-responsive')
 
+  const previousRequests = (await control('status')).requests
+  const targetDid = previousRequests.find((request) => request.repo)?.repo
+  assert.ok(targetDid, 'No PDS target was available for interrupted sync')
+  const beforeInterruption = await storageUsage()
+  const verifiedCursor =
+    beforeInterruption.verifiedCursors.find(
+      (cursor) => cursor.did === targetDid,
+    )?.cursor ?? null
   await control('mode?value=interrupted')
-  const before = (await control('status')).pages
   await waitFor(
-    async () => (await control('status')).pages > before,
-    'fresh interrupted stage',
+    async () =>
+      (await control('status')).requests.some(
+        (request) => request.repo === targetDid,
+      ),
+    'interrupted request for selected target',
   )
-  const interruptedRequests = (await control('status')).requests
-  const verifiedRequest = interruptedRequests.find((request) => request.repo)
-  assert.ok(verifiedRequest, 'Interrupted sync did not request a PDS page')
+  await waitFor(
+    async () =>
+      (await storageUsage()).stagedCursors.some(
+        (cursor) =>
+          cursor.did === targetDid && cursor.cursor.startsWith('interrupted-'),
+      ),
+    'selected target persisted interrupted cursor',
+  )
   assertions.push('interrupted-stage')
   await control('mode?value=observe')
   await delay(2_000)
@@ -642,21 +669,28 @@ try {
       ),
     'expired stage cleanup',
   )
+  await waitFor(
+    async () =>
+      !(await storageUsage()).stagedCursors.some(
+        (cursor) => cursor.did === targetDid,
+      ),
+    'expired selected stage cursor cleanup',
+  )
   const requestsAfterCleanup = (await control('status')).requests.length
   await configureLimits({ FEEDGEN_PROJECTION_MAX_AGE_MS: 1_000 })
   await waitFor(
     async () =>
       (await control('status')).requests
         .slice(requestsAfterCleanup)
-        .some((request) => request.repo === verifiedRequest.repo),
+        .some((request) => request.repo === targetDid),
     'restart without staged cursor',
   )
   const resumedRequest = (await control('status')).requests
     .slice(requestsAfterCleanup)
-    .find((request) => request.repo === verifiedRequest.repo)
+    .find((request) => request.repo === targetDid)
   assert.equal(
     resumedRequest?.cursor,
-    verifiedRequest.cursor,
+    verifiedCursor,
     'Expired staging resumed from an unverified staged cursor',
   )
   assertions.push('expired-stage-restart')
