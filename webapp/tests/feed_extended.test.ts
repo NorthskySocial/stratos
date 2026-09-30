@@ -315,6 +315,28 @@ describe('feed extended logic', () => {
       })
     })
 
+    it('logs successful feed completion with structured context', async () => {
+      const consoleInfo = vi
+        .spyOn(console, 'info')
+        .mockImplementation(() => undefined)
+      try {
+        const session = {
+          fetchHandler: vi
+            .fn()
+            .mockResolvedValue(
+              new Response(JSON.stringify({ feed: [] }), { status: 200 }),
+            ),
+        } as unknown as OAuthSession
+        await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9')
+        expect(consoleInfo).toHaveBeenCalledWith(
+          { operation: 'feedgen.getFeed', postCount: 0 },
+          'Feedgen feed request completed',
+        )
+      } finally {
+        consoleInfo.mockRestore()
+      }
+    })
+
     it.each([401, 403])(
       'classifies %i as authorization loss without logging a response body',
       async (status) => {
@@ -343,6 +365,14 @@ describe('feed extended logic', () => {
             retryable: false,
           })
           expect(JSON.stringify(consoleError.mock.calls)).not.toContain(secret)
+          expect(consoleError).toHaveBeenCalledWith(
+            {
+              operation: 'feedgen.getFeed',
+              status,
+              category: 'authorization',
+            },
+            'Feedgen feed request failed',
+          )
         } finally {
           consoleError.mockRestore()
         }
@@ -544,6 +574,42 @@ describe('feed extended logic', () => {
       },
       { feed: [], cursor: 5 },
       { feed: [], cursor: null },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: {
+                text: 'hi',
+                createdAt: '1995-01-01',
+                embed: { $type: 'app.bsky.embed.images', images: {} },
+              },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: {
+                text: 'hi',
+                createdAt: '1995-01-01',
+                embed: {
+                  $type: 'app.bsky.embed.recordWithMedia',
+                  media: {
+                    $type: 'app.bsky.embed.images',
+                    images: {},
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
     ])('rejects malformed successful feed shape %#', async (body) => {
       const session = {
         fetchHandler: vi
