@@ -174,6 +174,23 @@ const MIGRATIONS: &[Migration] = &[
           );
     "#,
     },
+    Migration {
+        version: 6,
+        sql: r#"
+        CREATE TABLE pds_boundary_generation (
+          boundary TEXT PRIMARY KEY,
+          generation INTEGER NOT NULL CHECK (generation >= 0)
+        ) WITHOUT ROWID;
+        CREATE TABLE pds_member_generation (
+          boundary TEXT NOT NULL,
+          did TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK (generation >= 0),
+          PRIMARY KEY (boundary, did)
+        ) WITHOUT ROWID;
+        INSERT INTO pds_member_generation (boundary, did, generation)
+          SELECT boundary, did, 0 FROM membership_baseline WHERE custody = 'pds';
+    "#,
+    },
 ];
 
 pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
@@ -203,7 +220,7 @@ pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
 mod tests {
     use rusqlite::Connection;
 
-    use super::{Migration, apply};
+    use super::{MIGRATIONS, Migration, apply};
 
     #[test]
     fn initializes_the_versioned_projection_schema() {
@@ -213,13 +230,13 @@ mod tests {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         let migration_count: u32 = connection
             .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(migration_count, 5);
+        assert_eq!(migration_count, 6);
         let post_boundary_sql: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_boundary'",
@@ -236,6 +253,38 @@ mod tests {
             )
             .unwrap();
         assert!(feed_index_sql.contains("boundary, sort_at DESC, uri ASC"));
+    }
+
+    #[test]
+    fn upgrade_seeds_generations_for_existing_pds_members() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for migration in MIGRATIONS.iter().take(5) {
+            connection.execute_batch(migration.sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migration (version, applied_at) VALUES (?1, unixepoch())",
+                    [migration.version],
+                )
+                .unwrap();
+            connection
+                .pragma_update(None, "user_version", migration.version)
+                .unwrap();
+        }
+        connection.execute(
+            "INSERT INTO membership_baseline (boundary, did, custody, reconciled_at) VALUES (?1, ?2, 'pds', ?3)",
+            rusqlite::params!["did:web:stratos.test/bebop", "did:plc:faye", "2026-09-22T00:00:00.000Z"],
+        ).unwrap();
+
+        apply(&mut connection).unwrap();
+
+        let generation: i64 = connection
+            .query_row(
+                "SELECT generation FROM pds_member_generation WHERE boundary = ?1 AND did = ?2",
+                rusqlite::params!["did:web:stratos.test/bebop", "did:plc:faye"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(generation, 0);
     }
 
     #[test]
@@ -367,7 +416,7 @@ mod tests {
     #[test]
     fn rejects_a_database_from_a_newer_store_format() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection.pragma_update(None, "user_version", 6).unwrap();
+        connection.pragma_update(None, "user_version", 7).unwrap();
 
         assert!(apply(&mut connection).is_err());
     }

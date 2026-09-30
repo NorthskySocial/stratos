@@ -381,6 +381,35 @@ impl ControlLifecycle {
             .expect("projection lock poisoned")
             .replace_pds_space_members(boundary, members, reconciled_at)
     }
+    pub fn pds_boundary_generation(&self, boundary: &str) -> Result<u64, StoreError> {
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .pds_boundary_generation(boundary)
+    }
+    pub fn pds_member_generation(
+        &self,
+        boundary: &str,
+        did: &str,
+    ) -> Result<Option<u64>, StoreError> {
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .pds_member_generation(boundary, did)
+    }
+    pub fn replace_pds_space_members_at_generation(
+        &self,
+        boundary: &str,
+        members: Vec<PdsSpaceMember>,
+        reconciled_at: &str,
+        generation: u64,
+    ) -> Result<std::collections::BTreeMap<String, u64>, StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .replace_pds_space_members_at_generation(boundary, members, reconciled_at, generation)
+    }
 
     pub fn pds_space_target(
         &self,
@@ -393,6 +422,19 @@ impl ControlLifecycle {
             .lock()
             .expect("projection lock poisoned")
             .pds_space_target(space_uri, boundary, actor_did)
+    }
+    pub fn pds_space_target_at_generation(
+        &self,
+        space_uri: impl Into<String>,
+        boundary: impl Into<String>,
+        actor_did: impl Into<String>,
+        generation: u64,
+    ) -> Result<SpaceSyncTarget, SpaceSyncError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .pds_space_target_at_generation(space_uri, boundary, actor_did, generation)
     }
 
     pub fn pds_space_cursor(
@@ -428,6 +470,26 @@ impl ControlLifecycle {
             .lock()
             .expect("projection lock poisoned")
             .promote_pds_space_stage(boundary, space_uri, actor_did, retained_at)
+    }
+    pub fn promote_pds_space_stage_at_generation(
+        &self,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
+        retained_at: &str,
+        generation: u64,
+    ) -> Result<(), StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .promote_pds_space_stage_at_generation(
+                boundary,
+                space_uri,
+                actor_did,
+                retained_at,
+                generation,
+            )
     }
 
     pub fn discard_pds_space_stage(
