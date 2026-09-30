@@ -18,6 +18,7 @@
   import {createServiceAgent, createStratosAgent, configureAgent} from './lib/stratos-agent'
   import {
     buildUnifiedFeed,
+    type FeedgenResult,
     type FeedPost,
     feedStats,
     fetchAppviewStratosPosts,
@@ -42,6 +43,7 @@
   let appviewAgent: Agent | null = $state(null)
   let stratosAgent: Agent | null = $state(null)
   let allPosts: FeedPost[] = $state([])
+  let feedgenFailure: Extract<FeedgenResult, {ok: false}> | null = $state(null)
   let replyingTo: FeedPost | null = $state(null)
   let loading = $state(true)
   let loadingStatus = $state('Initializing session...')
@@ -55,9 +57,16 @@
     __MOCK_SESSION__?: {
       sub: string
       handle?: string
+      feedgenDid?: string
       fetchHandler?: (url: string, init?: Parameters<typeof fetch>[1]) => Promise<Response>
     }
   }
+
+  const feedgenDid = FEEDGEN_DID || (
+    import.meta.env.DEV && typeof window !== 'undefined'
+      ? (window as unknown as CustomWindow).__MOCK_SESSION__?.feedgenDid
+      : undefined
+  )
 
   // Test-only seam. Vite removes this block from production builds.
   if (import.meta.env.DEV && typeof window !== 'undefined' && (window as unknown as CustomWindow).__MOCK_SESSION__) {
@@ -219,6 +228,11 @@
     }
     loading = true
     loadingStatus = 'Loading feed...'
+    if (feedgenDid) {
+      allPosts = allPosts.filter((post) => !post.isPrivate)
+      if (replyingTo?.isPrivate) replyingTo = null
+      feedgenFailure = null
+    }
     try {
       const publicPosts = appviewAgent
         ? await fetchPublicPosts(appviewAgent, refreshSession.sub)
@@ -232,13 +246,19 @@
       }
 
       let stratosPosts: FeedPost[] = []
-      if (FEEDGEN_DID) {
+      if (feedgenDid) {
         const res = await fetchFeedgenPosts(
           refreshSession,
-          FEEDGEN_DID,
+          feedgenDid,
           FEEDGEN_FEED,
         )
-        stratosPosts = res.posts
+        if (!isCurrent()) return
+        if (res.ok) {
+          stratosPosts = res.posts
+          feedgenFailure = null
+        } else {
+          feedgenFailure = res
+        }
       } else if (APPVIEW_URL) {
         const res = await fetchAppviewStratosPosts(
           refreshSession,
@@ -320,6 +340,7 @@
     appviewAgent = null
     stratosAgent = null
     allPosts = []
+    feedgenFailure = null
     replyingTo = null
     handle = ''
     did = ''
@@ -347,7 +368,7 @@
   })
 </script>
 
-{#if loading && allPosts.length === 0}
+{#if loading && allPosts.length === 0 && !stratosStatus}
     <div class="loading-screen" role="status">
         Loading…
         <p class="loading-hint">{loadingStatus}</p>
@@ -407,6 +428,7 @@
             </div>
 
             <Feed posts={filteredPosts} {stratosAgent} {publicAgent} {serviceUrl} loading={loading}
+                  failure={feedgenFailure} onretry={refreshFeed}
                   currentDid={did} onreply={handleReply} ondelete={handleDelete}/>
         </main>
     </div>
@@ -460,6 +482,7 @@
         display: flex;
         flex-direction: column;
         max-width: 600px;
+        min-width: 0;
     }
 
     .app-header {
@@ -513,5 +536,26 @@
         color: #3730a3;
         font-weight: 600;
         border-bottom-color: #3730a3;
+    }
+
+    @media (max-width: 700px) {
+        .app-layout {
+            flex-direction: column;
+        }
+
+        .sidebar {
+            width: 100%;
+            border-right: none;
+            border-bottom: 1px solid #eee;
+        }
+
+        .main {
+            width: 100%;
+            max-width: none;
+        }
+
+        .feed-tabs {
+            overflow-x: auto;
+        }
     }
 </style>

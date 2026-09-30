@@ -269,6 +269,7 @@ describe('feed extended logic', () => {
         'section-9',
       )
 
+      if (!result.ok) throw new Error('Expected the private feed')
       expect(result.posts).toHaveLength(1)
       expect(result.posts[0]?.boundaries).toEqual(['section-9'])
       expect(mockSession.fetchHandler).toHaveBeenCalledWith(
@@ -279,6 +280,525 @@ describe('feed extended logic', () => {
           },
           method: 'GET',
         }),
+      )
+    })
+
+    it('distinguishes an authorized empty feed from FeedNotReady', async () => {
+      const session = {
+        fetchHandler: vi
+          .fn()
+          .mockResolvedValueOnce(
+            new Response(JSON.stringify({ feed: [] }), { status: 200 }),
+          )
+          .mockResolvedValueOnce(
+            new Response(JSON.stringify({ error: 'FeedNotReady' }), {
+              status: 503,
+            }),
+          ),
+      } as unknown as OAuthSession
+
+      expect(
+        await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+      ).toEqual({
+        ok: true,
+        posts: [],
+        cursor: undefined,
+      })
+      expect(
+        await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+      ).toEqual({
+        ok: false,
+        posts: [],
+        category: 'not-ready',
+        status: 503,
+        retryable: true,
+      })
+    })
+
+    it('logs successful feed completion with structured context', async () => {
+      const consoleInfo = vi
+        .spyOn(console, 'info')
+        .mockImplementation(() => undefined)
+      try {
+        const session = {
+          fetchHandler: vi
+            .fn()
+            .mockResolvedValue(
+              new Response(JSON.stringify({ feed: [] }), { status: 200 }),
+            ),
+        } as unknown as OAuthSession
+        await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9')
+        expect(consoleInfo).toHaveBeenCalledWith(
+          { operation: 'feedgen.getFeed', postCount: 0 },
+          'Feedgen feed request completed',
+        )
+      } finally {
+        consoleInfo.mockRestore()
+      }
+    })
+
+    it.each([401, 403])(
+      'classifies %i as authorization loss without logging a response body',
+      async (status) => {
+        const secret = 'private upstream diagnostic'
+        const consoleError = vi
+          .spyOn(console, 'error')
+          .mockImplementation(() => undefined)
+        try {
+          const session = {
+            fetchHandler: vi
+              .fn()
+              .mockResolvedValue(
+                new Response(
+                  JSON.stringify({ error: 'ExpiredToken', message: secret }),
+                  { status },
+                ),
+              ),
+          } as unknown as OAuthSession
+          expect(
+            await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+          ).toEqual({
+            ok: false,
+            posts: [],
+            category: 'authorization',
+            status,
+            retryable: false,
+          })
+          expect(JSON.stringify(consoleError.mock.calls)).not.toContain(secret)
+          expect(consoleError).toHaveBeenCalledWith(
+            {
+              operation: 'feedgen.getFeed',
+              status,
+              category: 'authorization',
+            },
+            'Feedgen feed request failed',
+          )
+        } finally {
+          consoleError.mockRestore()
+        }
+      },
+    )
+
+    it('distinguishes network and malformed successful responses', async () => {
+      const consoleError = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined)
+      try {
+        const session = {
+          fetchHandler: vi
+            .fn()
+            .mockRejectedValueOnce(new Error('private token'))
+            .mockResolvedValueOnce(new Response('{', { status: 200 }))
+            .mockResolvedValueOnce(
+              new Response(JSON.stringify({ posts: [] }), { status: 200 }),
+            ),
+        } as unknown as OAuthSession
+        expect(
+          await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+        ).toEqual({
+          ok: false,
+          posts: [],
+          category: 'network',
+          retryable: true,
+        })
+        expect(
+          await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+        ).toEqual({
+          ok: false,
+          posts: [],
+          category: 'malformed',
+          status: 200,
+          retryable: true,
+        })
+        expect(
+          await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+        ).toEqual({
+          ok: false,
+          posts: [],
+          category: 'malformed',
+          status: 200,
+          retryable: true,
+        })
+        expect(JSON.stringify(consoleError.mock.calls)).not.toContain(
+          'private token',
+        )
+      } finally {
+        consoleError.mockRestore()
+      }
+    })
+
+    it.each([
+      [500, 'unavailable', true],
+      [503, 'unavailable', true],
+      [429, 'unavailable', true],
+      [400, 'unavailable', false],
+    ] as const)(
+      'preserves HTTP %i failure category and retryability',
+      async (status, category, retryable) => {
+        const session = {
+          fetchHandler: vi
+            .fn()
+            .mockResolvedValue(new Response(null, { status })),
+        } as unknown as OAuthSession
+        expect(
+          await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+        ).toEqual({
+          ok: false,
+          posts: [],
+          category,
+          status,
+          retryable,
+        })
+      },
+    )
+
+    it.each([
+      null,
+      [],
+      {},
+      { feed: null },
+      { feed: [null] },
+      { feed: [{ post: null }] },
+      { feed: [{ post: 7 }] },
+      {
+        feed: [
+          {
+            post: {
+              cid: 'cid',
+              record: { text: 'hi', createdAt: '1995-01-01' },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 7,
+              cid: 'cid',
+              record: { text: 'hi', createdAt: '1995-01-01' },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              record: { text: 'hi', createdAt: '1995-01-01' },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 7,
+              record: { text: 'hi', createdAt: '1995-01-01' },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: 7,
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: { createdAt: '1995-01-01' },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: { text: 7, createdAt: '1995-01-01' },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: { text: 'hi' },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: { text: 'hi', createdAt: 7 },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          { post: { uri: 'at://did:plc:motoko/zone.stratos.feed.post/1' } },
+        ],
+      },
+      { feed: [], cursor: 5 },
+      { feed: [], cursor: null },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: {
+                text: 'hi',
+                createdAt: '1995-01-01',
+                embed: { $type: 'app.bsky.embed.images', images: {} },
+              },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: {
+                text: 'hi',
+                createdAt: '1995-01-01',
+                embed: {
+                  $type: 'app.bsky.embed.recordWithMedia',
+                  media: {
+                    $type: 'app.bsky.embed.images',
+                    images: {},
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    ])('rejects malformed successful feed shape %#', async (body) => {
+      const session = {
+        fetchHandler: vi
+          .fn()
+          .mockResolvedValue(
+            new Response(JSON.stringify(body), { status: 200 }),
+          ),
+      } as unknown as OAuthSession
+      expect(
+        await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+      ).toEqual({
+        ok: false,
+        posts: [],
+        category: 'malformed',
+        status: 200,
+        retryable: true,
+      })
+    })
+
+    it('bounds upstream error reading and keeps its contents out of logs', async () => {
+      const secret = 'sensitive token'
+      const consoleError = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined)
+      try {
+        const session = {
+          fetchHandler: vi.fn().mockResolvedValue(
+            new Response(
+              JSON.stringify({
+                error: 'FeedNotReady',
+                message: secret.repeat(1000),
+              }),
+              { status: 503 },
+            ),
+          ),
+        } as unknown as OAuthSession
+        const result = await fetchFeedgenPosts(
+          session,
+          'did:web:batou.test',
+          'section-9',
+        )
+        expect(result).toMatchObject({
+          ok: false,
+          category: 'unavailable',
+          retryable: true,
+        })
+        expect(JSON.stringify(consoleError.mock.calls)).not.toContain(secret)
+      } finally {
+        consoleError.mockRestore()
+      }
+    })
+
+    it('recognizes FeedNotReady even on a nonstandard HTTP status', async () => {
+      const session = {
+        fetchHandler: vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ error: 'FeedNotReady' }), {
+            status: 400,
+          }),
+        ),
+      } as unknown as OAuthSession
+      expect(
+        await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+      ).toEqual({
+        ok: false,
+        posts: [],
+        category: 'not-ready',
+        status: 400,
+        retryable: true,
+      })
+    })
+
+    it.each([{ error: null }, { error: 7 }, [], null])(
+      'ignores non-string upstream error codes %#',
+      async (body) => {
+        const session = {
+          fetchHandler: vi
+            .fn()
+            .mockResolvedValue(
+              new Response(JSON.stringify(body), { status: 503 }),
+            ),
+        } as unknown as OAuthSession
+        expect(
+          await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+        ).toMatchObject({
+          ok: false,
+          category: 'unavailable',
+          retryable: true,
+        })
+      },
+    )
+
+    it('parses a chunked error code', async () => {
+      const encoded = new TextEncoder().encode(
+        JSON.stringify({ error: 'FeedNotReady' }),
+      )
+      const response = new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoded.subarray(0, 8))
+            controller.enqueue(encoded.subarray(8))
+            controller.close()
+          },
+        }),
+        { status: 503 },
+      )
+      const session = {
+        fetchHandler: vi.fn().mockResolvedValue(response),
+      } as unknown as OAuthSession
+      expect(
+        await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+      ).toMatchObject({
+        ok: false,
+        category: 'not-ready',
+        retryable: true,
+      })
+    })
+
+    it('cancels an oversized upstream error stream', async () => {
+      let cancelled = false
+      const response = new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('x'.repeat(5000)))
+          },
+          cancel() {
+            cancelled = true
+          },
+        }),
+        { status: 503 },
+      )
+      const session = {
+        fetchHandler: vi.fn().mockResolvedValue(response),
+      } as unknown as OAuthSession
+      expect(
+        await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9'),
+      ).toMatchObject({
+        ok: false,
+        category: 'unavailable',
+        retryable: true,
+      })
+      expect(cancelled).toBe(true)
+    })
+
+    it('stops reading when an upstream error reaches the byte limit', async () => {
+      let cancelled = false
+      let timeout: ReturnType<typeof setTimeout>
+      const response = new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(4096).fill(120))
+            timeout = setTimeout(() => controller.close(), 250)
+          },
+          cancel() {
+            cancelled = true
+          },
+        }),
+        { status: 503 },
+      )
+      const session = {
+        fetchHandler: vi.fn().mockResolvedValue(response),
+      } as unknown as OAuthSession
+      await fetchFeedgenPosts(session, 'did:web:batou.test', 'section-9')
+      clearTimeout(timeout!)
+      expect(cancelled).toBe(true)
+    })
+
+    it('returns a valid cursor and uses a supplied cursor in the request', async () => {
+      const session = {
+        fetchHandler: vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ feed: [], cursor: 'next-page' }), {
+            status: 200,
+          }),
+        ),
+      } as unknown as OAuthSession
+      expect(
+        await fetchFeedgenPosts(
+          session,
+          'did:web:batou.test',
+          'section-9',
+          'previous-page',
+        ),
+      ).toEqual({
+        ok: true,
+        posts: [],
+        cursor: 'next-page',
+      })
+      expect(session.fetchHandler).toHaveBeenCalledWith(
+        expect.stringContaining('cursor=previous-page'),
+        expect.objectContaining({ method: 'GET' }),
       )
     })
   })
