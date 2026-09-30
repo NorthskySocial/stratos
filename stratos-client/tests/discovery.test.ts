@@ -6,6 +6,7 @@ import {
   discoverEnrollments,
   getEnrollmentByServiceDid,
   parseEnrollmentRecord,
+  resolveRepositoryTarget,
   serviceDIDToRkey,
 } from '../src/index.js'
 
@@ -59,6 +60,102 @@ describe('Enrollment Discovery', () => {
       expect(result?.service).toBe('did:web:nerv.tokyo.jp')
       expect(result?.rkey).toBe('rkey123')
       expect(result?.attestation.sig).toEqual(new Uint8Array([1, 2, 3]))
+      expect(result?.custody).toBe('stratos')
+    })
+
+    it('preserves PDS custody and only a valid PDS host hint', () => {
+      expect(
+        parseEnrollmentRecord(
+          { ...validRecord, custody: 'pds', repoHost: 'https://pds.nerv.jp/' },
+          'rkey',
+        ),
+      ).toMatchObject({
+        custody: 'pds',
+        repoHost: 'https://pds.nerv.jp',
+      })
+      for (const repoHost of [
+        'http://pds.nerv.jp',
+        'https://evil@pds.nerv.jp',
+        'https://pds.nerv.jp/path',
+        'not-a-url',
+      ]) {
+        expect(
+          parseEnrollmentRecord(
+            { ...validRecord, custody: 'pds', repoHost },
+            'rkey',
+          ),
+        ).not.toHaveProperty('repoHost')
+      }
+      expect(
+        parseEnrollmentRecord(
+          {
+            ...validRecord,
+            custody: 'stratos',
+            repoHost: 'https://pds.nerv.jp',
+          },
+          'rkey',
+        ),
+      ).not.toHaveProperty('repoHost')
+      expect(
+        parseEnrollmentRecord(
+          {
+            ...validRecord,
+            custody: 'pds',
+            repoHost: new URL('https://pds.nerv.jp'),
+          },
+          'rkey',
+        ),
+      ).not.toHaveProperty('repoHost')
+    })
+
+    it.each([
+      ['https://pds.nerv.jp/', 'https://pds.nerv.jp'],
+      ['http://pds.nerv.jp', null],
+      ['https://user@pds.nerv.jp', null],
+      ['https://pds.nerv.jp/path', null],
+      ['https://pds.nerv.jp?query=1', null],
+    ])(
+      'applies the same host policy to discovery and routing: %s',
+      (host, expected) => {
+        const parsed = parseEnrollmentRecord(
+          { ...validRecord, custody: 'pds', repoHost: host },
+          'nerv',
+        )
+        expect(parsed?.repoHost).toBe(expected ?? undefined)
+        const target = resolveRepositoryTarget(parsed, { sessionPdsUrl: host })
+        expect(target).toEqual(
+          expected
+            ? { kind: 'pds', url: expected }
+            : { kind: 'unresolved', reason: 'invalid-trusted-host' },
+        )
+      },
+    )
+
+    it('preserves unsupported custody without a repo host', () => {
+      expect(
+        parseEnrollmentRecord(
+          {
+            ...validRecord,
+            custody: 'future',
+            repoHost: 'https://pds.nerv.jp',
+          },
+          'rkey',
+        ),
+      ).toMatchObject({ custody: 'future' })
+      expect(
+        parseEnrollmentRecord(
+          {
+            ...validRecord,
+            custody: 'future',
+            repoHost: 'https://pds.nerv.jp',
+          },
+          'rkey',
+        ),
+      ).not.toHaveProperty('repoHost')
+      expect(
+        parseEnrollmentRecord({ ...validRecord, custody: null }, 'rkey')
+          ?.custody,
+      ).toBe('unsupported')
     })
 
     it('should handle $bytes in attestation signature', () => {

@@ -70,6 +70,80 @@ export const resolveServiceUrl = (
   return enrollment?.service ?? fallbackUrl
 }
 
+export type RepositoryTarget =
+  | { kind: 'stratos'; url: string }
+  | { kind: 'pds'; url: string }
+  | {
+      kind: 'unresolved'
+      reason:
+        | 'missing-enrollment'
+        | 'unsupported-custody'
+        | 'missing-trusted-host'
+        | 'invalid-trusted-host'
+        | 'host-mismatch'
+    }
+
+export interface TrustedRepositoryHosts {
+  /** Live authority resolution of the Stratos service endpoint. */
+  authorityServiceUrl?: string
+  /** Live authority resolution of the user's PDS repo host. */
+  authoritativeRepoHost?: string
+  /** PDS endpoint bound to the user's existing authenticated session. */
+  sessionPdsUrl?: string
+}
+
+export const normalizeHttpsOrigin = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null
+  try {
+    const url = new URL(value)
+    if (
+      url.protocol !== 'https:' ||
+      !url.hostname ||
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    )
+      return null
+    return url.origin
+  } catch {
+    return null
+  }
+}
+
+/** Select a repository host only from live authority or session resolution. */
+export const resolveRepositoryTarget = (
+  enrollment: Pick<StratosEnrollment, 'custody'> | null,
+  hosts: TrustedRepositoryHosts,
+): RepositoryTarget => {
+  if (!enrollment) return { kind: 'unresolved', reason: 'missing-enrollment' }
+  if (enrollment.custody !== 'stratos' && enrollment.custody !== 'pds') {
+    return { kind: 'unresolved', reason: 'unsupported-custody' }
+  }
+  const selected =
+    enrollment.custody === 'stratos'
+      ? hosts.authorityServiceUrl
+      : (hosts.authoritativeRepoHost ?? hosts.sessionPdsUrl)
+  if (!selected) return { kind: 'unresolved', reason: 'missing-trusted-host' }
+  const url = normalizeHttpsOrigin(selected)
+  if (!url) return { kind: 'unresolved', reason: 'invalid-trusted-host' }
+  if (
+    enrollment.custody === 'pds' &&
+    hosts.authoritativeRepoHost &&
+    hosts.sessionPdsUrl
+  ) {
+    const sessionUrl = normalizeHttpsOrigin(hosts.sessionPdsUrl)
+    if (!sessionUrl)
+      return { kind: 'unresolved', reason: 'invalid-trusted-host' }
+    if (sessionUrl !== url)
+      return { kind: 'unresolved', reason: 'host-mismatch' }
+  }
+  return enrollment.custody === 'stratos'
+    ? { kind: 'stratos', url }
+    : { kind: 'pds', url }
+}
+
 /**
  * finds the enrollment matching a given service URL from a list of enrollments.
  *

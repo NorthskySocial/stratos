@@ -5,7 +5,7 @@ import type {
   ComAtprotoRepoListRecords,
 } from '@atcute/atproto'
 import type { ServiceAttestation, StratosEnrollment } from './types.js'
-import { serviceDIDToRkey } from './routing.js'
+import { normalizeHttpsOrigin, serviceDIDToRkey } from './routing.js'
 
 // forked from stratos-core/src/enrollment/discovery.ts — client can't depend
 // on stratos-core (see scripts/check-self-contained.mjs). kept honest by
@@ -88,8 +88,20 @@ export const parseEnrollmentRecord = (
   if (typeof obj.signingKey !== 'string') return null
   const attestation = parseAttestation(obj.attestation)
   if (!attestation) return null
+  const custody =
+    obj.custody === undefined
+      ? 'stratos'
+      : typeof obj.custody === 'string'
+        ? obj.custody
+        : 'unsupported'
+  const repoHost =
+    custody === 'pds'
+      ? (normalizeHttpsOrigin(obj.repoHost) ?? undefined)
+      : undefined
   return {
     service: obj.service,
+    custody,
+    ...(repoHost === undefined ? {} : { repoHost }),
     boundaries: parseBoundaries(obj.boundaries),
     signingKey: obj.signingKey,
     attestation,

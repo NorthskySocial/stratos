@@ -184,34 +184,70 @@ See the [service key history design](../docs/architecture/service-key-history.md
 
 ## 2. Service Routing
 
-The core routing decision is: _when reading/writing Stratos data and enrollment exists, route XRPC
-calls to the Stratos service URL instead of the user's PDS._
+Select the write route from the enrollment's custody. Stratos custody uses the authority service.
+PDS custody uses the user's spaces-capable PDS and `com.atproto.space.*` methods.
 
 When a user has multiple enrollments, select the target enrollment first (see
-`findEnrollmentByService` in Section 1), then route using that enrollment's service URL.
+`findEnrollmentByService` in Section 1), then select the repository target from its custody and
+trusted host information.
 
 ### Routing logic
 
-```typescript
-import { resolveServiceUrl } from '@northskysocial/stratos-client'
+`resolveServiceUrl(enrollment, pdsUrl)` returns the authority service URL if enrolled, otherwise
+the fallback PDS URL. It does not select a repository host; use `resolveRepositoryTarget` below.
 
-const url = resolveServiceUrl(enrollment, pdsUrl)
+`custody` defaults to `stratos` only when the published field is absent. Unknown values stay
+visible and cannot select a repository target. `repoHost` is a validated HTTPS origin hint only
+for PDS custody. Neither field is covered by the current service attestation. Resolve the actual
+write host from the live authority or the authenticated session before forwarding credentials.
+
+```typescript
+import { resolveRepositoryTarget } from '@northskysocial/stratos-client'
+
+const target = resolveRepositoryTarget(enrollment, {
+  authorityServiceUrl, // live authority endpoint for Stratos custody
+  authoritativeRepoHost, // live authority answer when available
+  sessionPdsUrl, // PDS endpoint bound to this authenticated session
+})
+if (target.kind === 'unresolved') throw new Error(target.reason)
+
+const handler = createServiceFetchHandler(authenticatedHandler, target.url)
+const rpc = new Client({ handler })
+if (target.kind === 'stratos') {
+  await rpc.post('com.atproto.repo.createRecord', {
+    input: {
+      repo: did,
+      collection: 'zone.stratos.feed.post',
+      record: stratosPost,
+    },
+  })
+} else {
+  await rpc.post('com.atproto.space.createRecord', {
+    input: {
+      space: `at://${authorityDid}/space/zone.stratos.space.feed/${spaceKey}`,
+      repo: did,
+      collection: 'zone.stratos.feed.post',
+      record: pdsPost,
+    },
+  })
+}
 ```
 
-`resolveServiceUrl` returns the enrollment's service URL if enrolled, otherwise the fallback PDS
-URL. Record creation/deletion always has the corresponding action to the PDS record referencing it.
+The PDS result URI has seven segments:
+`at://{authorityDid}/space/{type}/{spaceKey}/{authorDid}/{collection}/{rkey}`.
+Changing only the origin of legacy repo CRUD does not write into the space.
 
 ### Routing applies to
 
 | Operation                               | Routes to Stratos?                                                            |
 | --------------------------------------- | ----------------------------------------------------------------------------- |
-| `com.atproto.repo.getRecord`            | Yes (reads private records)                                                   |
-| `com.atproto.repo.listRecords`          | Yes (lists private collections)                                               |
-| `com.atproto.repo.describeRepo`         | Yes (describes private repo)                                                  |
-| `com.atproto.repo.createRecord`         | Yes (writes to Stratos)                                                       |
-| `com.atproto.repo.deleteRecord`         | Yes (deletes from Stratos)                                                    |
-| `com.atproto.repo.applyWrites`          | Yes (batch writes)                                                            |
-| `com.atproto.sync.getRecord`            | Yes (CAR export for verification)                                             |
+| `com.atproto.repo.getRecord`            | Stratos custody only                                                          |
+| `com.atproto.repo.listRecords`          | Stratos custody only                                                          |
+| `com.atproto.repo.describeRepo`         | Stratos custody only                                                          |
+| `com.atproto.repo.createRecord`         | Stratos custody only                                                          |
+| `com.atproto.repo.deleteRecord`         | Stratos custody only                                                          |
+| `com.atproto.repo.applyWrites`          | Stratos custody only                                                          |
+| `com.atproto.sync.getRecord`            | Stratos custody only                                                          |
 | `zone.stratos.space.listBlobs`          | Yes (lists blob CIDs in a space)                                              |
 | `zone.stratos.sync.getRepo`             | Yes (full repo export as CAR)                                                 |
 | `zone.stratos.repo.importRepo`          | Yes (import repo from CAR)                                                    |
@@ -236,11 +272,16 @@ specification when an absolute URL is provided.
 
 ### Transport wrapper
 
+This authority transport is for `stratos` custody only. For `pds` custody, select the
+authenticated PDS endpoint and space methods as shown in [Service Routing](#2-service-routing).
+
 ```typescript
 import { createServiceFetchHandler } from '@northskysocial/stratos-client'
 
 // agent.handle is the FetchHandler from your OAuth session
-const handler = createServiceFetchHandler(agent.handle, enrollment.service)
+if (enrollment.custody !== 'stratos')
+  throw new Error('Expected Stratos custody')
+const handler = createServiceFetchHandler(agent.handle, authorityServiceUrl)
 ```
 
 `createServiceFetchHandler` accepts any `FetchHandler` from `@atcute/client` (a function
@@ -249,29 +290,16 @@ pathnames against the target service URL.
 
 ### Client construction
 
-```typescript
-import { Client } from '@atcute/client'
-import { createServiceFetchHandler } from '@northskysocial/stratos-client'
-
-const createServiceClient = (
-  agent: OAuthUserAgent,
-  enrollment: StratosEnrollment | null,
-): Client => {
-  if (enrollment) {
-    return new Client({
-      handler: createServiceFetchHandler(agent.handle, enrollment.service),
-    })
-  }
-  return new Client({ handler: agent })
-}
-```
+Construct the RPC client from the resolved target in [Service Routing](#2-service-routing).
+Do not treat an enrollment's authority `service` URL as the PDS repository host.
 
 ---
 
 ## 4. Read Path Integration
 
-Views that display records, collections, or repo descriptions need to switch between PDS and Stratos
-sources based on the active mode.
+For `stratos` custody, views that display records, collections, or repo descriptions need to switch
+between PDS and Stratos sources based on the active mode. PDS-custody space reads use the trusted
+PDS target selected in [Service Routing](#2-service-routing).
 
 ### Pattern: reactive refetch on mode change
 
@@ -304,9 +332,10 @@ const getStratosClient = (
   agent: OAuthUserAgent,
   enrollment: StratosEnrollment,
 ): Client => {
+  if (enrollment.custody !== 'stratos') throw new Error('Expected Stratos custody')
   if (!stratosClient) {
     stratosClient = new Client({
-      handler: createServiceFetchHandler(agent.handle, enrollment.service),
+      handler: createServiceFetchHandler(agent.handle, authorityServiceUrl),
     })
   }
   return stratosClient
@@ -319,14 +348,18 @@ const resetClients = () => {
 }
 
 const fetchRecords = async () => {
-  const client = stratosActive && enrollment
+  if (stratosActive && enrollment?.custody === 'pds') {
+    throw new Error('Use the PDS space read route for PDS custody')
+  }
+  const client = stratosActive && enrollment?.custody === 'stratos'
     ? getStratosClient(agent, enrollment)
     : getPdsClient(agent)
   return client.get('com.atproto.repo.listRecords', {params: {...}})
 }
 ```
 
-Mode toggles now just pick the other cached client — no teardown or reconstruction needed. Call
+This example reads an ordinary PDS repo or a Stratos-custody repo. PDS-custody space reads need
+their own PDS space client. Mode toggles pick the cached client without reconstructing it. Call
 `resetClients()` on logout or account switch to avoid stale sessions.
 
 ### Pattern: auth requirement in Stratos mode
@@ -343,9 +376,9 @@ if (stratosActive && !agent) {
 
 ### Pattern: empty repo handling
 
-Stratos initializes every enrolled user's repository with an empty signed commit at enrollment time.
-This means `describeRepo` and `getRepo` will always return a valid (possibly empty) repo for any
-enrolled user. A `describeRepo` call against an enrolled user will return an empty `collections`
+For Stratos custody, the service initializes an empty signed commit at enrollment time.
+This means `describeRepo` and `getRepo` return a valid (possibly empty) repo for a
+Stratos-custody user. A `describeRepo` call against that repo returns an empty `collections`
 list until the first record is created — this is normal and should be rendered as an empty state,
 not an error.
 
@@ -368,29 +401,12 @@ retrieval via `com.atproto.sync.getBlob`.
 
 ## 5. Write Path Integration
 
-Record creates, updates, and deletes should route through the service client when Stratos is active:
+Select the repository target from custody before writing. `stratos` custody uses authority repo
+methods; `pds` custody uses PDS space methods. The complete request shape for each appears in
+[Service Routing](#2-service-routing).
 
-```typescript
-const sessionAgent = new OAuthUserAgent(await getSession(repoDid))
-const rpc = createServiceClient(sessionAgent, stratosActive, enrollment)
-
-await rpc.post('com.atproto.repo.createRecord', {
-  input: {
-    repo: did,
-    collection: 'zone.stratos.feed.post',
-    record: {
-      text: 'hello',
-      createdAt: new Date().toISOString(),
-      boundary: {
-        values: [{ value: 'did:web:stratos.example.com/WestCoastBestCoast' }],
-      },
-    },
-  },
-})
-```
-
-Batch operations (`com.atproto.repo.applyWrites`) work identically — route through the service
-client.
+For `stratos` custody, batch operations use `com.atproto.repo.applyWrites` on the authority client.
+For `pds` custody, use the PDS space write methods.
 
 ## 6. Blob Support
 
@@ -430,8 +446,8 @@ The Stratos-specific alias `zone.stratos.sync.getBlob` is preferred when you wan
 
 ## 7. Record Verification
 
-Stratos supports `com.atproto.sync.getRecord` which returns a CAR file containing an inclusion proof
-for a single record. Stratos maintains independent repositories per user. Record commits are signed
+For Stratos custody, `com.atproto.sync.getRecord` returns a CAR file containing an inclusion proof
+for a single record. The service maintains independent repositories per user. Record commits are signed
 with the user's per-enrollment P-256 key when available, falling back to the service's Secp256k1
 key. This means standard ATproto verification against the user's PDS DID document will fail —
 clients must verify against either the user's enrollment `signingKey` or the Stratos service's
@@ -735,8 +751,8 @@ qualification.
 
 ### Empty repo vs. error masking
 
-Stratos initializes a signed empty commit at enrollment time, so every enrolled user has a valid
-repository from the start. `RepoNotFound` for an enrolled user is always an error — it no longer
+For Stratos custody, the service initializes a signed empty commit at enrollment time, so the user
+has a valid repository from the start. `RepoNotFound` for a Stratos-custody user is an error — it no longer
 indicates "no records yet." Possible causes:
 
 - The Stratos service is unreachable or misconfigured
@@ -785,22 +801,10 @@ For a React Native/Expo app like Bluesky's social-app:
 
 ### Agent/transport
 
-In `src/state/session/agent.ts`, the `BskyAppAgent` wraps transport. For Stratos routing, create a
-parallel agent or intercept at the fetch handler level:
-
-```typescript
-import { createServiceFetchHandler } from '@northskysocial/stratos-client'
-import { Client } from '@atcute/client'
-
-// In a query hook or utility
-const agent = useAgent()
-const { active, enrollment } = useStratos()
-const client = enrollment
-  ? new Client({
-      handler: createServiceFetchHandler(agent.handle, enrollment.service),
-    })
-  : new Client({ handler: agent })
-```
+In `src/state/session/agent.ts`, the `BskyAppAgent` wraps transport. In a query hook, select a
+repository target with `resolveRepositoryTarget` before constructing a client. For `stratos`
+custody, use the authority URL and repo methods; for `pds` custody, use the authenticated PDS URL
+and space methods. See [Service Routing](#2-service-routing) for the complete write example.
 
 ### View integration
 
@@ -809,7 +813,7 @@ const client = enrollment
 | Post thread     | `src/screens/PostThread/index.tsx` | Hydrate from Stratos when viewing boundary-scoped posts |
 | Feed            | `src/state/queries/post-feed.ts`   | Include Stratos records in feed via hydration           |
 | Settings        | `src/screens/Settings/`            | Stratos enrollment status, mode toggle                  |
-| Record creation | Post composer                      | Route `createRecord` through service client             |
+| Record creation | Post composer                      | Select repo or space `createRecord` by custody          |
 
 ### Key differences from pdsls
 
@@ -831,14 +835,14 @@ For apps that want to add basic Stratos support incrementally:
 1. Add enrollment discovery to session establishment
 2. Store enrollment state
 3. Add a Stratos mode toggle (settings or UI chrome)
-4. In record/thread views, when Stratos is active, route `getRecord` / `listRecords` through the
-   service client
-5. Handle empty collections gracefully (enrolled users always have a valid repo, but it may have no
-   records yet)
+4. For Stratos-custody records, route `getRecord` / `listRecords` through the authority client;
+   for PDS-custody space records, use the trusted PDS target
+5. Handle empty Stratos-custody collections gracefully (the enrolled repo may have no records yet)
 
 ### Step 2: Write routing
 
-1. Route `createRecord` / `deleteRecord` / `applyWrites` through service client when active
+1. Select authority repo methods for `stratos` custody or PDS space methods for `pds` custody,
+   as shown in [Service Routing](#2-service-routing)
 2. Add scope declarations to OAuth metadata
 3. Add scope selector UI with dependency gating
 
