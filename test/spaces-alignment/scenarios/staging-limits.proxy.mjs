@@ -8,6 +8,7 @@ export function createProxyServer() {
   let firstRequests = 0
   const repos = new Set()
   const globalRepos = new Set()
+  const passes = new Map()
   const cid = 'bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
   return http.createServer(async (req, res) => {
@@ -15,6 +16,7 @@ export function createProxyServer() {
     if (url.pathname === '/_control/mode') {
       mode = url.searchParams.get('value')
       blockedCursors.clear()
+      passes.clear()
       res.end('ok')
       return
     }
@@ -48,6 +50,61 @@ export function createProxyServer() {
         return
       }
       const index = pages++
+      const pass = passes.get(repo) || 0
+      passes.set(repo, pass + 1)
+      if (['replacement', 'delete', 'rollback'].includes(mode)) {
+        const terminal = pass % 2 === 1
+        const rkey =
+          mode === 'replacement'
+            ? 'replacement'
+            : mode === 'delete'
+              ? 'deleted'
+              : 'rolled-back'
+        const record = {
+          rev: 'synthetic',
+          collection: 'zone.stratos.feed.post',
+          rkey,
+          cid,
+          value: {
+            $type: 'zone.stratos.feed.post',
+            text:
+              mode === 'replacement' && terminal
+                ? 'staged replacement'
+                : `${mode} staged record`,
+            createdAt: new Date().toISOString(),
+          },
+        }
+        const ops =
+          mode === 'delete' && terminal
+            ? [{ rev: 'synthetic', collection: record.collection, rkey }]
+            : mode === 'rollback' && terminal
+              ? Array.from({ length: 10 }, (_, n) => ({
+                  ...record,
+                  rkey: `${rkey}-${n}`,
+                }))
+              : [record]
+        let commit
+        if (terminal && mode !== 'rollback') {
+          const query = new URL(req.url, 'http://proxy')
+          query.searchParams.delete('cursor')
+          const headers = { ...req.headers }
+          delete headers.connection
+          const upstream = await fetch(
+            `http://feedgen-e2e-pds-spaces:3000${query.pathname}${query.search}`,
+            { headers },
+          )
+          commit = (await upstream.json()).commit
+        }
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            ops,
+            cursor: terminal ? undefined : `${mode}-${index + 1}`,
+            commit,
+          }),
+        )
+        return
+      }
       const next = mode + '-' + (index + 1)
       blockedCursors.set(repo, next)
       const count = mode === 'interrupted' ? 1 : 10

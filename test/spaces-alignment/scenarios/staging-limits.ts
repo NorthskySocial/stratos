@@ -5,6 +5,10 @@ export const suite: ScenarioSuite = {
   id: 'staging-limits',
   requiredAssertions: [
     'cumulative-pass-budget',
+    'same-path-replacement-and-delete-accounting',
+    'rejected-page-transaction-rollback',
+    'promotion-replaces-staged-accounting',
+    'unrelated-target-remains-available',
     'multi-target-global-budget',
     'storage-accounting',
     'service-responsive',
