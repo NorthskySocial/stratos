@@ -195,16 +195,29 @@ try {
     (response) =>
       response.request().method() === 'POST' &&
       new URL(response.url()).pathname ===
-        '/xrpc/com.atproto.repo.createRecord' &&
+        '/xrpc/com.atproto.space.createRecord' &&
       response.ok(),
     { timeout: 45_000 },
   )
   await page.locator('#room-post').fill(seedText)
   await page.getByRole('button', { name: 'Post topic' }).click()
-  const seedResult = await (await seedWrite).json()
+  const seedResponse = await seedWrite
+  const seedRequest = seedResponse.request().postDataJSON()
+  const seedResult = await seedResponse.json()
   assert.ok(
     typeof seedResult.uri === 'string' && typeof seedResult.cid === 'string',
     'Second account did not seed its space repo',
+  )
+  const recordUriSegments = seedResult.uri.replace(/^at:\/\//, '').split('/')
+  assert.equal(
+    `at://${recordUriSegments.slice(0, 4).join('/')}`,
+    seedRequest.space,
+    'Second account seed was written to a different space',
+  )
+  assert.equal(
+    recordUriSegments[4],
+    did,
+    'Second account seed URI does not identify its author repo',
   )
   await page.getByText(seedText, { exact: true }).waitFor({
     state: 'visible',
