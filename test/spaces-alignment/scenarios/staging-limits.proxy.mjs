@@ -93,8 +93,11 @@ export function createProxyServer(upstreamFetch = fetch) {
         if (terminal && mode !== 'rollback') {
           try {
             const query = new URL(req.url, 'http://proxy')
-            query.pathname = '/xrpc/com.atproto.space.getLatestCommit'
+            query.pathname = '/xrpc/com.atproto.space.listRepoOps'
             query.searchParams.delete('cursor')
+            query.searchParams.delete('since')
+            query.searchParams.delete('excludeValues')
+            query.searchParams.set('limit', '1000')
             const headers = { ...req.headers }
             delete headers.connection
             const upstream = await upstreamFetch(
@@ -106,7 +109,7 @@ export function createProxyServer(upstreamFetch = fetch) {
             if (!upstream.ok) throw new Error('Upstream PDS request failed')
             commit = (await upstream.json()).commit
             if (!commit)
-              throw new Error('Upstream PDS returned no latest commit')
+              throw new Error('Upstream PDS returned no terminal commit')
           } catch (error) {
             commitFailures += 1
             console.error(

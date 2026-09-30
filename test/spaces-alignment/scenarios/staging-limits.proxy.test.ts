@@ -45,7 +45,7 @@ describe('staging limits proxy', () => {
     expect(status).toMatchObject({ pages: 2, interruptions: 2, targetCount: 2 })
   })
 
-  it('uses the PDS latest commit for a synthetic terminal page', async () => {
+  it('uses a bounded terminal PDS page with the authenticated endpoint', async () => {
     const upstreamRequests: URL[] = []
     const terminalCommit = { revision: 'terminal-revision' }
     const commitServer = createProxyServer(async (input: RequestInfo | URL) => {
@@ -69,6 +69,8 @@ describe('staging limits proxy', () => {
         'space',
         'at://did:example:authority/space/feed/home',
       )
+      url.searchParams.set('since', 'stale-revision')
+      url.searchParams.set('limit', '2')
       if (cursor) url.searchParams.set('cursor', cursor)
       return fetch(url)
     }
@@ -78,7 +80,7 @@ describe('staging limits proxy', () => {
     expect((await terminalPage.json()).commit).toEqual(terminalCommit)
     expect(upstreamRequests).toHaveLength(1)
     expect(upstreamRequests[0].pathname).toBe(
-      '/xrpc/com.atproto.space.getLatestCommit',
+      '/xrpc/com.atproto.space.listRepoOps',
     )
     expect(upstreamRequests[0].searchParams.get('repo')).toBe(
       'did:example:motoko',
@@ -86,11 +88,14 @@ describe('staging limits proxy', () => {
     expect(upstreamRequests[0].searchParams.get('space')).toBe(
       'at://did:example:authority/space/feed/home',
     )
+    expect(upstreamRequests[0].searchParams.get('limit')).toBe('1000')
+    expect(upstreamRequests[0].searchParams.has('cursor')).toBe(false)
+    expect(upstreamRequests[0].searchParams.has('since')).toBe(false)
     const status = await (await fetch(`${origin}/_control/status`)).json()
     expect(status).toMatchObject({ commitRequests: 1, commitFailures: 0 })
   })
 
-  it('keeps serving after the PDS latest commit is unavailable', async () => {
+  it('keeps serving after the PDS terminal commit is unavailable', async () => {
     let upstreamRequests = 0
     const commitServer = createProxyServer(async () => {
       upstreamRequests += 1
