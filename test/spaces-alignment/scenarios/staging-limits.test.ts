@@ -11,7 +11,9 @@ describe('staging limits sandbox receipt', () => {
       'promotion-replaces-staged-accounting',
       'unrelated-target-remains-available',
       'multi-target-global-budget',
-      'storage-accounting',
+      'persisted-storage-accounting',
+      'target-row-budget',
+      'global-row-budget',
       'service-responsive',
       'interrupted-stage',
       'expired-stage-restart',
@@ -27,6 +29,7 @@ describe('staging limits sandbox receipt', () => {
       )
     const results = await suite.run({
       sandboxDirectory: '/tmp/disposable-sandbox',
+      composeFile: '/tmp/disposable-sandbox/compose.yaml',
       projectName: 'disposable',
       reportDirectory: '/tmp/disposable-report',
       runCommand,
@@ -62,6 +65,7 @@ describe('staging limits sandbox receipt', () => {
       await expect(
         suite.run({
           sandboxDirectory: '/tmp/disposable-sandbox',
+          composeFile: '/tmp/disposable-sandbox/compose.yaml',
           projectName: 'disposable',
           reportDirectory: '/tmp/disposable-report',
           runCommand: vi.fn().mockResolvedValue(output),
