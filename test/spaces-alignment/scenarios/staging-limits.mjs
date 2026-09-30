@@ -113,7 +113,7 @@ async function generalFeed() {
     '-e',
     `const password=(await (await import('node:fs/promises')).readFile('/run/sandbox-secrets/browser-password','utf8')).trim();
      const session=await fetch('https://spaces-pds-e2e.${domain}/xrpc/com.atproto.server.createSession',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({identifier:'rei.spaces-pds-e2e.${domain}',password})});
-     if(!session.ok)process.exit(1);const {accessJwt}=await session.json();
+     if(!session.ok)throw new Error('Feed viewer session failed ('+session.status+'): '+await session.text());const {accessJwt}=await session.json();
      const response=await fetch('https://spaces-pds-e2e.${domain}/xrpc/zone.stratos.feedgen.getFeed?feed=general&limit=50',{headers:{authorization:'Bearer '+accessJwt,'atproto-proxy':'did:web:feedgen-e2e.${domain}#stratos_feedgen'}});
      console.log(JSON.stringify({status:response.status,body:await response.json()}))`,
   ])
