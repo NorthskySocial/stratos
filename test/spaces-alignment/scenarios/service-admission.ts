@@ -3,7 +3,9 @@ import type { AssertionResult, ScenarioSuite } from '../rules.js'
 const requiredAssertions = [
   'never-enrolled-denied',
   'active-all-boundary',
+  'active-assigned-pull-records',
   'active-second-boundary',
+  'foreign-boundary-pull-denied',
   'deactivated-denied',
   'reactivated-admitted',
 ] as const
@@ -43,6 +45,7 @@ const caller = 'did:web:feedgen-e2e.' + process.env.SANDBOX_DOMAIN
 const signingKey = process.env.ADMISSION_SIGNING_KEY
 assert.ok(signingKey)
 const all = authority + '/all'
+const general = authority + '/general'
 const other = authority + '/other'
 const keypair = await Secp256k1Keypair.import(signingKey)
 const db = createServiceDb('/app/data/service.sqlite')
@@ -79,6 +82,40 @@ async function checkAdmitted(did) {
   }
 }
 
+function boundariesOf(value) {
+  return value?.boundary?.values
+    ?.map((entry) => entry?.value)
+    .filter((boundary) => typeof boundary === 'string') ?? []
+}
+
+async function checkPullRecords(did, boundary) {
+  const ops = await call('zone.stratos.sync.listRepoOps', did)
+  assert.equal(ops.status, 200, 'listRepoOps rejected an active service')
+  assert.ok(Array.isArray(ops.body.ops) && ops.body.ops.length > 0, 'listRepoOps returned no records to inspect')
+  assert.ok(
+    ops.body.ops.every((op) => boundariesOf(op.value).includes(boundary)),
+    'listRepoOps returned a record outside the assigned boundary',
+  )
+
+  const paths = await call('zone.stratos.sync.listRecordPaths', did)
+  assert.equal(paths.status, 200, 'listRecordPaths rejected an active service')
+  assert.ok(Array.isArray(paths.body.records) && paths.body.records.length > 0, 'listRecordPaths returned no records to inspect')
+  assert.ok(
+    paths.body.records.every((record) => boundariesOf(record.value).includes(boundary)),
+    'listRecordPaths returned a record outside the assigned boundary',
+  )
+}
+
+async function checkForeignPullDenied(did) {
+  const ops = await call('zone.stratos.sync.listRepoOps', did)
+  assert.equal(ops.status, 200, 'listRepoOps rejected an active foreign service')
+  assert.deepEqual(ops.body.ops, [], 'listRepoOps exposed a foreign-boundary record')
+
+  const paths = await call('zone.stratos.sync.listRecordPaths', did)
+  assert.equal(paths.status, 200, 'listRecordPaths rejected an active foreign service')
+  assert.deepEqual(paths.body.records, [], 'listRecordPaths exposed a foreign-boundary record')
+}
+
 try {
   const members = await store.listEnrollmentsByBoundary(all, { limit: 100 })
   const actors = await Promise.all(
@@ -89,9 +126,13 @@ try {
         boundaries: await store.getBoundaries(entry.did),
       })),
   )
-  const actor = actors.find((entry) => !entry.boundaries.includes(other))
+  const actor = actors.find(
+    (entry) =>
+      entry.boundaries.includes(general) &&
+      entry.boundaries.every((boundary) => boundary === all || boundary === general),
+  )
   const otherActor = actors.find((entry) => entry.boundaries.includes(other))
-  assert.ok(actor, 'Baseline left no Stratos-custody actor outside the second boundary')
+  assert.ok(actor, 'Baseline left no Stratos-custody actor assigned only to the general boundary')
   assert.ok(otherActor, 'Baseline left no Stratos-custody actor in the second boundary')
   await store.unenroll(caller)
   await store.setBoundaries(caller, [other])
@@ -106,18 +147,25 @@ try {
     active: true,
     signingKeyDid: keypair.did(),
     isService: true,
-    boundaries: [other],
+    boundaries: [general],
   })
   await checkAdmitted(actor.did)
   const allRepos = await call('zone.stratos.space.listRepos', actor.did)
   assert.ok(allRepos.body.repos.some((entry) => entry.did === actor.did))
   passed.push('active-all-boundary')
 
+  await checkPullRecords(actor.did, general)
+  passed.push('active-assigned-pull-records')
+
+  await store.setBoundaries(caller, [other])
   const otherRepos = await call('zone.stratos.space.listRepos', actor.did, other)
   assert.equal(otherRepos.status, 200)
   assert.ok(otherRepos.body.repos.every((entry) => entry.did !== actor.did))
   assert.ok(otherRepos.body.repos.some((entry) => entry.did === otherActor.did))
   passed.push('active-second-boundary')
+
+  await checkForeignPullDenied(actor.did)
+  passed.push('foreign-boundary-pull-denied')
 
   await store.updateEnrollment(caller, { active: false })
   assert.deepEqual(new Set(await store.getBoundaries(caller)), new Set([all, other]))

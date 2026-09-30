@@ -47,6 +47,10 @@ function context(
       expect(args.at(-2)).toBe('_')
       expect(args.at(-1)).toContain('await checkDenied(actor.did)')
       expect(args.at(-1)).toContain('zone.stratos.space.listRepos')
+      expect(args.at(-1)).toContain(
+        'await checkPullRecords(actor.did, general)',
+      )
+      expect(args.at(-1)).toContain('await checkForeignPullDenied(actor.did)')
       return exitCode === null
         ? output
         : `${output}\n  __service_admission_exit__=${exitCode}  \n`
@@ -55,6 +59,11 @@ function context(
 }
 
 describe('service admission sandbox scenario', () => {
+  it('requires record-scope checks for both pull routes', () => {
+    expect(suite.requiredAssertions).toContain('active-assigned-pull-records')
+    expect(suite.requiredAssertions).toContain('foreign-boundary-pull-denied')
+  })
+
   it('accepts the complete real-command assertion receipt', async () => {
     const assertions = suite.requiredAssertions.map((id) => ({
       id,
