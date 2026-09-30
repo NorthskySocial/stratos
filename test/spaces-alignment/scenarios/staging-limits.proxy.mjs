@@ -1,6 +1,6 @@
 import http from 'node:http'
 
-export function createProxyServer() {
+export function createProxyServer(upstreamFetch = fetch) {
   let mode = 'observe'
   const blockedCursors = new Map()
   let pages = 0
@@ -89,11 +89,24 @@ export function createProxyServer() {
           query.searchParams.delete('cursor')
           const headers = { ...req.headers }
           delete headers.connection
-          const upstream = await fetch(
-            `http://feedgen-e2e-pds-spaces:3000${query.pathname}${query.search}`,
-            { headers },
-          )
-          commit = (await upstream.json()).commit
+          for (let page = 0; page < 256; page += 1) {
+            const upstream = await upstreamFetch(
+              `http://feedgen-e2e-pds-spaces:3000${query.pathname}${query.search}`,
+              { headers },
+            )
+            if (!upstream.ok) throw new Error('Upstream PDS request failed')
+            const upstreamPage = await upstream.json()
+            if (
+              upstreamPage.cursor === undefined ||
+              upstreamPage.cursor === null
+            ) {
+              commit = upstreamPage.commit
+              break
+            }
+            query.searchParams.set('cursor', String(upstreamPage.cursor))
+          }
+          if (!commit)
+            throw new Error('Upstream PDS returned no terminal commit')
         }
         res.setHeader('content-type', 'application/json')
         res.end(
@@ -128,7 +141,7 @@ export function createProxyServer() {
       for await (const chunk of req) chunks.push(chunk)
       const headers = { ...req.headers }
       delete headers.connection
-      const upstream = await fetch(
+      const upstream = await upstreamFetch(
         'http://feedgen-e2e-pds-spaces:3000' + req.url,
         {
           method: req.method,
