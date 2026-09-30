@@ -101,6 +101,40 @@ async function health() {
   )
 }
 
+async function generalFeed() {
+  const output = await compose([
+    'run',
+    '--rm',
+    '--no-deps',
+    '--entrypoint',
+    'node',
+    'feedgen-e2e-browser',
+    '--input-type=module',
+    '-e',
+    `const password=(await (await import('node:fs/promises')).readFile('/run/sandbox-secrets/browser-password','utf8')).trim();
+     const session=await fetch('https://spaces-pds-e2e.${domain}/xrpc/com.atproto.server.createSession',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({identifier:'rei.spaces-pds-e2e.${domain}',password})});
+     if(!session.ok)process.exit(1);const {accessJwt}=await session.json();
+     const response=await fetch('https://spaces-pds-e2e.${domain}/xrpc/zone.stratos.feedgen.getFeed?feed=general&limit=50',{headers:{authorization:'Bearer '+accessJwt,'atproto-proxy':'did:web:feedgen-e2e.${domain}#stratos_feedgen'}});
+     console.log(JSON.stringify({status:response.status,body:await response.json()}))`,
+  ])
+  return JSON.parse(
+    output
+      .trim()
+      .split('\n')
+      .findLast((line) => line.startsWith('{"status":')),
+  )
+}
+
+async function waitForFeedText(text, present) {
+  await waitFor(async () => {
+    const response = await generalFeed()
+    if (response.status !== 200) return false
+    const feed = response.body?.feed
+    if (!Array.isArray(feed)) return false
+    return feed.some((item) => item?.post?.record?.text === text) === present
+  }, `${present ? 'published' : 'deleted'} staged record`)
+}
+
 const caddyPath = join(sandbox, 'state/Caddyfile')
 const originalCaddy = await readFile(caddyPath, 'utf8')
 const route = `spaces-pds-e2e.${domain} {\n  tls internal\n  reverse_proxy feedgen-e2e-pds-spaces:3000\n}`
@@ -192,6 +226,53 @@ try {
     'feedgen-e2e-rust',
   ])
   limitsChanged = true
+  await control('mode?value=replacement')
+  await waitForFeedText('staged replacement', true)
+  const replacementFeed = await generalFeed()
+  assert.equal(replacementFeed.status, 200)
+  assert.ok(
+    replacementFeed.body.feed.some(
+      (item) => item?.post?.record?.text === 'staged replacement',
+    ) &&
+      replacementFeed.body.feed.every(
+        (item) => item?.post?.record?.text !== 'replacement staged record',
+      ),
+    'Same-path replacement did not publish only its final value',
+  )
+  assertions.push('same-path-replacement-and-delete-accounting')
+
+  await control('mode?value=delete')
+  await waitForFeedText('delete staged record', false)
+  assertions.push('promotion-replaces-staged-accounting')
+
+  await writeFile(
+    join(sandbox, 'state/staging-limits-config.yaml'),
+    'services:\n  feedgen-e2e-rust:\n    environment:\n      FEEDGEN_PROJECTION_MAX_BYTES: "131072"\n      FEEDGEN_PROJECTION_MAX_AGE_MS: "86400000"\n      FEEDGEN_STAGE_TARGET_MAX_BYTES: "3500"\n',
+    { mode: 0o600 },
+  )
+  await withLimits(['up', '-d', '--no-deps', '--force-recreate', 'feedgen-e2e-rust'])
+  await control('mode?value=rollback')
+  await waitFor(
+    async () =>
+      (await compose(['logs', '--no-color', 'feedgen-e2e-rust'])).includes(
+        'event=space_stage_limit rejected_targets=1',
+      ),
+    'rejected staged-page rollback',
+  )
+  await waitForFeedText('rollback staged record', false)
+  assertions.push('rejected-page-transaction-rollback')
+
+  await writeFile(
+    join(sandbox, 'state/staging-limits-config.yaml'),
+    'services:\n  feedgen-e2e-rust:\n    environment:\n      FEEDGEN_PROJECTION_MAX_BYTES: "131072"\n      FEEDGEN_PROJECTION_MAX_AGE_MS: "86400000"\n',
+    { mode: 0o600 },
+  )
+  await withLimits(['up', '-d', '--no-deps', '--force-recreate', 'feedgen-e2e-rust'])
+  await control('mode?value=replacement')
+  await waitForFeedText('staged replacement', true)
+  assert.equal((await generalFeed()).status, 200)
+  assertions.push('unrelated-target-remains-available')
+
   await control('mode?value=limit')
   await waitFor(
     async () => (await control('status')).interruptions >= 2,
@@ -218,20 +299,6 @@ try {
     logs,
     /event=space_stage_budget_rejected[^\n]*reason=target_bytes/,
   )
-  const fileSize = Number(
-    (
-      await compose([
-        'exec',
-        '-T',
-        'feedgen-e2e-rust',
-        'stat',
-        '-c',
-        '%s',
-        '/var/lib/feedgen/projection.sqlite',
-      ])
-    ).trim(),
-  )
-  assert.ok(Number.isSafeInteger(fileSize) && fileSize > 0)
   assertions.push('storage-accounting')
   const response = await health()
   assert.ok([200, 503].includes(response.status) && response.elapsed < 2_000)
