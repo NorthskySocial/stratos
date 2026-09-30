@@ -358,10 +358,14 @@ server.on('request', async (req, res) => {
   }
   if (url.pathname === '/xrpc/com.atproto.space.listRepoOps') {
     const repo = url.searchParams.get('repo') || '';
-    const page = pageCounts.get(repo) || 0;
-    pageCounts.set(repo, page + 1);
-    const terminal = ['replacement', 'delete', 'rollback'].includes(mode) && page % 2 === 1;
-    while (gate === 'all' || (gate === 'terminal' && terminal) || (gate === 'first' && !terminal)) {
+    while (true) {
+      const page = pageCounts.get(repo) || 0;
+      const terminal = ['replacement', 'delete', 'rollback'].includes(mode) && page % 2 === 1;
+      const held = gate === 'all' || (gate === 'terminal' && terminal) || (gate === 'first' && !terminal);
+      if (!held) {
+        pageCounts.set(repo, page + 1);
+        break;
+      }
       await new Promise(resolve => pending.push(resolve));
       if (res.destroyed) return;
     }
