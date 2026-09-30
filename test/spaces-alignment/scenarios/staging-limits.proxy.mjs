@@ -6,6 +6,9 @@ export function createProxyServer(upstreamFetch = fetch) {
   let pages = 0
   let interruptions = 0
   let firstRequests = 0
+  let commitRequests = 0
+  let commitFailures = 0
+  let lastCommitStatus
   const repos = new Set()
   const globalRepos = new Set()
   const passes = new Map()
@@ -27,6 +30,9 @@ export function createProxyServer(upstreamFetch = fetch) {
           pages,
           interruptions,
           firstRequests,
+          commitRequests,
+          commitFailures,
+          lastCommitStatus,
           targetCount: repos.size,
           globalTargetCount: globalRepos.size,
         }),
@@ -95,11 +101,14 @@ export function createProxyServer(upstreamFetch = fetch) {
               `http://feedgen-e2e-pds-spaces:3000${query.pathname}${query.search}`,
               { headers },
             )
+            commitRequests += 1
+            lastCommitStatus = upstream.status
             if (!upstream.ok) throw new Error('Upstream PDS request failed')
             commit = (await upstream.json()).commit
             if (!commit)
               throw new Error('Upstream PDS returned no latest commit')
           } catch (error) {
+            commitFailures += 1
             console.error(
               `event=staging_limits_proxy_commit_failed error=${JSON.stringify(error instanceof Error ? error.message : String(error))}`,
             )
