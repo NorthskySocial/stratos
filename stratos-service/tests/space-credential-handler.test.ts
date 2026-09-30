@@ -25,6 +25,10 @@ import {
   generateKeyPair,
 } from 'jose'
 import { Secp256k1Keypair, verifySignature } from '@atproto/crypto'
+import {
+  createServiceJwt,
+  type Server as XrpcServer,
+} from '@atproto/xrpc-server'
 import type { Keypair } from '@atproto/crypto'
 import type { IdResolver } from '@atproto/identity'
 import { SqliteEnrollmentStore } from '../src/context.js'
@@ -78,6 +82,7 @@ interface InvokeResult {
 interface InvokeOptions {
   /** DPoP session key thumbprint carried on the caller's auth credentials. */
   jkt?: string
+  delegationToken?: string
   /** Request shape (method/url/headers) for mint-time DPoP proof checks. */
   req?: {
     method?: string
@@ -90,21 +95,45 @@ interface InvokeOptions {
 
 async function invoke(
   server: MockXrpcServer,
-  input: Record<string, unknown>,
+  input: Record<string, unknown> | undefined,
   authDid?: string,
   opts?: InvokeOptions,
 ): Promise<InvokeResult> {
-  const method = server.methods['zone.stratos.space.getSpaceCredential']
-  if (!method) throw new Error('method not registered')
   const auth = authDid
     ? { credentials: { type: 'user', did: authDid, jkt: opts?.jkt } }
-    : { credentials: { type: 'anonymous' } }
+    : opts?.delegationToken
+      ? {
+          credentials: {
+            type: 'delegation',
+            delegationToken: opts.delegationToken,
+          },
+        }
+      : { credentials: { type: 'anonymous' } }
+  return invokeHandler(server, input, auth, opts?.req)
+}
+
+async function invokeUnauthenticated(
+  server: MockXrpcServer,
+  input: Record<string, unknown> | undefined,
+  req?: InvokeOptions['req'],
+): Promise<InvokeResult> {
+  return invokeHandler(server, input, undefined, req)
+}
+
+async function invokeHandler(
+  server: MockXrpcServer,
+  input: Record<string, unknown> | undefined,
+  auth: unknown,
+  req?: InvokeOptions['req'],
+): Promise<InvokeResult> {
+  const method = server.methods['zone.stratos.space.getSpaceCredential']
+  if (!method) throw new Error('method not registered')
   try {
     const result = await method.handler({
-      input: { body: input, encoding: 'application/json' },
+      input: input && { body: input, encoding: 'application/json' },
       params: {},
       auth,
-      req: opts?.req ?? { headers: {} },
+      req,
     })
     return { body: result.body }
   } catch (err) {
@@ -136,17 +165,21 @@ class MemoryNxExStore implements NxExStore {
 function atprotoResolver(did: string, keypair: Keypair): IdResolver {
   return {
     did: {
-      resolve: vi.fn().mockResolvedValue({
-        id: did,
-        verificationMethod: [
-          {
-            id: `${did}#atproto`,
-            type: 'Multikey',
-            controller: did,
-            publicKeyMultibase: keypair.did().slice('did:key:'.length),
-          },
-        ],
-      }),
+      resolve: vi.fn(async (requestedDid: string) =>
+        requestedDid === did
+          ? {
+              id: did,
+              verificationMethod: [
+                {
+                  id: `${did}#atproto`,
+                  type: 'Multikey',
+                  controller: did,
+                  publicKeyMultibase: keypair.did().slice('did:key:'.length),
+                },
+              ],
+            }
+          : null,
+      ),
     },
   } as unknown as IdResolver
 }
@@ -193,6 +226,7 @@ function createMockCtx(opts: MockCtxOptions): AppContext {
     },
     authVerifier: {
       optionalStandard,
+      spaceCredentialMint: optionalStandard,
     },
     logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   } as unknown as AppContext
@@ -241,13 +275,19 @@ async function mintDelegation(opts: DelegationMintOpts): Promise<string> {
 
 async function makeMintProof(
   htu: string,
+  claims: { nonce?: string; ath?: string } = {},
 ): Promise<{ proof: string; jkt: string }> {
   const { privateKey, publicKey } = await generateKeyPair('ES256', {
     extractable: true,
   })
   const jwk = await exportJWK(publicKey)
   const jkt = await calculateJwkThumbprint(jwk)
-  const proof = await new SignJWT({ htm: 'POST', htu, jti: randomUUID() })
+  const proof = await new SignJWT({
+    htm: 'POST',
+    htu,
+    jti: randomUUID(),
+    ...claims,
+  })
     .setProtectedHeader({ typ: 'dpop+jwt', alg: 'ES256', jwk })
     .setIssuedAt()
     .sign(privateKey)
@@ -277,6 +317,19 @@ async function verifyCredentialAgainst(
 }
 
 describe('getSpaceCredential — DPoP path', () => {
+  it('rejects a missing body and missing authentication', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const ctx = createMockCtx({ signingKey })
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as unknown as XrpcServer, ctx)
+    expect((await invokeUnauthenticated(server, undefined)).error?.name).toBe(
+      'InvalidRequest',
+    )
+    expect(
+      (await invokeUnauthenticated(server, { space: SPACE_URI })).error?.name,
+    ).toBe('AuthRequired')
+  })
+
   it('issues a credential BOUND to the session DPoP key (verifies; no aud; TTL)', async () => {
     const signingKey = await Secp256k1Keypair.create()
     const ctx = createMockCtx({
@@ -511,6 +564,223 @@ describe('getSpaceCredential — delegation-token path', () => {
     return { signingKey, userKey, ctx, server }
   }
 
+  it('exchanges a Bearer delegation with a standalone DPoP proof', async () => {
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey })
+    const { proof, jkt } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    const res = await invoke(server, { space: SPACE_URI }, undefined, {
+      delegationToken: token,
+      req: {
+        method: 'POST',
+        originalUrl: MINT_PATH,
+        headers: { authorization: `Bearer ${token}`, dpop: proof },
+      },
+    })
+    expect(res.error).toBeUndefined()
+    expect(decodeCredential(res.body!.credential!).payload.cnf).toEqual({ jkt })
+  })
+
+  it('rejects simultaneous header and body delegations before consuming either', async () => {
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey })
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    const ambiguous = await invoke(
+      server,
+      { space: SPACE_URI, delegationToken: token },
+      undefined,
+      {
+        delegationToken: token,
+        req: {
+          method: 'POST',
+          originalUrl: MINT_PATH,
+          headers: { authorization: `Bearer ${token}`, dpop: proof },
+        },
+      },
+    )
+    expect(ambiguous.error?.name).toBe('InvalidRequest')
+    expect(ambiguous.error?.message).toBe(
+      'Use one delegation transport per request',
+    )
+
+    const retry = await invoke(server, { space: SPACE_URI }, undefined, {
+      delegationToken: token,
+      req: { method: 'POST', originalUrl: MINT_PATH, headers: { dpop: proof } },
+    })
+    expect(retry.error).toBeUndefined()
+  })
+
+  it('rejects body delegation combined with DPoP session identity, then accepts body-only retry', async () => {
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey })
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    const ambiguous = await invoke(
+      server,
+      { space: SPACE_URI, delegationToken: token },
+      USER_DID,
+      {
+        jkt: 'thumb-rei',
+        req: {
+          method: 'POST',
+          originalUrl: MINT_PATH,
+          headers: { authorization: 'DPoP session-access-token', dpop: proof },
+        },
+      },
+    )
+    expect(ambiguous.error?.name).toBe('InvalidRequest')
+    expect(ambiguous.error?.message).toBe(
+      'Use one delegation transport per request',
+    )
+
+    const bodyOnly = await invoke(
+      server,
+      { space: SPACE_URI, delegationToken: token },
+      undefined,
+      {
+        req: {
+          method: 'POST',
+          originalUrl: MINT_PATH,
+          headers: { dpop: proof },
+        },
+      },
+    )
+    expect(bodyOnly.error).toBeUndefined()
+    expect(bodyOnly.body?.credential).toBeTruthy()
+  })
+
+  it('rejects an invalid Bearer token without consuming a valid retry', async () => {
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey, typ: 'at+jwt' })
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    const res = await invoke(server, { space: SPACE_URI }, undefined, {
+      delegationToken: token,
+      req: { method: 'POST', originalUrl: MINT_PATH, headers: { dpop: proof } },
+    })
+    expect(res.error?.name).toBe('InvalidToken')
+  })
+
+  it('rejects a valid signed service-auth Bearer JWT as a delegation', async () => {
+    const { server, ctx } = await setup(true)
+    const serviceKey = await Secp256k1Keypair.create({ exportable: true })
+    const token = await createServiceJwt({
+      iss: serviceKey.did(),
+      aud: SERVICE_DID,
+      lxm: 'zone.stratos.space.getSpaceCredential',
+      keypair: serviceKey,
+    })
+    const [header, payload, signature] = token.split('.')
+    expect(
+      await verifySignature(
+        serviceKey.did(),
+        new TextEncoder().encode(`${header}.${payload}`),
+        Buffer.from(signature, 'base64url'),
+      ),
+    ).toBe(true)
+
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    const response = await invoke(server, { space: SPACE_URI }, undefined, {
+      delegationToken: token,
+      req: {
+        method: 'POST',
+        originalUrl: MINT_PATH,
+        headers: { authorization: `Bearer ${token}`, dpop: proof },
+      },
+    })
+    expect(response.error?.name).toBe('InvalidToken')
+    expect(ctx.logger?.info).toHaveBeenCalledWith(
+      { err: expect.stringContaining('Invalid delegation token typ') },
+      'space-credential delegation token rejected',
+    )
+  })
+
+  it('does not consume a header delegation when app access rejects it', async () => {
+    const { userKey, server, ctx } = await setup(true)
+    ctx.cfg.stratos.spaceAppAccess = {
+      byBoundary: new Map([
+        [
+          SPACE_BOUNDARY,
+          { kind: 'allowList', clientIds: ['https://nerv.test'] },
+        ],
+      ]),
+    }
+    const token = await mintDelegation({ userKey })
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    const present = () =>
+      invoke(server, { space: SPACE_URI }, undefined, {
+        delegationToken: token,
+        req: {
+          method: 'POST',
+          originalUrl: MINT_PATH,
+          headers: { authorization: `Bearer ${token}`, dpop: proof },
+        },
+      })
+    expect((await present()).error?.name).toBe('AttestationRequired')
+    ctx.cfg.stratos.spaceAppAccess.byBoundary.set(SPACE_BOUNDARY, {
+      kind: 'open',
+    })
+    expect((await present()).error).toBeUndefined()
+  })
+
+  it.each([
+    ['wrong type', { typ: 'at+jwt' }],
+    ['wrong issuer', { iss: 'did:plc:rei' }],
+    ['wrong audience', { aud: 'did:web:other.test#atproto_space_host' }],
+    [
+      'wrong space',
+      { sub: makeSpaceUri(SERVICE_DID, 'zone.stratos.space.feed', 'other') },
+    ],
+    [
+      'expired',
+      {
+        iat: Math.floor(Date.now() / 1000) - 1000,
+        exp: Math.floor(Date.now() / 1000) - 500,
+      },
+    ],
+    ['bad signature', { tamper: true }],
+  ])('rejects a header delegation with %s', async (_reason, overrides) => {
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey, ...overrides })
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    const response = await invoke(server, { space: SPACE_URI }, undefined, {
+      delegationToken: token,
+      req: { method: 'POST', originalUrl: MINT_PATH, headers: { dpop: proof } },
+    })
+    expect(response.error?.name).toBe('InvalidToken')
+  })
+
+  it.each([{ nonce: 'old-nonce' }, { ath: 'unbound-token' }])(
+    'rejects a mint proof carrying $nonce$ath without consuming the delegation',
+    async (claims) => {
+      const { userKey, server, ctx } = await setup(true)
+      const token = await mintDelegation({ userKey })
+      const bad = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`, claims)
+      const rejected = await invoke(server, { space: SPACE_URI }, undefined, {
+        delegationToken: token,
+        req: {
+          method: 'POST',
+          originalUrl: MINT_PATH,
+          headers: { dpop: bad.proof },
+        },
+      })
+      expect(rejected.error?.name).toBe('ProofRequired')
+      if ('nonce' in claims) {
+        expect(ctx.logger?.info).toHaveBeenCalledWith(
+          { err: 'Mint proof must omit nonce' },
+          'space-credential mint proof rejected',
+        )
+      }
+      const good = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+      const retry = await invoke(server, { space: SPACE_URI }, undefined, {
+        delegationToken: token,
+        req: {
+          method: 'POST',
+          originalUrl: MINT_PATH,
+          headers: { dpop: good.proof },
+        },
+      })
+      expect(retry.error).toBeUndefined()
+    },
+  )
+
   it('happy path: valid token + mint proof issues a credential bound to the proof key', async () => {
     const { signingKey, userKey, server } = await setup(true)
     const token = await mintDelegation({ userKey, iss: userKey.did() })
@@ -561,13 +831,33 @@ describe('getSpaceCredential — delegation-token path', () => {
   })
 
   it('rejects a valid token WITHOUT a mint-time DPoP proof → ProofRequired', async () => {
-    const { userKey, server } = await setup(true)
+    const { userKey, server, ctx } = await setup(true)
     const token = await mintDelegation({ userKey, iss: userKey.did() })
     const res = await invoke(server, {
       space: SPACE_URI,
       delegationToken: token,
     })
     expect(res.error?.name).toBe('ProofRequired')
+    expect(ctx.logger?.info).toHaveBeenLastCalledWith(
+      { err: 'DPoP proof required' },
+      'space-credential mint proof rejected',
+    )
+  })
+
+  it('rejects a body delegation with absent request headers without an ambiguity error', async () => {
+    const { userKey, server, ctx } = await setup(true)
+    const token = await mintDelegation({ userKey })
+    const res = await invoke(
+      server,
+      { space: SPACE_URI, delegationToken: token },
+      undefined,
+      { req: { method: 'POST', url: MINT_PATH } },
+    )
+    expect(res.error?.name).toBe('ProofRequired')
+    expect(ctx.logger?.info).toHaveBeenLastCalledWith(
+      { err: 'DPoP proof required' },
+      'space-credential mint proof rejected',
+    )
   })
 
   it('a request that fails a later gate does NOT burn the token: a retry with the proof succeeds', async () => {
