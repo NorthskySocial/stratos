@@ -9,6 +9,7 @@ export function createProxyServer(upstreamFetch = fetch) {
   let commitRequests = 0
   let commitFailures = 0
   let lastCommitStatus
+  let modeRequests = []
   const repos = new Set()
   const globalRepos = new Set()
   const passes = new Map()
@@ -20,6 +21,7 @@ export function createProxyServer(upstreamFetch = fetch) {
       mode = url.searchParams.get('value')
       blockedCursors.clear()
       passes.clear()
+      modeRequests = []
       res.end('ok')
       return
     }
@@ -33,6 +35,7 @@ export function createProxyServer(upstreamFetch = fetch) {
           commitRequests,
           commitFailures,
           lastCommitStatus,
+          requests: modeRequests,
           targetCount: repos.size,
           globalTargetCount: globalRepos.size,
         }),
@@ -43,6 +46,11 @@ export function createProxyServer(upstreamFetch = fetch) {
     const repo = url.searchParams.get('repo')
     if (isPage) {
       repos.add(repo)
+      modeRequests.push({
+        mode,
+        repo,
+        cursor: url.searchParams.get('cursor'),
+      })
       if (mode === 'global') globalRepos.add(repo)
       if (!url.searchParams.has('cursor')) firstRequests += 1
     }

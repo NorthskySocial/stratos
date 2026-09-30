@@ -628,6 +628,9 @@ try {
     async () => (await control('status')).pages > before,
     'fresh interrupted stage',
   )
+  const interruptedRequests = (await control('status')).requests
+  const verifiedRequest = interruptedRequests.find((request) => request.repo)
+  assert.ok(verifiedRequest, 'Interrupted sync did not request a PDS page')
   assertions.push('interrupted-stage')
   await control('mode?value=observe')
   await delay(2_000)
@@ -639,11 +642,22 @@ try {
       ),
     'expired stage cleanup',
   )
-  const firstAfterCleanup = (await control('status')).firstRequests
+  const requestsAfterCleanup = (await control('status')).requests.length
   await configureLimits({ FEEDGEN_PROJECTION_MAX_AGE_MS: 1_000 })
   await waitFor(
-    async () => (await control('status')).firstRequests > firstAfterCleanup,
+    async () =>
+      (await control('status')).requests
+        .slice(requestsAfterCleanup)
+        .some((request) => request.repo === verifiedRequest.repo),
     'restart without staged cursor',
+  )
+  const resumedRequest = (await control('status')).requests
+    .slice(requestsAfterCleanup)
+    .find((request) => request.repo === verifiedRequest.repo)
+  assert.equal(
+    resumedRequest?.cursor,
+    verifiedRequest.cursor,
+    'Expired staging resumed from an unverified staged cursor',
   )
   assertions.push('expired-stage-restart')
 
