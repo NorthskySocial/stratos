@@ -77,4 +77,33 @@ describe('staging limits proxy', () => {
     expect((await terminalPage.json()).commit).toEqual(terminalCommit)
     expect(upstreamCursors).toEqual([undefined, 'upstream-next'])
   })
+
+  it('keeps serving after upstream commit pagination is exhausted', async () => {
+    let upstreamPages = 0
+    const commitServer = createProxyServer(async () => {
+      upstreamPages += 1
+      return new Response(JSON.stringify({ ops: [], cursor: 'still-paging' }))
+    })
+    servers.add(commitServer)
+    await new Promise<void>((resolve) =>
+      commitServer.listen(0, '127.0.0.1', resolve),
+    )
+    const address = commitServer.address()
+    if (!address || typeof address === 'string')
+      throw new Error('Proxy did not bind a local port')
+    const origin = `http://127.0.0.1:${address.port}`
+    await fetch(`${origin}/_control/mode?value=replacement`)
+    const page = async (cursor?: string) => {
+      const url = new URL('/xrpc/com.atproto.space.listRepoOps', origin)
+      url.searchParams.set('repo', 'did:example:rei')
+      if (cursor) url.searchParams.set('cursor', cursor)
+      return fetch(url)
+    }
+    await page()
+    const failedTerminalPage = await page('replacement-1')
+    expect(failedTerminalPage.status).toBe(502)
+    expect(upstreamPages).toBe(256)
+    const statusResponse = await fetch(`${origin}/_control/status`)
+    expect(statusResponse.status).toBe(200)
+  })
 })
