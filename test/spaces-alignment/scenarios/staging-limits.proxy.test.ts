@@ -42,7 +42,17 @@ describe('staging limits proxy', () => {
     expect((await page('did:example:rei', cursorA)).status).toBe(503)
     expect((await page('did:example:motoko', cursorB)).status).toBe(503)
     const status = await (await fetch(`${origin}/_control/status`)).json()
-    expect(status).toMatchObject({ pages: 2, interruptions: 2, targetCount: 2 })
+    expect(status).toMatchObject({
+      pages: 2,
+      interruptions: 2,
+      targetCount: 2,
+      requests: [
+        { mode: 'limit', repo: 'did:example:rei', cursor: null },
+        { mode: 'limit', repo: 'did:example:motoko', cursor: null },
+        { mode: 'limit', repo: 'did:example:rei', cursor: cursorA },
+        { mode: 'limit', repo: 'did:example:motoko', cursor: cursorB },
+      ],
+    })
   })
 
   it('uses a bounded terminal PDS page with the authenticated endpoint', async () => {
