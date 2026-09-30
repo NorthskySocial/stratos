@@ -34,6 +34,7 @@ export interface ScenarioContext {
 }
 
 const SHA = /^[0-9a-f]{40}$/
+const REVIEW_MODELS = new Set(['gpt-5.6-terra', 'gpt-6.1-sol'])
 
 function record(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -61,13 +62,16 @@ export function validateReviewReceipt(
   const reviews = record(receipt.reviews)
   for (const kind of ['standards', 'spec'] as const) {
     const review = record(reviews[kind])
+    if (typeof review.model !== 'string') {
+      throw new Error(`${kind} review model must be a string`)
+    }
     if (
-      review.model !== 'gpt-5.6-terra' ||
+      !REVIEW_MODELS.has(review.model) ||
       review.verdict !== 'approved' ||
       review.reviewedSha !== candidateSha
     ) {
       throw new Error(
-        `${kind} review does not approve this candidate with Terra`,
+        `${kind} review does not approve this candidate with an accepted model`,
       )
     }
     if (
