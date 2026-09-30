@@ -1,5 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import {
   chmod,
@@ -15,9 +14,9 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { promisify } from 'node:util'
 import { buildAlphaPds } from './build-alpha-pds.js'
 import type { PdsBuildReceipt, PdsSourcePin } from './build-alpha-pds.js'
+import { CommandFailure, executeCommand, sha256File } from './command.js'
 import {
   suiteExecutionOrder,
   validateAssertions,
@@ -25,7 +24,6 @@ import {
 } from './rules.js'
 import type { AssertionResult, ReviewReceipt, ScenarioSuite } from './rules.js'
 
-const exec = promisify(execFile)
 const harnessDirectory = dirname(fileURLToPath(import.meta.url))
 interface SourcePins {
   atmosphereInABox: {
@@ -102,24 +100,16 @@ export async function command(
   env?: NodeJS.ProcessEnv,
 ): Promise<CommandResult> {
   try {
-    const { stdout } = await exec(file, args, {
+    const output = await executeCommand(file, args, {
       cwd,
       env: env ?? process.env,
-      maxBuffer: 8 * 1024 * 1024,
-      timeout: 45 * 60_000,
     })
-    return { output: stdout, exitCode: 0 }
+    return { output, exitCode: 0 }
   } catch (error) {
     throw new Error(
-      `${file} ${args[0] ?? ''} exited ${(error as { code?: number | string }).code ?? 'unknown'}`,
+      `${file} ${args[0] ?? ''} exited ${error instanceof CommandFailure ? (error.code ?? 'unknown') : 'unknown'}`,
     )
   }
-}
-
-async function sha256(path: string): Promise<string> {
-  return createHash('sha256')
-    .update(await readFile(path))
-    .digest('hex')
 }
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -151,7 +141,7 @@ export async function pinnedCheckout(
     throw new Error('AiaB source is not the clean pinned checkout')
   }
   for (const [path, expected] of Object.entries(pin.sha256)) {
-    if ((await sha256(join(checkout, path))) !== expected)
+    if ((await sha256File(join(checkout, path))) !== expected)
       throw new Error(`Pinned AiaB ${path} hash differs`)
   }
   return checkout
@@ -233,7 +223,7 @@ async function exportSources(
     ],
     sandboxCheckout,
   )
-  const atmosphereFingerprint = await sha256(archive)
+  const atmosphereFingerprint = await sha256File(archive)
   await command('tar', ['-xf', archive, '-C', atmosphere], workspace)
   const candidateArchive = join(reportDirectory, 'candidate-source.tar')
   await command(
@@ -266,9 +256,21 @@ async function exportSources(
     const sourcePath = join(stratos, 'test/spaces-alignment', from)
     const destination = join(atmosphere, to)
     await copyFile(sourcePath, destination)
-    templateHashes[to] = await sha256(sourcePath)
+    templateHashes[to] = await sha256File(sourcePath)
   }
   return { atmosphereFingerprint, templateHashes }
+}
+
+function sandboxEnvironment(dockerConfig: string): NodeJS.ProcessEnv {
+  return {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) => !key.startsWith('COMPOSE_'),
+      ),
+    ),
+    DOCKER_CONFIG: dockerConfig,
+    COMPOSE_PROFILES: '',
+  }
 }
 
 export async function runSandbox(
@@ -332,11 +334,14 @@ export async function runSandbox(
   const workspace = await mkdtemp(join(tmpdir(), 'stratos-spaces-alignment-'))
   const projectName = `stratos-${randomUUID().replaceAll('-', '').slice(0, 12)}`
   const atmosphere = join(workspace, 'atmosphereinabox')
+  const composeFile = join(atmosphere, 'compose.yaml')
   const dockerConfig = join(workspace, 'docker-config')
-  const childEnvironment = { ...process.env, DOCKER_CONFIG: dockerConfig }
+  const childEnvironment = sandboxEnvironment(dockerConfig)
   const steps: Array<{ name: string; exitCode: 0 }> = []
   const results: Record<string, AssertionResult[]> = {}
   let failedStep = 'docker-config'
+  let gateError: unknown
+  let summary: Record<string, unknown> | undefined
   const runStep = async (
     name: string,
     file: string,
@@ -389,6 +394,8 @@ export async function runSandbox(
       '--subnet',
       'auto',
     ])
+    if (!existsSync(composeFile))
+      throw new Error('Sandbox did not generate compose.yaml')
     const sandboxManifest = JSON.parse(
       await readFile(join(atmosphere, 'state/manifest.json'), 'utf8'),
     ) as { domain?: string }
@@ -432,6 +439,7 @@ export async function runSandbox(
       failedStep = `suite:${suite.id}`
       results[suite.id] = await suite.run({
         sandboxDirectory: atmosphere,
+        composeFile,
         projectName,
         reportDirectory: options.reportDirectory,
         runCommand: async (file, args, cwd) =>
@@ -440,7 +448,7 @@ export async function runSandbox(
       validateAssertions(suite, results[suite.id])
     }
     failedStep = 'write-receipt'
-    const summary = {
+    summary = {
       candidateSha: candidate,
       baseSha: base,
       reviewedSha: receipt.candidateSha,
@@ -459,12 +467,50 @@ export async function runSandbox(
       })),
       steps,
     }
-    await writeFile(
-      join(options.reportDirectory, 'receipt.json'),
-      JSON.stringify(summary, null, 2),
-      { mode: 0o600 },
-    )
   } catch (error) {
+    gateError = error
+  }
+
+  let cleanup: Record<string, unknown>
+  if (existsSync(composeFile)) {
+    try {
+      await command(
+        'docker',
+        [
+          'compose',
+          '--file',
+          composeFile,
+          '--project-name',
+          projectName,
+          '--project-directory',
+          atmosphere,
+          'down',
+          '--volumes',
+          '--remove-orphans',
+        ],
+        atmosphere,
+        childEnvironment,
+      )
+      cleanup = { status: 'passed', exitCode: 0 }
+    } catch (error) {
+      cleanup = {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        recoveryComposeFile: composeFile,
+      }
+      const cleanupError = new Error(`Sandbox cleanup failed: ${cleanup.error}`)
+      gateError = gateError
+        ? new AggregateError(
+            [gateError, cleanupError],
+            'Sandbox gate and cleanup failed',
+          )
+        : cleanupError
+    }
+  } else {
+    cleanup = { status: 'not-needed' }
+  }
+
+  if (gateError) {
     await writeFile(
       join(options.reportDirectory, 'failure.json'),
       JSON.stringify(
@@ -474,32 +520,26 @@ export async function runSandbox(
           projectName,
           failedStep,
           completedSteps: steps,
-          error: error instanceof Error ? error.message : String(error),
+          error:
+            gateError instanceof Error ? gateError.message : String(gateError),
+          cleanup,
         },
         null,
         2,
       ),
       { mode: 0o600 },
     )
-    throw error
-  } finally {
-    await command(
-      'docker',
-      [
-        'compose',
-        '--project-name',
-        projectName,
-        '--project-directory',
-        atmosphere,
-        'down',
-        '--volumes',
-        '--remove-orphans',
-      ],
-      atmosphere,
-      childEnvironment,
-    ).catch(() => {})
-    await rm(workspace, { recursive: true, force: true })
+    if (cleanup.status !== 'failed')
+      await rm(workspace, { recursive: true, force: true })
+    throw gateError
   }
+
+  await writeFile(
+    join(options.reportDirectory, 'receipt.json'),
+    JSON.stringify({ ...summary, cleanup }, null, 2),
+    { mode: 0o600 },
+  )
+  await rm(workspace, { recursive: true, force: true })
 }
 
 function summarizeReviews(

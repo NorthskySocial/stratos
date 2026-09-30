@@ -27,6 +27,7 @@ export interface ScenarioSuite {
 
 export interface ScenarioContext {
   sandboxDirectory: string
+  composeFile: string
   projectName: string
   reportDirectory: string
   runCommand: (file: string, args: string[], cwd: string) => Promise<string>

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   command,
@@ -30,6 +30,9 @@ afterEach(async () => {
   delete process.env.RUNNER_TEST_IMPOSTOR_ACCOUNT
   delete process.env.RUNNER_TEST_FAIL_PDS_BUILD
   delete process.env.RUNNER_TEST_DOCKER_LOG
+  delete process.env.RUNNER_TEST_FAIL_CLEANUP
+  delete process.env.COMPOSE_FILE
+  delete process.env.COMPOSE_PROJECT_NAME
   await Promise.all(
     temporary
       .splice(0)
@@ -170,7 +173,7 @@ describe('sandbox preflight', () => {
     await writeFile(
       join(candidateRepo, 'test/spaces-alignment/scenarios/baseline.ts'),
       `export const suite = { id: 'baseline', requiredAssertions: ['browser-pass'], async run(context) {
-        const output = await context.runCommand('docker', ['compose', 'run'], context.sandboxDirectory)
+        const output = await context.runCommand('docker', ['compose', '--file', context.composeFile, 'run'], context.sandboxDirectory)
         if (!output.includes('browser-ok')) throw new Error('Browser failed')
         if (process.env.RUNNER_TEST_EMPTY_ASSERTIONS) return []
         return [{ id: 'browser-pass', status: 'passed' }]
@@ -310,6 +313,8 @@ const fs = require('node:fs')
 const assert = require('node:assert/strict')
 assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-spaces-alignment-'))
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
+assert.equal(process.env.COMPOSE_FILE, undefined)
+assert.equal(process.env.COMPOSE_PROJECT_NAME, undefined)
 const args = process.argv.slice(2)
 if (args[0] !== 'task') process.exit(2)
 if (args[1] === 'install') assert.deepEqual(args, ['task', 'install'])
@@ -329,6 +334,7 @@ if (args[1] === 'sandbox' && args[2] === 'up') assert.deepEqual(args, ['task', '
 if (args[1] === 'sandbox' && args[2] === 'seed') assert.deepEqual(args, ['task', 'sandbox', 'seed'])
 if (process.env.RUNNER_TEST_FAIL_STEP && process.argv.includes(process.env.RUNNER_TEST_FAIL_STEP)) process.exit(7)
 if (process.argv.includes('create')) {
+  fs.writeFileSync('compose.yaml', 'services: {}\\n')
   fs.mkdirSync('state', { recursive: true })
   fs.writeFileSync('state/manifest.json', JSON.stringify({
     domain: process.env.RUNNER_TEST_WRONG_DOMAIN ? 'atmosbox.internal' : 'atmosbox.test'
@@ -355,7 +361,12 @@ const assert = require('node:assert/strict')
 const args = process.argv.slice(2)
 assert.ok(process.env.DOCKER_CONFIG?.startsWith('/tmp/stratos-spaces-alignment-'))
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
+assert.equal(process.env.COMPOSE_FILE, undefined)
+assert.equal(process.env.COMPOSE_PROJECT_NAME, undefined)
 if (args.includes('run')) {
+  const composeFile = args[args.indexOf('--file') + 1]
+  assert.ok(composeFile.endsWith('/compose.yaml'))
+  assert.ok(fs.existsSync(composeFile))
   assert.equal(fs.statSync('state/browser-accounts.json').mode & 0o777, 0o444)
   const accounts = JSON.parse(fs.readFileSync('state/browser-accounts.json', 'utf8')).accounts
   assert.equal(Object.keys(accounts).length, 2)
@@ -364,15 +375,21 @@ if (args.includes('run')) {
   console.log('browser-ok')
 }
 if (args.includes('down')) {
+  const composeFile = args[args.indexOf('--file') + 1]
+  assert.ok(composeFile.endsWith('/compose.yaml'))
+  assert.ok(fs.existsSync(composeFile))
   assert.ok(args.includes('--project-name'))
   assert.ok(args.includes('--volumes'))
   assert.ok(args.includes('--remove-orphans'))
   fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, process.env.DOCKER_CONFIG + '\\n')
+  if (process.env.RUNNER_TEST_FAIL_CLEANUP) process.exit(9)
 }
 `
     await writeFile(join(bin, 'deno'), fakeDeno, { mode: 0o755 })
     await writeFile(join(bin, 'docker'), fakeDocker, { mode: 0o755 })
     process.env.PATH = `${bin}:${originalPath}`
+    process.env.COMPOSE_FILE = '/unsafe/inherited-compose.yaml'
+    process.env.COMPOSE_PROJECT_NAME = 'unsafe-project'
     const dockerLog = join(root, 'docker.log')
     process.env.RUNNER_TEST_DOCKER_LOG = dockerLog
     const options = {
@@ -578,11 +595,33 @@ if (args.includes('down')) {
       'up',
       'seed',
     ])
+    expect(receipt.cleanup).toEqual({ status: 'passed', exitCode: 0 })
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
-    expect(dockerConfigs).toHaveLength(9)
-    expect(new Set(dockerConfigs).size).toBe(9)
+    expect(dockerConfigs).toHaveLength(7)
+    expect(new Set(dockerConfigs).size).toBe(7)
+
+    process.env.RUNNER_TEST_FAIL_CLEANUP = '1'
+    const cleanupFailedReport = join(root, 'cleanup-failed-report')
+    await expect(
+      runSandbox(
+        { ...options, reportDirectory: cleanupFailedReport },
+        dependencies,
+      ),
+    ).rejects.toThrow('Sandbox cleanup failed: docker compose exited 9')
+    const cleanupFailure = JSON.parse(
+      await readFile(join(cleanupFailedReport, 'failure.json'), 'utf8'),
+    )
+    expect(cleanupFailure.cleanup.status).toBe('failed')
+    expect(cleanupFailure.cleanup.error).toBe('docker compose exited 9')
+    expect(cleanupFailure.cleanup.recoveryComposeFile).toMatch(/compose\.yaml$/)
+    expect(await stat(cleanupFailure.cleanup.recoveryComposeFile)).toBeDefined()
+    await rm(dirname(dirname(cleanupFailure.cleanup.recoveryComposeFile)), {
+      recursive: true,
+      force: true,
+    })
+    delete process.env.RUNNER_TEST_FAIL_CLEANUP
 
     await writeFile(
       join(

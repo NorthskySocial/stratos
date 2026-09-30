@@ -1,11 +1,8 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-
-const exec = promisify(execFile)
+import { CommandFailure, executeCommand, sha256File } from './command.js'
 
 export interface PdsSourcePin {
   url: string
@@ -30,24 +27,18 @@ async function command(
   env?: NodeJS.ProcessEnv,
 ): Promise<string> {
   try {
-    const { stdout } = await exec(file, args, {
-      cwd,
-      env: env ?? process.env,
-      maxBuffer: 8 * 1024 * 1024,
-      timeout: 45 * 60_000,
-    })
-    return stdout.trim()
+    return (
+      await executeCommand(file, args, {
+        cwd,
+        env: env ?? process.env,
+      })
+    ).trim()
   } catch (error) {
-    const code = (error as { code?: string | number }).code ?? 'unknown'
+    const code =
+      error instanceof CommandFailure ? (error.code ?? 'unknown') : 'unknown'
     const step = args[0] === 'image' ? 'image inspect' : (args[0] ?? 'command')
     throw new Error(`${file} ${step} failed with exit ${code}`)
   }
-}
-
-async function sha256(path: string): Promise<string> {
-  return createHash('sha256')
-    .update(await readFile(path))
-    .digest('hex')
 }
 
 export async function buildAlphaPds(
@@ -77,8 +68,8 @@ export async function buildAlphaPds(
     if (sourceSha !== pin.revision || status)
       throw new Error('Pinned PDS source is dirty or has drifted')
 
-    const dockerfileSha256 = await sha256(join(source, pin.dockerfile))
-    const lockfileSha256 = await sha256(join(source, pin.lockfile))
+    const dockerfileSha256 = await sha256File(join(source, pin.dockerfile))
+    const lockfileSha256 = await sha256File(join(source, pin.lockfile))
     const dockerfile = await readFile(join(source, pin.dockerfile), 'utf8')
     const baseTags = [
       ...dockerfile.matchAll(/^FROM\s+([^\s]+)(?:\s+AS\s+[^\s]+)?/gim),

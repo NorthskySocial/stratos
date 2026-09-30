@@ -16,6 +16,7 @@ describe('baseline browser receipt', () => {
     const calls: Array<{ file: string; args: string[]; cwd: string }> = []
     const results = await suite.run({
       sandboxDirectory: '/tmp/faye-sandbox',
+      composeFile: '/tmp/faye-sandbox/compose.yaml',
       projectName: 'faye-test',
       reportDirectory: '/tmp/faye-report',
       async runCommand(file, args, cwd) {
@@ -29,6 +30,8 @@ describe('baseline browser receipt', () => {
         cwd: '/tmp/faye-sandbox',
         args: [
           'compose',
+          '--file',
+          '/tmp/faye-sandbox/compose.yaml',
           '--project-name',
           'faye-test',
           '--project-directory',
@@ -48,6 +51,7 @@ describe('baseline browser receipt', () => {
   it('rejects missing and invalid browser receipts', async () => {
     const context = (output: string) => ({
       sandboxDirectory: '/tmp/faye-sandbox',
+      composeFile: '/tmp/faye-sandbox/compose.yaml',
       projectName: 'faye-test',
       reportDirectory: '/tmp/faye-report',
       async runCommand() {
