@@ -126,13 +126,16 @@ async function generalFeed() {
 }
 
 async function waitForFeedText(text, present) {
-  await waitFor(async () => {
-    const response = await generalFeed()
-    if (response.status !== 200) return false
-    const feed = response.body?.feed
-    if (!Array.isArray(feed)) return false
-    return feed.some((item) => item?.post?.record?.text === text) === present
-  }, `${present ? 'published' : 'deleted'} staged record`)
+  await waitFor(
+    async () => {
+      const response = await generalFeed()
+      if (response.status !== 200) return false
+      const feed = response.body?.feed
+      if (!Array.isArray(feed)) return false
+      return feed.some((item) => item?.post?.record?.text === text) === present
+    },
+    `${present ? 'published' : 'deleted'} staged record`,
+  )
 }
 
 const caddyPath = join(sandbox, 'state/Caddyfile')
@@ -250,7 +253,13 @@ try {
     'services:\n  feedgen-e2e-rust:\n    environment:\n      FEEDGEN_PROJECTION_MAX_BYTES: "131072"\n      FEEDGEN_PROJECTION_MAX_AGE_MS: "86400000"\n      FEEDGEN_STAGE_TARGET_MAX_BYTES: "3500"\n',
     { mode: 0o600 },
   )
-  await withLimits(['up', '-d', '--no-deps', '--force-recreate', 'feedgen-e2e-rust'])
+  await withLimits([
+    'up',
+    '-d',
+    '--no-deps',
+    '--force-recreate',
+    'feedgen-e2e-rust',
+  ])
   await control('mode?value=rollback')
   await waitFor(
     async () =>
@@ -267,7 +276,13 @@ try {
     'services:\n  feedgen-e2e-rust:\n    environment:\n      FEEDGEN_PROJECTION_MAX_BYTES: "131072"\n      FEEDGEN_PROJECTION_MAX_AGE_MS: "86400000"\n',
     { mode: 0o600 },
   )
-  await withLimits(['up', '-d', '--no-deps', '--force-recreate', 'feedgen-e2e-rust'])
+  await withLimits([
+    'up',
+    '-d',
+    '--no-deps',
+    '--force-recreate',
+    'feedgen-e2e-rust',
+  ])
   await control('mode?value=replacement')
   await waitForFeedText('staged replacement', true)
   assert.equal((await generalFeed()).status, 200)

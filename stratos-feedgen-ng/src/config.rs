@@ -300,9 +300,8 @@ struct StageBudgetValues {
 
 const MEMORY_RETENTION_MAX_AGE: Duration = Duration::from_secs(60 * 60);
 pub const MEMORY_RETENTION_MAX_BYTES: u64 = 16 * 1024 * 1024;
-const DEFAULT_STAGE_TARGET_ROWS: u64 = 2_048;
+const DEFAULT_STAGE_TARGET_ROWS: u64 = MAX_SPACE_PROMOTION_STAGE_ROWS as u64;
 const DEFAULT_STAGE_GLOBAL_ROWS: u64 = 8_192;
-const MAX_STAGE_TARGET_BYTES: u64 = 16 * 1024 * 1024;
 pub(crate) const MAX_SPACE_PROMOTION_STAGE_ROWS: i64 = 1_024;
 pub(crate) const MAX_SPACE_PROMOTION_STAGE_BYTES: i64 = 8 * 1024 * 1024;
 
@@ -354,9 +353,9 @@ fn parse_stage_budget(
         global_rows: read(values.global_rows, DEFAULT_STAGE_GLOBAL_ROWS)?,
         target_bytes: read(
             values.target_bytes,
-            (max_bytes / 4).min(MAX_STAGE_TARGET_BYTES),
+            (max_bytes / 4).min(MAX_SPACE_PROMOTION_STAGE_BYTES as u64),
         )?,
-        global_bytes: read(values.global_bytes, max_bytes)?,
+        global_bytes: read(values.global_bytes, max_bytes / 2)?,
     };
     budget.validate(max_bytes)?;
     Ok(budget)
@@ -364,11 +363,11 @@ fn parse_stage_budget(
 
 impl SpaceStageBudget {
     pub fn validate(&self, max_bytes: u64) -> Result<(), ConfigError> {
-        if self.target_rows > DEFAULT_STAGE_TARGET_ROWS
+        if self.target_rows > MAX_SPACE_PROMOTION_STAGE_ROWS as u64
             || self.target_rows > self.global_rows
-            || self.target_bytes > MAX_STAGE_TARGET_BYTES
+            || self.target_bytes > MAX_SPACE_PROMOTION_STAGE_BYTES as u64
             || self.target_bytes > self.global_bytes
-            || self.global_bytes > max_bytes
+            || self.global_bytes > max_bytes / 2
             || [
                 self.target_rows,
                 self.global_rows,
@@ -785,7 +784,7 @@ mod tests {
             target_bytes: Some(target_bytes.to_owned()),
             global_bytes: Some(global_bytes.to_owned()),
         };
-        let valid = parse_stage_budget(131_072, values("1024", "4096", "65536", "100000")).unwrap();
+        let valid = parse_stage_budget(131_072, values("1024", "4096", "32768", "60000")).unwrap();
         assert_eq!(
             (
                 valid.target_rows,
@@ -793,21 +792,32 @@ mod tests {
                 valid.target_bytes,
                 valid.global_bytes
             ),
-            (1024, 4096, 65_536, 100_000)
+            (1024, 4096, 32_768, 60_000)
         );
         for invalid in [
             values("0", "4096", "65536", "100000"),
-            values("2049", "4096", "65536", "100000"),
+            values("1025", "4096", "32768", "60000"),
             values("1024", "1000", "65536", "100000"),
-            values("1024", "4096", "0", "100000"),
-            values("1024", "4096", "100001", "100000"),
-            values("1024", "4096", "65536", "131073"),
+            values("1024", "4096", "0", "60000"),
+            values("1024", "4096", "60001", "60000"),
+            values("1024", "4096", "32768", "65537"),
         ] {
             assert!(matches!(
                 parse_stage_budget(131_072, invalid),
                 Err(ConfigError::InvalidProjectionRetention)
             ));
         }
+        assert!(matches!(
+            parse_stage_budget(
+                16 * 1024 * 1024,
+                values("1024", "4096", "8388609", "8388608")
+            ),
+            Err(ConfigError::InvalidProjectionRetention)
+        ));
+        let defaults = super::SpaceStageBudget::for_projection(16 * 1024 * 1024).unwrap();
+        assert_eq!(defaults.target_rows, 1_024);
+        assert_eq!(defaults.target_bytes, 4 * 1024 * 1024);
+        assert_eq!(defaults.global_bytes, 8 * 1024 * 1024);
     }
 
     #[test]

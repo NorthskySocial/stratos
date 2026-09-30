@@ -43,6 +43,12 @@ impl EncryptedStore {
             .map_err(|_| StoreError::InvalidProjectionMutation)?;
         let max_bytes =
             i64::try_from(max_bytes).map_err(|_| StoreError::InvalidProjectionMutation)?;
+        let published_capacity = max_bytes
+            .checked_sub(
+                i64::try_from(budget.global_bytes)
+                    .map_err(|_| StoreError::InvalidProjectionMutation)?,
+            )
+            .ok_or(StoreError::InvalidProjectionMutation)?;
         let limit = i64::from(limit.clamp(1, MAX_PURGE_BATCH));
         let transaction = self
             .connection
@@ -150,11 +156,7 @@ impl EncryptedStore {
                     |row| row.get(0),
                 )
                 .map_err(StoreError::Open)?;
-            let staged_bytes = super::space::stage_usage(&transaction, None, None)?.bytes;
-            let bytes = published_bytes
-                .checked_add(staged_bytes)
-                .ok_or(StoreError::SpaceStageLimit)?;
-            if bytes <= max_bytes {
+            if published_bytes <= published_capacity {
                 0
             } else {
                 transaction
@@ -179,10 +181,6 @@ impl EncryptedStore {
                 |row| row.get(0),
             )
             .map_err(StoreError::Open)?;
-        let staged_bytes = super::space::stage_usage(&transaction, None, None)?.bytes;
-        let bytes_remaining = published_bytes
-            .checked_add(staged_bytes)
-            .ok_or(StoreError::SpaceStageLimit)?;
         transaction.commit().map_err(StoreError::Open)?;
         if !expired_targets.is_empty() {
             eprintln!(
@@ -193,7 +191,7 @@ impl EncryptedStore {
         Ok(ProjectionCompaction {
             deleted: deleted as u64,
             has_more: expired_remaining
-                || bytes_remaining > max_bytes
+                || published_bytes > published_capacity
                 || expired_targets.len() == limit as usize,
         })
     }
