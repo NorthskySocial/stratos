@@ -1,0 +1,596 @@
+import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { buildAlphaPds } from './build-alpha-pds.js'
+import type { PdsBuildReceipt, PdsSourcePin } from './build-alpha-pds.js'
+import { CommandFailure, executeCommand, sha256File } from './command.js'
+import {
+  suiteExecutionOrder,
+  validateAssertions,
+  validateReviewReceipt,
+} from './rules.js'
+import type { AssertionResult, ReviewReceipt, ScenarioSuite } from './rules.js'
+
+const harnessDirectory = dirname(fileURLToPath(import.meta.url))
+interface SourcePins {
+  atmosphereInABox: {
+    url: string
+    revision: string
+    sha256: Record<string, string>
+    archivePaths: string[]
+  }
+  spacesPds: PdsSourcePin
+}
+
+const sources = JSON.parse(
+  await readFile(join(harnessDirectory, 'sources.json'), 'utf8'),
+) as SourcePins
+
+export interface RunnerDependencies {
+  sourcePins?: SourcePins
+  runnerSource?: string
+  buildPds?: (
+    pin: SourcePins['spacesPds'],
+    reportDirectory: string,
+  ) => Promise<PdsBuildReceipt>
+}
+
+interface Options {
+  sandboxDirectory: string
+  source: string
+  suite: string
+  reportDirectory: string
+  reviewReceipt: string
+}
+
+interface CommandResult {
+  output: string
+  exitCode: 0
+}
+
+export function parseOptions(args: string[]): Options {
+  const names: Record<string, keyof Options> = {
+    '--sandbox-dir': 'sandboxDirectory',
+    '--source': 'source',
+    '--suite': 'suite',
+    '--report-dir': 'reportDirectory',
+    '--review-receipt': 'reviewReceipt',
+  }
+  const options: Partial<Options> = {}
+  for (let i = 0; i < args.length; i += 2) {
+    const key = names[args[i]]
+    const value = args[i + 1]
+    if (!key || !value || value.startsWith('--') || options[key])
+      throw new Error(`Invalid argument ${args[i] ?? ''}`)
+    options[key] = value
+  }
+  if (Object.keys(options).length !== Object.keys(names).length)
+    throw new Error('Five required options must be supplied')
+  for (const key of [
+    'sandboxDirectory',
+    'source',
+    'reportDirectory',
+    'reviewReceipt',
+  ] as const) {
+    if (!isAbsolute(options[key]!))
+      throw new Error(`${key} must be an absolute path`)
+  }
+  if (!/^[a-z][a-z0-9-]*$/.test(options.suite!))
+    throw new Error('Invalid suite ID')
+  return options as Options
+}
+
+export async function command(
+  file: string,
+  args: string[],
+  cwd: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<CommandResult> {
+  try {
+    const output = await executeCommand(file, args, {
+      cwd,
+      env: env ?? process.env,
+    })
+    return { output, exitCode: 0 }
+  } catch (error) {
+    throw new Error(
+      `${file} ${args[0] ?? ''} exited ${error instanceof CommandFailure ? (error.code ?? 'unknown') : 'unknown'}`,
+    )
+  }
+}
+
+async function git(cwd: string, ...args: string[]): Promise<string> {
+  return (await command('git', args, cwd)).output.trim()
+}
+
+export async function pinnedCheckout(
+  path: string,
+  pin: { url: string; revision: string; sha256: Record<string, string> },
+): Promise<string> {
+  let checkout = path
+  if (!existsSync(checkout)) {
+    const acquisition = await mkdtemp(join(tmpdir(), 'stratos-aiab-source-'))
+    checkout = join(acquisition, 'atmosphereinabox')
+    await command(
+      'git',
+      ['clone', '--no-checkout', pin.url, checkout],
+      acquisition,
+    )
+    await command('git', ['fetch', 'origin', pin.revision], checkout)
+    await command('git', ['checkout', '--detach', pin.revision], checkout)
+  }
+  if (
+    (await git(checkout, 'rev-parse', '--show-toplevel')) !==
+      (await realpath(checkout)) ||
+    (await git(checkout, 'rev-parse', 'HEAD')) !== pin.revision ||
+    (await git(checkout, 'status', '--porcelain', '--untracked-files=no'))
+  ) {
+    throw new Error('AiaB source is not the clean pinned checkout')
+  }
+  for (const [path, expected] of Object.entries(pin.sha256)) {
+    if ((await sha256File(join(checkout, path))) !== expected)
+      throw new Error(`Pinned AiaB ${path} hash differs`)
+  }
+  return checkout
+}
+
+async function discoverSuites(source: string): Promise<ScenarioSuite[]> {
+  const suiteDirectory = join(source, 'test/spaces-alignment/scenarios')
+  const files = (await readdir(suiteDirectory)).filter((file) =>
+    /^[a-z][a-z0-9-]*\.ts$/.test(file),
+  )
+  const tracked = new Set(
+    (
+      await git(source, 'ls-files', '--', 'test/spaces-alignment/scenarios')
+    ).split('\n'),
+  )
+  const suites: ScenarioSuite[] = []
+  for (const file of files) {
+    if (!tracked.has(`test/spaces-alignment/scenarios/${file}`))
+      throw new Error(`Untracked scenario: ${file}`)
+    const module = (await import(
+      pathToFileURL(join(suiteDirectory, file)).href
+    )) as { suite?: ScenarioSuite }
+    if (!module.suite) throw new Error(`Scenario ${file} has no suite export`)
+    suites.push(module.suite)
+  }
+  return suites
+}
+
+export async function ensureSeparatePaths(options: Options): Promise<void> {
+  const source = await realpath(options.source)
+  const sandbox = existsSync(options.sandboxDirectory)
+    ? await realpath(options.sandboxDirectory)
+    : resolve(options.sandboxDirectory)
+  const report = resolve(options.reportDirectory)
+  if (existsSync(report))
+    throw new Error('Report directory already exists; use a fresh private path')
+  for (const [left, right] of [
+    [source, sandbox],
+    [source, report],
+    [sandbox, report],
+  ]) {
+    if (
+      left === right ||
+      !relative(left, right).startsWith('..') ||
+      !relative(right, left).startsWith('..')
+    ) {
+      throw new Error(
+        'Source, sandbox and report paths must not alias or contain each other',
+      )
+    }
+  }
+}
+
+async function exportSources(
+  sandboxCheckout: string,
+  source: string,
+  candidate: string,
+  workspace: string,
+  reportDirectory: string,
+  pins: SourcePins,
+): Promise<{
+  atmosphereFingerprint: string
+  templateHashes: Record<string, string>
+}> {
+  const atmosphere = join(workspace, 'atmosphereinabox')
+  const stratos = join(workspace, 'stratos')
+  await mkdir(atmosphere)
+  await mkdir(stratos)
+  const archive = join(reportDirectory, 'aiab-source.tar')
+  await command(
+    'git',
+    [
+      'archive',
+      '--format=tar',
+      '--output',
+      archive,
+      pins.atmosphereInABox.revision,
+      ...pins.atmosphereInABox.archivePaths,
+    ],
+    sandboxCheckout,
+  )
+  const atmosphereFingerprint = await sha256File(archive)
+  await command('tar', ['-xf', archive, '-C', atmosphere], workspace)
+  const candidateArchive = join(reportDirectory, 'candidate-source.tar')
+  await command(
+    'git',
+    ['archive', '--format=tar', '--output', candidateArchive, candidate],
+    source,
+  )
+  await command('tar', ['-xf', candidateArchive, '-C', stratos], workspace)
+  const templateFiles = [
+    ['templates/feedgen-ng-e2e.yaml', 'stacks/feedgen-ng-e2e.yaml'],
+    [
+      'templates/feedgen-ng-e2e.definition.json',
+      'stacks/feedgen-ng-e2e.definition.json',
+    ],
+    [
+      'templates/feedgen-ng-e2e-browser.mjs',
+      'runtime/feedgen-ng-e2e-browser.mjs',
+    ],
+    [
+      'templates/feedgen-ng-e2e-clubhouse.yaml',
+      'stacks/feedgen-ng-e2e-clubhouse.yaml',
+    ],
+    [
+      'templates/feedgen-ng-e2e-clubhouse.definition.json',
+      'stacks/feedgen-ng-e2e-clubhouse.definition.json',
+    ],
+  ]
+  const templateHashes: Record<string, string> = {}
+  for (const [from, to] of templateFiles) {
+    const sourcePath = join(stratos, 'test/spaces-alignment', from)
+    const destination = join(atmosphere, to)
+    await copyFile(sourcePath, destination)
+    templateHashes[to] = await sha256File(sourcePath)
+  }
+  return { atmosphereFingerprint, templateHashes }
+}
+
+function sandboxEnvironment(dockerConfig: string): NodeJS.ProcessEnv {
+  return {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) => !key.startsWith('COMPOSE_'),
+      ),
+    ),
+    DOCKER_CONFIG: dockerConfig,
+    COMPOSE_PROFILES: '',
+  }
+}
+
+export async function runSandbox(
+  options: Options,
+  dependencies: RunnerDependencies = {},
+): Promise<void> {
+  const pins = dependencies.sourcePins ?? sources
+  await ensureSeparatePaths(options)
+  const source = await realpath(options.source)
+  const candidate = await git(source, 'rev-parse', 'HEAD')
+  if (await git(source, 'status', '--porcelain', '--untracked-files=no'))
+    throw new Error('Candidate tracked work is dirty')
+  if (
+    source !==
+    (await realpath(
+      dependencies.runnerSource ?? join(harnessDirectory, '../..'),
+    ))
+  )
+    throw new Error('Runner must execute from the candidate checkout')
+  const reviewData = JSON.parse(
+    await readFile(options.reviewReceipt, 'utf8'),
+  ) as unknown
+  const claimedBase =
+    reviewData !== null &&
+    typeof reviewData === 'object' &&
+    !Array.isArray(reviewData)
+      ? (reviewData as Record<string, unknown>).baseSha
+      : undefined
+  const receipt = validateReviewReceipt(
+    reviewData,
+    candidate,
+    typeof claimedBase === 'string' ? claimedBase : '',
+  )
+  const base = receipt.baseSha
+  const resolvedBase = await git(
+    source,
+    'rev-parse',
+    '--verify',
+    `${base}^{commit}`,
+  ).catch(() => '')
+  if (resolvedBase !== base)
+    throw new Error('Review base is not a commit in the candidate checkout')
+  try {
+    await command(
+      'git',
+      ['merge-base', '--is-ancestor', base, candidate],
+      source,
+    )
+  } catch {
+    throw new Error('Review base must be an ancestor of the candidate')
+  }
+  const suites = suiteExecutionOrder(
+    options.suite,
+    await discoverSuites(source),
+  )
+  const sandboxCheckout = await pinnedCheckout(
+    options.sandboxDirectory,
+    pins.atmosphereInABox,
+  )
+  await mkdir(options.reportDirectory, { recursive: false, mode: 0o700 })
+  const workspace = await mkdtemp(join(tmpdir(), 'stratos-spaces-alignment-'))
+  const projectName = `stratos-${randomUUID().replaceAll('-', '').slice(0, 12)}`
+  const atmosphere = join(workspace, 'atmosphereinabox')
+  const composeFile = join(atmosphere, 'compose.yaml')
+  const dockerConfig = join(workspace, 'docker-config')
+  const childEnvironment = sandboxEnvironment(dockerConfig)
+  const steps: Array<{ name: string; exitCode: 0 }> = []
+  const results: Record<string, AssertionResult[]> = {}
+  let pds: PdsBuildReceipt | undefined
+  let failedStep = 'docker-config'
+  let gateError: unknown
+  let summary: Record<string, unknown> | undefined
+  const runStep = async (
+    name: string,
+    file: string,
+    args: string[],
+  ): Promise<string> => {
+    failedStep = name
+    const result = await command(file, args, atmosphere, childEnvironment)
+    steps.push({ name, exitCode: result.exitCode })
+    return result.output
+  }
+  try {
+    await mkdir(dockerConfig, { mode: 0o700 })
+    failedStep = 'export-sources'
+    const { atmosphereFingerprint, templateHashes } = await exportSources(
+      sandboxCheckout,
+      source,
+      candidate,
+      workspace,
+      options.reportDirectory,
+      pins,
+    )
+    failedStep = 'build-pds'
+    pds = await (dependencies.buildPds ?? buildAlphaPds)(
+      pins.spacesPds,
+      options.reportDirectory,
+    )
+    failedStep = 'prepare-stack'
+    const stackPath = join(atmosphere, 'stacks/feedgen-ng-e2e.yaml')
+    const stack = await readFile(stackPath, 'utf8')
+    if (!stack.includes('${SPACES_PDS_IMAGE_ID}'))
+      throw new Error('PDS image placeholder is missing')
+    await writeFile(
+      stackPath,
+      stack.replace('${SPACES_PDS_IMAGE_ID}', pds.imageId),
+    )
+
+    await runStep('install', 'deno', ['task', 'install'])
+    await runStep('create', 'deno', [
+      'task',
+      'sandbox',
+      'create',
+      '--pds',
+      '1',
+      '--users-per-pds',
+      '2',
+      '--preset',
+      'feedgen-ng-e2e',
+      '--project',
+      projectName,
+      '--subnet',
+      'auto',
+    ])
+    if (!existsSync(composeFile))
+      throw new Error('Sandbox did not generate compose.yaml')
+    const sandboxManifest = JSON.parse(
+      await readFile(join(atmosphere, 'state/manifest.json'), 'utf8'),
+    ) as { domain?: string }
+    if (sandboxManifest.domain !== 'atmosbox.test')
+      throw new Error(
+        'Pinned sandbox domain differs from the OAuth route templates',
+      )
+    await runStep('check', 'deno', ['task', 'sandbox', 'check'])
+    await runStep('up', 'deno', ['task', 'sandbox', 'up', '--build'])
+    await runStep('seed', 'deno', ['task', 'sandbox', 'seed'])
+    failedStep = 'prepare-browser-accounts'
+    const state = JSON.parse(
+      await readFile(join(atmosphere, 'state/accounts.json'), 'utf8'),
+    ) as {
+      accounts?: Record<string, { did?: string; password?: string }>
+    }
+    const ordinaryAccounts = Object.fromEntries(
+      Object.entries(state.accounts ?? {})
+        .filter(([handle]) => /^user[12]\.pds1\./.test(handle))
+        .map(([handle, account]) => [
+          handle,
+          { did: account.did, password: account.password },
+        ]),
+    )
+    if (
+      Object.keys(ordinaryAccounts).length !== 2 ||
+      Object.values(ordinaryAccounts).some(
+        (account) => !account.did || !account.password,
+      )
+    ) {
+      throw new Error('AiaB did not seed both ordinary PDS accounts')
+    }
+    const browserAccounts = join(atmosphere, 'state/browser-accounts.json')
+    await writeFile(
+      browserAccounts,
+      JSON.stringify({ accounts: ordinaryAccounts }),
+      { mode: 0o444 },
+    )
+    await chmod(browserAccounts, 0o444)
+    for (const suite of suites) {
+      failedStep = `suite:${suite.id}`
+      results[suite.id] = await suite.run({
+        sandboxDirectory: atmosphere,
+        composeFile,
+        projectName,
+        reportDirectory: options.reportDirectory,
+        runCommand: async (file, args, cwd) =>
+          (await command(file, args, cwd, childEnvironment)).output,
+      })
+      validateAssertions(suite, results[suite.id])
+    }
+    failedStep = 'write-receipt'
+    summary = {
+      candidateSha: candidate,
+      baseSha: base,
+      reviewedSha: receipt.candidateSha,
+      reviews: summarizeReviews(receipt),
+      atmosphereSourceSha: pins.atmosphereInABox.revision,
+      atmosphereFingerprint,
+      templateHashes,
+      pds,
+      projectName,
+      suites: suites.map((suite) => ({
+        id: suite.id,
+        requiredAssertions: suite.requiredAssertions,
+        passed: results[suite.id].length,
+        skipped: 0,
+        failed: 0,
+      })),
+      steps,
+    }
+  } catch (error) {
+    gateError = error
+  }
+
+  const cleanup: Record<string, unknown> = {}
+  const cleanupErrors: Error[] = []
+  if (existsSync(composeFile)) {
+    try {
+      await command(
+        'docker',
+        [
+          'compose',
+          '--file',
+          composeFile,
+          '--project-name',
+          projectName,
+          '--project-directory',
+          atmosphere,
+          'down',
+          '--volumes',
+          '--remove-orphans',
+        ],
+        atmosphere,
+        childEnvironment,
+      )
+      cleanup.compose = { status: 'passed', exitCode: 0 }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      cleanup.compose = { status: 'failed', error: message }
+      cleanup.recoveryComposeFile = composeFile
+      cleanupErrors.push(new Error(`Sandbox cleanup failed: ${message}`))
+    }
+  } else {
+    cleanup.compose = { status: 'not-needed' }
+  }
+  if (pds) {
+    try {
+      await command(
+        'docker',
+        ['image', 'rm', pds.imageTag],
+        atmosphere,
+        childEnvironment,
+      )
+      cleanup.image = { status: 'passed', exitCode: 0, tag: pds.imageTag }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      cleanup.image = { status: 'failed', error: message, tag: pds.imageTag }
+      cleanupErrors.push(new Error(`PDS image cleanup failed: ${message}`))
+    }
+  } else {
+    cleanup.image = { status: 'not-needed' }
+  }
+  cleanup.status = cleanupErrors.length === 0 ? 'passed' : 'failed'
+  if (cleanupErrors.length > 0) {
+    const cleanupError =
+      cleanupErrors.length === 1
+        ? cleanupErrors[0]
+        : new AggregateError(cleanupErrors, 'Sandbox cleanup failed')
+    gateError = gateError
+      ? new AggregateError(
+          [gateError, cleanupError],
+          'Sandbox gate and cleanup failed',
+        )
+      : cleanupError
+  }
+
+  if (gateError) {
+    await writeFile(
+      join(options.reportDirectory, 'failure.json'),
+      JSON.stringify(
+        {
+          candidateSha: candidate,
+          baseSha: base,
+          projectName,
+          failedStep,
+          completedSteps: steps,
+          error:
+            gateError instanceof Error ? gateError.message : String(gateError),
+          cleanup,
+        },
+        null,
+        2,
+      ),
+      { mode: 0o600 },
+    )
+    if (cleanup.status !== 'failed')
+      await rm(workspace, { recursive: true, force: true })
+    throw gateError
+  }
+
+  await writeFile(
+    join(options.reportDirectory, 'receipt.json'),
+    JSON.stringify({ ...summary, cleanup }, null, 2),
+    { mode: 0o600 },
+  )
+  await rm(workspace, { recursive: true, force: true })
+}
+
+function summarizeReviews(
+  receipt: ReviewReceipt,
+): Record<
+  string,
+  { model: string; sessionId: string; evidenceRef: string; verdict: string }
+> {
+  return Object.fromEntries(
+    (['standards', 'spec'] as const).map((kind) => [
+      kind,
+      {
+        model: receipt.reviews[kind].model,
+        sessionId: receipt.reviews[kind].sessionId,
+        evidenceRef: receipt.reviews[kind].evidenceRef,
+        verdict: receipt.reviews[kind].verdict,
+      },
+    ]),
+  )
+}
+
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  runSandbox(parseOptions(process.argv.slice(2))).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exitCode = 1
+  })
+}

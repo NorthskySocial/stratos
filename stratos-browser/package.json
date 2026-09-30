@@ -19,6 +19,7 @@
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "test": "vitest run --config vitest.config.ts",
+    "mutation": "stryker run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "prelint": "pnpm --filter @northskysocial/stratos-client run build",
     "lint": "eslint ."
@@ -31,6 +32,8 @@
     "@northskysocial/stratos-client": "workspace:*"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "typescript": "npm:@typescript/typescript6@~6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
     "vitest": "^4.0.18"
