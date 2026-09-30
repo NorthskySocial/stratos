@@ -86,6 +86,8 @@ describe('staging limits proxy', () => {
     expect(upstreamRequests[0].searchParams.get('space')).toBe(
       'at://did:example:authority/space/feed/home',
     )
+    const status = await (await fetch(`${origin}/_control/status`)).json()
+    expect(status).toMatchObject({ commitRequests: 1, commitFailures: 0 })
   })
 
   it('keeps serving after the PDS latest commit is unavailable', async () => {
@@ -115,5 +117,10 @@ describe('staging limits proxy', () => {
     expect(upstreamRequests).toBe(1)
     const statusResponse = await fetch(`${origin}/_control/status`)
     expect(statusResponse.status).toBe(200)
+    expect(await statusResponse.json()).toMatchObject({
+      commitRequests: 1,
+      commitFailures: 1,
+      lastCommitStatus: 200,
+    })
   })
 })
