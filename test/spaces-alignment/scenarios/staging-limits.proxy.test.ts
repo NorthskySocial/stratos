@@ -45,16 +45,13 @@ describe('staging limits proxy', () => {
     expect(status).toMatchObject({ pages: 2, interruptions: 2, targetCount: 2 })
   })
 
-  it('uses the commit from the terminal upstream PDS page', async () => {
-    const upstreamCursors: Array<string | undefined> = []
+  it('uses the PDS latest commit for a synthetic terminal page', async () => {
+    const upstreamRequests: URL[] = []
     const terminalCommit = { revision: 'terminal-revision' }
     const commitServer = createProxyServer(async (input: RequestInfo | URL) => {
       const url = new URL(String(input))
-      const cursor = url.searchParams.get('cursor') ?? undefined
-      upstreamCursors.push(cursor)
-      return cursor
-        ? new Response(JSON.stringify({ ops: [], commit: terminalCommit }))
-        : new Response(JSON.stringify({ ops: [], cursor: 'upstream-next' }))
+      upstreamRequests.push(url)
+      return new Response(JSON.stringify({ commit: terminalCommit }))
     })
     servers.add(commitServer)
     await new Promise<void>((resolve) =>
@@ -68,6 +65,10 @@ describe('staging limits proxy', () => {
     const page = async (cursor?: string) => {
       const url = new URL('/xrpc/com.atproto.space.listRepoOps', origin)
       url.searchParams.set('repo', 'did:example:motoko')
+      url.searchParams.set(
+        'space',
+        'at://did:example:authority/space/feed/home',
+      )
       if (cursor) url.searchParams.set('cursor', cursor)
       return fetch(url)
     }
@@ -75,14 +76,23 @@ describe('staging limits proxy', () => {
     expect((await firstPage.json()).cursor).toBe('replacement-1')
     const terminalPage = await page('replacement-1')
     expect((await terminalPage.json()).commit).toEqual(terminalCommit)
-    expect(upstreamCursors).toEqual([undefined, 'upstream-next'])
+    expect(upstreamRequests).toHaveLength(1)
+    expect(upstreamRequests[0].pathname).toBe(
+      '/xrpc/com.atproto.space.getLatestCommit',
+    )
+    expect(upstreamRequests[0].searchParams.get('repo')).toBe(
+      'did:example:motoko',
+    )
+    expect(upstreamRequests[0].searchParams.get('space')).toBe(
+      'at://did:example:authority/space/feed/home',
+    )
   })
 
-  it('keeps serving after upstream commit pagination is exhausted', async () => {
-    let upstreamPages = 0
+  it('keeps serving after the PDS latest commit is unavailable', async () => {
+    let upstreamRequests = 0
     const commitServer = createProxyServer(async () => {
-      upstreamPages += 1
-      return new Response(JSON.stringify({ ops: [], cursor: 'still-paging' }))
+      upstreamRequests += 1
+      return new Response(JSON.stringify({}), { status: 200 })
     })
     servers.add(commitServer)
     await new Promise<void>((resolve) =>
@@ -102,7 +112,7 @@ describe('staging limits proxy', () => {
     await page()
     const failedTerminalPage = await page('replacement-1')
     expect(failedTerminalPage.status).toBe(502)
-    expect(upstreamPages).toBe(256)
+    expect(upstreamRequests).toBe(1)
     const statusResponse = await fetch(`${origin}/_control/status`)
     expect(statusResponse.status).toBe(200)
   })
