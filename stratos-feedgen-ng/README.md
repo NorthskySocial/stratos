@@ -29,6 +29,14 @@ can be returned. The projection is bounded and rebuildable; its encrypted disk
 contents are not an independent authorization source. Blob content uses a
 bounded in-memory cache and never enters the projection.
 
+Authority membership selects PDS repositories and current viewer enrollment
+gates feed responses. Removing a member does not stop writes at that member's
+PDS. In-flight foreign synchronization also needs a durable generation fence
+so a page fetched before removal cannot be promoted afterward; deploy the
+Feedgen version with that fence before relying on this guarantee. An
+outstanding credential accepted by a foreign host can remain usable until its
+expiry. See [the current spaces contract](../docs/architecture/spaces-alignment.md).
+
 Run the current contract tests with:
 
 ```sh
