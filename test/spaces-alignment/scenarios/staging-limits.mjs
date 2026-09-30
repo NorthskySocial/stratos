@@ -631,7 +631,6 @@ try {
   assertions.push('interrupted-stage')
   await control('mode?value=observe')
   await delay(2_000)
-  const firstBefore = (await control('status')).firstRequests
   await configureLimits({ FEEDGEN_PROJECTION_MAX_AGE_MS: 1_000 })
   await waitFor(
     async () =>
@@ -640,9 +639,10 @@ try {
       ),
     'expired stage cleanup',
   )
+  const firstAfterCleanup = (await control('status')).firstRequests
   await configureLimits({ FEEDGEN_PROJECTION_MAX_AGE_MS: 1_000 })
   await waitFor(
-    async () => (await control('status')).firstRequests > firstBefore,
+    async () => (await control('status')).firstRequests > firstAfterCleanup,
     'restart without staged cursor',
   )
   assertions.push('expired-stage-restart')
