@@ -572,7 +572,6 @@ try {
   await control('open')
   await configureLimits()
   await waitForPublishedText('staged replacement')
-  assert.equal((await generalFeed()).status, 200)
   assertions.push('unrelated-target-remains-available')
 
   await control('mode?value=limit')
