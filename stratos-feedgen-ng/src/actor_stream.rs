@@ -117,6 +117,7 @@ impl ActorPool {
         validate_config(&config)?;
         let (commands, receiver) = mpsc::channel(32);
         let (failures, _) = watch::channel(0_u64);
+        telemetry.set_actor_pool(0, 0, config.max_connections);
         let pool = Arc::new(Self {
             lifecycle: Arc::clone(&lifecycle),
             service_did: config.service_did.clone(),
@@ -761,6 +762,7 @@ mod tests {
         )
         .unwrap();
         let mut failures = pool.failure_receiver();
+        assert_eq!(telemetry.actor_pool_stats(), (0, 0, 1));
         assert_eq!(
             pool.sync_from_store().await.unwrap(),
             super::ActorPoolStats {

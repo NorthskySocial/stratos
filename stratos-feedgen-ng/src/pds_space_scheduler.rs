@@ -194,7 +194,7 @@ async fn run_forever(
                     },
                     started.elapsed(),
                     completed.promoted,
-                    completed.membership_failures + completed.target_failures,
+                    completed.target_failures,
                     completed.deferred,
                     completed.rejected,
                 );

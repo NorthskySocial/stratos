@@ -238,24 +238,27 @@ async fn run_connection(
         let _ = socket.close(None).await;
         return Ok(());
     };
-    telemetry.record_reconciliation(
-        if summary.errors == 0 && !summary.truncated {
-            ReconciliationOutcome::Ok
-        } else if summary.errors < summary.examined || summary.truncated {
-            ReconciliationOutcome::Partial
-        } else {
-            ReconciliationOutcome::Failed
-        },
-        reconciliation_started.elapsed(),
-    );
+    let outcome = if summary.errors == 0 && !summary.truncated {
+        ReconciliationOutcome::Ok
+    } else if summary.errors < summary.examined || summary.truncated {
+        ReconciliationOutcome::Partial
+    } else {
+        ReconciliationOutcome::Failed
+    };
     if summary.errors != 0 || summary.truncated {
+        telemetry.record_reconciliation(outcome, reconciliation_started.elapsed());
         return Err(ServiceStreamError::ReconciliationIncomplete);
     }
     actor_failures.borrow_and_update();
-    actors.sync_from_store().await.map_err(|_| {
+    if actors.sync_from_store().await.is_err() {
         eprintln!("event=service_actor_sync_failed kind=store");
-        ServiceStreamError::ReconciliationIncomplete
-    })?;
+        telemetry.record_reconciliation(
+            ReconciliationOutcome::Failed,
+            reconciliation_started.elapsed(),
+        );
+        return Err(ServiceStreamError::ReconciliationIncomplete);
+    }
+    telemetry.record_reconciliation(outcome, reconciliation_started.elapsed());
 
     loop {
         tokio::select! {

@@ -189,7 +189,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
     blob_sweeper.stop().await;
     compactor.stop().await;
     stream.stop().await;
-    metrics.shutdown();
+    let _ = tokio::task::spawn_blocking(move || metrics.shutdown()).await;
     result?;
     Ok(())
 }
