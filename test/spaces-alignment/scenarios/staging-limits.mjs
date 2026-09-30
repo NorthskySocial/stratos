@@ -340,6 +340,8 @@ const handler = server.listeners('request')[0];
 server.removeAllListeners('request');
 let gate = 'open';
 let pending = [];
+let mode = 'observe';
+let pageCounts = new Map();
 server.on('request', async (req, res) => {
   const url = new URL(req.url, 'http://proxy');
   if (url.pathname === '/_control/hold-terminal' || url.pathname === '/_control/release-terminal' || url.pathname === '/_control/open' || url.pathname === '/_control/freeze') {
@@ -348,9 +350,18 @@ server.on('request', async (req, res) => {
     for (const resume of waiting) resume();
     res.end('ok'); return;
   }
+  if (url.pathname === '/_control/mode') {
+    mode = url.searchParams.get('value') || 'observe';
+    pageCounts.clear();
+    await handler(req, res);
+    return;
+  }
   if (url.pathname === '/xrpc/com.atproto.space.listRepoOps') {
-    const cursor = url.searchParams.has('cursor');
-    while (gate === 'all' || (gate === 'terminal' && cursor) || (gate === 'first' && !cursor)) {
+    const repo = url.searchParams.get('repo') || '';
+    const page = pageCounts.get(repo) || 0;
+    pageCounts.set(repo, page + 1);
+    const terminal = ['replacement', 'delete', 'rollback'].includes(mode) && page % 2 === 1;
+    while (gate === 'all' || (gate === 'terminal' && terminal) || (gate === 'first' && !terminal)) {
       await new Promise(resolve => pending.push(resolve));
       if (res.destroyed) return;
     }
