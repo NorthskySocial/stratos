@@ -333,7 +333,18 @@ function isFeedgenItem(value: unknown): value is FeedViewPost {
     'text' in post.record &&
     typeof post.record.text === 'string' &&
     'createdAt' in post.record &&
-    typeof post.record.createdAt === 'string'
+    typeof post.record.createdAt === 'string' &&
+    isSafeFeedEmbed((post.record as Record<string, unknown>).embed)
+  )
+}
+
+function isSafeFeedEmbed(value: unknown): boolean {
+  if (value === undefined) return true
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  if ('images' in value && !Array.isArray(value.images)) return false
+  return (
+    (!('media' in value) || isSafeFeedEmbed(value.media)) &&
+    (!('record' in value) || isSafeFeedEmbed(value.record))
   )
 }
 
@@ -505,7 +516,10 @@ export async function fetchFeedgenPosts(
           : errorCode === 'FeedNotReady'
             ? 'not-ready'
             : 'unavailable'
-      console.error(`[feedgen] getFeed failed: ${res.status} ${category}`)
+      console.error(
+        { operation: 'feedgen.getFeed', status: res.status, category },
+        'Feedgen feed request failed',
+      )
       return {
         ok: false,
         posts: [],
@@ -547,7 +561,10 @@ export async function fetchFeedgenPosts(
       }
     }
     const timeline = body as StratosTimelineResponse
-    console.log(`[feedgen] getFeed: ${timeline.feed?.length ?? 0} posts`)
+    console.info(
+      { operation: 'feedgen.getFeed', postCount: timeline.feed?.length ?? 0 },
+      'Feedgen feed request completed',
+    )
     return {
       ok: true,
       posts: mapFeedViewPosts(timeline.feed ?? [], true).map((post) => ({
@@ -570,7 +587,10 @@ export async function fetchFeedgenPosts(
       cursor: timeline.cursor,
     }
   } catch {
-    console.error('[feedgen] getFeed network or response error')
+    console.error(
+      { operation: 'feedgen.getFeed', category: 'network' },
+      'Feedgen feed request failed',
+    )
     return { ok: false, posts: [], category: 'network', retryable: true }
   }
 }
