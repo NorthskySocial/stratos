@@ -348,6 +348,14 @@ const resetClients = () => {
 }
 
 const fetchRecords = async () => {
+  if (
+    stratosActive &&
+    enrollment &&
+    enrollment.custody !== 'stratos' &&
+    enrollment.custody !== 'pds'
+  ) {
+    throw new Error('Unsupported custody')
+  }
   if (stratosActive && enrollment?.custody === 'pds') {
     throw new Error('Use the PDS space read route for PDS custody')
   }
