@@ -138,4 +138,12 @@ describe('getCid extraction', () => {
       getCid({ something: 'else' } as unknown as Parameters<typeof getCid>[0]),
     ).toBeUndefined()
   })
+
+  it('rejects array-shaped CID references without invoking their toString', () => {
+    expect(
+      getCid({
+        ref: [{ toString: null }],
+      } as unknown as Parameters<typeof getCid>[0]),
+    ).toBeUndefined()
+  })
 })

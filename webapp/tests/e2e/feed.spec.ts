@@ -95,6 +95,7 @@ test.describe('Feed rendering (authenticated)', () => {
         __MOCK_SESSION__?: {
           sub: string
           handle?: string
+          feedgenDid?: string
           fetchHandler?: (
             url: string,
             init: Parameters<typeof fetch>[1],
@@ -104,6 +105,7 @@ test.describe('Feed rendering (authenticated)', () => {
       ;(window as unknown as CustomWindow).__MOCK_SESSION__ = {
         sub: 'did:plc:mock',
         handle: 'mock.bsky.social',
+        feedgenDid: 'did:web:batou.test',
         fetchHandler: async (
           url: string,
           init: Parameters<typeof fetch>[1],
@@ -334,5 +336,158 @@ test.describe('Feed rendering (authenticated)', () => {
     await expect(tokyo3Card).toBeVisible()
     await expect(juubanCard).toBeVisible()
     await expect(publicCard).toBeVisible()
+  })
+
+  for (const viewport of [
+    { name: 'desktop', width: 1280, height: 800 },
+    { name: 'narrow mobile', width: 375, height: 740 },
+  ]) {
+    test(`${viewport.name}: announces feed failure and recovers with keyboard retry`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({
+        width: viewport.width,
+        height: viewport.height,
+      })
+      let requests = 0
+      await page.route(
+        '**/xrpc/zone.stratos.feedgen.getFeed**',
+        async (route) => {
+          requests++
+          await route.fulfill({
+            status: requests === 1 ? 503 : 200,
+            contentType: 'application/json',
+            body:
+              requests === 1
+                ? JSON.stringify({ error: 'FeedNotReady' })
+                : JSON.stringify({ feed: privateFeedViewPosts }),
+          })
+        },
+      )
+      await page.goto('/')
+      const status = page
+        .getByRole('status')
+        .filter({ hasText: 'Your private feed is getting ready.' })
+      await expect(status).toBeVisible()
+      await expect(page.getByText(PUBLIC_TEXT)).toBeVisible()
+      await expect(page.getByText(TOKYO3_TEXT)).toHaveCount(0)
+      await expect(
+        page.getByText('No posts yet. Create your first post above!'),
+      ).toHaveCount(0)
+      const retry = page.getByRole('button', { name: 'Retry private feed' })
+      await retry.focus()
+      await expect(retry).toBeFocused()
+      await page.keyboard.press('Enter')
+      await expect(page.getByText(TOKYO3_TEXT)).toBeVisible()
+      await expect(status).toHaveCount(0)
+      await expect(page.getByText(PUBLIC_TEXT)).toBeVisible()
+      expect(requests).toBe(2)
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true)
+    })
+  }
+
+  test('authorization loss clears private content and late refresh cannot restore it after logout', async ({
+    page,
+  }) => {
+    let requests = 0
+    let resolveRefresh!: () => void
+    const refreshBlocked = new Promise<void>((resolve) => {
+      resolveRefresh = resolve
+    })
+    await page.route(
+      '**/xrpc/zone.stratos.feedgen.getFeed**',
+      async (route) => {
+        requests++
+        if (requests === 3) await refreshBlocked
+        await route.fulfill({
+          status: requests === 1 || requests === 3 ? 200 : 401,
+          contentType: 'application/json',
+          body:
+            requests === 1 || requests === 3
+              ? JSON.stringify({ feed: privateFeedViewPosts })
+              : JSON.stringify({
+                  error: 'ExpiredToken',
+                  message: 'private server body',
+                }),
+        })
+      },
+    )
+    await page.route(
+      '**/xrpc/com.atproto.repo.createRecord**',
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            uri: `at://${MOCK_DID}/app.bsky.feed.post/refresh`,
+            cid: PUBLIC_CID,
+          }),
+        })
+      },
+    )
+    await page.goto('/')
+    await expect(page.getByText(TOKYO3_TEXT)).toBeVisible()
+    await page.locator('#post-text').fill('Togusa asks for a refresh.')
+    await page.getByRole('button', { name: 'Post', exact: true }).click()
+    await expect(page.getByText(TOKYO3_TEXT)).toHaveCount(0)
+    await expect(
+      page.getByRole('status').filter({
+        hasText: 'Your private feed access has expired or was denied.',
+      }),
+    ).toBeVisible()
+    await expect(page.getByText(PUBLIC_TEXT)).toBeVisible()
+    await expect(
+      page.getByRole('button', { name: 'Retry private feed' }),
+    ).toHaveCount(0)
+    await page.locator('#post-text').fill('Batou requests another refresh.')
+    await page.getByRole('button', { name: 'Post', exact: true }).click()
+    await expect.poll(() => requests).toBe(3)
+    page.once('dialog', (dialog) => dialog.accept())
+    await page.getByRole('button', { name: 'Log Out' }).click()
+    resolveRefresh()
+    await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible()
+    await expect(page.getByText(TOKYO3_TEXT)).toHaveCount(0)
+  })
+
+  test('a late retry cannot restore private content after logout', async ({
+    page,
+  }) => {
+    let requests = 0
+    let resolveRetry!: () => void
+    const retryBlocked = new Promise<void>((resolve) => {
+      resolveRetry = resolve
+    })
+    await page.route(
+      '**/xrpc/zone.stratos.feedgen.getFeed**',
+      async (route) => {
+        requests++
+        if (requests === 2) await retryBlocked
+        await route.fulfill({
+          status: requests === 1 ? 503 : 200,
+          contentType: 'application/json',
+          body:
+            requests === 1
+              ? JSON.stringify({ error: 'FeedNotReady' })
+              : JSON.stringify({ feed: privateFeedViewPosts }),
+        })
+      },
+    )
+    await page.goto('/')
+    await expect(
+      page
+        .getByRole('status')
+        .filter({ hasText: 'Your private feed is getting ready.' }),
+    ).toBeVisible()
+    await page.getByRole('button', { name: 'Retry private feed' }).click()
+    await expect.poll(() => requests).toBe(2)
+    page.once('dialog', (dialog) => dialog.accept())
+    await page.getByRole('button', { name: 'Log Out' }).click()
+    resolveRetry()
+    await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible()
+    await expect(page.getByText(TOKYO3_TEXT)).toHaveCount(0)
   })
 })
