@@ -846,7 +846,13 @@ try {
     await withProxy(['stop', 'staging-limits-proxy'])
     await withProxy(['rm', '-f', 'staging-limits-proxy'])
   }
-  if (inspectorBuilt) await command(['image', 'rm', inspectorImage])
+  if (inspectorBuilt) {
+    await command(['image', 'rm', inspectorImage]).catch((error) =>
+      console.warn(
+        `Could not remove staging limits inspector image: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    )
+  }
   if (accountConfigChanged) {
     await compose([
       'up',
