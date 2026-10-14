@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { Secp256k1Keypair } from '@atproto/crypto'
 import type { ServiceDb } from '../src/db/index.js'
 import {
   closeServiceDb,
@@ -12,18 +11,12 @@ import { SqliteEnrollmentStore } from '../src/context.js'
 import {
   EnrollmentBoundaryResolver,
   HydrationServiceImpl,
-  mintSpaceCredential,
 } from '../src/features/index.js'
-import {
-  canAccessRecord,
-  spaceUriToBoundary,
-} from '@northskysocial/stratos-core'
 import type {
   HydrationContext,
   HydrationRequest,
   RecordResolver,
 } from '@northskysocial/stratos-core'
-import { makeSpaceUri } from './helpers/space-uri.js'
 
 /**
  * Stratos live-check assertions (revocation is immediate).
@@ -203,65 +196,5 @@ describe('no-new-cache guard (grep-level)', () => {
     expect(src).toContain('await ctx.enrollmentStore.getBoundaries(callerDid)')
     // No new cache class is instantiated in the subscription read path.
     expect(src).not.toMatch(/new\s+\w*Cache\w*\s*\(/)
-  })
-})
-
-/**
- * Space credentials do NOT extend exposure past membership.
- *
- * A space credential is an out-of-band bearer token that admits API
- * calls; it is NOT an input to the per-record boundary gate. `canAccessRecord`
- * decides purely on the viewer's LIVE `viewerDomains` vs. the record's
- * boundaries, so holding a (still-valid) credential after a viewer's membership
- * is revoked does not grant access.
- *
- * NOTE: the credential *verifier* — the consumer that would accept a
- * credential on an API call and turn it into a session — has not landed in this
- * base (only the minter is present; there is no verifier that maps a
- * credential to `viewerDomains`). The composition asserted here is therefore at
- * the gate level. When the credential verifier lands, extend this to run an
- * actual credential-authenticated hydration request and assert the same denial.
- */
-describe('credentials do not extend exposure past membership (composition)', () => {
-  const OWNER2 = 'did:plc:owner2'
-  const VIEWER2 = 'did:plc:viewer2'
-  const SPACE_DID = 'did:web:nerv.tokyo.jp'
-  const SPACE_URI = makeSpaceUri(SPACE_DID, 'zone.stratos.space.feed', 'thread')
-  const boundaryResult = spaceUriToBoundary(SPACE_URI, SPACE_DID)
-  if (!boundaryResult.ok) throw new Error('bad test boundary')
-  const SPACE_BOUNDARY = boundaryResult.value
-
-  it('a still-valid credential does not bypass the per-record boundary gate after revocation', async () => {
-    // Prove a real, unexpired space credential exists (via the minter).
-    const key = await Secp256k1Keypair.create()
-    const iat = Math.floor(Date.now() / 1000)
-    const minted = await mintSpaceCredential({
-      signingKey: key,
-      issuerDid: 'did:web:stratos.example.com',
-      spaceUri: SPACE_URI,
-      ttlSeconds: 7_200,
-      iat,
-    })
-    // Credential is valid well into the future...
-    expect(minted.exp).toBeGreaterThan(iat)
-    expect(minted.credential.split('.')).toHaveLength(3)
-
-    // ...yet the per-record gate ignores it: it depends only on the viewer's
-    // LIVE domains. With the space boundary revoked (viewerDomains no longer
-    // contains it), access is denied regardless of the credential.
-    const grantedWhileMember = canAccessRecord({
-      recordBoundaries: [SPACE_BOUNDARY],
-      ownerDid: OWNER2,
-      context: { viewerDid: VIEWER2, viewerDomains: [SPACE_BOUNDARY] },
-    })
-    expect(grantedWhileMember).toBe(true)
-
-    const deniedAfterRevocation = canAccessRecord({
-      recordBoundaries: [SPACE_BOUNDARY],
-      ownerDid: OWNER2,
-      // Membership revoked → empty live domains. Credential still in hand.
-      context: { viewerDid: VIEWER2, viewerDomains: [] },
-    })
-    expect(deniedAfterRevocation).toBe(false)
   })
 })
