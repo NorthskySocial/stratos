@@ -30,6 +30,7 @@ export function getCid(image: StratosImage['image']): string | undefined {
     if (typeof obj === 'string') {
       return obj
     }
+    if (typeof obj !== 'object' || Array.isArray(obj)) return undefined
     // Check for $link property (common in ATProto JSON)
     const record = obj as Record<string, unknown>
     if (record.$link && typeof record.$link === 'string') {

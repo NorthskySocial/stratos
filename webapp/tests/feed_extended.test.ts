@@ -598,6 +598,123 @@ describe('feed extended logic', () => {
               record: {
                 text: 'hi',
                 createdAt: '1995-01-01',
+                embed: { $type: 'app.bsky.embed.images', images: [null] },
+              },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: {
+                text: 'hi',
+                createdAt: '1995-01-01',
+                embed: {
+                  $type: 'app.bsky.embed.images',
+                  images: [
+                    { alt: 'valid', image: { ref: { $link: 'cid' } } },
+                    null,
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: {
+                text: 'hi',
+                createdAt: '1995-01-01',
+                embed: { $type: 'app.bsky.embed.images', images: [false] },
+              },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: {
+                text: 'hi',
+                createdAt: '1995-01-01',
+                embed: { $type: 'app.bsky.embed.images', images: ['cid'] },
+              },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: {
+                text: 'hi',
+                createdAt: '1995-01-01',
+                embed: { $type: 'app.bsky.embed.images', images: [[]] },
+              },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: {
+                text: 'hi',
+                createdAt: '1995-01-01',
+                embed: {
+                  $type: 'app.bsky.embed.images',
+                  images: [{ alt: 'missing image' }],
+                },
+              },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: {
+                text: 'hi',
+                createdAt: '1995-01-01',
+                embed: {
+                  $type: 'app.bsky.embed.images',
+                  images: [{ alt: 'null image', image: null }],
+                },
+              },
+            },
+          },
+        ],
+      },
+      {
+        feed: [
+          {
+            post: {
+              uri: 'at://did:plc:motoko/app.bsky.feed.post/1',
+              cid: 'cid',
+              record: {
+                text: 'hi',
+                createdAt: '1995-01-01',
                 embed: {
                   $type: 'app.bsky.embed.recordWithMedia',
                   media: {

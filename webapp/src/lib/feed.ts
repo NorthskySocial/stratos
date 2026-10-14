@@ -338,10 +338,25 @@ function isFeedgenItem(value: unknown): value is FeedViewPost {
   )
 }
 
+function isSafeFeedImage(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  if (!('image' in value)) return false
+  const image = value.image
+  return (
+    typeof image === 'string' ||
+    (!!image && typeof image === 'object' && !Array.isArray(image))
+  )
+}
+
 function isSafeFeedEmbed(value: unknown): boolean {
   if (value === undefined) return true
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  if ('images' in value && !Array.isArray(value.images)) return false
+  if (
+    'images' in value &&
+    (!Array.isArray(value.images) || !value.images.every(isSafeFeedImage))
+  ) {
+    return false
+  }
   return (
     (!('media' in value) || isSafeFeedEmbed(value.media)) &&
     (!('record' in value) || isSafeFeedEmbed(value.record))
