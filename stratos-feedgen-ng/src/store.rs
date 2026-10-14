@@ -89,6 +89,9 @@ pub enum StoreError {
     StaleCursor,
     EnrollmentConflict,
     UnverifiedSpaceStage,
+    SpaceStageLimit,
+    SpacePromotionLimit,
+    ExpiredSpaceStage,
     UnauthorizedSpaceMember,
 }
 
@@ -104,6 +107,9 @@ impl fmt::Debug for StoreError {
             Self::StaleCursor => "StaleCursor",
             Self::EnrollmentConflict => "EnrollmentConflict",
             Self::UnverifiedSpaceStage => "UnverifiedSpaceStage",
+            Self::SpaceStageLimit => "SpaceStageLimit",
+            Self::SpacePromotionLimit => "SpacePromotionLimit",
+            Self::ExpiredSpaceStage => "ExpiredSpaceStage",
             Self::UnauthorizedSpaceMember => "UnauthorizedSpaceMember",
         };
         formatter.write_str(name)
@@ -130,6 +136,11 @@ impl fmt::Display for StoreError {
             Self::UnverifiedSpaceStage => {
                 formatter.write_str("space stage has not completed verification")
             }
+            Self::SpaceStageLimit => formatter.write_str("space stage exceeds the storage budget"),
+            Self::SpacePromotionLimit => {
+                formatter.write_str("space stage exceeds the atomic promotion work budget")
+            }
+            Self::ExpiredSpaceStage => formatter.write_str("space stage has expired"),
             Self::UnauthorizedSpaceMember => {
                 formatter.write_str("space member is no longer authorized")
             }

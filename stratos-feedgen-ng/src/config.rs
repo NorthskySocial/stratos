@@ -25,6 +25,16 @@ pub enum StorageProfile {
 pub struct ProjectionRetention {
     pub max_age: Duration,
     pub max_bytes: u64,
+    pub stage_budget: SpaceStageBudget,
+}
+
+/// Persistent limits on unverified space records, per member and across the projection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpaceStageBudget {
+    pub target_rows: u64,
+    pub global_rows: u64,
+    pub target_bytes: u64,
+    pub global_bytes: u64,
 }
 
 /// Private OTLP/HTTP metrics export is opt-in and never affects feed serving.
@@ -120,6 +130,10 @@ impl FeedgenConfig {
                 writer_lock_path: env::var("FEEDGEN_WRITER_LOCK_PATH").ok(),
                 projection_max_age_ms: env::var("FEEDGEN_PROJECTION_MAX_AGE_MS").ok(),
                 projection_max_bytes: env::var("FEEDGEN_PROJECTION_MAX_BYTES").ok(),
+                stage_target_max_rows: env::var("FEEDGEN_STAGE_TARGET_MAX_ROWS").ok(),
+                stage_global_max_rows: env::var("FEEDGEN_STAGE_GLOBAL_MAX_ROWS").ok(),
+                stage_target_max_bytes: env::var("FEEDGEN_STAGE_TARGET_MAX_BYTES").ok(),
+                stage_global_max_bytes: env::var("FEEDGEN_STAGE_GLOBAL_MAX_BYTES").ok(),
             },
         )?;
         config.plc_url = env::var("PLC_DIRECTORY")
@@ -202,9 +216,23 @@ impl FeedgenConfig {
             writer_lock_path,
             projection_max_age_ms,
             projection_max_bytes,
+            stage_target_max_rows,
+            stage_global_max_rows,
+            stage_target_max_bytes,
+            stage_global_max_bytes,
         } = storage;
         let storage = parse_storage(backend, profile, sqlite_path, key_path, writer_lock_path)?;
-        let retention = parse_retention(&storage, projection_max_age_ms, projection_max_bytes)?;
+        let retention = parse_retention(
+            &storage,
+            projection_max_age_ms,
+            projection_max_bytes,
+            StageBudgetValues {
+                target_rows: stage_target_max_rows,
+                global_rows: stage_global_max_rows,
+                target_bytes: stage_target_max_bytes,
+                global_bytes: stage_global_max_bytes,
+            },
+        )?;
         let stratos_service_url =
             normalize_service_url(required_value(stratos_service_url, "STRATOS_SERVICE_URL")?)?;
         Ok(Self {
@@ -256,28 +284,115 @@ struct StorageValues {
     writer_lock_path: Option<String>,
     projection_max_age_ms: Option<String>,
     projection_max_bytes: Option<String>,
+    stage_target_max_rows: Option<String>,
+    stage_global_max_rows: Option<String>,
+    stage_target_max_bytes: Option<String>,
+    stage_global_max_bytes: Option<String>,
+}
+
+#[derive(Default)]
+struct StageBudgetValues {
+    target_rows: Option<String>,
+    global_rows: Option<String>,
+    target_bytes: Option<String>,
+    global_bytes: Option<String>,
 }
 
 const MEMORY_RETENTION_MAX_AGE: Duration = Duration::from_secs(60 * 60);
-const MEMORY_RETENTION_MAX_BYTES: u64 = 16 * 1024 * 1024;
+pub const MEMORY_RETENTION_MAX_BYTES: u64 = 16 * 1024 * 1024;
+const DEFAULT_STAGE_TARGET_ROWS: u64 = MAX_SPACE_PROMOTION_STAGE_ROWS as u64;
+const DEFAULT_STAGE_GLOBAL_ROWS: u64 = 8_192;
+pub(crate) const MAX_SPACE_PROMOTION_STAGE_ROWS: i64 = 1_024;
+pub(crate) const MAX_SPACE_PROMOTION_STAGE_BYTES: i64 = 8 * 1024 * 1024;
 
 fn parse_retention(
     storage: &StorageProfile,
     max_age_ms: Option<String>,
     max_bytes: Option<String>,
+    stage_values: StageBudgetValues,
 ) -> Result<ProjectionRetention, ConfigError> {
     if matches!(storage, StorageProfile::Memory) {
         return Ok(ProjectionRetention {
             max_age: MEMORY_RETENTION_MAX_AGE,
             max_bytes: MEMORY_RETENTION_MAX_BYTES,
+            stage_budget: parse_stage_budget(MEMORY_RETENTION_MAX_BYTES, stage_values)?,
         });
     }
     let max_age_ms = required_positive_u64(max_age_ms, "FEEDGEN_PROJECTION_MAX_AGE_MS")?;
+    if max_age_ms < 1_000 || max_age_ms % 1_000 != 0 {
+        return Err(ConfigError::InvalidProjectionRetention);
+    }
     let max_bytes = required_positive_u64(max_bytes, "FEEDGEN_PROJECTION_MAX_BYTES")?;
+    if max_bytes > i64::MAX as u64 {
+        return Err(ConfigError::InvalidProjectionRetention);
+    }
     Ok(ProjectionRetention {
         max_age: Duration::from_millis(max_age_ms),
         max_bytes,
+        stage_budget: parse_stage_budget(max_bytes, stage_values)?,
     })
+}
+
+fn parse_stage_budget(
+    max_bytes: u64,
+    values: StageBudgetValues,
+) -> Result<SpaceStageBudget, ConfigError> {
+    let read = |value: Option<String>, default: u64| -> Result<u64, ConfigError> {
+        value
+            .map(|value| {
+                value
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|limit| *limit > 0)
+                    .ok_or(ConfigError::InvalidProjectionRetention)
+            })
+            .unwrap_or(Ok(default))
+    };
+    let budget = SpaceStageBudget {
+        target_rows: read(values.target_rows, DEFAULT_STAGE_TARGET_ROWS)?,
+        global_rows: read(values.global_rows, DEFAULT_STAGE_GLOBAL_ROWS)?,
+        target_bytes: read(
+            values.target_bytes,
+            (max_bytes / 4).min(MAX_SPACE_PROMOTION_STAGE_BYTES as u64),
+        )?,
+        global_bytes: read(values.global_bytes, max_bytes / 2)?,
+    };
+    budget.validate(max_bytes)?;
+    Ok(budget)
+}
+
+impl SpaceStageBudget {
+    pub fn validate(&self, max_bytes: u64) -> Result<(), ConfigError> {
+        if self.target_rows > MAX_SPACE_PROMOTION_STAGE_ROWS as u64
+            || self.target_rows > self.global_rows
+            || self.target_bytes > MAX_SPACE_PROMOTION_STAGE_BYTES as u64
+            || self.target_bytes > self.global_bytes
+            || self.global_bytes > max_bytes / 2
+            || [
+                self.target_rows,
+                self.global_rows,
+                self.target_bytes,
+                self.global_bytes,
+            ]
+            .iter()
+            .any(|limit| *limit == 0 || *limit > i64::MAX as u64)
+        {
+            return Err(ConfigError::InvalidProjectionRetention);
+        }
+        Ok(())
+    }
+
+    pub fn for_projection(max_bytes: u64) -> Result<Self, ConfigError> {
+        parse_stage_budget(
+            max_bytes,
+            StageBudgetValues {
+                target_rows: None,
+                global_rows: None,
+                target_bytes: None,
+                global_bytes: None,
+            },
+        )
+    }
 }
 
 fn required_positive_u64(value: Option<String>, name: &'static str) -> Result<u64, ConfigError> {
@@ -400,8 +515,8 @@ mod tests {
     };
 
     use super::{
-        ConfigError, FeedgenConfig, StorageProfile, StorageValues, load_feed_registry_from_values,
-        parse_metrics_export_endpoint,
+        ConfigError, FeedgenConfig, StageBudgetValues, StorageProfile, StorageValues,
+        load_feed_registry_from_values, parse_metrics_export_endpoint, parse_retention,
     };
 
     #[test]
@@ -431,6 +546,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn durable_retention_rejects_subsecond_age_and_unrepresentable_budget() {
+        let storage = StorageProfile::EncryptedVolume {
+            database_path: "/tmp/feedgen.sqlite".into(),
+            key_path: "/tmp/feedgen.key".into(),
+            writer_lock_path: "/tmp/feedgen.lock".into(),
+        };
+        assert_eq!(
+            parse_retention(
+                &storage,
+                Some("999".to_owned()),
+                Some("1024".to_owned()),
+                StageBudgetValues::default()
+            ),
+            Err(ConfigError::InvalidProjectionRetention)
+        );
+        assert_eq!(
+            parse_retention(
+                &storage,
+                Some("1500".to_owned()),
+                Some("1024".to_owned()),
+                StageBudgetValues::default()
+            ),
+            Err(ConfigError::InvalidProjectionRetention)
+        );
+        assert_eq!(
+            parse_retention(
+                &storage,
+                Some("1000".to_owned()),
+                Some((i64::MAX as u64 + 1).to_string()),
+                StageBudgetValues::default(),
+            ),
+            Err(ConfigError::InvalidProjectionRetention)
+        );
+    }
+
     fn storage(
         backend: Option<&str>,
         profile: Option<&str>,
@@ -445,6 +596,10 @@ mod tests {
             writer_lock_path: None,
             projection_max_age_ms: None,
             projection_max_bytes: None,
+            stage_target_max_rows: None,
+            stage_global_max_rows: None,
+            stage_target_max_bytes: None,
+            stage_global_max_bytes: None,
         }
     }
 
@@ -615,6 +770,54 @@ mod tests {
             super::parse_actor_connection_limit(Some("65".to_owned())),
             Err(super::ConfigError::InvalidActorConnectionLimit)
         );
+    }
+
+    #[test]
+    fn validates_target_and_global_stage_rows_and_bytes() {
+        use super::{ConfigError, StageBudgetValues, parse_stage_budget};
+        let values = |target_rows: &str,
+                      global_rows: &str,
+                      target_bytes: &str,
+                      global_bytes: &str| StageBudgetValues {
+            target_rows: Some(target_rows.to_owned()),
+            global_rows: Some(global_rows.to_owned()),
+            target_bytes: Some(target_bytes.to_owned()),
+            global_bytes: Some(global_bytes.to_owned()),
+        };
+        let valid = parse_stage_budget(131_072, values("1024", "4096", "32768", "60000")).unwrap();
+        assert_eq!(
+            (
+                valid.target_rows,
+                valid.global_rows,
+                valid.target_bytes,
+                valid.global_bytes
+            ),
+            (1024, 4096, 32_768, 60_000)
+        );
+        for invalid in [
+            values("0", "4096", "65536", "100000"),
+            values("1025", "4096", "32768", "60000"),
+            values("1024", "1000", "65536", "100000"),
+            values("1024", "4096", "0", "60000"),
+            values("1024", "4096", "60001", "60000"),
+            values("1024", "4096", "32768", "65537"),
+        ] {
+            assert!(matches!(
+                parse_stage_budget(131_072, invalid),
+                Err(ConfigError::InvalidProjectionRetention)
+            ));
+        }
+        assert!(matches!(
+            parse_stage_budget(
+                16 * 1024 * 1024,
+                values("1024", "4096", "8388609", "8388608")
+            ),
+            Err(ConfigError::InvalidProjectionRetention)
+        ));
+        let defaults = super::SpaceStageBudget::for_projection(16 * 1024 * 1024).unwrap();
+        assert_eq!(defaults.target_rows, 1_024);
+        assert_eq!(defaults.target_bytes, 4 * 1024 * 1024);
+        assert_eq!(defaults.global_bytes, 8 * 1024 * 1024);
     }
 
     #[test]

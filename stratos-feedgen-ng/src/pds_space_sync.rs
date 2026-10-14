@@ -125,6 +125,7 @@ pub struct PdsSpaceSynchronizer {
     pages: Arc<dyn SpacePageSource>,
     credentials: Arc<SpaceCredentialManager>,
     commits: Arc<dyn SpaceCommitVerificationPort>,
+    promotion_clock: fn() -> String,
     target_locks: Arc<Mutex<BTreeMap<String, Arc<TargetLock>>>>,
 }
 
@@ -167,6 +168,7 @@ impl PdsSpaceSynchronizer {
             pages,
             credentials,
             commits,
+            promotion_clock: current_utc_millis,
             target_locks: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -224,9 +226,24 @@ impl PdsSpaceSynchronizer {
                     prepare_space_page(target, response.page, observed_at)
                         .map_err(PdsSpaceSyncError::Stage)
                 })?;
-            lifecycle
-                .stage_pds_space_page(prepared)
-                .map_err(PdsSpaceSyncError::Stage)?;
+            if let Err(error) = lifecycle.stage_pds_space_page(prepared) {
+                if matches!(
+                    error,
+                    SpaceSyncError::Store(
+                        StoreError::SpaceStageLimit | StoreError::ExpiredSpaceStage
+                    )
+                ) {
+                    lifecycle
+                        .discard_pds_space_stage(&target.boundary, &target.space_uri, &target.did)
+                        .map_err(PdsSpaceSyncError::Store)?;
+                    if matches!(error, SpaceSyncError::Store(StoreError::ExpiredSpaceStage)) {
+                        eprintln!("event=space_stage_expired rejected_targets=1");
+                    } else {
+                        eprintln!("event=space_stage_limit rejected_targets=1");
+                    }
+                }
+                return Err(PdsSpaceSyncError::Stage(error));
+            }
             if !terminal {
                 cursor = next_cursor;
                 continue;
@@ -241,15 +258,37 @@ impl PdsSpaceSynchronizer {
                 .await;
             return match verification {
                 CommitVerification::Verified => {
-                    lifecycle
-                        .promote_pds_space_stage_at_generation(
-                            &target.boundary,
-                            &target.space_uri,
-                            &target.did,
-                            retained_at,
-                            target.generation,
-                        )
-                        .map_err(PdsSpaceSyncError::Store)?;
+                    let promotion_observed_at = (self.promotion_clock)();
+                    if let Err(error) = lifecycle.promote_pds_space_stage_at_generation(
+                        &target.boundary,
+                        &target.space_uri,
+                        &target.did,
+                        retained_at,
+                        &promotion_observed_at,
+                        target.generation,
+                    ) {
+                        if matches!(
+                            error,
+                            StoreError::SpaceStageLimit | StoreError::ExpiredSpaceStage
+                        ) {
+                            lifecycle
+                                .discard_pds_space_stage(
+                                    &target.boundary,
+                                    &target.space_uri,
+                                    &target.did,
+                                )
+                                .map_err(PdsSpaceSyncError::Store)?;
+                        }
+                        if matches!(
+                            error,
+                            StoreError::SpaceStageLimit
+                                | StoreError::ExpiredSpaceStage
+                                | StoreError::SpacePromotionLimit
+                        ) {
+                            eprintln!("event=space_stage_promotion_limit rejected_targets=1");
+                        }
+                        return Err(PdsSpaceSyncError::Store(error));
+                    }
                     Ok(PdsSpaceSyncOutcome::Promoted)
                 }
                 CommitVerification::DeferredKeyResolution => {
@@ -295,6 +334,20 @@ impl PdsSpaceSynchronizer {
         lease.guard = Some(Arc::clone(&lease.lock.mutex).lock_owned().await);
         Ok(lease)
     }
+}
+
+fn current_utc_millis() -> String {
+    let now = time::OffsetDateTime::now_utc();
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second(),
+        now.millisecond()
+    )
 }
 
 #[cfg(test)]
@@ -524,6 +577,26 @@ mod tests {
         )
     }
 
+    fn lifecycle_with_one_second_retention() -> ControlLifecycle {
+        let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+        store
+            .replace_pds_space_members(
+                BOUNDARY,
+                vec![PdsSpaceMember {
+                    did: DID.to_owned(),
+                }],
+                NOW,
+            )
+            .unwrap();
+        store
+            .compact_projection(NOW, "2026-09-22T00:00:01.000Z", 16_000, 128)
+            .unwrap();
+        ControlLifecycle::new(
+            ProjectionReader::new(store),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+        )
+    }
+
     fn synchronizer(
         pages: Vec<SpaceHostPage>,
         decision: CommitVerification,
@@ -538,7 +611,7 @@ mod tests {
         pages: Arc<dyn SpacePageSource>,
         commits: Arc<dyn SpaceCommitVerificationPort>,
     ) -> PdsSpaceSynchronizer {
-        PdsSpaceSynchronizer::new(
+        let mut synchronizer = PdsSpaceSynchronizer::new(
             pages,
             Arc::new(
                 crate::credential_manager::SpaceCredentialManager::with_clock(
@@ -547,7 +620,9 @@ mod tests {
                 ),
             ),
             commits,
-        )
+        );
+        synchronizer.promotion_clock = || NOW.to_owned();
+        synchronizer
     }
 
     fn revoke_and_readd(lifecycle: &ControlLifecycle) {
@@ -648,6 +723,26 @@ mod tests {
             Some("next".to_owned())
         );
         assert!(synchronizer.target_locks.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn delayed_verification_expires_stage_at_fresh_promotion_time() {
+        let lifecycle = lifecycle_with_one_second_retention();
+        let mut synchronizer = synchronizer(vec![page(None)], CommitVerification::Verified);
+        synchronizer.promotion_clock = || "2026-09-22T00:00:01.500Z".to_owned();
+        let result = synchronizer
+            .sync_target(&lifecycle, &target(), NOW, "2026-09-22T00:00:01.000Z")
+            .await;
+        assert!(matches!(
+            result,
+            Err(PdsSpaceSyncError::Store(
+                crate::store::StoreError::ExpiredSpaceStage
+            ))
+        ));
+        assert_eq!(
+            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
+            None
+        );
     }
 
     #[tokio::test]
