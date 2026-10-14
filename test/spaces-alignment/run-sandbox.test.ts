@@ -1,6 +1,14 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -21,6 +29,12 @@ async function directory(): Promise<string> {
   return path
 }
 
+async function temporaryAiaBSources(): Promise<string[]> {
+  return (await readdir(tmpdir()))
+    .filter((path) => path.startsWith('stratos-aiab-source-'))
+    .sort()
+}
+
 afterEach(async () => {
   process.env.PATH = originalPath
   delete process.env.RUNNER_TEST_FAIL_STEP
@@ -33,6 +47,7 @@ afterEach(async () => {
   delete process.env.RUNNER_TEST_FAIL_CLEANUP
   delete process.env.COMPOSE_FILE
   delete process.env.COMPOSE_PROJECT_NAME
+  delete process.env.RUNNER_TEST_DOCKER_CONFIG_PREFIX
   await Promise.all(
     temporary
       .splice(0)
@@ -131,7 +146,10 @@ describe('sandbox preflight', () => {
       .update(await readFile(manifest))
       .digest('hex')
     const pin = { url: repo, revision, sha256: { 'deno.json': sha256 } }
-    await expect(pinnedCheckout(repo, pin)).resolves.toBe(repo)
+    await expect(pinnedCheckout(repo, pin)).resolves.toEqual({
+      checkout: repo,
+      acquisition: undefined,
+    })
     await expect(
       pinnedCheckout(repo, { ...pin, sha256: { 'deno.json': '0'.repeat(64) } }),
     ).rejects.toThrow('hash differs')
@@ -311,9 +329,7 @@ describe('sandbox preflight', () => {
     const fakeDeno = `#!/usr/bin/env node
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
-assert.ok(process.env.DOCKER_CONFIG?.startsWith(${JSON.stringify(
-      join(tmpdir(), 'stratos-spaces-alignment-'),
-    )}))
+assert.ok(process.env.DOCKER_CONFIG?.startsWith(process.env.RUNNER_TEST_DOCKER_CONFIG_PREFIX))
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 assert.equal(process.env.COMPOSE_FILE, undefined)
 assert.equal(process.env.COMPOSE_PROJECT_NAME, undefined)
@@ -361,9 +377,7 @@ if (process.argv.includes('seed')) {
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
 const args = process.argv.slice(2)
-assert.ok(process.env.DOCKER_CONFIG?.startsWith(${JSON.stringify(
-      join(tmpdir(), 'stratos-spaces-alignment-'),
-    )}))
+assert.ok(process.env.DOCKER_CONFIG?.startsWith(process.env.RUNNER_TEST_DOCKER_CONFIG_PREFIX))
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 assert.equal(process.env.COMPOSE_FILE, undefined)
 assert.equal(process.env.COMPOSE_PROJECT_NAME, undefined)
@@ -400,8 +414,13 @@ if (args[0] === 'image' && args[1] === 'rm') {
     process.env.COMPOSE_PROJECT_NAME = 'unsafe-project'
     const dockerLog = join(root, 'docker.log')
     process.env.RUNNER_TEST_DOCKER_LOG = dockerLog
+    process.env.RUNNER_TEST_DOCKER_CONFIG_PREFIX = join(
+      tmpdir(),
+      'stratos-spaces-alignment-',
+    )
+    const aiabSources = await temporaryAiaBSources()
     const options = {
-      sandboxDirectory: sandboxRepo,
+      sandboxDirectory: join(root, 'sandbox-checkout'),
       source: candidateRepo,
       suite: 'baseline',
       reportDirectory,
@@ -462,9 +481,17 @@ if (args[0] === 'image' && args[1] === 'rm') {
     ).rejects.toThrow('Unknown or unavailable suite')
     await writeFile(join(candidateRepo, 'README.md'), 'Dirty candidate\n')
     await expect(runSandbox(options, dependencies)).rejects.toThrow(
-      'Candidate tracked work is dirty',
+      'Candidate work is dirty',
     )
     git(candidateRepo, 'checkout', '--', 'README.md')
+    await writeFile(
+      join(candidateRepo, 'untracked.txt'),
+      'Untracked candidate\n',
+    )
+    await expect(runSandbox(options, dependencies)).rejects.toThrow(
+      'Candidate work is dirty',
+    )
+    await rm(join(candidateRepo, 'untracked.txt'))
     await mkdir(reportDirectory)
     await expect(runSandbox(options, dependencies)).rejects.toThrow(
       'Report directory already exists',
@@ -681,5 +708,6 @@ if (args[0] === 'image' && args[1] === 'rm') {
         dependencies,
       ),
     ).rejects.toThrow('PDS image placeholder is missing')
+    expect(await temporaryAiaBSources()).toEqual(aiabSources)
   })
 })
