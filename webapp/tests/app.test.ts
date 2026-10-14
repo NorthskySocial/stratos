@@ -424,9 +424,7 @@ describe('App.svelte', () => {
     await fireEvent.input(screen.getByPlaceholderText('Write a post…'), {
       target: { value: 'Togusa requests a fresh briefing.' },
     })
-    await fireEvent.click(
-      screen.getByRole('button', { name: /^Post$/ }),
-    )
+    await fireEvent.click(screen.getByRole('button', { name: /^Post$/ }))
     await waitFor(() =>
       expect(appState.fetchRepoPublicPosts).toHaveBeenCalledTimes(3),
     )
