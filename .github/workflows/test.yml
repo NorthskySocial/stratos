@@ -109,6 +109,15 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+      - name: Run browser helper tests
+        run: pnpm --filter @northskysocial/stratos-browser test
+
+      - name: Run feedgen contract tests
+        run: pnpm exec vitest run --config test/feedgen-harness/vitest.config.ts
+
+      - name: Run sandbox runner tests
+        run: pnpm exec vitest run --config test/spaces-alignment/vitest.config.ts
+
       - name: Run E2E tests (Playwright container)
         run: pnpm run test:e2e:docker -- --project=chromium
         working-directory: webapp

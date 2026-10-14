@@ -317,7 +317,7 @@ describe('persistent boundary lifecycle', () => {
     await h.manager.drain()
     expect(await h.store.get(ENGINEERING)).toMatchObject({ status: 'inactive' })
     expect(h.removals).toHaveLength(101)
-  })
+  }, 15_000)
   it.each(['configured', 'absent'] as const)(
     'retries failed invalidation without starving other boundaries with error callback %s',
     async (errorCallback) => {

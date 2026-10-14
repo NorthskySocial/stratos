@@ -20,6 +20,7 @@ pub struct PdsPollTarget {
     pub boundary: String,
     pub did: String,
     pub host: String,
+    pub generation: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -75,11 +76,24 @@ impl MembershipReconciler {
         boundary: &str,
         reconciled_at: &str,
     ) -> Result<MembershipReconciliation, MembershipReconciliationError> {
-        let snapshot = self.discover(boundary).await?;
-        let pds_members = u16::try_from(snapshot.members.len()).expect("membership cap fits u16");
-        store
-            .replace_pds_space_members(boundary, snapshot.members, reconciled_at)
+        let generation = store
+            .pds_boundary_generation(boundary)
             .map_err(MembershipReconciliationError::Store)?;
+        let mut snapshot = self.discover(boundary).await?;
+        let pds_members = u16::try_from(snapshot.members.len()).expect("membership cap fits u16");
+        let generations = store
+            .replace_pds_space_members_at_generation(
+                boundary,
+                snapshot.members,
+                reconciled_at,
+                generation,
+            )
+            .map_err(MembershipReconciliationError::Store)?;
+        for target in &mut snapshot.targets {
+            target.generation = generations.get(&target.did).copied().ok_or(
+                MembershipReconciliationError::Store(StoreError::UnauthorizedSpaceMember),
+            )?;
+        }
         Ok(MembershipReconciliation {
             pds_members,
             targets: snapshot.targets,
@@ -117,6 +131,7 @@ impl MembershipReconciler {
                     boundary: boundary.to_owned(),
                     did: member.did.clone(),
                     host: host.clone(),
+                    generation: 0,
                 })
             })
             .collect();

@@ -117,8 +117,13 @@ async function resolveCallerBoundaries(
 ): Promise<ReadonlySet<string>> {
   let boundaries: string[]
   try {
+    const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
+    if (!enrollment || !enrollment.active) {
+      throw new AuthRequiredError('Enrollment is missing or deactivated')
+    }
     boundaries = await ctx.enrollmentStore.getBoundaries(callerDid)
   } catch (err) {
+    if (err instanceof AuthRequiredError) throw err
     // Fail closed: a scope-resolution error must never widen access.
     ctx.logger?.warn({ callerDid, err }, 'boundary resolution failed')
     throw new AuthRequiredError('Service is not enrolled in any boundary')

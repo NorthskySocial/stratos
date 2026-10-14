@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "id": "feedgen-ng-e2e",
+  "services": [
+    {
+      "service": "feedgen-e2e-identity",
+      "environment": [
+        { "name": "SANDBOX_DOMAIN", "source": { "kind": "domain" } }
+      ],
+      "secretFiles": [
+        {
+          "secret": "feedgen-e2e-signing-key",
+          "name": "feedgen-signing-key",
+          "uid": 0,
+          "gid": 0
+        }
+      ]
+    },
+    {
+      "service": "feedgen-e2e-valkey",
+      "environment": []
+    },
+    {
+      "service": "feedgen-e2e-pds-spaces",
+      "environment": [
+        { "name": "SANDBOX_DOMAIN", "source": { "kind": "domain" } },
+        { "name": "SPACES_PDS_PLC_URL", "source": { "kind": "plc-url" } },
+        {
+          "name": "SPACES_PDS_JWT_SECRET",
+          "source": { "kind": "secret", "secret": "feedgen-e2e-pds-jwt" }
+        },
+        {
+          "name": "SPACES_PDS_ADMIN_PASSWORD",
+          "source": { "kind": "secret", "secret": "feedgen-e2e-pds-admin" }
+        },
+        {
+          "name": "SPACES_PDS_ROTATION_KEY",
+          "source": {
+            "kind": "secret",
+            "secret": "feedgen-e2e-pds-rotation-key"
+          }
+        }
+      ]
+    },
+    {
+      "service": "feedgen-e2e-stratos",
+      "environment": [
+        { "name": "SANDBOX_DOMAIN", "source": { "kind": "domain" } },
+        { "name": "STRATOS_PLC_URL", "source": { "kind": "plc-url" } }
+      ]
+    },
+    {
+      "service": "feedgen-e2e-rust",
+      "environment": [
+        { "name": "SANDBOX_DOMAIN", "source": { "kind": "domain" } },
+        { "name": "FEEDGEN_PLC_URL", "source": { "kind": "plc-url" } }
+      ],
+      "secretFiles": [
+        {
+          "secret": "feedgen-e2e-signing-key",
+          "name": "feedgen-signing-key",
+          "uid": 65532,
+          "gid": 65532
+        },
+        {
+          "secret": "feedgen-e2e-storage-key",
+          "name": "feedgen-storage-key",
+          "uid": 65532,
+          "gid": 65532
+        }
+      ]
+    },
+    {
+      "service": "feedgen-e2e-browser",
+      "environment": [
+        { "name": "SANDBOX_DOMAIN", "source": { "kind": "domain" } }
+      ],
+      "secretFiles": [
+        {
+          "secret": "feedgen-e2e-pds-admin",
+          "name": "pds-admin-password",
+          "uid": 1001,
+          "gid": 1001
+        },
+        {
+          "secret": "feedgen-e2e-browser-password",
+          "name": "browser-password",
+          "uid": 1001,
+          "gid": 1001
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "id": "spaces-pds",
+      "service": "feedgen-e2e-pds-spaces",
+      "host": "spaces-pds-e2e",
+      "port": 3000
+    },
+    {
+      "id": "spaces-pds-handles",
+      "service": "feedgen-e2e-pds-spaces",
+      "host": "*.spaces-pds-e2e",
+      "port": 3000
+    },
+    {
+      "id": "stratos",
+      "service": "feedgen-e2e-stratos",
+      "host": "stratos-e2e",
+      "port": 3100
+    },
+    {
+      "id": "stratos-oauth",
+      "service": "feedgen-e2e-stratos",
+      "hostname": "stratos-e2e.atmosbox.internal",
+      "port": 3100
+    },
+    {
+      "id": "feedgen",
+      "service": "feedgen-e2e-rust",
+      "host": "feedgen-e2e",
+      "port": 3000
+    }
+  ],
+  "secrets": [
+    { "id": "feedgen-e2e-signing-key", "bytes": 32 },
+    { "id": "feedgen-e2e-storage-key", "bytes": 32 },
+    { "id": "feedgen-e2e-pds-jwt", "bytes": 32 },
+    { "id": "feedgen-e2e-pds-admin", "bytes": 24 },
+    { "id": "feedgen-e2e-pds-rotation-key", "bytes": 32 },
+    { "id": "feedgen-e2e-browser-password", "bytes": 24 }
+  ],
+  "volumeInit": [
+    { "volume": "feedgen-e2e-stratos-data", "uid": 1000, "gid": 1000 },
+    { "volume": "feedgen-e2e-rust-data", "uid": 65532, "gid": 65532 },
+    { "volume": "feedgen-e2e-pds-spaces-data", "uid": 1000, "gid": 1000 }
+  ]
+}

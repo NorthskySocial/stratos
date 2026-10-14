@@ -213,10 +213,11 @@ impl PdsSpaceSynchronizer {
             }
             let commit = response.commit;
             let prepared = lifecycle
-                .pds_space_target(
+                .pds_space_target_at_generation(
                     target.space_uri.clone(),
                     target.boundary.clone(),
                     target.did.clone(),
+                    target.generation,
                 )
                 .map_err(PdsSpaceSyncError::Target)
                 .and_then(|target| {
@@ -241,11 +242,12 @@ impl PdsSpaceSynchronizer {
             return match verification {
                 CommitVerification::Verified => {
                     lifecycle
-                        .promote_pds_space_stage(
+                        .promote_pds_space_stage_at_generation(
                             &target.boundary,
                             &target.space_uri,
                             &target.did,
                             retained_at,
+                            target.generation,
                         )
                         .map_err(PdsSpaceSyncError::Store)?;
                     Ok(PdsSpaceSyncOutcome::Promoted)
@@ -304,6 +306,7 @@ mod tests {
 
     use async_trait::async_trait;
     use serde_json::json;
+    use tokio::sync::oneshot;
 
     use crate::{
         credential_issuer::{
@@ -390,6 +393,76 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct PausedPages(Arc<PausedPageState>);
+
+    struct PausedPageState {
+        page: Mutex<Option<SpaceHostPage>>,
+        started: Mutex<Option<oneshot::Sender<()>>>,
+        release: Mutex<Option<oneshot::Receiver<()>>>,
+    }
+
+    #[async_trait]
+    impl SpacePageSource for PausedPages {
+        async fn connect(
+            &self,
+            _: &PdsPollTarget,
+            _: Arc<crate::space_credential::HeldSpaceCredential>,
+        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
+            Ok(Arc::new(self.clone()))
+        }
+    }
+
+    #[async_trait]
+    impl SpacePageReader for PausedPages {
+        async fn list_page(
+            &self,
+            _: &PdsPollTarget,
+            _: Option<&str>,
+            _: usize,
+        ) -> Result<SpaceHostPage, SpaceHostError> {
+            let release = self
+                .0
+                .release
+                .lock()
+                .unwrap()
+                .take()
+                .ok_or(SpaceHostError::Unreachable)?;
+            if let Some(started) = self.0.started.lock().unwrap().take() {
+                let _ = started.send(());
+            }
+            release.await.map_err(|_| SpaceHostError::Unreachable)?;
+            self.0
+                .page
+                .lock()
+                .unwrap()
+                .take()
+                .ok_or(SpaceHostError::Unreachable)
+        }
+    }
+
+    struct PausedDecision {
+        started: Mutex<Option<oneshot::Sender<()>>>,
+        release: Mutex<Option<oneshot::Receiver<()>>>,
+    }
+
+    #[async_trait]
+    impl SpaceCommitVerificationPort for PausedDecision {
+        async fn verify(
+            &self,
+            _: &str,
+            _: &str,
+            _: Option<&serde_json::Value>,
+        ) -> CommitVerification {
+            let release = self.release.lock().unwrap().take().unwrap();
+            if let Some(started) = self.started.lock().unwrap().take() {
+                let _ = started.send(());
+            }
+            let _ = release.await;
+            CommitVerification::Verified
+        }
+    }
+
     fn fixed_now() -> u64 {
         1_000
     }
@@ -400,6 +473,7 @@ mod tests {
             boundary: BOUNDARY.to_owned(),
             did: DID.to_owned(),
             host: "https://pds.example.test/".to_owned(),
+            generation: 0,
         }
     }
 
@@ -454,16 +528,106 @@ mod tests {
         pages: Vec<SpaceHostPage>,
         decision: CommitVerification,
     ) -> PdsSpaceSynchronizer {
-        PdsSpaceSynchronizer::new(
+        synchronizer_with(
             Arc::new(Pages(Arc::new(Mutex::new(pages.into())))),
+            Arc::new(Decision(decision)),
+        )
+    }
+
+    fn synchronizer_with(
+        pages: Arc<dyn SpacePageSource>,
+        commits: Arc<dyn SpaceCommitVerificationPort>,
+    ) -> PdsSpaceSynchronizer {
+        PdsSpaceSynchronizer::new(
+            pages,
             Arc::new(
                 crate::credential_manager::SpaceCredentialManager::with_clock(
                     Arc::new(Issuer),
                     fixed_now,
                 ),
             ),
-            Arc::new(Decision(decision)),
+            commits,
         )
+    }
+
+    fn revoke_and_readd(lifecycle: &ControlLifecycle) {
+        lifecycle
+            .replace_pds_space_members(BOUNDARY, Vec::new(), NOW)
+            .unwrap();
+        lifecycle
+            .replace_pds_space_members(
+                BOUNDARY,
+                vec![PdsSpaceMember {
+                    did: DID.to_owned(),
+                }],
+                NOW,
+            )
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn late_page_cannot_stage_after_remove_and_readd() {
+        let lifecycle = Arc::new(lifecycle());
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let pages = PausedPages(Arc::new(PausedPageState {
+            page: Mutex::new(Some(page(None))),
+            started: Mutex::new(Some(started_tx)),
+            release: Mutex::new(Some(release_rx)),
+        }));
+        let sync = synchronizer_with(
+            Arc::new(pages),
+            Arc::new(Decision(CommitVerification::Verified)),
+        );
+        let lifecycle_task = Arc::clone(&lifecycle);
+        let task =
+            tokio::spawn(
+                async move { sync.sync_target(&lifecycle_task, &target(), NOW, NOW).await },
+            );
+        started_rx.await.unwrap();
+        revoke_and_readd(&lifecycle);
+        release_tx.send(()).unwrap();
+        assert!(matches!(
+            task.await.unwrap(),
+            Err(PdsSpaceSyncError::Target(_))
+        ));
+        assert_eq!(
+            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn late_terminal_verification_cannot_promote_after_remove_and_readd() {
+        let lifecycle = Arc::new(lifecycle());
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let decision = PausedDecision {
+            started: Mutex::new(Some(started_tx)),
+            release: Mutex::new(Some(release_rx)),
+        };
+        let sync = synchronizer_with(
+            Arc::new(Pages(Arc::new(Mutex::new(vec![page(None)].into())))),
+            Arc::new(decision),
+        );
+        let lifecycle_task = Arc::clone(&lifecycle);
+        let task =
+            tokio::spawn(
+                async move { sync.sync_target(&lifecycle_task, &target(), NOW, NOW).await },
+            );
+        started_rx.await.unwrap();
+        revoke_and_readd(&lifecycle);
+        release_tx.send(()).unwrap();
+        assert!(matches!(
+            task.await.unwrap(),
+            Err(PdsSpaceSyncError::Store(
+                crate::store::StoreError::UnauthorizedSpaceMember
+            ))
+        ));
+        assert_eq!(
+            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
+            None
+        );
     }
 
     #[tokio::test]
