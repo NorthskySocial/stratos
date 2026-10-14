@@ -330,8 +330,9 @@ async function targetFailureCount() {
   )
   return logs
     .split('\n')
-    .filter((line) => line.includes('event=pds_space_target_failed kind=target'))
-    .length
+    .filter((line) =>
+      line.includes('event=pds_space_target_failed kind=target'),
+    ).length
 }
 
 async function waitFor(check, label, timeout = 45_000) {
@@ -398,13 +399,10 @@ try {
 
   await control('hold-terminal')
   parsedLine(await browser('write'), '{"kind":"revocation-write",')
-  await waitFor(
-    async () => {
-      const status = await control('status')
-      return status.pending === 1 && status.terminalResponses > 0
-    },
-    'paused terminal PDS response',
-  )
+  await waitFor(async () => {
+    const status = await control('status')
+    return status.pending === 1 && status.terminalResponses > 0
+  }, 'paused terminal PDS response')
   await admin('remove', adminAccess)
   {
     const status = await control('status')
