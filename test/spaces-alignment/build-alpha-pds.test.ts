@@ -28,6 +28,7 @@ afterEach(async () => {
   delete process.env.RUNNER_TEST_FAIL_DOCKER_INSPECT
   delete process.env.RUNNER_TEST_IMAGE_ID
   delete process.env.RUNNER_TEST_SOURCE_LOG
+  delete process.env.RUNNER_TEST_PDS_DOCKER_CONFIG_PREFIX
   await Promise.all(
     temporary
       .splice(0)
@@ -93,9 +94,11 @@ if (args[0] === 'image' && args[1] === 'inspect') {
   process.exit(0)
 }
 if (args[0] === 'build') {
-  assert.ok(process.env.DOCKER_CONFIG?.startsWith(${JSON.stringify(
-    join(tmpdir(), 'stratos-pds-source-'),
-  )}))
+  assert.ok(
+    process.env.DOCKER_CONFIG?.startsWith(
+      process.env.RUNNER_TEST_PDS_DOCKER_CONFIG_PREFIX,
+    ),
+  )
   assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
   assert.ok(args.includes('--progress=plain'))
   const index = args.indexOf('--iidfile')
@@ -118,6 +121,10 @@ process.exit(2)
     process.env.PATH = `${bin}:${originalPath}`
     const sourceLog = join(root, 'source-path')
     process.env.RUNNER_TEST_SOURCE_LOG = sourceLog
+    process.env.RUNNER_TEST_PDS_DOCKER_CONFIG_PREFIX = join(
+      tmpdir(),
+      'stratos-pds-source-',
+    )
 
     const receipt = await buildAlphaPds(
       {

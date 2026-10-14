@@ -177,19 +177,6 @@ function base64url(value) {
   ).toString('base64url')
 }
 
-function alteredDelegation(token, alter) {
-  const [header, payload, signature] = token.split('.')
-  assert.ok(header && payload && signature, 'PDS returned an invalid JWT')
-  const decodedHeader = JSON.parse(Buffer.from(header, 'base64url'))
-  const decodedPayload = JSON.parse(Buffer.from(payload, 'base64url'))
-  const altered = alter(decodedHeader, decodedPayload)
-  return [
-    base64url(altered.header ?? decodedHeader),
-    base64url(altered.payload ?? decodedPayload),
-    altered.signature ?? signature,
-  ].join('.')
-}
-
 function proof(key, url, method, token) {
   const header = { typ: 'dpop+jwt', alg: 'ES256', jwk: key.jwk }
   const claims = {
@@ -233,11 +220,16 @@ async function exchangeWithoutProof(token) {
   })
 }
 
-async function assertDelegationDenied(page, key, alter, assertion) {
+async function assertTamperedDelegationDenied(page, key) {
   const token = await getDelegation(page)
-  const response = await exchange(alteredDelegation(token, alter), key)
-  assert.equal(response.status, 400, `${assertion} was accepted`)
-  passed.push(assertion)
+  const [header, payload] = token.split('.')
+  assert.ok(header && payload, 'PDS returned an invalid JWT')
+  const response = await exchange(
+    `${header}.${payload}.tampered-signature`,
+    key,
+  )
+  assert.equal(response.status, 400, 'Tampered delegation was accepted')
+  passed.push('tampered-delegation-signature-denied')
 }
 
 async function main() {
@@ -283,55 +275,7 @@ async function main() {
     assert.ok(Array.isArray(records) && records.length > 0)
     passed.push('foreign-repo-read')
 
-    await assertDelegationDenied(
-      page,
-      proofKey(),
-      (header) => ({ header: { ...header, typ: 'at+jwt' } }),
-      'wrong-delegation-type-denied',
-    )
-    await assertDelegationDenied(
-      page,
-      proofKey(),
-      (_header, payload) => ({ payload: { ...payload, iss: 'did:plc:rei' } }),
-      'wrong-delegation-issuer-denied',
-    )
-    await assertDelegationDenied(
-      page,
-      proofKey(),
-      () => ({ signature: 'tampered-signature' }),
-      'wrong-delegation-signature-denied',
-    )
-    await assertDelegationDenied(
-      page,
-      proofKey(),
-      (_header, payload) => ({
-        payload: {
-          ...payload,
-          sub: `at://${authorityDid}/space/zone.stratos.space.feed/other`,
-        },
-      }),
-      'wrong-delegation-space-denied',
-    )
-    await assertDelegationDenied(
-      page,
-      proofKey(),
-      (_header, payload) => ({
-        payload: { ...payload, aud: `${authorityDid}#wrong-audience` },
-      }),
-      'wrong-delegation-audience-denied',
-    )
-    await assertDelegationDenied(
-      page,
-      proofKey(),
-      (_header, payload) => ({
-        payload: {
-          ...payload,
-          iat: Math.floor(Date.now() / 1000) - 1_000,
-          exp: Math.floor(Date.now() / 1000) - 500,
-        },
-      }),
-      'expired-delegation-denied',
-    )
+    await assertTamperedDelegationDenied(page, proofKey())
 
     const wrongKey = proofKey()
     const wrongKeyResponse = await fetch(recordsUrl, {

@@ -647,6 +647,29 @@ describe('getSpaceCredential — delegation-token path', () => {
     expect(bodyOnly.body?.credential).toBeTruthy()
   })
 
+  it.each([
+    {
+      label: 'an empty Authorization header',
+      input: { space: SPACE_URI, delegationToken: '' },
+      req: { headers: { authorization: '' } },
+    },
+    {
+      label: 'an empty body delegation',
+      input: { space: SPACE_URI, delegationToken: '' },
+      req: { headers: { authorization: 'DPoP session-access-token' } },
+    },
+  ])(
+    'rejects $label as ambiguous delegation transport',
+    async ({ input, req }) => {
+      const { server } = await setup(true)
+      const response = await invoke(server, input, undefined, { req })
+      expect(response.error?.name).toBe('InvalidRequest')
+      expect(response.error?.message).toBe(
+        'Use one delegation transport per request',
+      )
+    },
+  )
+
   it('rejects an invalid Bearer token without consuming a valid retry', async () => {
     const { userKey, server } = await setup(true)
     const token = await mintDelegation({ userKey, typ: 'at+jwt' })

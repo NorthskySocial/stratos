@@ -116,35 +116,46 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await command('git', args, cwd)).output.trim()
 }
 
+export interface PinnedCheckout {
+  checkout: string
+  acquisition?: string
+}
+
 export async function pinnedCheckout(
   path: string,
   pin: { url: string; revision: string; sha256: Record<string, string> },
-): Promise<string> {
+): Promise<PinnedCheckout> {
   let checkout = path
-  if (!existsSync(checkout)) {
-    const acquisition = await mkdtemp(join(tmpdir(), 'stratos-aiab-source-'))
-    checkout = join(acquisition, 'atmosphereinabox')
-    await command(
-      'git',
-      ['clone', '--no-checkout', pin.url, checkout],
-      acquisition,
-    )
-    await command('git', ['fetch', 'origin', pin.revision], checkout)
-    await command('git', ['checkout', '--detach', pin.revision], checkout)
+  let acquisition: string | undefined
+  try {
+    if (!existsSync(checkout)) {
+      acquisition = await mkdtemp(join(tmpdir(), 'stratos-aiab-source-'))
+      checkout = join(acquisition, 'atmosphereinabox')
+      await command(
+        'git',
+        ['clone', '--no-checkout', pin.url, checkout],
+        acquisition,
+      )
+      await command('git', ['fetch', 'origin', pin.revision], checkout)
+      await command('git', ['checkout', '--detach', pin.revision], checkout)
+    }
+    if (
+      (await git(checkout, 'rev-parse', '--show-toplevel')) !==
+        (await realpath(checkout)) ||
+      (await git(checkout, 'rev-parse', 'HEAD')) !== pin.revision ||
+      (await git(checkout, 'status', '--porcelain', '--untracked-files=all'))
+    ) {
+      throw new Error('AiaB source is not the clean pinned checkout')
+    }
+    for (const [path, expected] of Object.entries(pin.sha256)) {
+      if ((await sha256File(join(checkout, path))) !== expected)
+        throw new Error(`Pinned AiaB ${path} hash differs`)
+    }
+    return { checkout, acquisition }
+  } catch (error) {
+    if (acquisition) await rm(acquisition, { recursive: true, force: true })
+    throw error
   }
-  if (
-    (await git(checkout, 'rev-parse', '--show-toplevel')) !==
-      (await realpath(checkout)) ||
-    (await git(checkout, 'rev-parse', 'HEAD')) !== pin.revision ||
-    (await git(checkout, 'status', '--porcelain', '--untracked-files=no'))
-  ) {
-    throw new Error('AiaB source is not the clean pinned checkout')
-  }
-  for (const [path, expected] of Object.entries(pin.sha256)) {
-    if ((await sha256File(join(checkout, path))) !== expected)
-      throw new Error(`Pinned AiaB ${path} hash differs`)
-  }
-  return checkout
 }
 
 async function discoverSuites(source: string): Promise<ScenarioSuite[]> {
@@ -281,8 +292,8 @@ export async function runSandbox(
   await ensureSeparatePaths(options)
   const source = await realpath(options.source)
   const candidate = await git(source, 'rev-parse', 'HEAD')
-  if (await git(source, 'status', '--porcelain', '--untracked-files=no'))
-    throw new Error('Candidate tracked work is dirty')
+  if (await git(source, 'status', '--porcelain', '--untracked-files=all'))
+    throw new Error('Candidate work is dirty')
   if (
     source !==
     (await realpath(
@@ -326,12 +337,26 @@ export async function runSandbox(
     options.suite,
     await discoverSuites(source),
   )
-  const sandboxCheckout = await pinnedCheckout(
+  const sandbox = await pinnedCheckout(
     options.sandboxDirectory,
     pins.atmosphereInABox,
   )
-  await mkdir(options.reportDirectory, { recursive: false, mode: 0o700 })
-  const workspace = await mkdtemp(join(tmpdir(), 'stratos-spaces-alignment-'))
+  const sandboxCheckout = sandbox.checkout
+  try {
+    await mkdir(options.reportDirectory, { recursive: false, mode: 0o700 })
+  } catch (error) {
+    if (sandbox.acquisition)
+      await rm(sandbox.acquisition, { recursive: true, force: true })
+    throw error
+  }
+  let workspace: string
+  try {
+    workspace = await mkdtemp(join(tmpdir(), 'stratos-spaces-alignment-'))
+  } catch (error) {
+    if (sandbox.acquisition)
+      await rm(sandbox.acquisition, { recursive: true, force: true })
+    throw error
+  }
   const projectName = `stratos-${randomUUID().replaceAll('-', '').slice(0, 12)}`
   const atmosphere = join(workspace, 'atmosphereinabox')
   const composeFile = join(atmosphere, 'compose.yaml')
@@ -555,6 +580,8 @@ export async function runSandbox(
     )
     if (cleanup.status !== 'failed')
       await rm(workspace, { recursive: true, force: true })
+    if (sandbox.acquisition)
+      await rm(sandbox.acquisition, { recursive: true, force: true })
     throw gateError
   }
 
@@ -564,6 +591,8 @@ export async function runSandbox(
     { mode: 0o600 },
   )
   await rm(workspace, { recursive: true, force: true })
+  if (sandbox.acquisition)
+    await rm(sandbox.acquisition, { recursive: true, force: true })
 }
 
 function summarizeReviews(

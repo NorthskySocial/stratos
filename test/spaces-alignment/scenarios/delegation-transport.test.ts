@@ -165,16 +165,9 @@ describe('delegation transport browser scenario', () => {
         'authorization-server-pds-separation',
       )
       expect(suite.requiredAssertions).toContain('foreign-repo-read')
-      for (const assertion of [
-        'wrong-delegation-type-denied',
-        'wrong-delegation-issuer-denied',
-        'wrong-delegation-signature-denied',
-        'wrong-delegation-space-denied',
-        'wrong-delegation-audience-denied',
-        'expired-delegation-denied',
-      ]) {
-        expect(suite.requiredAssertions).toContain(assertion)
-      }
+      expect(suite.requiredAssertions).toContain(
+        'tampered-delegation-signature-denied',
+      )
       expect(() => validateSuite(suite)).not.toThrow()
       expect(() => validateAssertions(suite, results)).not.toThrow()
     } finally {

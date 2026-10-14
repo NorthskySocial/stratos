@@ -168,7 +168,9 @@ async function handleGetSpaceCredential(
 
   // Resolve identity via delegation token or DPoP session.
   const headerToken = credentials?.delegationToken
-  if (input.delegationToken && req?.headers?.authorization) {
+  const hasBodyDelegation = input.delegationToken !== undefined
+  const hasAuthorization = req?.headers?.authorization !== undefined
+  if (hasBodyDelegation && hasAuthorization) {
     throw new InvalidRequestError(
       'Use one delegation transport per request',
       'InvalidRequest',
