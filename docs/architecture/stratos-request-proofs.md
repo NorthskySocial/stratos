@@ -21,7 +21,15 @@ and the helper API section in `stratos-client/README.md`.
 
 Add a `Stratos-Request-Proof` compact JWS to designated credential-authenticated
 Stratos reads. The caller signs it with a local ephemeral P-256 key bound by the
-validated credential's `cnf.kid`. A registered client DID is not required.
+validated credential's `cnf.kid`. No additional app/client DID registration is needed.
+The authenticated enrolled actor's `did:plc` or `did:web` is a separate identity;
+auth policy checks actor identity and enrollment independently. Neither the space
+credential nor its request proof establishes that actor identity.
+
+For Stratos custody, Stratos holds the actor's custody P-256 private key and signs
+the hosted repository's commits. That key is not a client proof-of-possession key.
+The caller holds the separate credential-bound ephemeral private key and signs
+the request proof.
 
 The proof binds the exact credential token, receiving authority DID, method, raw
 path and query, body digest, lifetime, and random proof ID. Where policy requires
@@ -43,7 +51,7 @@ OAuth DPoP, enrollment, and admin authentication remain unchanged.
 | Choice                                      | Reason                                                                            |
 | ------------------------------------------- | --------------------------------------------------------------------------------- |
 | Bind the exact request bytes                | Normalized URLs or parsed credentials can hide changes to what the caller signed. |
-| Use the credential-bound ephemeral key      | Prove possession without requiring client registration or an account key.         |
+| Use the credential-bound ephemeral key      | Prove possession without additional app/client DID registration or a custody key. |
 | Bind service identity to the proof          | An unrelated service JWT beside a valid proof does not authenticate that request. |
 | Consume one replay identity after admission | Invalid or unauthorized requests must not consume a valid proof ID.               |
 | Keep standard Spaces signatures             | This extension supplements their contract; it does not replace it.                |

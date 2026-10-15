@@ -40,8 +40,17 @@ Do not require this Stratos extension on a foreign PDS.
 
 ### What the extension establishes
 
-The client proves possession of an ephemeral credential-bound P-256 key; it does
-not need a registered client DID. A required service assertion uses a published,
+The caller signs the request proof with a caller-held credential-bound ephemeral
+P-256 key. No additional app/client DID registration is needed. The authenticated
+enrolled actor's `did:plc` or `did:web` is separate from this proof key. Auth policy
+checks actor identity and enrollment independently; neither the space credential
+nor its request proof establishes that actor identity.
+
+For Stratos custody, Stratos holds the actor's custody P-256 private key and signs
+the hosted repository's commits. That key is not a client proof-of-possession key
+and is separate from the caller-held ephemeral key.
+
+A required service assertion uses a published,
 issuer-controlled DID method to bind the exact proof digest. No new key purpose
 is required. The injected resolver forces refresh without stale-key fallback.
 Complete credential, client, service, and authorization checks precede one atomic

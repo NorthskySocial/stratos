@@ -59,10 +59,17 @@ point, then require canonical re-encoding equality. Reject other curves and key
 sources, including `jwk`, `jku`, `x5c`, and `crit` headers.
 Never resolve an arbitrary proof-supplied key before validating credential binding.
 
-The credential issuer signs this binding. The client generates the ephemeral key
-with a CSPRNG and keeps its private material local. It is not an account key,
-client registration, or a new DID-document key purpose. Credential migration from
-`cnf.jkt` to `cnf.kid` is a prerequisite, not an implicit conversion.
+The credential issuer signs this binding. The caller generates the ephemeral key
+with a CSPRNG, holds its private material locally, and signs the request proof.
+No additional app/client DID registration or new DID-document key purpose is needed.
+The authenticated enrolled actor's `did:plc` or `did:web` is separate from this proof key.
+Auth policy checks actor identity and enrollment independently; neither the space
+credential nor its request proof establishes that actor identity.
+
+For Stratos custody, Stratos holds the actor's custody P-256 private key and signs
+the hosted repository's commits. That key is not a client proof-of-possession key;
+it is separate from the caller-held credential-bound ephemeral key.
+Credential migration from `cnf.jkt` to `cnf.kid` is a prerequisite, not an implicit conversion.
 
 ES256 means ECDSA P-256 with SHA-256. The signature is exactly 64 octets of
 JOSE `R || S`, each a 32-octet unsigned big-endian integer. Reject DER and invalid

@@ -321,8 +321,16 @@ do not require Stratos extension headers on a foreign PDS.
 
 To use the helpers in a test integration, you need a separately validated
 `cnf.kid` credential and a local ephemeral P-256 key. Current Stratos credentials
-still use `cnf.jkt`; do not convert that binding implicitly. A browser does not
-need a registered client DID.
+still use `cnf.jkt`; do not convert that binding implicitly. The caller holds the
+ephemeral private key and signs the request proof. No additional app/client DID
+registration is needed. The authenticated enrolled actor's `did:plc` or `did:web`
+is separate from this proof key. Auth policy checks actor identity and enrollment
+independently; neither the space credential nor its request proof establishes
+that actor identity.
+
+For Stratos custody, Stratos holds the actor's custody P-256 private key and signs
+the hosted repository's commits. That key is not a client proof-of-possession key;
+do not confuse it with the caller-held credential-bound ephemeral key.
 
 The proof binds exact credential bytes, receiving authority DID, method, raw
 path/query, empty-body digest, lifetime, and random proof ID. A required service
