@@ -29,6 +29,55 @@ only on `@atcute/*` packages, so pulling it into a client app doesn't drag in se
 
 ---
 
+## Proposed request-proof foundation
+
+`createRequestProof`, `verifyRequestProof`, and `requestProofReplayEntry` expose
+pure ADR 019 helpers. The protocol is proposed and is not enabled on service
+routes. These helpers do not change standard Spaces signatures or DPoP transport.
+Do not send the extension to foreign PDS hosts as a required authentication field.
+
+Creation takes a P-256 `PrivateKey` from `@atcute/crypto`, an already validated
+credential's exact compact token and `cnf.kid` as `credential` and `credentialKey`,
+a trusted receiving authority DID, `method: 'GET'`, the exact transmitted raw
+origin-form `target`, an empty `Uint8Array` body, and integer Unix seconds as `now`.
+`lifetimeSeconds` defaults to 60 and must be a positive integer no greater than 60.
+Each creation generates a fresh random 128-bit `jti`. No key material is exported.
+
+Verification takes the compact proof and the same trusted request context. It
+validates proof possession and byte bindings, not the credential's signature,
+permission, current enrollment, service identity, or transport. The caller must
+validate the credential and supply its trusted `cnf.kid`; do not extract that value
+from an unverified credential. No helper captures raw ingress bytes, selects an
+authorized route, or consumes replay state.
+
+After all authorization checks, `requestProofReplayEntry(verified, nowSeconds)`
+rechecks time and returns the arguments for the existing structural
+`RequestProofReplayStore.consumeOnce(kind, jti, ttlSeconds)` seam. This clock accepts
+fractional Unix seconds. Deny access on missing storage, false results, or errors.
+Retain shared atomic replay state through expiry plus skew. Lost or evicted state
+invalidates an unconditional at-most-once guarantee. Use a fresh proof on retries.
+
+The strict JSON helper uses native JSON parsing plus a bounded flat-member scan
+to reject duplicate decoded names. This is limited to the profile's scalar fields,
+not a general-purpose JSON parser. Crypto, multibase, and point validation reuse
+existing maintained libraries. See
+[`docs/architecture/stratos-request-proofs.md`](../docs/architecture/stratos-request-proofs.md)
+for the complete wire contract and outstanding integration requirements.
+
+`createServiceAssertion` and `verifyServiceAssertion` add the proposed service
+identity profile. Both verify the bound client proof against the supplied request
+context. Creation takes the service's `PrivateKey`, full published `kid`, trusted
+`issuer`, and route `lxm`. Verification takes an injected trusted key resolver.
+That resolver must select the exact issuer-controlled published method and reject
+stale or unsupported material; an arbitrary public key does not establish identity.
+The helpers accept ES256 or ES256K and bind the exact proof digest and lifetime.
+They do not authorize the service or consume an assertion-specific replay identity.
+
+The unregistered service foundation composition consumes one request-proof identity
+only after injected credential validation, complete proof/assertion verification,
+and authorization. No production transport or route is enabled. The Chromium
+vector probe runs without Node globals; Rust and other browsers remain unverified.
+
 ## 1. Enrollment Discovery
 
 A user's Stratos enrollments are published as `zone.stratos.actor.enrollment` records on their PDS

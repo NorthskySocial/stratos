@@ -19,4 +19,33 @@ Credentials are multi-use capabilities for a whole space until their configured 
 
 For the Feedgen, authority membership must also fence work already in flight: a generation change must prevent staged foreign commits from being promoted after removal and must survive restart. This is a separate ingestion control, not credential revocation. Deployments without that generation fence retain an in-flight exposure window. Outstanding foreign-host credentials remain bounded by their expiry unless the foreign host provides an independent revocation mechanism.
 
+## Proposed Stratos request-proof extension
+
+[ADR 019](stratos-request-proofs.md) defines a proposed extension with tested pure
+request-proof/service-assertion helpers and unregistered injected admission code.
+No production route enables it. It does not replace or alter standard Spaces HTTP
+Message Signatures, OAuth DPoP, or existing `cnf.jkt` credentials. Migration to
+standard credential transport and validated `cnf.kid` belongs to later work.
+
+Keep three audiences distinct: standard delegation targets
+`authorityDid#atproto_space_host`; standard credential presentation targets the
+repository owner or authority as required by the operation; the extension targets
+the receiving Stratos authority DID without a fragment. Do not require the Stratos
+extension on a foreign PDS.
+
+The client uses an ephemeral P-256 credential-bound key, not a registered client
+DID. Where policy requires service identity, a published issuer-controlled DID
+method signs a separate assertion bound to the exact client proof digest. No new
+key purpose is introduced. Complete credential, client, service, and authorization
+checks precede one atomic replay consumption; the assertion has no second replay
+identity. The injected resolver forces refresh and adds no stale-key fallback.
+
+Chromium vectors now execute without Node globals. Shared Redis probing, reviewed
+production ingress and caller integration, scoped mutation, independent reviews,
+and source-bound AiaB remain outstanding. Lost shared replay state means no replay
+protection for consumed identities inside the remaining acceptance window. A stolen
+unused delegation can still win credential issuance; the PDS remains trusted for
+hosting and account keys. Proof possession does not grant permission, establish
+response completeness, or prove human consent.
+
 Signing has two different meanings here. Stratos-custody MST commits and PDS-custody account commits can authenticate a signer and the relevant committed state. The current cross-host space proof uses a signature/MAC over a served view; it does not establish a durable, independently verifiable full-content proof for every historical record. Do not equate a valid credential or signed response with proof that the host returned all permitted content. The remaining work is interoperable authority discovery, foreign-host revocation, and a complete content-proof contract.

@@ -1,0 +1,59 @@
+--- a/spaces/02-auth.md
++++ b/spaces/02-auth.md
+@@ -1,4 +1,31 @@
+ # Auth: Delegation Tokens, Space Credentials, and App Gating
++
++## Plan 019 foundation status (2026-10-15)
++
++This section supersedes earlier implementation-status claims below. The older
++sections retain their historical spec pin; they are not current deployment evidence.
++Stratos currently has delegation ingestion, credential issuance, optional app gating,
++and local cnf.jkt/DPoP credential reads. Standard transport migration is separate.
++
++The candidate adds proposed Stratos-Request-Proof and Stratos-Service-Assertion
++helpers and injected admission composition only. No production route enables them.
++Standard Spaces HTTP Message Signatures remain unchanged. Clients use ephemeral
++P-256 keys bound by validated cnf.kid, without a registered client DID. Services
++prove identity with a published issuer-controlled DID method and a separate
++assertion over the exact request-proof digest. No new key purpose is required.
++
++Credential, client, service, and authorization checks precede one replay-consumed
++proof identity. The assertion has no second jti. Shared state must be atomic and
++retained through expiry plus skew; after state loss there is no replay protection
++for consumed identities. An unused stolen delegation can still win issuance.
++Possession is not permission or human consent. The PDS remains trusted.
++
++Keep delegation audience authorityDid#atproto_space_host separate from standard
++credential presentation audience (repository owner or authority by operation) and
++extension audience (receiving Stratos authority DID). Do not require the extension
++on foreign PDS hosts. Production ingress, cnf.kid migration, shared Redis probing,
++mutation, independent reviews, and source-bound AiaB remain outstanding.
++
+ 
+ **Status:** Draft · **Parent:** [`README.md`](README.md)
+ 
+--- a/spaces/04-keys-and-trust.md
++++ b/spaces/04-keys-and-trust.md
+@@ -1,4 +1,22 @@
+ # Keys & Trust: Signing, Escrow, Binding, and Separation of Duties
++
++## Plan 019 service identity foundation (2026-10-15)
++
++This proposed request-proof extension does not change repository commit trust,
++key custody, or standard Spaces signatures. No production route enables it.
++The client proof uses an ephemeral credential-bound P-256 did:key. A required
++service assertion uses a separately published service DID verification method
++and binds the exact proof digest, authority, route, and lifetime. No mandatory
++new DID key purpose or historical-key fallback is introduced.
++
++The injected adapter forces trusted DID resolution for every assertion and adds
++no cache. It requires the document ID, exact full method ID, and controller to
++match the expected issuer. Removed methods fail after refreshed resolution.
++Production must verify resolver network bounds and upstream freshness. Any later
++cache needs finite age and capacity, explicit invalidation and rotation visibility;
++stale-on-error acceptance is not permitted. Identity still requires separate
++service authorization. Neither identity nor possession proves human consent.
++
+ 
+ **Status:** Draft · **Parent:** [`README.md`](README.md)
+ 

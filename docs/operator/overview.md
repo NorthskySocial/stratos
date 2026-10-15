@@ -36,6 +36,29 @@ The TypeScript feedgen and standalone indexer are deprecated. See
 
 <DataFlowAnimation />
 
+## Proposed request-proof foundation
+
+ADR 019 is foundation code and a proposed protocol, not deployed enforcement.
+No production route enables `Stratos-Request-Proof` or `Stratos-Service-Assertion`.
+Current OAuth, service JWT, and `cnf.jkt`/DPoP credential paths are unchanged.
+Standard Spaces signatures remain separate and unchanged.
+
+The injected admission composition validates the client proof and required bound
+service assertion, awaits credential and authorization checks, then consumes one
+proof identity before protected data access. Production integration must still
+establish raw public path/query preservation, bounded empty-body handling, route
+policy, credential migration, and trusted DID resolution limits. The foundation
+resolver forces fresh DID resolution and adds no stale-key cache or rotation grace.
+
+Replay storage must be shared, atomic, and retained through expiry plus clock
+skew. Missing or unavailable storage denies admission. After shared state is lost,
+there is no replay protection for consumed identities still within their acceptance
+window. Flush, eviction, or failover rollback therefore invalidates at-most-once
+claims. Establish recovery and retention guarantees before enabling any route.
+A stolen unused delegation can still race credential issuance; this extension does
+not remove PDS trust or prove user consent. See
+[ADR 019](../architecture/stratos-request-proofs.md) for limits and remaining gates.
+
 ## Next Steps
 
 - [Architecture](/operator/architecture) — system components, MST repos, storage layout

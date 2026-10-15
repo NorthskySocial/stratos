@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "pnpm",
+  "testRunner": "vitest",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+  "vitest": {
+    "configFile": "vitest.request-proof.config.mjs"
+  },
+  "inPlace": true,
+  "reporters": ["clear-text", "json"],
+  "mutate": [
+    "src/request-proof-codec.ts",
+    "src/request-proof.ts",
+    "src/service-assertion.ts"
+  ],
+  "incremental": false,
+  "concurrency": 4,
+  "thresholds": {
+    "high": 80,
+    "low": 60,
+    "break": 60
+  },
+  "jsonReporter": {
+    "fileName": "reports/request-proof/mutation.json"
+  }
+}

@@ -41,6 +41,28 @@ tested helpers — use raw XRPC when you need full control or are using a framew
 the helper signatures.
 :::
 
+## Proposed request-proof foundation
+
+ADR 019 adds tested request-proof and service-assertion helpers, not an enabled
+production authentication path. Existing OAuth, DPoP, and standard Spaces HTTP
+Message Signatures are unchanged. Do not require Stratos extension headers on a
+foreign PDS. Current Stratos credentials still use `cnf.jkt`; the proposed proof
+requires a separately validated credential with `cnf.kid` and a local ephemeral
+P-256 key. A browser does not need a registered client DID.
+
+The proof binds exact credential bytes, receiving authority DID, method, raw
+path/query, empty-body digest, lifetime, and random proof ID. A required service
+assertion binds that same proof through its digest and authenticates a published
+service DID key. Neither possession nor identity grants permission or proves
+human consent. Authorization remains separate. Chromium vectors run without Node
+globals; this is not production browser transport integration or Rust evidence.
+
+See [the proposed wire contract](../architecture/stratos-request-proofs.md) and
+[helper API guidance](../../stratos-client/README.md#proposed-request-proof-foundation).
+Production adoption still needs reviewed credential migration, ingress handling,
+route policy, CORS, shared replay storage, and caller integration. Retry with a
+fresh proof after any accepted attempt; there is no exactly-once operation claim.
+
 ## Quick Start
 
 ### 1. Check for Stratos Support

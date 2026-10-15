@@ -1,4 +1,25 @@
 export {
+  createServiceAssertion,
+  verifyServiceAssertion,
+  type ServiceAssertionContext,
+  type CreateServiceAssertionOptions,
+  type ServiceAssertionKeyResolver,
+  type VerifiedServiceAssertion,
+} from './service-assertion.js'
+
+export {
+  createRequestProof,
+  verifyRequestProof,
+  requestProofReplayEntry,
+  type RequestProofContext,
+  type CreateRequestProofOptions,
+  type RequestProofClaims,
+  type VerifiedRequestProof,
+  type RequestProofReplayStore,
+  type RequestProofReplayEntry,
+} from './request-proof.js'
+
+export {
   appendServiceKeyHistory,
   verifyServiceKeyHistory,
   findHistoricalSigningKey,
