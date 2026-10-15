@@ -7,7 +7,9 @@ use serde_json::Value;
 use url::Url;
 
 use crate::{
+    identifier::Did,
     identity::{PrivateCidr, is_public_address, parse_private_cidrs},
+    space_http_signature::SpaceHttpSignatureHeaders,
     space_sync::{MAX_SPACE_PAGE_OPS, SpacePage, SpaceRepoOp},
 };
 
@@ -76,13 +78,10 @@ impl HostResolver for SystemHostResolver {
 
 #[async_trait]
 pub trait SpaceCredentialProof: Send + Sync {
-    fn credential(&self) -> &str;
-
-    async fn presentation_proof(
+    async fn presentation_headers(
         &self,
-        method: &str,
-        target_uri: &str,
-    ) -> Result<String, SpaceHostError>;
+        audience: &Did,
+    ) -> Result<SpaceHttpSignatureHeaders, SpaceHostError>;
 }
 
 pub struct PinnedSpaceHostClient {
@@ -150,9 +149,28 @@ impl PinnedSpaceHostClient {
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<SpaceHostPage, SpaceHostError> {
+        let response = self
+            .repo_request(space_uri, actor_did, cursor, limit)
+            .await?
+            .send()
+            .await
+            .map_err(classify_request_error)?;
+        if !response.status().is_success() {
+            return Err(request_error(response).await);
+        }
+        let bytes = response_bytes(response, MAX_PAGE_BYTES).await?;
+        decode_page(&bytes)
+    }
+
+    async fn repo_request(
+        &self,
+        space_uri: &str,
+        actor_did: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<reqwest::RequestBuilder, SpaceHostError> {
         validate_request(space_uri, actor_did, cursor, limit)?;
         let endpoint = self.endpoint_url("com.atproto.space.listRepoOps")?;
-        let target_uri = endpoint.to_string();
         let mut url = endpoint;
         {
             let mut query = url.query_pairs_mut();
@@ -163,21 +181,16 @@ impl PinnedSpaceHostClient {
                 query.append_pair("cursor", cursor);
             }
         }
-        let dpop = self.proof.presentation_proof("GET", &target_uri).await?;
-        let response = self
+        let audience = Did::parse(actor_did).map_err(|_| SpaceHostError::InvalidRequest)?;
+        let headers = self.proof.presentation_headers(&audience).await?;
+        Ok(self
             .client
             .get(url)
             .header("accept", "application/json")
-            .header("authorization", format!("DPoP {}", self.proof.credential()))
-            .header("dpop", dpop)
-            .send()
-            .await
-            .map_err(classify_request_error)?;
-        if !response.status().is_success() {
-            return Err(request_error(response).await);
-        }
-        let bytes = response_bytes(response, MAX_PAGE_BYTES).await?;
-        decode_page(&bytes)
+            .header("authorization", headers.authorization())
+            .header("atproto-space-audience", audience.as_str())
+            .header("signature-input", headers.signature_input())
+            .header("signature", headers.signature()))
     }
 
     fn endpoint_url(&self, lxm: &str) -> Result<Url, SpaceHostError> {
@@ -414,12 +427,14 @@ mod tests {
 
     #[async_trait]
     impl SpaceCredentialProof for TestProof {
-        fn credential(&self) -> &str {
-            "credential"
-        }
-
-        async fn presentation_proof(&self, _: &str, _: &str) -> Result<String, SpaceHostError> {
-            Ok("proof".to_owned())
+        async fn presentation_headers(
+            &self,
+            audience: &crate::identifier::Did,
+        ) -> Result<crate::space_http_signature::SpaceHttpSignatureHeaders, SpaceHostError>
+        {
+            crate::space_http_signature::SpaceHttpSignatureKey::generate()
+                .presentation_headers("credential", audience)
+                .map_err(|_| SpaceHostError::Proof)
         }
     }
 
@@ -561,5 +576,80 @@ mod tests {
         assert_eq!(page.page.ops.len(), 1);
         assert_eq!(page.page.next_cursor.as_deref(), Some("next"));
         assert!(page.commit.is_some());
+    }
+    #[tokio::test]
+    async fn binds_repo_reads_to_each_owner_not_the_shared_host() {
+        use crate::{
+            identifier::Did, space_credential::GrantedSpaceCredential,
+            space_http_signature::SpaceHttpSignatureKey,
+        };
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+        let grant = Arc::new(
+            GrantedSpaceCredential::new("rei".to_owned(), SpaceHttpSignatureKey::generate())
+                .unwrap(),
+        );
+        let multikey = bs58::decode(grant.key_id().strip_prefix("did:key:z").unwrap())
+            .into_vec()
+            .unwrap();
+        let key = VerifyingKey::from_sec1_bytes(&multikey[2..]).unwrap();
+        let client = PinnedSpaceHostClient::connect_with_resolver(
+            "https://pds.example.test",
+            grant,
+            &FixedResolver(vec!["1.1.1.1:443".parse().unwrap()]),
+        )
+        .await
+        .unwrap();
+        let space = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+        let rei = client
+            .repo_request(space, "did:plc:rei", None, 10)
+            .await
+            .unwrap()
+            .build()
+            .unwrap();
+        let repeat = client
+            .repo_request(space, "did:plc:rei", Some("next"), 20)
+            .await
+            .unwrap()
+            .build()
+            .unwrap();
+        let misato = client
+            .repo_request(space, "did:plc:misato", None, 10)
+            .await
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(rei.headers()["authorization"], "Atproto-Space rei");
+        assert_eq!(rei.headers()["signature"], repeat.headers()["signature"]);
+        assert_ne!(rei.headers()["signature"], misato.headers()["signature"]);
+        assert_eq!(rei.headers()["atproto-space-audience"], "did:plc:rei");
+        assert_eq!(misato.headers()["atproto-space-audience"], "did:plc:misato");
+        assert!(rei.headers().get("dpop").is_none());
+        let bytes = STANDARD
+            .decode(
+                rei.headers()["signature"]
+                    .to_str()
+                    .unwrap()
+                    .strip_prefix("atproto-space=:")
+                    .unwrap()
+                    .strip_suffix(':')
+                    .unwrap(),
+            )
+            .unwrap();
+        let signature = Signature::from_slice(&bytes).unwrap();
+        for (audience, expected) in [("did:plc:rei", true), ("did:plc:misato", false)] {
+            let audience = Did::parse(audience).unwrap();
+            let base = format!(
+                "\"authorization\": Atproto-Space rei\n\"atproto-space-audience\": {}\n\"@signature-params\": (\"authorization\" \"atproto-space-audience\")",
+                audience.as_str()
+            );
+            assert_eq!(key.verify(base.as_bytes(), &signature).is_ok(), expected);
+        }
+        assert!(
+            client
+                .repo_request(space, "https://pds.example.test", None, 10)
+                .await
+                .is_err()
+        );
     }
 }

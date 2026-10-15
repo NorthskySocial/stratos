@@ -27,7 +27,9 @@ const clubhousePackage = new URL(
   '../../../clubhouse/package.json',
   import.meta.url,
 )
-async function prepareBrowserRunner(reportDirectory: string): Promise<string> {
+export async function prepareBrowserRunner(
+  reportDirectory: string,
+): Promise<string> {
   const browserAssets = join(reportDirectory, 'standard-browser-assets')
   await rm(browserAssets, { recursive: true, force: true })
   await mkdir(browserAssets)

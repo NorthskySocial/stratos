@@ -119,7 +119,7 @@ services:
       STRATOS_ALLOWED_REDIRECT_ORIGINS: https://clubhouse-e2e.atmosbox.internal
       PLC_DIRECTORY: https://plc.atmosbox.test
       PLC_DIRECTORY_PRIVATE_CIDRS: 172.16.0.0/12
-      IDENTITY_PRIVATE_ORIGINS: https://spaces-pds-e2e.atmosbox.test,https://motoko.spaces-pds-e2e.atmosbox.test,https://pds1.atmosbox.test,https://user1.pds1.atmosbox.test,https://user2.pds1.atmosbox.test
+      IDENTITY_PRIVATE_ORIGINS: https://spaces-pds-e2e.atmosbox.test,https://motoko.spaces-pds-e2e.atmosbox.test,https://batou.spaces-pds-e2e.atmosbox.test,https://pds1.atmosbox.test,https://user1.pds1.atmosbox.test,https://user2.pds1.atmosbox.test
       IDENTITY_PRIVATE_CIDRS: 172.16.0.0/12
       STORAGE_BACKEND: sqlite
       STRATOS_DATA_DIR: /app/data

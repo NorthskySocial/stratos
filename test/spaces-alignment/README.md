@@ -70,9 +70,37 @@ stack. Private transport grants name only these sandbox origins, and
 `schemas.authority.atmosbox.test` account, which the baseline queries through
 the private authority PDS.
 
+## October primary PDS
+
+The primary spaces PDS is pinned to `79d6307e19908f3af406838ea0e5fae42847f182`.
+The builder checks the upstream Dockerfile and lockfile hashes in `sources.json`
+before pulling base images. Source identity does not attest a running image;
+the build receipt records the immutable image ID separately.
+
+Select `--suite rust-production-interop` for the mandatory ten-assertion baseline
+followed by the same real OAuth, PDS publication, and Rust feed delivery checks
+with Batou as a second owner on the same host. Both runs require the exact new
+post URI and text in a successful feed HTTP response, not just a rendered page.
+The suite also reuses the October OAuth driver with an in-memory Rust
+probe built in the browser image from the pinned Rust builder and linked to the actual feedgen library. It requires Rust-signed exchange,
+seeded-record reads for two owners, wrong-owner/key denial, identical-header
+reuse, fresh-key renewal, and renewal denial after member removal. The probe
+receives tokens through pipes, not command arguments or files. Browser OAuth
+obtains delegation; Rust constructs every exchange and presentation signature.
+The Rust suite configures a ten-second standard credential lifetime. Its probe also
+uses the production HTTP issuer and credential manager with the existing sandbox
+service identity, verifies cached-key reuse, waits for real expiry, and requires a
+rotated key and a successful foreign-PDS read. No test clock or explicit cache
+invalidation triggers this refresh. The runtime scheduler itself is unchanged. The separate `standard-credential-transport` suite retains its
+TypeScript transport assertions. Neither suite is certified until its reviewed
+sandbox run passes.
+
 ## Suite API
 
-Each tracked `scenarios/<suite>.ts` exports `suite: ScenarioSuite` with `id`, nonempty `requiredAssertions`, and an async `run(context)` returning one result for each named assertion. Import `ScenarioSuite` from `../rules.js`. The runner discovers modules from the candidate checkout and runs `baseline` before any additional suite. A missing, skipped, failed, or duplicate assertion fails the gate. Add a new suite in its own scenario module; no registry edit is needed.
+Each tracked `scenarios/<suite>.ts` exports `suite: ScenarioSuite` with `id`, nonempty `requiredAssertions`, and an async `run(context)` returning one result for each named assertion. Import `ScenarioSuite` from `../rules.js`. The runner discovers modules from the candidate checkout and runs `baseline` before any additional suite. A missing, skipped, failed, or duplicate assertion fails the gate. Add a new suite in its own scenario module. Suites that need the additional October
+PDS must be named in the runner's October capability set. Both standard transport
+and Rust production interoperability provision that PDS and its explicit identity
+origins, and record and clean up both source-built PDS images.
 
 Mock child processes only in runner unit tests. Acceptance requires the real private sandbox with production authorization gates and the complete baseline assertion receipt. A health check or zero-test filter is not acceptance evidence.
 

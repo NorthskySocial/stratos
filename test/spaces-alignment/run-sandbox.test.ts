@@ -204,7 +204,10 @@ describe('sandbox preflight', () => {
         candidateRepo,
         'test/spaces-alignment/templates/feedgen-ng-e2e.yaml',
       ),
-      'services:\n  feedgen-e2e-pds-spaces:\n    image: ${SPACES_PDS_IMAGE_ID}\n    environment:\n      IDENTITY_PRIVATE_ORIGINS: https://spaces-pds-e2e.atmosbox.test\n\nvolumes:\n  primary-data: {}\n',
+      await readFile(
+        new URL('./templates/feedgen-ng-e2e.yaml', import.meta.url),
+        'utf8',
+      ),
     )
     await writeFile(
       join(
@@ -241,12 +244,26 @@ describe('sandbox preflight', () => {
       ),
       `export const suite = { id: 'standard-credential-transport', requiredAssertions: ['october-pass'], async run() { return [{ id: 'october-pass', status: 'passed' }] } }`,
     )
+    await writeFile(
+      join(
+        candidateRepo,
+        'test/spaces-alignment/scenarios/rust-production-interop.ts',
+      ),
+      `export const suite = { id: 'rust-production-interop', requiredAssertions: ['rust-pass'], async run() { return [{ id: 'rust-pass', status: 'passed' }] } }`,
+    )
     for (const file of ['october-pds.yaml', 'october-pds.definition.json']) {
       await writeFile(
         join(candidateRepo, 'test/spaces-alignment/templates', file),
         await readFile(new URL('./templates/' + file, import.meta.url)),
       )
     }
+    await mkdir(join(candidateRepo, 'stratos-feedgen-ng'))
+    await writeFile(
+      join(candidateRepo, 'stratos-feedgen-ng/Dockerfile'),
+      await readFile(
+        new URL('../../stratos-feedgen-ng/Dockerfile', import.meta.url),
+      ),
+    )
     git(candidateRepo, 'add', '.')
     git(candidateRepo, 'commit', '-qm', 'Add candidate')
     await writeFile(join(candidateRepo, 'README.md'), 'Faye reviewed update\n')
@@ -293,6 +310,10 @@ describe('sandbox preflight', () => {
     await writeFile(
       join(sandboxRepo, 'stacks/feedgen-ng-e2e-clubhouse.definition.json'),
       '{}\n',
+    )
+    await writeFile(
+      join(sandboxRepo, 'stacks/feedgen-ng-e2e-browser.Dockerfile'),
+      'FROM browser\nCOPY runtime/feedgen-ng-e2e-browser.mjs /runner/driver.mjs\n',
     )
     git(sandboxRepo, 'add', '.')
     git(sandboxRepo, 'commit', '-qm', 'Pin sandbox')
@@ -369,6 +390,11 @@ describe('sandbox preflight', () => {
         (name) => `https://${name}.october-pds-e2e.atmosbox.test`,
       ),
       'https://spaces-pds-e2e.atmosbox.test',
+      'https://motoko.spaces-pds-e2e.atmosbox.test',
+      'https://batou.spaces-pds-e2e.atmosbox.test',
+      'https://pds1.atmosbox.test',
+      'https://user1.pds1.atmosbox.test',
+      'https://user2.pds1.atmosbox.test',
     ]
     const fakeDeno = `#!/usr/bin/env node
 const fs = require('node:fs')
@@ -390,7 +416,20 @@ if (args[1] === 'sandbox' && args[2] === 'create') {
 }
 if (args[1] === 'sandbox' && args[2] === 'check') assert.deepEqual(args, ['task', 'sandbox', 'check'])
 if (args[1] === 'sandbox' && args[2] === 'check') {
-  const stack = fs.readFileSync('stacks/feedgen-ng-e2e.yaml', 'utf8')
+  const stack = fs.readFileSync('compose.yaml', 'utf8')
+  assert.equal(stack, fs.readFileSync('stacks/feedgen-ng-e2e.yaml', 'utf8'))
+  const browserDockerfile = fs.readFileSync('stacks/feedgen-ng-e2e-browser.Dockerfile', 'utf8')
+  if (browserDockerfile.includes('AS builder')) {
+    assert.ok(stack.includes('context: ../stratos\\n      dockerfile: ../atmosphereinabox/stacks/feedgen-ng-e2e-browser.Dockerfile'))
+    assert.ok(stack.includes("STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS: '10'"))
+    assert.ok(browserDockerfile.includes('RUN cargo build --locked --release --package stratos-feedgen-ng --example space_interop_probe'))
+    assert.ok(browserDockerfile.includes('COPY --from=builder /workspace/target/release/examples/space_interop_probe /usr/local/bin/space_interop_probe'))
+    assert.ok(browserDockerfile.includes('COPY test/spaces-alignment/templates/feedgen-ng-e2e-browser.mjs /runner/driver.mjs'))
+    const definition = JSON.parse(fs.readFileSync('stacks/feedgen-ng-e2e.definition.json', 'utf8'))
+    assert.ok(definition.services.find(s => s.service === 'feedgen-e2e-browser').secretFiles.some(s => s.name === 'probe-service-signing-key' && s.secret === 'feedgen-e2e-signing-key' && s.uid === 1001 && s.gid === 1001))
+  } else {
+    assert.ok(!stack.includes('STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS'))
+  }
   assert.ok(stack.includes('image: sha256:${'a'.repeat(64)}'))
   const origins = stack.match(/IDENTITY_PRIVATE_ORIGINS: (.+)/)[1].split(',')
   if (stack.includes('feedgen-e2e-pds-october:')) {
@@ -402,14 +441,14 @@ if (args[1] === 'sandbox' && args[2] === 'check') {
       .join('\\n')
     assert.ok(stack.includes('\\n' + october + '\\nvolumes:\\n  feedgen-e2e-pds-october-data: {}\\n'), 'Preserve the entire October template, including every Compose shell escape')
   } else {
-    assert.deepEqual(origins, ['https://spaces-pds-e2e.atmosbox.test'])
+    assert.deepEqual(origins, ${JSON.stringify(octoberOrigins.slice(3))})
   }
 }
 if (args[1] === 'sandbox' && args[2] === 'up') assert.deepEqual(args, ['task', 'sandbox', 'up', '--build'])
 if (args[1] === 'sandbox' && args[2] === 'seed') assert.deepEqual(args, ['task', 'sandbox', 'seed'])
 if (process.env.RUNNER_TEST_FAIL_STEP && process.argv.includes(process.env.RUNNER_TEST_FAIL_STEP)) process.exit(7)
 if (process.argv.includes('create')) {
-  fs.writeFileSync('compose.yaml', 'services: {}\\n')
+  fs.copyFileSync('stacks/feedgen-ng-e2e.yaml', 'compose.yaml')
   fs.mkdirSync('state', { recursive: true })
   fs.writeFileSync('state/manifest.json', JSON.stringify({
     domain: process.env.RUNNER_TEST_WRONG_DOMAIN ? 'atmosbox.internal' : 'atmosbox.test'
@@ -717,52 +756,65 @@ if (args[0] === 'image' && args[1] === 'rm') {
         dependencies,
       ),
     ).rejects.toThrow('October PDS source pin is missing')
-    const dualReport = join(root, 'dual-pds-report')
     const octoberPin = { ...sourcePins.spacesPds, revision: 'c'.repeat(40) }
-    const dualBuilds: string[] = []
-    await runSandbox(
-      {
-        ...options,
-        suite: 'standard-credential-transport',
-        reportDirectory: dualReport,
-      },
-      {
-        ...dependencies,
-        sourcePins: { ...sourcePins, octoberSpacesPds: octoberPin },
-        async buildPds(pin, directory) {
-          dualBuilds.push(pin.revision)
-          const receipt = await dependencies.buildPds()
-          return {
-            ...receipt,
-            sourceSha: pin.revision,
-            imageId: `sha256:${(pin === octoberPin ? 'c' : 'a').repeat(64)}`,
-            imageTag:
-              pin === octoberPin
-                ? 'stratos-spaces-pds-11111111-1111-1111-1111-111111111111:local'
-                : receipt.imageTag,
-          }
-        },
-      },
-    )
-    expect(dualBuilds).toEqual([
-      sourcePins.spacesPds.revision,
-      octoberPin.revision,
-    ])
-    const dual = JSON.parse(
-      await readFile(join(dualReport, 'receipt.json'), 'utf8'),
-    )
-    expect(dual.pdsServices.primary.build.sourceSha).toBe(
-      sourcePins.spacesPds.revision,
-    )
-    expect(dual.pdsServices.october.build.sourceSha).toBe(octoberPin.revision)
-    expect(dual.pdsServices.october.build.imageId).toBe(
-      `sha256:${'c'.repeat(64)}`,
-    )
-    expect(dual.cleanup.octoberImage.status).toBe('passed')
-    expect(dual.suites.map((suite: { id: string }) => suite.id)).toEqual([
-      'baseline',
+    for (const selectedSuite of [
       'standard-credential-transport',
-    ])
+      'rust-production-interop',
+    ]) {
+      const dualReport = join(root, selectedSuite + '-dual-pds-report')
+      const dualBuilds: string[] = []
+      await runSandbox(
+        {
+          ...options,
+          suite: selectedSuite,
+          reportDirectory: dualReport,
+        },
+        {
+          ...dependencies,
+          sourcePins: { ...sourcePins, octoberSpacesPds: octoberPin },
+          async buildPds(pin, directory) {
+            dualBuilds.push(pin.revision)
+            const receipt = await dependencies.buildPds()
+            return {
+              ...receipt,
+              sourceSha: pin.revision,
+              imageId: `sha256:${(pin === octoberPin ? 'c' : 'a').repeat(64)}`,
+              imageTag:
+                pin === octoberPin
+                  ? 'stratos-spaces-pds-11111111-1111-1111-1111-111111111111:local'
+                  : receipt.imageTag,
+            }
+          },
+        },
+      )
+      expect(dualBuilds).toEqual([
+        sourcePins.spacesPds.revision,
+        octoberPin.revision,
+      ])
+      const dual = JSON.parse(
+        await readFile(join(dualReport, 'receipt.json'), 'utf8'),
+      )
+      expect(dual.pdsServices.primary.build.sourceSha).toBe(
+        sourcePins.spacesPds.revision,
+      )
+      expect(dual.pdsServices.october.build.sourceSha).toBe(octoberPin.revision)
+      expect(dual.pdsServices.october.build.imageId).toBe(
+        `sha256:${'c'.repeat(64)}`,
+      )
+      expect(dual.cleanup.octoberImage.status).toBe('passed')
+      expect(dual.suites.map((suite: { id: string }) => suite.id)).toEqual([
+        'baseline',
+        selectedSuite,
+      ])
+      expect(dual.cleanup.image.status).toBe('passed')
+      expect(dual.cleanup.compose.status).toBe('passed')
+      expect(dual.templateHashes['stacks/october-pds.yaml']).toMatch(
+        /^[0-9a-f]{64}$/,
+      )
+      expect(dual.templateHashes['stacks/october-pds.definition.json']).toMatch(
+        /^[0-9a-f]{64}$/,
+      )
+    }
 
     process.env.RUNNER_TEST_FAIL_IMAGE = '1'
     const imageFailedReport = join(root, 'image-failed-report')
