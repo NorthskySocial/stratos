@@ -24,6 +24,12 @@
       "examples"
     ]
   },
+  "octoberSpacesPds": {
+    "url": "https://github.com/bluesky-social/atproto.git",
+    "revision": "79d6307e19908f3af406838ea0e5fae42847f182",
+    "dockerfile": "services/pds/Dockerfile",
+    "lockfile": "pnpm-lock.yaml"
+  },
   "spacesPds": {
     "url": "https://github.com/bluesky-social/atproto.git",
     "revision": "de009e6e83faea80d92d2fc32a8ad07863586b50",

@@ -1,0 +1,15 @@
+{
+  "source": "bluesky-social/atproto@5b95b2f2723a2882824fbb0b819fd6aad884ef20/packages/space/src/http-signature.ts",
+  "keyId": "did:key:zDnaeXxvmFHMHjqgQTbadpWG7gPHwnga1i7SMwxrV2BSdUjAD",
+  "exchange": {
+    "authorization": "Bearer rei-delegation",
+    "signature-input": "atproto-space=(\"authorization\");keyid=\"did:key:zDnaeXxvmFHMHjqgQTbadpWG7gPHwnga1i7SMwxrV2BSdUjAD\"",
+    "signature": "atproto-space=:eK8Y8zk7bC2CY6h+uaBC3knTw6bVJxqhoA/eZjfd5CRAnG28Jb9lwnxOuXlN7YjgiM07qAtzdw4lqW8X5h/HSQ:"
+  },
+  "presentation": {
+    "authorization": "Atproto-Space misato-credential",
+    "atproto-space-audience": "did:plc:tokyo3",
+    "signature-input": "atproto-space=(\"authorization\" \"atproto-space-audience\")",
+    "signature": "atproto-space=:KzibzmLzsi/n5qkAeO/ryZs20YNwcG9kbkF8+LZNmdth5JoqCkbuhBptZFLcLze8q+w2pFA/YWq0HHIqWhUEGw:"
+  }
+}

@@ -14,6 +14,10 @@ import {
   verifySpaceCredential,
 } from './space-credential-verifier.js'
 import { SpaceDpopProofChecker } from './space-dpop.js'
+import {
+  SpaceHttpSignatureError,
+  verifySpacePresentationSignature,
+} from './space-http-signature.js'
 import type { ReplayStore } from './replay-store.js'
 import {
   EnrollmentDeniedError,
@@ -371,11 +375,16 @@ function createServiceVerifier(deps: {
  */
 function extractSpaceCredentialToken(
   authHeader: string | undefined,
-): { token: string; scheme: 'dpop' | 'bearer' } | null {
+): { token: string; scheme: 'dpop' | 'bearer' | 'atproto-space' } | null {
   // RFC 9110 section 11.1: the auth scheme is case-insensitive.
+  if (authHeader && /^atproto-space(?:\s|$)/i.test(authHeader)) {
+    const token = /^atproto-space ([^\s]+)$/i.exec(authHeader)?.[1]
+    if (!token) throw new AuthRequiredError('Malformed space authorization')
+    return { token, scheme: 'atproto-space' }
+  }
   const match = authHeader ? /^(dpop|bearer) +(.+)$/i.exec(authHeader) : null
   if (!match) return null
-  const scheme: 'dpop' | 'bearer' =
+  const scheme: 'dpop' | 'bearer' | 'atproto-space' =
     match[1].toLowerCase() === 'dpop' ? 'dpop' : 'bearer'
   const token = match[2].trim()
   const parts = token.split('.')
@@ -415,6 +424,32 @@ function extractSpaceCredentialToken(
  * @throws AuthRequiredError if the header is missing / not a space credential,
  *   or the credential or its proof fails verification.
  */
+function resolveSpaceReadAudience(
+  url: string | undefined,
+  serviceDid: string,
+): string {
+  const request = new URL(url ?? '/', 'http://localhost')
+  if (request.pathname === '/xrpc/zone.stratos.space.listRepos') {
+    return serviceDid
+  }
+  const parameter = new Map([
+    ['/xrpc/zone.stratos.space.getRecord', 'repo'],
+    ['/xrpc/zone.stratos.space.listBlobs', 'repo'],
+    ['/xrpc/zone.stratos.sync.listRepoOps', 'did'],
+    ['/xrpc/zone.stratos.sync.listRecordPaths', 'did'],
+  ]).get(request.pathname)
+  if (!parameter)
+    throw new AuthRequiredError('Unsupported space read operation')
+  const owners = request.searchParams.getAll(parameter)
+  if (
+    owners.length !== 1 ||
+    !/^did:[a-z]+:[A-Za-z0-9._:%-]+$/.test(owners[0])
+  ) {
+    throw new AuthRequiredError('Space read requires an unambiguous repo DID')
+  }
+  return owners[0]
+}
+
 function createSpaceCredentialVerifier(deps: {
   boundaryStore?: import('@northskysocial/stratos-core').BoundaryCatalogStore
   serviceDid: string
@@ -433,7 +468,55 @@ function createSpaceCredentialVerifier(deps: {
     const { token, scheme } = extracted
     try {
       let result
-      if (scheme === 'dpop') {
+      const rawHeaders = ctx.req?.rawHeaders ?? []
+      const proofHeaders = new Set(
+        [
+          ...Object.keys(ctx.req?.headers ?? {}),
+          ...rawHeaders.filter((_, index) => index % 2 === 0),
+        ].map((name) => name.toLowerCase()),
+      )
+      if (scheme === 'atproto-space') {
+        if (proofHeaders.has('dpop')) {
+          throw new AuthRequiredError('Conflicting credential proof families')
+        }
+        result = await verifySpaceCredential(token, {
+          serviceKey: deps.signingKey,
+          serviceDid: deps.serviceDid,
+        })
+        if (!result.cnfKid || result.cnfJkt) {
+          throw new AuthRequiredError('HTTP credential key binding required')
+        }
+        if (
+          rawHeaders
+            .filter((_, index) => index % 2 === 0)
+            .filter((name) => name.toLowerCase() === 'authorization').length !==
+            1 ||
+          !rawHeaders.some(
+            (value, index) =>
+              index % 2 === 0 &&
+              value.toLowerCase() === 'authorization' &&
+              rawHeaders[index + 1] === authHeader,
+          )
+        ) {
+          throw new AuthRequiredError('Ambiguous space authorization')
+        }
+        await verifySpacePresentationSignature(
+          { rawHeaders },
+          {
+            keyId: result.cnfKid,
+            expectedAudience: resolveSpaceReadAudience(
+              ctx.req.url,
+              deps.serviceDid,
+            ),
+          },
+        )
+      } else if (
+        proofHeaders.has('signature') ||
+        proofHeaders.has('signature-input') ||
+        proofHeaders.has('atproto-space-audience')
+      ) {
+        throw new AuthRequiredError('Conflicting credential proof families')
+      } else if (scheme === 'dpop') {
         if (!deps.replayStore) {
           deps.logger?.warn(
             { path: ctx.req?.url },
@@ -470,7 +553,7 @@ function createSpaceCredentialVerifier(deps: {
           serviceKey: deps.signingKey,
           serviceDid: deps.serviceDid,
         })
-        if (result.cnfJkt) {
+        if (result.cnfJkt || result.cnfKid) {
           // A key-bound credential must present its proof even in dev mode.
           deps.logger?.info(
             { path: ctx.req?.url },
@@ -492,7 +575,10 @@ function createSpaceCredentialVerifier(deps: {
         },
       }
     } catch (err) {
-      if (err instanceof SpaceCredentialVerificationError) {
+      if (
+        err instanceof SpaceCredentialVerificationError ||
+        err instanceof SpaceHttpSignatureError
+      ) {
         deps.logger?.info(
           { reason: err.name, message: err.message, path: ctx.req?.url },
           'auth rejected: space credential verification failed',
