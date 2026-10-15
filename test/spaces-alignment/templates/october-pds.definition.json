@@ -1,0 +1,77 @@
+{
+  "services": [
+    {
+      "service": "feedgen-e2e-pds-october",
+      "environment": [
+        {
+          "name": "SANDBOX_DOMAIN",
+          "source": {
+            "kind": "domain"
+          }
+        },
+        {
+          "name": "OCTOBER_PDS_PLC_URL",
+          "source": {
+            "kind": "plc-url"
+          }
+        },
+        {
+          "name": "OCTOBER_PDS_JWT_SECRET",
+          "source": {
+            "kind": "secret",
+            "secret": "feedgen-e2e-october-jwt"
+          }
+        },
+        {
+          "name": "OCTOBER_PDS_ADMIN_PASSWORD",
+          "source": {
+            "kind": "secret",
+            "secret": "feedgen-e2e-october-admin"
+          }
+        },
+        {
+          "name": "OCTOBER_PDS_ROTATION_KEY",
+          "source": {
+            "kind": "secret",
+            "secret": "feedgen-e2e-october-rotation-key"
+          }
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "id": "october-pds",
+      "service": "feedgen-e2e-pds-october",
+      "host": "october-pds-e2e",
+      "port": 3000
+    },
+    {
+      "id": "october-pds-handles",
+      "service": "feedgen-e2e-pds-october",
+      "host": "*.october-pds-e2e",
+      "port": 3000
+    }
+  ],
+  "secrets": [
+    {
+      "id": "feedgen-e2e-october-jwt",
+      "bytes": 32
+    },
+    {
+      "id": "feedgen-e2e-october-admin",
+      "bytes": 24
+    },
+    {
+      "id": "feedgen-e2e-october-rotation-key",
+      "bytes": 32
+    }
+  ],
+  "volumeInit": [
+    {
+      "volume": "feedgen-e2e-pds-october-data",
+      "uid": 1000,
+      "gid": 1000
+    }
+  ]
+}

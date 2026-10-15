@@ -24,7 +24,7 @@ import {
   exportJWK,
   generateKeyPair,
 } from 'jose'
-import { Secp256k1Keypair, verifySignature } from '@atproto/crypto'
+import { P256Keypair, Secp256k1Keypair, verifySignature } from '@atproto/crypto'
 import {
   createServiceJwt,
   type Server as XrpcServer,
@@ -85,6 +85,7 @@ interface InvokeOptions {
   delegationToken?: string
   /** Request shape (method/url/headers) for mint-time DPoP proof checks. */
   req?: {
+    rawHeaders?: string[]
     method?: string
     /** The full path, as Express keeps it when a router rewrites `url`. */
     originalUrl?: string
@@ -1068,5 +1069,349 @@ describe('getSpaceCredential — delegation-token path', () => {
       delegationToken: token,
     })
     expect(res.error?.name).toBe('InvalidToken')
+  })
+})
+
+async function makeExchangeRequest(
+  token: string,
+  key: Keypair,
+): Promise<NonNullable<InvokeOptions['req']>> {
+  const authorization = `Bearer ${token}`
+  const params = `("authorization");keyid="${key.did()}"`
+  const signature = await key.sign(
+    new TextEncoder().encode(
+      `"authorization": ${authorization}\n"@signature-params": ${params}`,
+    ),
+  )
+  const headers = {
+    authorization,
+    'signature-input': `atproto-space=${params}`,
+    signature: `atproto-space=:${Buffer.from(signature).toString('base64')}:`,
+  }
+  return {
+    method: 'POST',
+    originalUrl: MINT_PATH,
+    headers,
+    rawHeaders: Object.entries(headers).flat(),
+  }
+}
+
+describe('getSpaceCredential — HTTP signature coexistence', () => {
+  async function setup() {
+    const signingKey = await Secp256k1Keypair.create()
+    const userKey = await Secp256k1Keypair.create()
+    const ctx = createMockCtx({
+      signingKey,
+      enrolledBoundaries: [SPACE_BOUNDARY],
+      idResolver: atprotoResolver(userKey.did(), userKey),
+    })
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as unknown as XrpcServer, ctx)
+    const token = await mintDelegation({ userKey })
+    const key = await P256Keypair.create()
+    const req = await makeExchangeRequest(token, key)
+    const present = (request = req) =>
+      invoke(server, { space: SPACE_URI }, undefined, {
+        delegationToken: token,
+        req: request,
+      })
+    return { ctx, server, token, key, req, present, signingKey }
+  }
+
+  it.each(['signature', 'signature-input'])(
+    'dispatches a lone raw %s without legacy fallback',
+    async (name) => {
+      const { req, present } = await setup()
+      const broken = {
+        ...req,
+        headers: { authorization: req.headers!.authorization },
+        rawHeaders: [
+          'Authorization',
+          req.headers!.authorization as string,
+          name,
+          'invalid',
+        ],
+      }
+      expect((await present(broken)).error).toEqual({
+        name: 'ProofRequired',
+        message: 'A valid HTTP signature is required',
+      })
+      expect((await present()).error).toBeUndefined()
+    },
+  )
+
+  it.each(['Bearer invalid extra', 'prefix Bearer invalid', 'Bearer'])(
+    'rejects malformed normalized authorization %s',
+    async (authorization) => {
+      const { req, present } = await setup()
+      expect(
+        (await present({ ...req, headers: { ...req.headers, authorization } }))
+          .error,
+      ).toEqual({
+        name: 'InvalidRequest',
+        message: 'Conflicting mint proof families',
+      })
+      expect((await present()).error).toBeUndefined()
+    },
+  )
+
+  it.each(['prefix', 'suffix'])(
+    'rejects a %s around the resolved normalized Bearer token',
+    async (side) => {
+      const { token, req, present } = await setup()
+      const authorization =
+        side === 'prefix' ? `rei Bearer ${token}` : `Bearer ${token} rei`
+      expect(
+        (await present({ ...req, headers: { ...req.headers, authorization } }))
+          .error,
+      ).toEqual({
+        name: 'InvalidRequest',
+        message: 'Conflicting mint proof families',
+      })
+      expect((await present()).error).toBeUndefined()
+    },
+  )
+
+  it('rejects raw signature headers without normalized headers or credentials', async () => {
+    const { server, req, present } = await setup()
+    expect((await present({ ...req, headers: undefined })).error).toEqual({
+      name: 'InvalidRequest',
+      message: 'Conflicting mint proof families',
+    })
+    expect(
+      (await invokeUnauthenticated(server, { space: SPACE_URI }, req)).error,
+    ).toEqual({
+      name: 'InvalidRequest',
+      message: 'Conflicting mint proof families',
+    })
+  })
+
+  it('rejects a body delegation with signed header identity even without normalized authorization', async () => {
+    const { server, token, req } = await setup()
+    const headers = { ...req.headers }
+    delete headers.authorization
+    expect(
+      (
+        await invokeHandler(
+          server,
+          { space: SPACE_URI, delegationToken: token },
+          { credentials: { delegationToken: token } },
+          { ...req, headers },
+        )
+      ).error,
+    ).toEqual({
+      name: 'InvalidRequest',
+      message: 'Conflicting mint proof families',
+    })
+  })
+
+  it.each(['signature', 'signature-input'])(
+    'does not dispatch a legacy session when a raw value equals %s',
+    async (value) => {
+      const { server } = await setup()
+      const result = await invoke(server, { space: SPACE_URI }, USER_DID, {
+        jkt: 'thumb-rei',
+        req: { rawHeaders: ['X-Rei', value] },
+      })
+      expect(result.error).toBeUndefined()
+      expect(decodeCredential(result.body!.credential!).payload.cnf).toEqual({
+        jkt: 'thumb-rei',
+      })
+    },
+  )
+
+  it('rejects a session thumbprint even when a delegation is also resolved', async () => {
+    const { server, token, req } = await setup()
+    const result = await invokeHandler(
+      server,
+      { space: SPACE_URI },
+      { credentials: { delegationToken: token, jkt: 'rei' } },
+      req,
+    )
+    expect(result.error).toEqual({
+      name: 'InvalidRequest',
+      message: 'Conflicting mint proof families',
+    })
+  })
+
+  it('accepts raw header whitespace and unrelated headers before authorization', async () => {
+    const { req, present } = await setup()
+    const rawHeaders = ['X-Rei', 'authorization', ...req.rawHeaders!]
+    rawHeaders[3] = ` \t${rawHeaders[3]}\t `
+    expect((await present({ ...req, rawHeaders })).error).toBeUndefined()
+  })
+
+  it.each([undefined, 1, 3_600])(
+    'mints kid without aud using only the new TTL %s',
+    async (ttl) => {
+      const { ctx, present, key, signingKey } = await setup()
+      ctx.cfg.stratos.spaceHttpCredentialTtlSeconds = ttl
+      ctx.cfg.stratos.spaceCredentialTtlSeconds = 86_400
+      const res = await present()
+      expect(res.error).toBeUndefined()
+      const { payload } = decodeCredential(res.body!.credential!)
+      expect(payload.cnf).toEqual({ kid: key.did() })
+      expect(payload).not.toHaveProperty('aud')
+      expect(payload.jti).toEqual(expect.any(String))
+      expect(payload.jti.length).toBeGreaterThan(0)
+      expect(payload.iat).toBeGreaterThan(0)
+      expect(payload.exp - payload.iat).toBe(ttl ?? 600)
+      expect(res.body!.expiresAt).toBe(
+        new Date(payload.exp * 1000).toISOString(),
+      )
+      expect(
+        await verifyCredentialAgainst(signingKey.did(), res.body!.credential!),
+      ).toBe(true)
+      expect((await present()).error?.name).toBe('InvalidToken')
+    },
+  )
+
+  it.each([
+    'signature',
+    'signature-input',
+    'rawHeaders',
+    'changed token',
+    'duplicate authorization',
+  ])(
+    'rejects %s without spending delegation or falling back',
+    async (failure) => {
+      const { req, present } = await setup()
+      const broken = {
+        ...req,
+        headers: { ...req.headers },
+        rawHeaders: [...req.rawHeaders!],
+      }
+      if (failure === 'rawHeaders') broken.rawHeaders = []
+      else if (failure === 'changed token') {
+        broken.rawHeaders[1] += 'tampered'
+      } else if (failure === 'duplicate authorization') {
+        broken.rawHeaders.push(
+          'Authorization',
+          broken.headers.authorization as string,
+        )
+      } else {
+        broken.headers[failure] = 'invalid'
+        const index = broken.rawHeaders.indexOf(failure)
+        broken.rawHeaders[index + 1] = 'invalid'
+      }
+      expect((await present(broken)).error?.name).toBe('ProofRequired')
+      expect((await present()).error).toBeUndefined()
+    },
+  )
+
+  it('rejects mixed DPoP/signature then allows the same token with one profile', async () => {
+    const { req, present } = await setup()
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    expect(
+      (await present({ ...req, headers: { ...req.headers, dpop: proof } }))
+        .error?.name,
+    ).toBe('InvalidRequest')
+    expect((await present()).error).toBeUndefined()
+  })
+
+  it('rejects body and session signature combinations', async () => {
+    const { server, token, req } = await setup()
+    expect(
+      (
+        await invoke(
+          server,
+          { space: SPACE_URI, delegationToken: token },
+          undefined,
+          { req },
+        )
+      ).error?.name,
+    ).toBe('InvalidRequest')
+    expect(
+      (
+        await invoke(server, { space: SPACE_URI }, USER_DID, {
+          req,
+          jkt: 'rei',
+        })
+      ).error?.name,
+    ).toBe('InvalidRequest')
+  })
+
+  it.each(['member', 'inactive', 'app'])(
+    'does not spend delegation on a failed %s gate',
+    async (gate) => {
+      const { ctx, present } = await setup()
+      if (gate === 'member')
+        vi.mocked(ctx.enrollmentStore.getBoundaries).mockResolvedValueOnce([])
+      if (gate === 'inactive')
+        vi.mocked(ctx.enrollmentStore.getEnrollment).mockResolvedValueOnce(null)
+      if (gate === 'app')
+        ctx.cfg.stratos.spaceAppAccess = {
+          byBoundary: new Map([
+            [
+              SPACE_BOUNDARY,
+              { kind: 'allowList', clientIds: ['https://nerv.test'] },
+            ],
+          ]),
+        }
+      expect((await present()).error?.name).toBe(
+        gate === 'app' ? 'AttestationRequired' : 'NotEnrolled',
+      )
+      ctx.cfg.stratos.spaceAppAccess = { byBoundary: new Map() }
+      expect((await present()).error).toBeUndefined()
+    },
+  )
+
+  it.each(['http first', 'legacy first'])(
+    'shares one delegation replay store: %s',
+    async (order) => {
+      const { server, token, present } = await setup()
+      const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+      const legacy = () =>
+        invoke(
+          server,
+          { space: SPACE_URI, delegationToken: token },
+          undefined,
+          {
+            req: {
+              method: 'POST',
+              originalUrl: MINT_PATH,
+              headers: { dpop: proof },
+            },
+          },
+        )
+      const first = order === 'http first' ? present : legacy
+      const second = order === 'http first' ? legacy : present
+      expect((await first()).error).toBeUndefined()
+      expect((await second()).error?.name).toBe('InvalidToken')
+    },
+  )
+
+  it('rejects a valid signature over a different delegation than the resolved identity', async () => {
+    const { token, present, key } = await setup()
+    const other = await makeExchangeRequest(`${token}changed`, key)
+    other.headers!.authorization = `Bearer ${token}`
+    expect((await present(other)).error?.name).toBe('ProofRequired')
+    expect((await present()).error).toBeUndefined()
+  })
+
+  it('rejects raw-only DPoP conflicts and never treats a failed signature as dev auth', async () => {
+    const { ctx, present, req } = await setup()
+    ctx.cfg.stratos.devMode = true
+    expect(
+      (
+        await present({
+          ...req,
+          rawHeaders: [...req.rawHeaders!, 'DPoP', 'rei'],
+        })
+      ).error?.name,
+    ).toBe('InvalidRequest')
+    expect((await present({ ...req, rawHeaders: [] })).error?.name).toBe(
+      'ProofRequired',
+    )
+    expect((await present()).error).toBeUndefined()
+  })
+
+  it('admits exactly one concurrent exchange', async () => {
+    const { present } = await setup()
+    const results = await Promise.all([present(), present()])
+    expect(results.filter((result) => result.body?.credential)).toHaveLength(1)
+    expect(
+      results.filter((result) => result.error?.name === 'InvalidToken'),
+    ).toHaveLength(1)
   })
 })

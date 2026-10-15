@@ -20,6 +20,8 @@ import {
   runSandbox,
 } from './run-sandbox.js'
 
+import { runScenario } from './scenarios/standard-credential-transport.driver.mjs'
+
 const temporary: string[] = []
 const originalPath = process.env.PATH
 
@@ -202,7 +204,7 @@ describe('sandbox preflight', () => {
         candidateRepo,
         'test/spaces-alignment/templates/feedgen-ng-e2e.yaml',
       ),
-      'services:\n  feedgen-e2e-pds-spaces:\n    image: ${SPACES_PDS_IMAGE_ID}\n',
+      'services:\n  feedgen-e2e-pds-spaces:\n    image: ${SPACES_PDS_IMAGE_ID}\n    environment:\n      IDENTITY_PRIVATE_ORIGINS: https://spaces-pds-e2e.atmosbox.test\n\nvolumes:\n  primary-data: {}\n',
     )
     await writeFile(
       join(
@@ -216,7 +218,7 @@ describe('sandbox preflight', () => {
         candidateRepo,
         'test/spaces-alignment/templates/feedgen-ng-e2e.definition.json',
       ),
-      '{"routes":[{"hostname":"stratos-e2e.atmosbox.internal"}]}\n',
+      '{"services":[{"service":"feedgen-e2e-browser","secretFiles":[]}],"secrets":[],"volumeInit":[],"routes":[{"hostname":"stratos-e2e.atmosbox.internal"}]}\n',
     )
     await writeFile(
       join(
@@ -232,6 +234,19 @@ describe('sandbox preflight', () => {
       ),
       '{"buildArguments":[{"name":"VITE_PLC_DIRECTORY"}]}\n',
     )
+    await writeFile(
+      join(
+        candidateRepo,
+        'test/spaces-alignment/scenarios/standard-credential-transport.ts',
+      ),
+      `export const suite = { id: 'standard-credential-transport', requiredAssertions: ['october-pass'], async run() { return [{ id: 'october-pass', status: 'passed' }] } }`,
+    )
+    for (const file of ['october-pds.yaml', 'october-pds.definition.json']) {
+      await writeFile(
+        join(candidateRepo, 'test/spaces-alignment/templates', file),
+        await readFile(new URL('./templates/' + file, import.meta.url)),
+      )
+    }
     git(candidateRepo, 'add', '.')
     git(candidateRepo, 'commit', '-qm', 'Add candidate')
     await writeFile(join(candidateRepo, 'README.md'), 'Faye reviewed update\n')
@@ -326,6 +341,35 @@ describe('sandbox preflight', () => {
       },
     }
     await writeFile(reviewReceipt, JSON.stringify(review))
+    const accountLabels: string[] = []
+    await expect(
+      runScenario({
+        open: async () => ({ close: async () => {} }),
+        prepare: async (_browser, name) => {
+          accountLabels.push(name)
+          if (accountLabels.length === 2)
+            throw new Error('October account labels captured')
+          return {
+            account: { did: `did:plc:${name}`, seedText: name },
+            page: name,
+          }
+        },
+        delegation: async () => {
+          throw new Error('No exchange expected while capturing labels')
+        },
+        remove: async () => {
+          throw new Error('No removal expected while capturing labels')
+        },
+      }),
+    ).rejects.toThrow('October account labels captured')
+    expect(accountLabels).toEqual(['faye', 'edward'])
+    const octoberOrigins = [
+      'https://october-pds-e2e.atmosbox.test',
+      ...accountLabels.map(
+        (name) => `https://${name}.october-pds-e2e.atmosbox.test`,
+      ),
+      'https://spaces-pds-e2e.atmosbox.test',
+    ]
     const fakeDeno = `#!/usr/bin/env node
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
@@ -346,7 +390,20 @@ if (args[1] === 'sandbox' && args[2] === 'create') {
 }
 if (args[1] === 'sandbox' && args[2] === 'check') assert.deepEqual(args, ['task', 'sandbox', 'check'])
 if (args[1] === 'sandbox' && args[2] === 'check') {
-  assert.ok(fs.readFileSync('stacks/feedgen-ng-e2e.yaml', 'utf8').includes('image: sha256:${'a'.repeat(64)}'))
+  const stack = fs.readFileSync('stacks/feedgen-ng-e2e.yaml', 'utf8')
+  assert.ok(stack.includes('image: sha256:${'a'.repeat(64)}'))
+  const origins = stack.match(/IDENTITY_PRIVATE_ORIGINS: (.+)/)[1].split(',')
+  if (stack.includes('feedgen-e2e-pds-october:')) {
+    assert.deepEqual(origins, ${JSON.stringify(octoberOrigins)})
+    const october = fs.readFileSync('../stratos/test/spaces-alignment/templates/october-pds.yaml', 'utf8')
+      .replace('\${OCTOBER_PDS_IMAGE_ID}', 'sha256:${'c'.repeat(64)}')
+      .split('\\n')
+      .map(line => line ? '  ' + line : line)
+      .join('\\n')
+    assert.ok(stack.includes('\\n' + october + '\\nvolumes:\\n  feedgen-e2e-pds-october-data: {}\\n'), 'Preserve the entire October template, including every Compose shell escape')
+  } else {
+    assert.deepEqual(origins, ['https://spaces-pds-e2e.atmosbox.test'])
+  }
 }
 if (args[1] === 'sandbox' && args[2] === 'up') assert.deepEqual(args, ['task', 'sandbox', 'up', '--build'])
 if (args[1] === 'sandbox' && args[2] === 'seed') assert.deepEqual(args, ['task', 'sandbox', 'seed'])
@@ -405,6 +462,7 @@ if (args.includes('down')) {
 if (args[0] === 'image' && args[1] === 'rm') {
   assert.match(args[2], /^stratos-spaces-pds-[0-9a-f-]+:local$/)
   fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, 'image rm ' + args[2] + '\\n')
+  if (process.env.RUNNER_TEST_FAIL_IMAGE) process.exit(8)
 }
 `
     await writeFile(join(bin, 'deno'), fakeDeno, { mode: 0o755 })
@@ -649,6 +707,80 @@ if (args[0] === 'image' && args[1] === 'rm') {
       dockerConfigs.filter((line) => line.startsWith('image rm ')),
     ).toHaveLength(8)
 
+    await expect(
+      runSandbox(
+        {
+          ...options,
+          suite: 'standard-credential-transport',
+          reportDirectory: join(root, 'missing-october-pin'),
+        },
+        dependencies,
+      ),
+    ).rejects.toThrow('October PDS source pin is missing')
+    const dualReport = join(root, 'dual-pds-report')
+    const octoberPin = { ...sourcePins.spacesPds, revision: 'c'.repeat(40) }
+    const dualBuilds: string[] = []
+    await runSandbox(
+      {
+        ...options,
+        suite: 'standard-credential-transport',
+        reportDirectory: dualReport,
+      },
+      {
+        ...dependencies,
+        sourcePins: { ...sourcePins, octoberSpacesPds: octoberPin },
+        async buildPds(pin, directory) {
+          dualBuilds.push(pin.revision)
+          const receipt = await dependencies.buildPds()
+          return {
+            ...receipt,
+            sourceSha: pin.revision,
+            imageId: `sha256:${(pin === octoberPin ? 'c' : 'a').repeat(64)}`,
+            imageTag:
+              pin === octoberPin
+                ? 'stratos-spaces-pds-11111111-1111-1111-1111-111111111111:local'
+                : receipt.imageTag,
+          }
+        },
+      },
+    )
+    expect(dualBuilds).toEqual([
+      sourcePins.spacesPds.revision,
+      octoberPin.revision,
+    ])
+    const dual = JSON.parse(
+      await readFile(join(dualReport, 'receipt.json'), 'utf8'),
+    )
+    expect(dual.pdsServices.primary.build.sourceSha).toBe(
+      sourcePins.spacesPds.revision,
+    )
+    expect(dual.pdsServices.october.build.sourceSha).toBe(octoberPin.revision)
+    expect(dual.pdsServices.october.build.imageId).toBe(
+      `sha256:${'c'.repeat(64)}`,
+    )
+    expect(dual.cleanup.octoberImage.status).toBe('passed')
+    expect(dual.suites.map((suite: { id: string }) => suite.id)).toEqual([
+      'baseline',
+      'standard-credential-transport',
+    ])
+
+    process.env.RUNNER_TEST_FAIL_IMAGE = '1'
+    const imageFailedReport = join(root, 'image-failed-report')
+    await expect(
+      runSandbox(
+        { ...options, reportDirectory: imageFailedReport },
+        dependencies,
+      ),
+    ).rejects.toThrow('PDS image cleanup failed: docker image exited 8')
+    const imageFailure = JSON.parse(
+      await readFile(join(imageFailedReport, 'failure.json'), 'utf8'),
+    )
+    expect(imageFailure.cleanup.image).toEqual({
+      status: 'failed',
+      error: 'docker image exited 8',
+      tag: 'stratos-spaces-pds-00000000-0000-0000-0000-000000000000:local',
+    })
+    delete process.env.RUNNER_TEST_FAIL_IMAGE
     process.env.RUNNER_TEST_FAIL_CLEANUP = '1'
     const cleanupFailedReport = join(root, 'cleanup-failed-report')
     await expect(
@@ -678,6 +810,43 @@ if (args[0] === 'image' && args[1] === 'rm') {
     })
     delete process.env.RUNNER_TEST_FAIL_CLEANUP
 
+    await writeFile(
+      join(candidateRepo, 'test/spaces-alignment/templates/october-pds.yaml'),
+      'services: {}\n',
+    )
+    git(candidateRepo, 'add', '.')
+    git(candidateRepo, 'commit', '-qm', 'Remove October PDS image placeholder')
+    const withoutOctoberPlaceholder = git(candidateRepo, 'rev-parse', 'HEAD')
+    await writeFile(
+      reviewReceipt,
+      JSON.stringify({
+        ...review,
+        candidateSha: withoutOctoberPlaceholder,
+        reviews: {
+          standards: {
+            ...review.reviews.standards,
+            reviewedSha: withoutOctoberPlaceholder,
+          },
+          spec: {
+            ...review.reviews.spec,
+            reviewedSha: withoutOctoberPlaceholder,
+          },
+        },
+      }),
+    )
+    await expect(
+      runSandbox(
+        {
+          ...options,
+          suite: 'standard-credential-transport',
+          reportDirectory: join(root, 'missing-october-image'),
+        },
+        {
+          ...dependencies,
+          sourcePins: { ...sourcePins, octoberSpacesPds: octoberPin },
+        },
+      ),
+    ).rejects.toThrow('October PDS image placeholder is missing')
     await writeFile(
       join(
         candidateRepo,

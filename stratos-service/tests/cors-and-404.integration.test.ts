@@ -147,6 +147,34 @@ describe('CORS and 404 Verification', () => {
     }
   })
 
+  it('allows standard space signature headers without granting cross-origin cookies', async () => {
+    const response = await axios.options(
+      `${url}/xrpc/zone.stratos.space.getRecord`,
+      {
+        headers: {
+          Origin: 'https://rei.example',
+          'Access-Control-Request-Method': 'GET',
+          'Access-Control-Request-Headers':
+            'Authorization,Signature,Signature-Input,Atproto-Space-Audience',
+        },
+      },
+    )
+    expect(response.status).toBe(204)
+    const allowed = response.headers['access-control-allow-headers']
+      .toLowerCase()
+      .split(',')
+    for (const header of [
+      'authorization',
+      'signature',
+      'signature-input',
+      'atproto-space-audience',
+      'dpop',
+    ]) {
+      expect(allowed).toContain(header)
+    }
+    expect(response.headers['access-control-allow-credentials']).toBeUndefined()
+  })
+
   it('should not return 404 for standard XRPC methods', async () => {
     // repo.listRecords usually requires some parameters, but should at least not 404 (maybe 400 if params missing)
     try {
