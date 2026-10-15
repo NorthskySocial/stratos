@@ -36,28 +36,35 @@ The TypeScript feedgen and standalone indexer are deprecated. See
 
 <DataFlowAnimation />
 
-## Proposed request-proof foundation
+## Request proofs are not enabled
 
-ADR 019 is foundation code and a proposed protocol, not deployed enforcement.
-No production route enables `Stratos-Request-Proof` or `Stratos-Service-Assertion`.
-Current OAuth, service JWT, and `cnf.jkt`/DPoP credential paths are unchanged.
-Standard Spaces signatures remain separate and unchanged.
+No production route enables the proposed `Stratos-Request-Proof` or
+`Stratos-Service-Assertion` headers. Current OAuth, service JWT, and
+`cnf.jkt`/DPoP paths are unchanged. Standard Spaces signatures remain separate.
+There is no request-proof deployment step in this guide.
 
-The injected admission composition validates the client proof and required bound
-service assertion, awaits credential and authorization checks, then consumes one
-proof identity before protected data access. Production integration must still
-establish raw public path/query preservation, bounded empty-body handling, route
-policy, credential migration, and trusted DID resolution limits. The foundation
-resolver forces fresh DID resolution and adds no stale-key cache or rotation grace.
+Before enabling a route in later integration work, operators must establish:
 
-Replay storage must be shared, atomic, and retained through expiry plus clock
-skew. Missing or unavailable storage denies admission. After shared state is lost,
-there is no replay protection for consumed identities still within their acceptance
-window. Flush, eviction, or failover rollback therefore invalidates at-most-once
-claims. Establish recovery and retention guarantees before enabling any route.
-A stolen unused delegation can still race credential issuance; this extension does
-not remove PDS trust or prove user consent. See
-[ADR 019](../architecture/stratos-request-proofs.md) for limits and remaining gates.
+- **Byte-preserving ingress:** retain the public raw path and query unchanged,
+  prove bounded empty-body handling, and review route policy and credential migration.
+- **Bounded identity resolution:** verify network limits and freshness. The
+  foundation forces fresh resolution without a stale-key cache or rotation grace.
+- **Durable replay retention:** share atomic state across instances and retain it
+  through expiry plus clock skew. Missing or unavailable storage denies admission.
+  Flush, eviction, or failover rollback removes protection for consumed identities
+  still inside their acceptance window. Establish recovery and retention guarantees
+  before making at-most-once claims.
+
+The foundation admission code validates credentials, the client proof, and any
+required bound service assertion, then completes authorization before consuming one
+proof identity. Protected data access follows consumption. Production callers must
+still integrate these checks; possession alone does not grant access.
+
+A stolen unused delegation can still race credential issuance. The extension does
+not remove PDS trust or prove user consent. Read
+[ADR 019](../architecture/stratos-request-proofs.md) for the decision and rollout
+conditions, or the [wire reference](../architecture/stratos-request-proof-reference.md)
+for exact limits and admission requirements.
 
 ## Next Steps
 

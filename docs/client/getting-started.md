@@ -41,28 +41,6 @@ tested helpers — use raw XRPC when you need full control or are using a framew
 the helper signatures.
 :::
 
-## Proposed request-proof foundation
-
-ADR 019 adds tested request-proof and service-assertion helpers, not an enabled
-production authentication path. Existing OAuth, DPoP, and standard Spaces HTTP
-Message Signatures are unchanged. Do not require Stratos extension headers on a
-foreign PDS. Current Stratos credentials still use `cnf.jkt`; the proposed proof
-requires a separately validated credential with `cnf.kid` and a local ephemeral
-P-256 key. A browser does not need a registered client DID.
-
-The proof binds exact credential bytes, receiving authority DID, method, raw
-path/query, empty-body digest, lifetime, and random proof ID. A required service
-assertion binds that same proof through its digest and authenticates a published
-service DID key. Neither possession nor identity grants permission or proves
-human consent. Authorization remains separate. Chromium vectors run without Node
-globals; this is not production browser transport integration or Rust evidence.
-
-See [the proposed wire contract](../architecture/stratos-request-proofs.md) and
-the helper API guidance in `stratos-client/README.md` (Proposed request-proof foundation).
-Production adoption still needs reviewed credential migration, ingress handling,
-route policy, CORS, shared replay storage, and caller integration. Retry with a
-fresh proof after any accepted attempt; there is no exactly-once operation claim.
-
 ## Quick Start
 
 ### 1. Check for Stratos Support
@@ -203,7 +181,7 @@ if (target.kind === 'unresolved') throw new Error(target.reason)
 ```
 
 Use `target.url` with repo methods for `stratos` custody or space methods for `pds` custody, as
-shown in [Create a Private Post](#4-create-a-private-post). `resolveServiceUrl` returns the
+shown in [Create a Private Post](#_4-create-a-private-post). `resolveServiceUrl` returns the
 authority URL; it does not select a repository host.
 
 ### Which operations route to Stratos
@@ -236,7 +214,7 @@ that origin rather than the PDS.
 ### Transport wrapper
 
 This authority transport applies to `stratos` custody only. For `pds` custody, route to the
-authenticated PDS host with space methods; see [Create a Private Post](#4-create-a-private-post).
+authenticated PDS host with space methods; see [Create a Private Post](#_4-create-a-private-post).
 
 ```typescript
 import { createServiceFetchHandler } from '@northskysocial/stratos-client'
@@ -253,7 +231,7 @@ pathnames against the target service URL.
 
 ### Client construction
 
-Construct the RPC client from the resolved target in [Create a Private Post](#4-create-a-private-post).
+Construct the RPC client from the resolved target in [Create a Private Post](#_4-create-a-private-post).
 The enrollment's authority `service` URL is not the PDS repository host.
 
 ## Minimum Viable Adoption Path
@@ -273,7 +251,7 @@ For apps that want to add basic Stratos support incrementally:
 
 1. For `stratos` custody, route repo `createRecord` / `deleteRecord` / `applyWrites` through the
    authority client; for `pds` custody, use the corresponding space methods on the authenticated
-   PDS target shown in [Create a Private Post](#4-create-a-private-post)
+   PDS target shown in [Create a Private Post](#_4-create-a-private-post)
 2. Add scope declarations to OAuth metadata
 3. Add scope selector UI with dependency gating
 
@@ -314,7 +292,7 @@ For a React Native/Expo app like Bluesky's social-app:
 In `src/state/session/agent.ts`, the `BskyAppAgent` wraps transport. In a query hook, resolve the
 repository target before constructing a client. Use authority repo methods for `stratos` custody;
 use authenticated PDS space methods for `pds` custody. See
-[Create a Private Post](#4-create-a-private-post) for the write route.
+[Create a Private Post](#_4-create-a-private-post) for the write route.
 
 ### View integration
 
@@ -333,6 +311,33 @@ use authenticated PDS space methods for `pds` custody. See
 | Reactivity          | Signal auto-tracking   | Query key invalidation / `useEffect` |
 | Refetch trigger     | Resource source signal | Query key includes `stratosActive`   |
 | Client construction | Per-call               | `useMemo` with deps or query hook    |
+
+## Before experimenting with request proofs
+
+The quick start uses existing authentication. ADR 019's request-proof helpers are
+experimental foundation APIs, not a production transport. No service route enables
+them. Keep OAuth, DPoP, and standard Spaces HTTP Message Signatures unchanged;
+do not require Stratos extension headers on a foreign PDS.
+
+To use the helpers in a test integration, you need a separately validated
+`cnf.kid` credential and a local ephemeral P-256 key. Current Stratos credentials
+still use `cnf.jkt`; do not convert that binding implicitly. A browser does not
+need a registered client DID.
+
+The proof binds exact credential bytes, receiving authority DID, method, raw
+path/query, empty-body digest, lifetime, and random proof ID. A required service
+assertion authenticates a published service DID key and binds the same proof
+through its digest. Neither establishes permission or human consent; authorization
+remains separate. Retry with a fresh proof after any accepted attempt. This is not
+an exactly-once operation guarantee.
+
+Use the [Proposed request-proof foundation](https://github.com/NorthskySocial/stratos/blob/advisor/019-request-proof-foundation/stratos-client/README.md#proposed-request-proof-foundation)
+for helper inputs and caller responsibilities, and the
+[wire reference](../architecture/stratos-request-proof-reference.md) for exact rules.
+Production adoption still requires reviewed credential migration, ingress, route
+policy, CORS, shared replay storage, and caller integration. Chromium vectors run
+without Node globals; they do not establish production browser transport or Rust
+compatibility. Rust vector consumption belongs to Plan 015. See the [integration gates](../architecture/stratos-request-proofs.md#production-prerequisites).
 
 ## Next Steps
 

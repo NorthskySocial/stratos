@@ -122,6 +122,14 @@ export default defineConfig({
               text: 'Service Key History',
               link: '/architecture/service-key-history',
             },
+            {
+              text: 'Request Proofs (ADR 019)',
+              link: '/architecture/stratos-request-proofs',
+            },
+            {
+              text: 'Request-Proof Wire Reference',
+              link: '/architecture/stratos-request-proof-reference',
+            },
             { text: 'System Diagrams', link: '/architecture/diagrams' },
           ],
         },
