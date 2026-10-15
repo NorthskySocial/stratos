@@ -372,7 +372,7 @@ function orchestrationFixture(fault = '') {
         url.searchParams.get('space') !== space
       )
         return json({}, fault === 'denial' ? 200 : 403)
-      const owner = audience === 'did:plc:faye' ? 'faye' : 'ed'
+      const owner = audience === 'did:plc:faye' ? 'faye' : 'edward'
       return json({
         records:
           fault === `seed-${owner}`
@@ -398,7 +398,7 @@ function orchestrationFixture(fault = '') {
     },
     prepare: async (actual: typeof browser, name: string) => {
       expect(actual).toBe(browser)
-      expect(['faye', 'ed']).toContain(name)
+      expect(['faye', 'edward']).toContain(name)
       events.push(`prepare-${name}`)
       if (fault === 'prepare') throw new Error('prepare failed')
       return {
@@ -425,6 +425,17 @@ function orchestrationFixture(fault = '') {
 }
 afterEach(() => vi.unstubAllGlobals())
 describe('standard driver orchestration', () => {
+  it('uses account labels that meet the October PDS three-character minimum', async () => {
+    const fixture = orchestrationFixture()
+    const prepare = vi.fn(fixture.adapters.prepare)
+    await runScenario({ ...fixture.adapters, prepare })
+    const labels = prepare.mock.calls.map(([, name]) => name)
+    expect(labels).toHaveLength(2)
+    for (const label of labels) {
+      expect(label.length).toBeGreaterThanOrEqual(3)
+    }
+    expect(labels).toEqual(['faye', 'edward'])
+  })
   it('executes all checks in order with actual cryptographic HTTP headers and closes before returning', async () => {
     const fixture = orchestrationFixture()
     const receipt = await runScenario(fixture.adapters)
@@ -455,14 +466,16 @@ describe('standard driver orchestration', () => {
     expect([...fixture.requests[1].headers]).toEqual([
       ...fixture.requests[3].headers,
     ])
-    expect(fixture.requests[3].url.searchParams.get('repo')).toBe('did:plc:ed')
+    expect(fixture.requests[3].url.searchParams.get('repo')).toBe(
+      'did:plc:edward',
+    )
     expect(fixture.requests[4].headers.get('atproto-space-audience')).toBe(
-      'did:plc:ed',
+      'did:plc:edward',
     )
     expect(fixture.events.slice(0, 4)).toEqual([
       'open',
       'prepare-faye',
-      'prepare-ed',
+      'prepare-edward',
       'delegation',
     ])
     expect(fixture.events.slice(-5)).toEqual([
@@ -483,7 +496,7 @@ describe('standard driver orchestration', () => {
     'jti',
     'lifetime',
     'seed-faye',
-    'seed-ed',
+    'seed-edward',
     'denial',
     'legacy-key',
     'same-owner',
@@ -496,7 +509,7 @@ describe('standard driver orchestration', () => {
       'http-10': 'Standard exchange failed',
       'http-2': 'October PDS rejected Stratos credential',
       'seed-faye': 'October read omitted seeded record',
-      'seed-ed': 'Second owner read omitted seeded record',
+      'seed-edward': 'Second owner read omitted seeded record',
     }
     await expect(runScenario(fixture.adapters)).rejects.toThrow(messages[fault])
     expect(fixture.events.at(-1)).toBe('close')

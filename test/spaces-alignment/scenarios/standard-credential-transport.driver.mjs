@@ -469,7 +469,7 @@ export async function runScenario({
   const browser = await open()
   try {
     const accounts = []
-    for (const name of ['faye', 'ed']) {
+    for (const name of ['faye', 'edward']) {
       accounts.push(await prepare(browser, name))
     }
     const [{ account, page }, second] = accounts
