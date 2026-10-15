@@ -359,7 +359,16 @@ if (args[1] === 'sandbox' && args[2] === 'create') {
 }
 if (args[1] === 'sandbox' && args[2] === 'check') assert.deepEqual(args, ['task', 'sandbox', 'check'])
 if (args[1] === 'sandbox' && args[2] === 'check') {
-  assert.ok(fs.readFileSync('stacks/feedgen-ng-e2e.yaml', 'utf8').includes('image: sha256:${'a'.repeat(64)}'))
+  const stack = fs.readFileSync('stacks/feedgen-ng-e2e.yaml', 'utf8')
+  assert.ok(stack.includes('image: sha256:${'a'.repeat(64)}'))
+  if (stack.includes('feedgen-e2e-pds-october:')) {
+    const october = fs.readFileSync('../stratos/test/spaces-alignment/templates/october-pds.yaml', 'utf8')
+      .replace('\${OCTOBER_PDS_IMAGE_ID}', 'sha256:${'c'.repeat(64)}')
+      .split('\\n')
+      .map(line => line ? '  ' + line : line)
+      .join('\\n')
+    assert.ok(stack.includes('\\n' + october + '\\nvolumes:\\n  feedgen-e2e-pds-october-data: {}\\n'), 'Preserve the entire October template, including every Compose shell escape')
+  }
 }
 if (args[1] === 'sandbox' && args[2] === 'up') assert.deepEqual(args, ['task', 'sandbox', 'up', '--build'])
 if (args[1] === 'sandbox' && args[2] === 'seed') assert.deepEqual(args, ['task', 'sandbox', 'seed'])

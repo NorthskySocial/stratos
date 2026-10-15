@@ -418,6 +418,7 @@ export async function runSandbox(
     )
 
     if (octoberPds) {
+      const octoberImageId = octoberPds.imageId
       const octoberStack = await readFile(
         join(
           workspace,
@@ -431,9 +432,10 @@ export async function runSandbox(
         stackPath,
         (await readFile(stackPath, 'utf8')).replace(
           '\nvolumes:\n',
-          '\n' +
+          () =>
+            '\n' +
             octoberStack
-              .replace('${OCTOBER_PDS_IMAGE_ID}', octoberPds.imageId)
+              .replace('${OCTOBER_PDS_IMAGE_ID}', octoberImageId)
               .split('\n')
               .map((line) => (line ? '  ' + line : line))
               .join('\n') +
