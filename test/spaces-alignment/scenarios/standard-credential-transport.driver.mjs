@@ -378,6 +378,13 @@ export async function denied(response) {
   assert.ok([401, 403].includes(response.status), 'Request was not denied')
 }
 
+async function deniedCrossSpace(response) {
+  if (response.status !== 400) return denied(response)
+  const body = await response.json()
+  assert.equal(body.error, 'InvalidCredential')
+  assert.equal(body.message, 'Credential is not scoped to this space')
+}
+
 export async function credentialLifetime(
   response,
   expectedLifetime = 600,
@@ -545,7 +552,7 @@ export async function runScenario({
       }),
     )
     passed.push('tampered-token-denied')
-    await denied(
+    await deniedCrossSpace(
       await fetch(
         recordsUrl(account.did, space.replace('/general', '/other')),
         { headers },

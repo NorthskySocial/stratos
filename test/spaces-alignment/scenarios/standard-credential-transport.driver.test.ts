@@ -367,11 +367,29 @@ function orchestrationFixture(fault = '') {
       expect(url.origin).toBe('https://october-pds-e2e.undefined')
       expect(url.pathname).toBe('/xrpc/com.atproto.space.listRecords')
       expect(url.searchParams.get('collection')).toBe('zone.stratos.feed.post')
-      if (
-        url.searchParams.get('repo') !== audience ||
-        url.searchParams.get('space') !== space
-      )
+      if (url.searchParams.get('repo') !== audience)
         return json({}, fault === 'denial' ? 200 : 403)
+      if (url.searchParams.get('space') !== space) {
+        const denial = {
+          error: 'InvalidCredential',
+          message: 'Credential is not scoped to this space',
+        }
+        if (fault === 'cross-space-401') return json({}, 401)
+        if (fault === 'cross-space-403') return json({}, 403)
+        if (fault === 'cross-space-error-type')
+          return json({ ...denial, error: 400 }, 400)
+        if (fault === 'cross-space-unknown-400')
+          return json({ ...denial, error: 'InvalidRequest' }, 400)
+        if (fault === 'cross-space-message')
+          return json({ ...denial, message: 'Malformed request' }, 400)
+        if (fault === 'cross-space-empty') return json({}, 400)
+        if (fault === 'cross-space-null') return json(null, 400)
+        if (fault === 'cross-space-malformed')
+          return new Response('not JSON', { status: 400 })
+        if (fault === 'cross-space-success') return json(denial)
+        if (fault === 'cross-space-server-error') return json(denial, 500)
+        return json(denial, 400)
+      }
       const owner = audience === 'did:plc:faye' ? 'faye' : 'edward'
       return json({
         records:
@@ -436,6 +454,16 @@ describe('standard driver orchestration', () => {
     }
     expect(labels).toEqual(['faye', 'edward'])
   })
+  it.each(['cross-space-401', 'cross-space-403'])(
+    'preserves ordinary cross-space denial semantics for %s',
+    async (fault) => {
+      const fixture = orchestrationFixture(fault)
+      await expect(runScenario(fixture.adapters)).resolves.toHaveProperty(
+        'suite',
+        'standard-credential-transport',
+      )
+    },
+  )
   it('executes all checks in order with actual cryptographic HTTP headers and closes before returning', async () => {
     const fixture = orchestrationFixture()
     const receipt = await runScenario(fixture.adapters)
@@ -499,6 +527,14 @@ describe('standard driver orchestration', () => {
     'seed-edward',
     'denial',
     'legacy-key',
+    'cross-space-error-type',
+    'cross-space-unknown-400',
+    'cross-space-message',
+    'cross-space-empty',
+    'cross-space-null',
+    'cross-space-malformed',
+    'cross-space-success',
+    'cross-space-server-error',
     'same-owner',
     'prepare',
     'remove',
