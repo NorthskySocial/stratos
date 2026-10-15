@@ -25,7 +25,7 @@ export function deniedRenewal(
   exchange: () => Promise<Response>,
   remove: () => Promise<number>,
 ): Promise<void>
-export function denied(response: Response): Promise<void>
+export function denied(response: Response, caseName: string): Promise<void>
 export function runScenario<
   Page,
   Browser extends { close(): Promise<void> },

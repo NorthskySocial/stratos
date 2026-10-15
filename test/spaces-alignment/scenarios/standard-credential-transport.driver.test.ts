@@ -13,6 +13,7 @@ import {
 
 import {
   runScenario,
+  main,
   credentialLifetime,
   deniedRenewal,
   denied,
@@ -31,14 +32,20 @@ const server = createServer((request, response) => {
     return
   }
   exchanges += 1
-  response.writeHead(enrolled ? status : 403, {
+  response.writeHead(enrolled ? status : 400, {
     'content-type': 'application/json',
   })
   response.end(
     JSON.stringify(
-      body ?? {
-        credential: `header.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`,
-      },
+      body ??
+        (!enrolled
+          ? {
+              error: 'NotEnrolled',
+              message: 'User is not enrolled in this space',
+            }
+          : {
+              credential: `header.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`,
+            }),
     ),
   )
 })
@@ -150,7 +157,7 @@ describe('executable standard driver HTTP checks', () => {
   it('rejects a renewal that remains authorized', async () => {
     reset()
     await expect(deniedRenewal(exchange, async () => 200)).rejects.toThrow(
-      'Request was not denied',
+      'renewal-after-removal-denied',
     )
     expect(exchanges).toBe(2)
   })
@@ -173,22 +180,119 @@ describe('executable standard driver HTTP checks', () => {
     ).rejects.toThrow('Credential exchange failed')
     expect(removed).toBe(false)
   })
-  it.each([200, 204, 400, 404, 429, 500])(
-    'does not count HTTP %i as an authorization denial',
-    async (code) => {
+  const denials = [
+    [
+      'wrong-owner-denied',
+      401,
+      'BadSpaceAudience',
+      'space audience does not match the request',
+    ],
+    [
+      'wrong-key-denied',
+      401,
+      'BadSpaceSignature',
+      'signature keyid does not match the credential key',
+    ],
+    [
+      'tampered-token-denied',
+      401,
+      'BadJwtSignature',
+      'invalid token signature',
+    ],
+    [
+      'cross-space-denied',
+      400,
+      'InvalidCredential',
+      'Credential is not scoped to this space',
+    ],
+    [
+      'delegation-replay-denied',
+      400,
+      'InvalidToken',
+      'Delegation token could not be verified',
+    ],
+    [
+      'conflicting-proof-denied',
+      400,
+      'InvalidRequest',
+      'Conflicting mint proof families',
+    ],
+    [
+      'renewal-after-removal-denied',
+      400,
+      'NotEnrolled',
+      'User is not enrolled in this space',
+    ],
+  ] as const
+  it.each(denials)(
+    'requires exact status and body for %s',
+    async (name, status, error, message) => {
+      const response = (body: unknown, code = status) =>
+        new Response(JSON.stringify(body), { status: code })
       await expect(
-        denied(new Response(null, { status: code })),
-      ).rejects.toThrow()
-    },
-  )
-  it.each([401, 403])(
-    'accepts HTTP %i as an authorization denial',
-    async (code) => {
-      await expect(
-        denied(new Response(null, { status: code })),
+        denied(response({ error, message }), name),
       ).resolves.toBeUndefined()
+      for (const code of [200, 400, 401, 403, 404, 429, 500]) {
+        if (code !== status)
+          await expect(
+            denied(response({ error, message }, code as typeof status), name),
+          ).rejects.toThrow(name)
+      }
+      for (const body of [
+        {},
+        null,
+        { error: 400, message },
+        { error: 'InvalidRequest', message: 'unrelated' },
+        { error, message: 'secret-token record-content' },
+        { error: 'WrongError', message },
+      ]) {
+        await expect(denied(response(body), name)).rejects.toThrow(
+          'Denial contract failed: ' + name,
+        )
+      }
+      await expect(
+        denied(new Response('secret-token record-content', { status }), name),
+      ).rejects.toThrow('Denial contract failed: ' + name)
     },
   )
+  it('prints the named denial case without response secrets', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const previous = process.exitCode
+    try {
+      await main(
+        [
+          'node',
+          new URL('./standard-credential-transport.driver.mjs', import.meta.url)
+            .pathname,
+        ],
+        async () => {
+          await denied(
+            new Response(
+              JSON.stringify({
+                error: 'secret-token',
+                message: 'record-content',
+              }),
+              { status: 400 },
+            ),
+            'delegation-replay-denied',
+          )
+          throw new Error('unreachable')
+        },
+      )
+      expect(log).toHaveBeenCalledExactlyOnceWith(
+        'Standard credential scenario failed: Denial contract failed: delegation-replay-denied',
+      )
+      expect(process.exitCode).toBe(1)
+    } finally {
+      process.exitCode = previous
+      log.mockRestore()
+    }
+  })
+  it('rejects unknown case names without echoing them', async () => {
+    await expect(denied(new Response(), 'secret-token')).rejects.toThrow(
+      'Unknown denial case',
+    )
+  })
 })
 
 function publicKey(kid: string) {
@@ -294,6 +398,19 @@ function orchestrationFixture(fault = '') {
       events.push(url.pathname)
       const index = requests.length
       if (fault === `http-${index}`) return json({}, 500)
+      if (fault === `wrong-error-${index}`)
+        return json(
+          { error: 'UnrelatedError', message: 'private-response' },
+          [4, 6, 7].includes(index) ? 401 : 400,
+        )
+      if (fault === `wrong-status-${index}`)
+        return json(
+          {
+            error: 'InvalidToken',
+            message: 'Delegation token could not be verified',
+          },
+          403,
+        )
       if (fault === `body-${index}`) return json({})
       if (url.pathname === '/xrpc/zone.stratos.space.getSpaceCredential') {
         expect(url.origin).toBe('https://stratos-e2e.atmosbox.internal')
@@ -304,8 +421,29 @@ function orchestrationFixture(fault = '') {
         expect(authorization).toMatch(/^Bearer delegation-[0-9]+$/)
         if (headers.has('dpop')) checkDpop(headers, url.href)
         if (headers.has('dpop') && headers.has('signature'))
-          return json({}, 403)
-        if (removed || used.has(authorization)) return json({}, 401)
+          return json(
+            {
+              error: 'InvalidRequest',
+              message: 'Conflicting mint proof families',
+            },
+            400,
+          )
+        if (removed)
+          return json(
+            {
+              error: 'NotEnrolled',
+              message: 'User is not enrolled in this space',
+            },
+            400,
+          )
+        if (used.has(authorization))
+          return json(
+            {
+              error: 'InvalidToken',
+              message: 'Delegation token could not be verified',
+            },
+            400,
+          )
         used.add(authorization)
         if (!headers.has('signature'))
           return json({
@@ -357,7 +495,16 @@ function orchestrationFixture(fault = '') {
         expect(url.searchParams.get('space')).toBe(
           space.replace('/general', '/other'),
         )
-      if (issued.get(credential) !== kid) return json({}, 403)
+      if (issued.get(credential) !== kid)
+        return json(
+          index === 7
+            ? { error: 'BadJwtSignature', message: 'invalid token signature' }
+            : {
+                error: 'BadSpaceSignature',
+                message: 'signature keyid does not match the credential key',
+              },
+          401,
+        )
       if (url.pathname === '/xrpc/zone.stratos.space.listRepos') {
         expect(url.origin).toBe('https://stratos-e2e.atmosbox.internal')
         expect(audience).toBe(authorityDid)
@@ -368,7 +515,13 @@ function orchestrationFixture(fault = '') {
       expect(url.pathname).toBe('/xrpc/com.atproto.space.listRecords')
       expect(url.searchParams.get('collection')).toBe('zone.stratos.feed.post')
       if (url.searchParams.get('repo') !== audience)
-        return json({}, fault === 'denial' ? 200 : 403)
+        return json(
+          {
+            error: 'BadSpaceAudience',
+            message: 'space audience does not match the request',
+          },
+          fault === 'denial' ? 200 : 401,
+        )
       if (url.searchParams.get('space') !== space) {
         const denial = {
           error: 'InvalidCredential',
@@ -454,14 +607,24 @@ describe('standard driver orchestration', () => {
     }
     expect(labels).toEqual(['faye', 'edward'])
   })
-  it.each(['cross-space-401', 'cross-space-403'])(
-    'preserves ordinary cross-space denial semantics for %s',
-    async (fault) => {
-      const fixture = orchestrationFixture(fault)
-      await expect(runScenario(fixture.adapters)).resolves.toHaveProperty(
-        'suite',
-        'standard-credential-transport',
-      )
+  it.each([
+    [4, 'wrong-owner-denied'],
+    [6, 'wrong-key-denied'],
+    [7, 'tampered-token-denied'],
+    [8, 'cross-space-denied'],
+    [12, 'delegation-replay-denied'],
+    [13, 'conflicting-proof-denied'],
+    [17, 'renewal-after-removal-denied'],
+  ] as const)(
+    'attributes wrong status and error at request %i to %s',
+    async (index, name) => {
+      for (const fault of [`wrong-error-${index}`, `wrong-status-${index}`]) {
+        const fixture = orchestrationFixture(fault)
+        await expect(runScenario(fixture.adapters)).rejects.toThrow(
+          'Denial contract failed: ' + name,
+        )
+        expect(fixture.events.at(-1)).toBe('close')
+      }
     },
   )
   it('executes all checks in order with actual cryptographic HTTP headers and closes before returning', async () => {
@@ -508,8 +671,8 @@ describe('standard driver orchestration', () => {
     ])
     expect(fixture.events.slice(-5)).toEqual([
       '/xrpc/zone.stratos.space.getSpaceCredential',
-      'remove',
       'delegation',
+      'remove',
       '/xrpc/zone.stratos.space.getSpaceCredential',
       'close',
     ])
@@ -527,6 +690,8 @@ describe('standard driver orchestration', () => {
     'seed-edward',
     'denial',
     'legacy-key',
+    'cross-space-401',
+    'cross-space-403',
     'cross-space-error-type',
     'cross-space-unknown-400',
     'cross-space-message',

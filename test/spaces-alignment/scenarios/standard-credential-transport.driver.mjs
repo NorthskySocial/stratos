@@ -374,15 +374,58 @@ function recordsUrl(repo, selectedSpace = space) {
   url.searchParams.set('collection', postCollection)
   return url
 }
-export async function denied(response) {
-  assert.ok([401, 403].includes(response.status), 'Request was not denied')
+const denialContracts = {
+  'wrong-owner-denied': [
+    401,
+    'BadSpaceAudience',
+    'space audience does not match the request',
+  ],
+  'wrong-key-denied': [
+    401,
+    'BadSpaceSignature',
+    'signature keyid does not match the credential key',
+  ],
+  'tampered-token-denied': [401, 'BadJwtSignature', 'invalid token signature'],
+  'cross-space-denied': [
+    400,
+    'InvalidCredential',
+    'Credential is not scoped to this space',
+  ],
+  'delegation-replay-denied': [
+    400,
+    'InvalidToken',
+    'Delegation token could not be verified',
+  ],
+  'conflicting-proof-denied': [
+    400,
+    'InvalidRequest',
+    'Conflicting mint proof families',
+  ],
+  'renewal-after-removal-denied': [
+    400,
+    'NotEnrolled',
+    'User is not enrolled in this space',
+  ],
 }
 
-async function deniedCrossSpace(response) {
-  if (response.status !== 400) return denied(response)
-  const body = await response.json()
-  assert.equal(body.error, 'InvalidCredential')
-  assert.equal(body.message, 'Credential is not scoped to this space')
+class DenialAssertionError extends Error {
+  constructor(caseName) {
+    super('Denial contract failed: ' + caseName)
+  }
+}
+
+export async function denied(response, caseName) {
+  const contract = denialContracts[caseName]
+  if (!contract) throw new Error('Unknown denial case')
+  const [status, error, message] = contract
+  try {
+    assert.equal(response.status, status)
+    const body = await response.json()
+    assert.equal(body.error, error)
+    assert.equal(body.message, message)
+  } catch {
+    throw new DenialAssertionError(caseName)
+  }
 }
 
 export async function credentialLifetime(
@@ -410,7 +453,7 @@ export async function deniedRenewal(exchange, removeMember) {
   const before = await exchange()
   await credentialLifetime(before)
   assert.equal(await removeMember(), 200, 'Member removal failed')
-  await denied(await exchange())
+  await denied(await exchange(), 'renewal-after-removal-denied')
 }
 export async function openBrowser() {
   assert.match(domain ?? '', /^[a-z0-9.-]+$/)
@@ -512,7 +555,10 @@ export async function runScenario({
       200,
     )
     passed.push('same-signature-reused')
-    await denied(await fetch(recordsUrl(second.account.did), { headers }))
+    await denied(
+      await fetch(recordsUrl(second.account.did), { headers }),
+      'wrong-owner-denied',
+    )
     passed.push('wrong-owner-denied')
     const secondRead = await fetch(recordsUrl(second.account.did), {
       headers: signedHeaders(
@@ -537,6 +583,7 @@ export async function runScenario({
           account.did,
         ),
       }),
+      'wrong-key-denied',
     )
     passed.push('wrong-key-denied')
     const parts = credential.split('.')
@@ -550,13 +597,15 @@ export async function runScenario({
           account.did,
         ),
       }),
+      'tampered-token-denied',
     )
     passed.push('tampered-token-denied')
-    await deniedCrossSpace(
+    await denied(
       await fetch(
         recordsUrl(account.did, space.replace('/general', '/other')),
         { headers },
       ),
+      'cross-space-denied',
     )
     passed.push('cross-space-denied')
     const authorityUrl = new URL(
@@ -597,11 +646,15 @@ export async function runScenario({
       200,
     )
     passed.push('renewal-fresh-key')
-    await denied(await standardExchange(initialDelegation, proofKey()))
+    await denied(
+      await standardExchange(initialDelegation, proofKey()),
+      'delegation-replay-denied',
+    )
     passed.push('delegation-replay-denied')
     const fresh = await delegation(page)
     await denied(
       await standardExchange(fresh, key, { dpop: proof(key, mintUrl, 'POST') }),
+      'conflicting-proof-denied',
     )
     passed.push('conflicting-proof-denied')
     const legacyResponse = await fetch(mintUrl, {
@@ -631,9 +684,13 @@ export async function runScenario({
       200,
     )
     passed.push('legacy-compatible')
+    let removalDelegation = await delegation(page)
     await deniedRenewal(
-      async () => standardExchange(await delegation(page), proofKey()),
-      () => remove(page),
+      async () => standardExchange(removalDelegation, proofKey()),
+      async () => {
+        removalDelegation = await delegation(page)
+        return remove(page)
+      },
     )
     passed.push('renewal-after-removal-denied')
     return {
@@ -652,7 +709,11 @@ export async function main(argv = process.argv, run = runScenario) {
   } catch (error) {
     console.error(
       'Standard credential scenario failed: ' +
-        (error instanceof Error ? error.name : 'UnknownError'),
+        (error instanceof DenialAssertionError
+          ? error.message
+          : error instanceof Error
+            ? error.name
+            : 'UnknownError'),
     )
     process.exitCode = 1
   }
