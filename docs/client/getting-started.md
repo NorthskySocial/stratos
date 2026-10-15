@@ -58,7 +58,7 @@ human consent. Authorization remains separate. Chromium vectors run without Node
 globals; this is not production browser transport integration or Rust evidence.
 
 See [the proposed wire contract](../architecture/stratos-request-proofs.md) and
-[helper API guidance](../../stratos-client/README.md#proposed-request-proof-foundation).
+the helper API guidance in `stratos-client/README.md` (Proposed request-proof foundation).
 Production adoption still needs reviewed credential migration, ingress handling,
 route policy, CORS, shared replay storage, and caller integration. Retry with a
 fresh proof after any accepted attempt; there is no exactly-once operation claim.
