@@ -68,13 +68,12 @@ impl std::error::Error for SpaceMembershipError {}
 pub struct HttpSpaceMembershipClient {
     client: Client,
     service_url: Url,
-    public_url: Url,
 }
 
 impl HttpSpaceMembershipClient {
     pub fn new(service_url: &str, public_url: &str) -> Result<Self, SpaceMembershipError> {
         let service_url = validate_base_url(service_url)?;
-        let public_url = validate_base_url(public_url)?;
+        validate_base_url(public_url)?;
         let client = Client::builder()
             .redirect(Policy::none())
             .connect_timeout(REQUEST_TIMEOUT)
@@ -84,7 +83,6 @@ impl HttpSpaceMembershipClient {
         Ok(Self {
             client,
             service_url,
-            public_url,
         })
     }
 
@@ -105,19 +103,19 @@ impl HttpSpaceMembershipClient {
                 query.append_pair("cursor", cursor);
             }
         }
-        // The authority verifies htu against its configured public endpoint,
-        // which can differ from the private URL used to reach the service.
-        let public_endpoint = endpoint(&self.public_url);
-        let proof = credential
-            .presentation_proof("GET", public_endpoint.as_str())
+        let authority = space_authority(space_uri)?;
+        let headers = credential
+            .presentation_headers(&authority)
             .await
             .map_err(|_| SpaceMembershipError::Proof)?;
         let response = self
             .client
             .get(request_url)
             .header("accept", "application/json")
-            .header("authorization", format!("DPoP {}", credential.credential()))
-            .header("dpop", proof)
+            .header("authorization", headers.authorization())
+            .header("atproto-space-audience", authority.as_str())
+            .header("signature-input", headers.signature_input())
+            .header("signature", headers.signature())
             .send()
             .await
             .map_err(classify_request_error)?;
@@ -167,6 +165,25 @@ fn endpoint(base: &Url) -> Url {
     endpoint.set_path(&format!("{base_path}/xrpc/{LIST_REPOS_LXM}"));
     endpoint.set_query(None);
     endpoint
+}
+
+fn space_authority(space_uri: &str) -> Result<Did, SpaceMembershipError> {
+    let parts: Vec<_> = space_uri
+        .strip_prefix("at://")
+        .ok_or(SpaceMembershipError::InvalidRequest)?
+        .split('/')
+        .collect();
+    let [authority, "space", "zone.stratos.space.feed", key] = parts.as_slice() else {
+        return Err(SpaceMembershipError::InvalidRequest);
+    };
+    let did = Did::parse(*authority).map_err(|_| SpaceMembershipError::InvalidRequest)?;
+    if crate::credential_manager::boundary_to_space_uri(&format!("{authority}/{key}"))
+        .map_err(|_| SpaceMembershipError::InvalidRequest)?
+        != space_uri
+    {
+        return Err(SpaceMembershipError::InvalidRequest);
+    }
+    Ok(did)
 }
 
 fn validate_request(
@@ -335,9 +352,64 @@ mod tests {
             endpoint(&client.service_url).as_str(),
             "http://stratos.internal.test/base/xrpc/zone.stratos.space.listRepos"
         );
-        assert_eq!(
-            endpoint(&client.public_url).as_str(),
-            "https://stratos.example.test/base/xrpc/zone.stratos.space.listRepos"
+        assert!(
+            HttpSpaceMembershipClient::new("https://stratos.example.test", "file:///unsafe")
+                .is_err()
         );
+    }
+    #[tokio::test]
+    async fn membership_signs_the_validated_authority_not_the_transport_url() {
+        use crate::{
+            space_credential::GrantedSpaceCredential, space_http_signature::SpaceHttpSignatureKey,
+        };
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            loop {
+                let mut chunk = [0; 4096];
+                let n = stream.read(&mut chunk).await.unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&chunk[..n]);
+                if bytes.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8(bytes).unwrap();
+            assert!(request.contains("authorization: Atproto-Space rei\r\n"));
+            assert!(request.contains("atproto-space-audience: did:web:stratos.example.test\r\n"));
+            assert!(request.contains(
+                "signature-input: atproto-space=(\"authorization\" \"atproto-space-audience\")\r\n"
+            ));
+            assert!(!request.contains("dpop:"));
+            stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 12\r\nconnection: close\r\n\r\n{\"repos\":[]}").await.unwrap();
+        });
+        let client = HttpSpaceMembershipClient::new(
+            &format!("http://{address}"),
+            "https://public.example.test",
+        )
+        .unwrap();
+        let grant =
+            GrantedSpaceCredential::new("rei".to_owned(), SpaceHttpSignatureKey::generate())
+                .unwrap();
+        let space = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+        assert!(
+            client
+                .list(space, &grant, None, 10)
+                .await
+                .unwrap()
+                .members
+                .is_empty()
+        );
+        server.await.unwrap();
+        for invalid in [
+            "at://did:plc:rei/space/zone.stratos.space.feed/",
+            "https://stratos.example.test",
+            "at://did:plc:rei/space/zone.stratos.space.feed/bebop/extra",
+        ] {
+            assert!(super::space_authority(invalid).is_err());
+        }
     }
 }

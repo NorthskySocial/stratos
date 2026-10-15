@@ -25,6 +25,10 @@ import {
 import type { AssertionResult, ReviewReceipt, ScenarioSuite } from './rules.js'
 
 const harnessDirectory = dirname(fileURLToPath(import.meta.url))
+const octoberPdsSuites = new Set([
+  'standard-credential-transport',
+  'rust-production-interop',
+])
 interface SourcePins {
   atmosphereInABox: {
     url: string
@@ -396,7 +400,7 @@ export async function runSandbox(
       pins.spacesPds,
       options.reportDirectory,
     )
-    if (options.suite === 'standard-credential-transport') {
+    if (suites.some((suite) => octoberPdsSuites.has(suite.id))) {
       failedStep = 'build-october-pds'
       if (!pins.octoberSpacesPds)
         throw new Error('October PDS source pin is missing')
@@ -407,9 +411,44 @@ export async function runSandbox(
         octoberReport,
       )
     }
+    if (options.suite === 'rust-production-interop') {
+      const browserDockerfile = join(
+        atmosphere,
+        'stacks/feedgen-ng-e2e-browser.Dockerfile',
+      )
+      const original = await readFile(browserDockerfile, 'utf8')
+      const rustDockerfile = await readFile(
+        join(workspace, 'stratos/stratos-feedgen-ng/Dockerfile'),
+        'utf8',
+      )
+      const builder = rustDockerfile
+        .split('FROM debian:')[0]
+        .replace(
+          'RUN cargo build --locked --release --package stratos-feedgen-ng',
+          'RUN cargo build --locked --release --package stratos-feedgen-ng --example space_interop_probe',
+        )
+      await writeFile(
+        browserDockerfile,
+        builder +
+          original.replace(
+            'runtime/feedgen-ng-e2e-browser.mjs',
+            'test/spaces-alignment/templates/feedgen-ng-e2e-browser.mjs',
+          ) +
+          '\nCOPY --from=builder /workspace/target/release/examples/space_interop_probe /usr/local/bin/space_interop_probe\n',
+      )
+      templateHashes['stacks/feedgen-ng-e2e-browser.Dockerfile'] =
+        await sha256File(browserDockerfile)
+    }
     failedStep = 'prepare-stack'
     const stackPath = join(atmosphere, 'stacks/feedgen-ng-e2e.yaml')
-    const stack = await readFile(stackPath, 'utf8')
+    const sourceStack = await readFile(stackPath, 'utf8')
+    const stack =
+      options.suite === 'rust-production-interop'
+        ? sourceStack.replace(
+            'context: .\n      dockerfile: stacks/feedgen-ng-e2e-browser.Dockerfile',
+            'context: ../stratos\n      dockerfile: ../atmosphereinabox/stacks/feedgen-ng-e2e-browser.Dockerfile',
+          )
+        : sourceStack
     if (!stack.includes('${SPACES_PDS_IMAGE_ID}'))
       throw new Error('PDS image placeholder is missing')
     await writeFile(
@@ -465,6 +504,14 @@ export async function runSandbox(
           secretFiles?: unknown[]
         }>
       ).find((service) => service.service === 'feedgen-e2e-browser')!
+      if (options.suite === 'rust-production-interop') {
+        browser.secretFiles!.push({
+          secret: 'feedgen-e2e-signing-key',
+          name: 'probe-service-signing-key',
+          uid: 1001,
+          gid: 1001,
+        })
+      }
       browser.secretFiles!.push({
         secret: 'feedgen-e2e-october-admin',
         name: 'october-admin-password',
@@ -487,6 +534,15 @@ export async function runSandbox(
         await sha256File(extraPath)
     }
 
+    if (options.suite === 'rust-production-interop') {
+      await writeFile(
+        stackPath,
+        (await readFile(stackPath, 'utf8')).replace(
+          "      STRATOS_PORT: '3100'",
+          "      STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS: '10'\n      STRATOS_PORT: '3100'",
+        ),
+      )
+    }
     await runStep('install', 'deno', ['task', 'install'])
     await runStep('create', 'deno', [
       'task',

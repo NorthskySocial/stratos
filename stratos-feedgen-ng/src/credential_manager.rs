@@ -9,7 +9,8 @@ use tokio::sync::Notify;
 use crate::{
     credential_issuer::{CredentialExpiry, CredentialMintError, SpaceCredentialIssuer},
     identifier::RecordUri,
-    space_credential::{DpopKey, HeldSpaceCredential},
+    space_credential::HeldSpaceCredential,
+    space_http_signature::SpaceHttpSignatureKey,
 };
 
 const MAX_CREDENTIALS: usize = 128;
@@ -40,7 +41,6 @@ impl std::error::Error for CredentialManagerError {}
 
 pub struct SpaceCredentialManager {
     issuer: Arc<dyn SpaceCredentialIssuer>,
-    key: Arc<DpopKey>,
     now: fn() -> u64,
     state: Mutex<ManagerState>,
 }
@@ -53,7 +53,7 @@ struct ManagerState {
 
 struct CachedCredential {
     credential: Arc<HeldSpaceCredential>,
-    expiry: CredentialExpiry,
+    refresh_at: u64,
 }
 
 struct CredentialFlight {
@@ -70,7 +70,6 @@ impl SpaceCredentialManager {
     pub fn with_clock(issuer: Arc<dyn SpaceCredentialIssuer>, now: fn() -> u64) -> Self {
         Self {
             issuer,
-            key: Arc::new(DpopKey::generate()),
             now,
             state: Mutex::new(ManagerState {
                 generation: 0,
@@ -89,14 +88,14 @@ impl SpaceCredentialManager {
         let (flight, owner) = {
             let mut state = self.state.lock().expect("credential manager poisoned");
             if let Some(cached) = state.credentials.get(boundary)
-                && cached.expiry.as_epoch_seconds().saturating_sub(now) > REFRESH_MARGIN_SECONDS
+                && now < cached.refresh_at
             {
                 return Ok(Arc::clone(&cached.credential));
             }
             if let Some(flight) = state.in_flight.get(boundary) {
                 (Arc::clone(flight), false)
             } else {
-                if state.credentials.len() >= MAX_CREDENTIALS
+                if state.credentials.len() + state.in_flight.len() >= MAX_CREDENTIALS
                     && !state.credentials.contains_key(boundary)
                 {
                     return Err(CredentialManagerError::Capacity);
@@ -130,17 +129,29 @@ impl SpaceCredentialManager {
         }
     }
 
+    pub fn invalidate(&self, boundary: &str, rejected: &Arc<HeldSpaceCredential>) {
+        let mut state = self.state.lock().expect("credential manager poisoned");
+        if state
+            .credentials
+            .get(boundary)
+            .is_some_and(|cached| Arc::ptr_eq(&cached.credential, rejected))
+        {
+            state.credentials.remove(boundary);
+        }
+    }
+
     async fn mint(
         &self,
         space_uri: &str,
         now: u64,
     ) -> Result<(Arc<HeldSpaceCredential>, CredentialExpiry), CredentialManagerError> {
+        let key = SpaceHttpSignatureKey::generate();
         let issued = self
             .issuer
-            .mint(space_uri, &self.key, now)
+            .mint(space_uri, &key, now)
             .await
             .map_err(CredentialManagerError::Mint)?;
-        HeldSpaceCredential::new(issued.credential, Arc::clone(&self.key), self.now)
+        HeldSpaceCredential::new(issued.credential, key)
             .map(|credential| (Arc::new(credential), issued.expires_at))
             .map_err(|_| CredentialManagerError::Mint(CredentialMintError::InvalidResponse))
     }
@@ -160,7 +171,13 @@ impl SpaceCredentialManager {
                     boundary.to_owned(),
                     CachedCredential {
                         credential: Arc::clone(&credential),
-                        expiry,
+                        refresh_at: {
+                            let now = (self.now)();
+                            let remaining = expiry.as_epoch_seconds().saturating_sub(now);
+                            expiry
+                                .as_epoch_seconds()
+                                .saturating_sub(REFRESH_MARGIN_SECONDS.min(remaining / 10))
+                        },
                     },
                 );
                 credential
@@ -182,6 +199,9 @@ async fn wait_for_flight(
     flight: Arc<CredentialFlight>,
 ) -> Result<Arc<HeldSpaceCredential>, CredentialManagerError> {
     loop {
+        let notified = flight.notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
         if let Some(result) = flight
             .result
             .lock()
@@ -190,7 +210,7 @@ async fn wait_for_flight(
         {
             return result;
         }
-        flight.notify.notified().await;
+        notified.await;
     }
 }
 
@@ -232,7 +252,7 @@ mod tests {
         credential_issuer::{
             CredentialExpiry, CredentialMintError, IssuedSpaceCredential, SpaceCredentialIssuer,
         },
-        space_credential::DpopKey,
+        space_http_signature::SpaceHttpSignatureKey,
     };
 
     use super::{CredentialManagerError, SpaceCredentialManager, boundary_to_space_uri};
@@ -244,7 +264,7 @@ mod tests {
         async fn mint(
             &self,
             _: &str,
-            _: &DpopKey,
+            _: &SpaceHttpSignatureKey,
             _: u64,
         ) -> Result<IssuedSpaceCredential, CredentialMintError> {
             self.0.fetch_add(1, Ordering::SeqCst);
@@ -337,5 +357,66 @@ mod tests {
             pending.await.unwrap(),
             Err(CredentialManagerError::Invalidated)
         ));
+    }
+    struct ShortIssuer {
+        calls: AtomicUsize,
+        denied: std::sync::atomic::AtomicBool,
+    }
+
+    #[async_trait]
+    impl SpaceCredentialIssuer for ShortIssuer {
+        async fn mint(
+            &self,
+            _: &str,
+            _: &SpaceHttpSignatureKey,
+            now: u64,
+        ) -> Result<IssuedSpaceCredential, CredentialMintError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.denied.load(Ordering::SeqCst) {
+                return Err(CredentialMintError::Authentication);
+            }
+            Ok(IssuedSpaceCredential {
+                credential: "rei".to_owned(),
+                expires_at: CredentialExpiry::from_epoch_seconds(now + 60),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn rotates_per_grant_and_refreshes_short_grants_only_near_expiry() {
+        static NOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1000);
+        let issuer = Arc::new(ShortIssuer {
+            calls: AtomicUsize::new(0),
+            denied: false.into(),
+        });
+        let manager =
+            SpaceCredentialManager::with_clock(issuer.clone(), || NOW.load(Ordering::SeqCst));
+        let boundary = "did:web:stratos.example.test/rei";
+        let first = manager.get(boundary).await.unwrap();
+        assert!(Arc::ptr_eq(&first, &manager.get(boundary).await.unwrap()));
+        let second = manager
+            .get("did:web:stratos.example.test/misato")
+            .await
+            .unwrap();
+        assert_ne!(first.key_id(), second.key_id());
+        NOW.store(1053, Ordering::SeqCst);
+        assert!(Arc::ptr_eq(&first, &manager.get(boundary).await.unwrap()));
+        NOW.store(1054, Ordering::SeqCst);
+        let refreshed = manager.get(boundary).await.unwrap();
+        assert_ne!(first.key_id(), refreshed.key_id());
+        manager.invalidate(boundary, &first);
+        assert!(Arc::ptr_eq(
+            &refreshed,
+            &manager.get(boundary).await.unwrap()
+        ));
+        manager.invalidate(boundary, &refreshed);
+        issuer.denied.store(true, Ordering::SeqCst);
+        assert!(matches!(
+            manager.get(boundary).await,
+            Err(CredentialManagerError::Mint(
+                CredentialMintError::Authentication
+            ))
+        ));
+        assert_eq!(issuer.calls.load(Ordering::SeqCst), 4);
     }
 }
