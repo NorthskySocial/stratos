@@ -20,6 +20,8 @@ import {
   runSandbox,
 } from './run-sandbox.js'
 
+import { runScenario } from './scenarios/standard-credential-transport.driver.mjs'
+
 const temporary: string[] = []
 const originalPath = process.env.PATH
 
@@ -202,7 +204,7 @@ describe('sandbox preflight', () => {
         candidateRepo,
         'test/spaces-alignment/templates/feedgen-ng-e2e.yaml',
       ),
-      'services:\n  feedgen-e2e-pds-spaces:\n    image: ${SPACES_PDS_IMAGE_ID}\n\nvolumes:\n  primary-data: {}\n',
+      'services:\n  feedgen-e2e-pds-spaces:\n    image: ${SPACES_PDS_IMAGE_ID}\n    environment:\n      IDENTITY_PRIVATE_ORIGINS: https://spaces-pds-e2e.atmosbox.test\n\nvolumes:\n  primary-data: {}\n',
     )
     await writeFile(
       join(
@@ -339,6 +341,35 @@ describe('sandbox preflight', () => {
       },
     }
     await writeFile(reviewReceipt, JSON.stringify(review))
+    const accountLabels: string[] = []
+    await expect(
+      runScenario({
+        open: async () => ({ close: async () => {} }),
+        prepare: async (_browser, name) => {
+          accountLabels.push(name)
+          if (accountLabels.length === 2)
+            throw new Error('October account labels captured')
+          return {
+            account: { did: `did:plc:${name}`, seedText: name },
+            page: name,
+          }
+        },
+        delegation: async () => {
+          throw new Error('No exchange expected while capturing labels')
+        },
+        remove: async () => {
+          throw new Error('No removal expected while capturing labels')
+        },
+      }),
+    ).rejects.toThrow('October account labels captured')
+    expect(accountLabels).toEqual(['faye', 'edward'])
+    const octoberOrigins = [
+      'https://october-pds-e2e.atmosbox.test',
+      ...accountLabels.map(
+        (name) => `https://${name}.october-pds-e2e.atmosbox.test`,
+      ),
+      'https://spaces-pds-e2e.atmosbox.test',
+    ]
     const fakeDeno = `#!/usr/bin/env node
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
@@ -361,13 +392,17 @@ if (args[1] === 'sandbox' && args[2] === 'check') assert.deepEqual(args, ['task'
 if (args[1] === 'sandbox' && args[2] === 'check') {
   const stack = fs.readFileSync('stacks/feedgen-ng-e2e.yaml', 'utf8')
   assert.ok(stack.includes('image: sha256:${'a'.repeat(64)}'))
+  const origins = stack.match(/IDENTITY_PRIVATE_ORIGINS: (.+)/)[1].split(',')
   if (stack.includes('feedgen-e2e-pds-october:')) {
+    assert.deepEqual(origins, ${JSON.stringify(octoberOrigins)})
     const october = fs.readFileSync('../stratos/test/spaces-alignment/templates/october-pds.yaml', 'utf8')
       .replace('\${OCTOBER_PDS_IMAGE_ID}', 'sha256:${'c'.repeat(64)}')
       .split('\\n')
       .map(line => line ? '  ' + line : line)
       .join('\\n')
     assert.ok(stack.includes('\\n' + october + '\\nvolumes:\\n  feedgen-e2e-pds-october-data: {}\\n'), 'Preserve the entire October template, including every Compose shell escape')
+  } else {
+    assert.deepEqual(origins, ['https://spaces-pds-e2e.atmosbox.test'])
   }
 }
 if (args[1] === 'sandbox' && args[2] === 'up') assert.deepEqual(args, ['task', 'sandbox', 'up', '--build'])

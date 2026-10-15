@@ -474,7 +474,7 @@ export async function runSandbox(
       await writeFile(definitionPath, JSON.stringify(definition))
       const updatedStack = (await readFile(stackPath, 'utf8')).replace(
         'IDENTITY_PRIVATE_ORIGINS: ',
-        'IDENTITY_PRIVATE_ORIGINS: https://october-pds-e2e.atmosbox.test,https://faye.october-pds-e2e.atmosbox.test,https://ed.october-pds-e2e.atmosbox.test,',
+        'IDENTITY_PRIVATE_ORIGINS: https://october-pds-e2e.atmosbox.test,https://faye.october-pds-e2e.atmosbox.test,https://edward.october-pds-e2e.atmosbox.test,',
       )
       await writeFile(stackPath, updatedStack)
       templateHashes['stacks/october-pds.yaml'] = await sha256File(
