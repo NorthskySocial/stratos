@@ -148,14 +148,16 @@ Authorization: Bearer <access_token>
 ```http
 GET /xrpc/zone.stratos.space.getRecord?space=<at-uri>&repo=<did>&collection=<nsid>&rkey=<rkey>
 Authorization: Bearer <access_token> | DPoP <space-credential>
-DPoP: <proof>   (required when presenting a space credential)
+DPoP: <proof>   (legacy cnf.jkt credentials only)
 Response: { "uri": "...", "cid": "...", "value": { ... } }
 ```
 
 Get a single record from a permissioned space (spec-shaped mirror of
 `com.atproto.space.getRecord`). Callable with standard user auth - the caller
 must be a member of the space - or with a space credential for that space (for
-syncing services). A space credential is DPoP-key-bound (`cnf.jkt`): present it
+syncing services). Standard `cnf.kid` credentials use `Atproto-Space` with HTTP
+signatures as described under Get Space Credential. A legacy credential is
+DPoP-key-bound (`cnf.jkt`): present it
 under the `DPoP` scheme with a per-request proof signed by the bound key and
 hash-bound to the credential (`ath`). The record must belong to the requested
 space; records outside it (including records with no space) resolve to
@@ -166,7 +168,7 @@ space; records outside it (including records with no space) resolve to
 ```http
 GET /xrpc/zone.stratos.space.listBlobs?space=<at-uri>&repo=<did>[&since=<rev>][&limit=<n>][&cursor=<cursor>]
 Authorization: Bearer <access_token> | DPoP <space-credential>
-DPoP: <proof>   (required when presenting a space credential)
+DPoP: <proof>   (legacy cnf.jkt credentials only)
 Response: { "cids": ["..."], "cursor": "..." }
 ```
 
@@ -268,6 +270,36 @@ proof key. When no key is available the request fails with `ProofRequired` (unbo
 credentials are minted only in development mode). The credential is then accepted on
 read/sync endpoints as an alternative to standard auth, presented under the `DPoP` scheme
 with a fresh proof per request.
+
+The additive standard profile uses the same custom procedure:
+
+```http
+POST /xrpc/zone.stratos.space.getSpaceCredential
+Authorization: Bearer <delegation JWT>
+Signature-Input: atproto-space=("authorization");keyid="<P-256 did:key>"
+Signature: atproto-space=:<base64 compact signature>:
+Content-Type: application/json
+Body: { "space": "at://<authority-did>/space/<type>/<skey>" }
+```
+
+Do not combine HTTP signatures with a DPoP proof. Standard credentials bind
+`cnf.kid` and use a separate default-600/max-3600-second TTL. Legacy session,
+body-delegation, and Bearer-delegation-plus-DPoP minting remain supported with
+their existing TTL configuration, default 7200 seconds.
+
+For standard reads, send `Authorization: Atproto-Space <credential JWT>` and
+sign exactly `authorization` then `atproto-space-audience`. Set
+`Atproto-Space-Audience` to the actual repo owner's DID, not its host, for repo
+operations. Use the bare authority DID for `zone.stratos.space.listRepos`.
+The same signature is reusable for the same credential and audience until
+expiry. Failed standard verification never falls back to legacy verification.
+Keep each cached credential paired with its original key and transport profile;
+renew both together. Ordinary OAuth DPoP remains unchanged.
+
+This does not add an upstream `com.atproto.space.*` authority endpoint.
+Member removal prevents renewal but does not automatically revoke credentials
+already accepted by a foreign PDS. See the
+[compatibility and rollout limits](../operator/configuration.md#october-spaces-rollout).
 
 ## Record Types
 

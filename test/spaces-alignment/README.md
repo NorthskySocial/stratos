@@ -95,6 +95,47 @@ invalidation triggers this refresh. The runtime scheduler itself is unchanged. T
 TypeScript transport assertions. Neither suite is certified until its reviewed
 sandbox run passes.
 
+## Combined October cutover gate
+
+Select `--suite october-interop` for the mandatory baseline followed by all 15
+standard transport assertions and all 11 Rust assertions. Standard fixtures use
+Faye and Edward; Rust fixtures use Rustfaye and Rustedward on the same October
+host. The runner executes the ten mandatory baseline assertions once with Motoko.
+The Rust ingestion check deliberately reuses that driver with Batou on the primary
+PDS. This is a distinct second-owner scope, not another mandatory baseline receipt:
+it requires Batou's own new post URI and text in the Rust feed response before
+emitting `rust-second-owner-ingestion`. The combined suite then calls the separate
+Rust signing probe, not the standalone Rust suite. Both combined and standalone
+runs preserve the Batou check. These accounts are distinct because the standard
+scenario removes its first member.
+
+The combined suite first checks the default 600-second standard lifetime.
+It then recreates only the disposable authority with a ten-second TTL and waits
+for it to become healthy before the Rust expiry-refresh checks. It does not
+weaken or replace either suite's assertions. Both source-built PDS identities,
+the Rust probe build, private TLS, and cleanup remain required.
+
+After exact-candidate independent Standards and Spec approvals, use a new
+private receipt and a nonexistent report path for each run:
+
+```sh
+pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
+  --sandbox-dir /home/evelyn/git/northsky/ops/sandbox/atmosphereinabox \
+  --source "$(git rev-parse --show-toplevel)" \
+  --suite october-interop \
+  --review-receipt "$REVIEW_RECEIPT" \
+  --report-dir "$NEW_REPORT_DIR"
+```
+
+Repeat `delegation-transport`, `credential-lifetime`, `client-custody`,
+`space-delete`, `feed-errors`, and `baseline` as separate sandbox runs. Each run
+has fresh accounts and its own new report directory. Do not combine their
+shared Motoko fixtures after a removal or OAuth revocation. Delegated transport
+and the foreign lifetime checks now use standard HTTP signatures against the
+October primary PDS. The authority lifetime checks retain legacy compatibility
+coverage. OAuth browser proofs are unchanged. Unit-test receipts are not runtime
+acceptance, and predecessor receipts do not certify this combined candidate.
+
 ## Suite API
 
 Each tracked `scenarios/<suite>.ts` exports `suite: ScenarioSuite` with `id`, nonempty `requiredAssertions`, and an async `run(context)` returning one result for each named assertion. Import `ScenarioSuite` from `../rules.js`. The runner discovers modules from the candidate checkout and runs `baseline` before any additional suite. A missing, skipped, failed, or duplicate assertion fails the gate. Add a new suite in its own scenario module. Suites that need the additional October

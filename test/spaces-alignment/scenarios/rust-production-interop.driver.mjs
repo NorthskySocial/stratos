@@ -59,8 +59,8 @@ export async function runScenario() {
   let browser
   try {
     browser = await openBrowser()
-    const { account, page } = await prepareAccount(browser, 'faye')
-    const second = await prepareAccount(browser, 'edward')
+    const { account, page } = await prepareAccount(browser, 'rustfaye')
+    const second = await prepareAccount(browser, 'rustedward')
     assert.notEqual(account.did, second.account.did)
     async function exchange(grant, delegation) {
       const headers = await probe({ operation: 'exchange', grant, delegation })

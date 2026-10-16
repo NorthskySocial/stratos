@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
-import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
+import {
+  proofKey,
+  signedHeaders,
+} from './standard-credential-transport.driver.mjs'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { mkdir, readFile } from 'node:fs/promises'
@@ -163,46 +166,12 @@ async function getDelegation(page) {
   )
 }
 
-function proofKey() {
-  const { publicKey, privateKey } = generateKeyPairSync('ec', {
-    namedCurve: 'prime256v1',
-  })
-  const jwk = publicKey.export({ format: 'jwk' })
-  return { privateKey, jwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y } }
-}
-
-function base64url(value) {
-  return Buffer.from(
-    typeof value === 'string' ? value : JSON.stringify(value),
-  ).toString('base64url')
-}
-
-function proof(key, url, method, token) {
-  const header = { typ: 'dpop+jwt', alg: 'ES256', jwk: key.jwk }
-  const claims = {
-    htm: method,
-    htu: new URL(url).origin + new URL(url).pathname,
-    jti: randomUUID(),
-    iat: Math.floor(Date.now() / 1000),
-    ...(token
-      ? { ath: createHash('sha256').update(token).digest('base64url') }
-      : {}),
-  }
-  const signingInput = `${base64url(header)}.${base64url(claims)}`
-  const signature = sign('sha256', Buffer.from(signingInput), {
-    key: key.privateKey,
-    dsaEncoding: 'ieee-p1363',
-  })
-  return `${signingInput}.${signature.toString('base64url')}`
-}
-
 async function exchange(token, key, body = { space }) {
   const response = await fetch(mintUrl, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${token}`,
+      ...signedHeaders(`Bearer ${token}`, key),
       'content-type': 'application/json',
-      dpop: proof(key, mintUrl, 'POST'),
     },
     body: JSON.stringify(body),
   })
@@ -250,8 +219,11 @@ async function main() {
     async function read(url, presentationKey = key) {
       return fetch(url, {
         headers: {
-          authorization: `DPoP ${credential}`,
-          dpop: proof(presentationKey, url.href, 'GET', credential),
+          ...signedHeaders(
+            `Atproto-Space ${credential}`,
+            presentationKey,
+            url === localUrl ? authorityDid : did,
+          ),
         },
       })
     }

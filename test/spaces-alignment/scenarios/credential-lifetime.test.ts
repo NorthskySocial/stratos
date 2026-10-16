@@ -60,6 +60,7 @@ describe('credential lifetime sandbox scenario', () => {
         'auth-client.iife.js',
         'authority.mjs',
         'driver.mjs',
+        'standard-credential-transport.driver.mjs',
       ])
       expect((await stat(assets)).mode & 0o777).toBe(0o755)
       expect(
