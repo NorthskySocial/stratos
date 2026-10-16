@@ -136,6 +136,28 @@ October primary PDS. The authority lifetime checks retain legacy compatibility
 coverage. OAuth browser proofs are unchanged. Unit-test receipts are not runtime
 acceptance, and predecessor receipts do not certify this combined candidate.
 
+## Writer-sync design probe
+
+Select `--suite writer-sync-contract` after exact-candidate independent review.
+The mandatory baseline runs first. The suite provisions a disposable upstream
+simplespace authority on the pinned October Spaces alpha PDS, using Faye and
+Edward's real accounts. It checks actual commit `rev`, standard writer metadata,
+short-page cursors, exclusive/opaque cursor behavior, repeated writers, equal and
+older update idempotence, issuer/audience/future-revision denial, current write
+policy removal, and Stratos's unsupported standard routes. This is real upstream
+authority behavior, not Stratos standard-authority support. No fake authority
+server substitutes for the PDS.
+
+`writer-sync-contract.model.test.ts` separately exercises a synthetic reference
+model for durable-processing crash boundaries, coalescing, ordering and bounded
+backoff. Those tests do not prove actual storage atomicity, retry durability,
+forwarding delivery, or generation fencing. The live probe explicitly delivers
+the real signed head through real service authentication to avoid depending on
+immediate automatic-notification timing. It does not certify the retry worker or
+notification fanout. See the [design and follow-ups](../../docs/architecture/october-writer-sync-contract.md).
+A reviewed clean-candidate runtime receipt remains required; unit tests alone
+are not acceptance.
+
 ## Suite API
 
 Each tracked `scenarios/<suite>.ts` exports `suite: ScenarioSuite` with `id`, nonempty `requiredAssertions`, and an async `run(context)` returning one result for each named assertion. Import `ScenarioSuite` from `../rules.js`. The runner discovers modules from the candidate checkout and runs `baseline` before any additional suite. A missing, skipped, failed, or duplicate assertion fails the gate. Add a new suite in its own scenario module. Suites that need the additional October

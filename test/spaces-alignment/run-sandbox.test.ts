@@ -262,6 +262,13 @@ describe('sandbox preflight', () => {
       ),
       `export const suite = { id: 'credential-revocation-contract', requiredAssertions: ['upstream-pass'], async run() { return [{ id: 'upstream-pass', status: 'passed' }] } }`,
     )
+    await writeFile(
+      join(
+        candidateRepo,
+        'test/spaces-alignment/scenarios/writer-sync-contract.ts',
+      ),
+      `export const suite = { id: 'writer-sync-contract', requiredAssertions: ['writer-pass'], async run() { return [{ id: 'writer-pass', status: 'passed' }] } }`,
+    )
     for (const file of ['october-pds.yaml', 'october-pds.definition.json']) {
       await writeFile(
         join(candidateRepo, 'test/spaces-alignment/templates', file),
@@ -769,6 +776,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
     ).rejects.toThrow('October PDS source pin is missing')
     const octoberPin = { ...sourcePins.spacesPds, revision: 'c'.repeat(40) }
     for (const selectedSuite of [
+      'writer-sync-contract',
       'credential-revocation-contract',
       'standard-credential-transport',
       'rust-production-interop',
