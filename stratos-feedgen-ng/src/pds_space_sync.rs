@@ -191,7 +191,18 @@ impl PdsSpaceSynchronizer {
             .pages
             .connect(target, Arc::clone(&credential))
             .await
-            .map_err(PdsSpaceSyncError::Host)?;
+            .map_err(|error| {
+                if matches!(
+                    error,
+                    SpaceHostError::Request {
+                        status: 401 | 403,
+                        ..
+                    }
+                ) {
+                    self.credentials.invalidate(&target.boundary, &credential);
+                }
+                PdsSpaceSyncError::Host(error)
+            })?;
         let mut cursor = lifecycle
             .pds_space_cursor(&target.boundary, &target.space_uri, &target.did)
             .map_err(PdsSpaceSyncError::Store)?;
@@ -201,7 +212,18 @@ impl PdsSpaceSynchronizer {
             let response = reader
                 .list_page(target, cursor.as_deref(), MAX_SPACE_PAGE_OPS)
                 .await
-                .map_err(PdsSpaceSyncError::Host)?;
+                .map_err(|error| {
+                    if matches!(
+                        error,
+                        SpaceHostError::Request {
+                            status: 401 | 403,
+                            ..
+                        }
+                    ) {
+                        self.credentials.invalidate(&target.boundary, &credential);
+                    }
+                    PdsSpaceSyncError::Host(error)
+                })?;
             staged_ops = staged_ops.saturating_add(response.page.ops.len());
             if staged_ops > MAX_SYNC_OPS {
                 return Err(PdsSpaceSyncError::OperationLimit);
@@ -370,8 +392,8 @@ mod tests {
         readiness::FeedReadinessGate,
         service::ProjectionReader,
         space_commit::CommitVerification,
-        space_credential::DpopKey,
         space_host::{SpaceHostError, SpaceHostPage},
+        space_http_signature::SpaceHttpSignatureKey,
         space_sync::{POST_COLLECTION, SpacePage, SpaceRepoOp},
         store::{EncryptedStore, PdsSpaceMember, StorageKey},
     };
@@ -393,7 +415,7 @@ mod tests {
         async fn mint(
             &self,
             _: &str,
-            _: &DpopKey,
+            _: &SpaceHttpSignatureKey,
             _: u64,
         ) -> Result<IssuedSpaceCredential, CredentialMintError> {
             Ok(IssuedSpaceCredential {
@@ -840,5 +862,47 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(error, PdsSpaceSyncError::OperationLimit));
+    }
+    struct DeniedPages;
+    #[async_trait]
+    impl SpacePageSource for DeniedPages {
+        async fn connect(
+            &self,
+            _: &PdsPollTarget,
+            _: Arc<crate::space_credential::HeldSpaceCredential>,
+        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
+            Ok(Arc::new(Self))
+        }
+    }
+    #[async_trait]
+    impl SpacePageReader for DeniedPages {
+        async fn list_page(
+            &self,
+            _: &PdsPollTarget,
+            _: Option<&str>,
+            _: usize,
+        ) -> Result<SpaceHostPage, SpaceHostError> {
+            Err(SpaceHostError::Request {
+                status: 401,
+                code: Some("InvalidCredential".to_owned()),
+            })
+        }
+    }
+    #[tokio::test]
+    async fn host_denial_discards_the_rejected_cached_grant() {
+        let sync = synchronizer_with(
+            Arc::new(DeniedPages),
+            Arc::new(Decision(CommitVerification::Verified)),
+        );
+        let before = sync.credentials.get(BOUNDARY).await.unwrap();
+        assert!(matches!(
+            sync.sync_target(&lifecycle(), &target(), NOW, NOW).await,
+            Err(PdsSpaceSyncError::Host(SpaceHostError::Request {
+                status: 401,
+                ..
+            }))
+        ));
+        let after = sync.credentials.get(BOUNDARY).await.unwrap();
+        assert_ne!(before.key_id(), after.key_id());
     }
 }

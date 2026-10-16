@@ -296,7 +296,9 @@ async function requestJson(url, options, context) {
 
 async function provisionAccount(domain) {
   const pdsUrl = `https://spaces-pds-e2e.${domain}`
-  const username = `motoko.spaces-pds-e2e.${domain}`
+  const name = process.env.FEEDGEN_E2E_PDS_ACCOUNT || 'motoko'
+  assert.match(name, /^(motoko|batou)$/)
+  const username = `${name}.spaces-pds-e2e.${domain}`
   const password = (
     await readFile('/run/sandbox-secrets/browser-password', 'utf8')
   ).trim()
@@ -343,7 +345,7 @@ async function provisionAccount(domain) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        email: `motoko@spaces-pds-e2e.${domain}`,
+        email: `${name}@spaces-pds-e2e.${domain}`,
         handle: username,
         password,
         inviteCode: invitation.code,

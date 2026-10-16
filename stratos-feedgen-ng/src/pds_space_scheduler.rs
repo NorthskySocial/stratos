@@ -405,8 +405,8 @@ mod tests {
         readiness::FeedReadinessGate,
         service::ProjectionReader,
         space_commit::CommitVerification,
-        space_credential::DpopKey,
         space_host::{SpaceHostError, SpaceHostPage},
+        space_http_signature::SpaceHttpSignatureKey,
         space_membership::{
             RepoCustody, SpaceMembershipClient, SpaceMembershipError, SpaceMembershipPage,
             SpaceRepoMember,
@@ -428,7 +428,7 @@ mod tests {
         async fn mint(
             &self,
             _: &str,
-            _: &DpopKey,
+            _: &SpaceHttpSignatureKey,
             _: u64,
         ) -> Result<IssuedSpaceCredential, CredentialMintError> {
             Ok(IssuedSpaceCredential {

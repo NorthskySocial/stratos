@@ -126,12 +126,32 @@ process.exit(2)
       'stratos-pds-source-',
     )
 
+    for (const path of ['services/pds/Dockerfile', 'pnpm-lock.yaml']) {
+      await expect(
+        buildAlphaPds(
+          {
+            url: source,
+            revision,
+            dockerfile: 'services/pds/Dockerfile',
+            lockfile: 'pnpm-lock.yaml',
+            sha256: { [path]: '0'.repeat(64) },
+          },
+          report,
+        ),
+      ).rejects.toThrow('Pinned PDS build input hash mismatch')
+    }
     const receipt = await buildAlphaPds(
       {
         url: source,
         revision,
         dockerfile: 'services/pds/Dockerfile',
         lockfile: 'pnpm-lock.yaml',
+        sha256: {
+          'services/pds/Dockerfile': createHash('sha256')
+            .update(dockerfile)
+            .digest('hex'),
+          'pnpm-lock.yaml': createHash('sha256').update(lockfile).digest('hex'),
+        },
       },
       report,
     )
