@@ -239,23 +239,23 @@ Changing only the origin of legacy repo CRUD does not write into the space.
 
 ### Routing applies to
 
-| Operation                               | Routes to Stratos?                                                            |
-| --------------------------------------- | ----------------------------------------------------------------------------- |
-| `com.atproto.repo.getRecord`            | Stratos custody only                                                          |
-| `com.atproto.repo.listRecords`          | Stratos custody only                                                          |
-| `com.atproto.repo.describeRepo`         | Stratos custody only                                                          |
-| `com.atproto.repo.createRecord`         | Stratos custody only                                                          |
-| `com.atproto.repo.deleteRecord`         | Stratos custody only                                                          |
-| `com.atproto.repo.applyWrites`          | Stratos custody only                                                          |
-| `com.atproto.sync.getRecord`            | Stratos custody only                                                          |
-| `zone.stratos.space.listBlobs`          | Yes (lists blob CIDs in a space)                                              |
-| `zone.stratos.sync.getRepo`             | Yes (full repo export as CAR)                                                 |
-| `zone.stratos.repo.importRepo`          | Yes (import repo from CAR)                                                    |
-| `zone.stratos.sync.subscribeRecords`    | Yes (WebSocket firehose)                                                      |
-| `zone.stratos.sync.listRepoOps`         | Yes (pull oplog; falls back to `listRecordPaths` on `OplogTruncated`)         |
-| `zone.stratos.sync.listRecordPaths`     | Yes (full-state recovery enumeration)                                         |
-| `zone.stratos.space.getSpaceCredential` | Yes (mints a DPoP-key-bound space credential accepted on read/sync endpoints) |
-| `com.atproto.sync.getBlob`              | Yes (downloads blob content)                                                  |
+| Operation                               | Routes to Stratos?                                                    |
+| --------------------------------------- | --------------------------------------------------------------------- |
+| `com.atproto.repo.getRecord`            | Stratos custody only                                                  |
+| `com.atproto.repo.listRecords`          | Stratos custody only                                                  |
+| `com.atproto.repo.describeRepo`         | Stratos custody only                                                  |
+| `com.atproto.repo.createRecord`         | Stratos custody only                                                  |
+| `com.atproto.repo.deleteRecord`         | Stratos custody only                                                  |
+| `com.atproto.repo.applyWrites`          | Stratos custody only                                                  |
+| `com.atproto.sync.getRecord`            | Stratos custody only                                                  |
+| `zone.stratos.space.listBlobs`          | Yes (lists blob CIDs in a space)                                      |
+| `zone.stratos.sync.getRepo`             | Yes (full repo export as CAR)                                         |
+| `zone.stratos.repo.importRepo`          | Yes (import repo from CAR)                                            |
+| `zone.stratos.sync.subscribeRecords`    | Yes (WebSocket firehose)                                              |
+| `zone.stratos.sync.listRepoOps`         | Yes (pull oplog; falls back to `listRecordPaths` on `OplogTruncated`) |
+| `zone.stratos.sync.listRecordPaths`     | Yes (full-state recovery enumeration)                                 |
+| `zone.stratos.space.getSpaceCredential` | Yes (mints standard HTTP-signature or legacy DPoP space credentials)  |
+| `com.atproto.sync.getBlob`              | Yes (downloads blob content)                                          |
 
 `zone.stratos.space.getSpaceCredential` is a POST procedure. A client with a
 space delegation sends `Authorization: Bearer <delegation JWT>`, a standalone
@@ -294,6 +294,13 @@ and Bearer delegation with standalone DPoP continue to produce `cnf.jkt`
 credentials. Keep each cached credential associated with its original key and
 profile. Failed HTTP verification never falls back to OAuth, service auth, or
 legacy DPoP. Ordinary OAuth DPoP and service JWT authentication are unchanged.
+
+For a coordinated upgrade, discard cached grants and reacquire credentials with
+fresh keys. The Rust client has no legacy fallback; do not deploy it against an
+old receiver. October PDS hosts require the standard profile even though Stratos
+continues to support legacy clients. Roll back the receiver, client, and compatible
+PDS set together, then clear grant caches. See the
+[operator rollout procedure](../docs/operator/configuration.md#october-spaces-rollout).
 
 The issued legacy credential covers one whole space until expiry (normally two
 hours), not just the member who requested it. Production reads require a fresh
@@ -714,6 +721,7 @@ which configures:
 
 - `authorization` — carries the DPoP-bound access token
 - `dpop` — carries the DPoP proof JWT
+- `signature`, `signature-input`, `atproto-space-audience` — standard space credentials
 - `content-type`
 - `atproto-accept-labelers`, `atproto-proxy`
 
@@ -740,7 +748,7 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', origin)
   res.header(
     'Access-Control-Allow-Headers',
-    'authorization, dpop, content-type, atproto-accept-labelers, atproto-proxy',
+    'authorization, dpop, signature, signature-input, atproto-space-audience, content-type, atproto-accept-labelers, atproto-proxy',
   )
   res.header('Access-Control-Expose-Headers', 'dpop-nonce, www-authenticate')
   if (req.method === 'OPTIONS') {

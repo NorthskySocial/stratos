@@ -115,6 +115,14 @@ async function prepareBrowserRunner(reportDirectory: string): Promise<string> {
       },
     },
   })
+  await copyFile(
+    join(scenarioDirectory, 'standard-credential-transport.driver.mjs'),
+    join(browserAssets, 'standard-credential-transport.driver.mjs'),
+  )
+  await chmod(
+    join(browserAssets, 'standard-credential-transport.driver.mjs'),
+    0o644,
+  )
   const driverPath = join(browserAssets, 'driver.mjs')
   await copyFile(
     join(scenarioDirectory, 'delegation-transport.driver.mjs'),
