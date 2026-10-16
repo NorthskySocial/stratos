@@ -188,9 +188,32 @@ async function waitForComposer(page) {
   throw new Error('Room did not become ready after enrollment reconciliation')
 }
 
+async function waitForRoomAction(scope) {
+  try {
+    await scope
+      .getByRole('button', { name: /^(Open room|Join room)$/ })
+      .waitFor({ state: 'visible', timeout: 30_000 })
+  } catch {
+    const state = {}
+    for (const name of [
+      'Checking access…',
+      'Open room',
+      'Join room',
+      'Request pending…',
+      'Joining unavailable',
+    ]) {
+      state[name] = await visible(
+        scope.getByRole('button', { name, exact: true }),
+      )
+    }
+    throw new Error(`Room action did not resolve: ${JSON.stringify(state)}`)
+  }
+}
+
 async function enterRoom(page, account, clubhouseUrl, roomId) {
   const card = roomCard(page, roomId)
   await card.waitFor({ state: 'visible', timeout: 30_000 })
+  await waitForRoomAction(card)
   const open = card.getByRole('button', { name: 'Open room' })
   if (await visible(open)) {
     await open.click()
@@ -650,6 +673,7 @@ async function assertNonmemberDenied(domain, clubhouseUrl, roomId, postText) {
     await signIn(page, account, clubhouseUrl)
     const card = roomCard(page, roomId)
     await card.waitFor({ state: 'visible', timeout: 30_000 })
+    await waitForRoomAction(card)
     assert.ok(
       await visible(card.getByRole('button', { name: 'Join room' })),
       'Unjoined account was treated as a room member',
@@ -657,7 +681,19 @@ async function assertNonmemberDenied(domain, clubhouseUrl, roomId, postText) {
     await page.goto(`${clubhouseUrl}/rooms/${encodeURIComponent(roomId)}`, {
       waitUntil: 'domcontentloaded',
     })
-    await delay(2_000)
+    await page
+      .locator('.room-view .placeholder-panel, .room-view #room-post')
+      .first()
+      .waitFor({ state: 'visible', timeout: 30_000 })
+      .catch(() => {
+        throw new Error('Room route access did not resolve')
+      })
+    assert.ok(
+      await visible(
+        page.locator('.room-view').getByRole('button', { name: 'Join room' }),
+      ),
+      'Unjoined account was treated as a room member on the room route',
+    )
     assert.equal(
       await visible(page.locator('.post', { hasText: postText }).first()),
       false,
