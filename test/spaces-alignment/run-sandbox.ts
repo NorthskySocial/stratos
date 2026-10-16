@@ -26,6 +26,7 @@ import type { AssertionResult, ReviewReceipt, ScenarioSuite } from './rules.js'
 
 const harnessDirectory = dirname(fileURLToPath(import.meta.url))
 const octoberPdsSuites = new Set([
+  'writer-sync-contract',
   'credential-revocation-contract',
   'standard-credential-transport',
   'rust-production-interop',

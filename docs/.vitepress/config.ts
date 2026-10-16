@@ -126,6 +126,10 @@ export default defineConfig({
               text: 'Credential Revocation Contract',
               link: '/architecture/credential-revocation-contract',
             },
+            {
+              text: 'October Writer Sync',
+              link: '/architecture/october-writer-sync-contract',
+            },
             { text: 'System Diagrams', link: '/architecture/diagrams' },
           ],
         },
