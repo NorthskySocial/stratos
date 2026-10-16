@@ -1,4 +1,33 @@
 import assert from 'node:assert/strict'
+
+let assertionLabel
+function check(condition, label) {
+  assertionLabel = label
+  assert.ok(condition, label)
+}
+async function checkResponse(response, status, label, code) {
+  assertionLabel = label
+  let errorCode
+  if (code !== undefined) {
+    const body = await response.json()
+    errorCode = body.error === code ? code : 'UnexpectedErrorCode'
+  }
+  if (response.status !== status || errorCode !== code) {
+    const error = new Error()
+    error.outcome = {
+      label,
+      status: response.status,
+      expectedStatus: status,
+      errorCode,
+    }
+    throw error
+  }
+}
+function failureOutcome(error) {
+  return JSON.stringify(
+    error.outcome ?? { label: assertionLabel, status: 'failed' },
+  )
+}
 import {
   proofKey,
   signedHeaders,
@@ -12,7 +41,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 const require = createRequire('/runner/feedgen-ng-e2e-browser.mjs')
 const { chromium } = require('playwright')
 const domain = process.env.SANDBOX_DOMAIN
-assert.match(domain ?? '', /^[a-z0-9.-]+$/)
+check(/^[a-z0-9.-]+$/.test(domain ?? ''), 'sandbox-domain')
 const clubhouse = 'https://clubhouse-e2e.atmosbox.internal'
 const authority = 'https://stratos-e2e.atmosbox.internal'
 const pds = `https://spaces-pds-e2e.${domain}`
@@ -142,7 +171,7 @@ async function oauthSession(page) {
     if (!session) throw new Error('OAuth session was not restored')
     return session.sub
   })
-  assert.ok(did.startsWith('did:'), 'OAuth session has no account DID')
+  check(did.startsWith('did:'), 'oauth-account-did')
   passed.push('oauth-space-session')
   return did
 }
@@ -199,15 +228,16 @@ async function main() {
     const claims = JSON.parse(
       Buffer.from(delegation.split('.')[1], 'base64url'),
     )
-    assert.equal(claims.iss, did)
-    assert.equal(claims.sub, space)
+    check(claims.iss === did, 'delegation-iss')
+    check(claims.sub === space, 'delegation-sub')
+    check(claims.aud === `${authorityDid}#atproto_space_host`, 'delegation-aud')
     passed.push('pds-issued-delegation')
 
     const key = proofKey()
     const mint = await exchange(delegation, key)
-    assert.equal(mint.status, 200)
+    await checkResponse(mint, 200, 'credential-mint')
     const credential = (await mint.json()).credential
-    assert.equal(typeof credential, 'string')
+    check(typeof credential === 'string', 'credential-string')
     passed.push('credential-minted')
 
     const localUrl = new URL('/xrpc/zone.stratos.space.listRepos', authority)
@@ -228,11 +258,14 @@ async function main() {
       })
     }
     const localBefore = await read(localUrl)
-    assert.equal(localBefore.status, 200)
+    await checkResponse(localBefore, 200, 'local-read-before-removal')
     passed.push('local-read-before-removal')
     const foreignBefore = await read(foreignUrl)
-    assert.equal(foreignBefore.status, 200)
-    assert.ok((await foreignBefore.json()).records.length > 0)
+    await checkResponse(foreignBefore, 200, 'foreign-read-before-removal')
+    check(
+      (await foreignBefore.json()).records.length > 0,
+      'foreign-records-before-removal',
+    )
     passed.push('foreign-read-before-removal')
 
     const removed = await page.evaluate(async (authorityUrl) => {
@@ -244,19 +277,25 @@ async function main() {
       )
       return response.status
     }, authority)
-    assert.equal(removed, 200, 'Member removal failed')
+    check(removed === 200, 'member-removal-status')
     passed.push('member-removed')
 
     const localAfter = await read(localUrl)
-    assert.equal(localAfter.status, 200)
-    assert.ok(!(await localAfter.json()).repos.some((repo) => repo.did === did))
+    await checkResponse(localAfter, 200, 'local-read-after-removal')
+    check(
+      !(await localAfter.json()).repos.some((repo) => repo.did === did),
+      'removed-member-not-listed',
+    )
     passed.push('local-credential-after-removal')
     const foreignAfter = await read(foreignUrl)
-    assert.equal(foreignAfter.status, 200)
-    assert.ok((await foreignAfter.json()).records.length > 0)
+    await checkResponse(foreignAfter, 200, 'foreign-read-after-removal')
+    check(
+      (await foreignAfter.json()).records.length > 0,
+      'foreign-records-after-removal',
+    )
     passed.push('foreign-credential-after-removal')
     const wrongKey = await read(foreignUrl, proofKey())
-    assert.ok([401, 403].includes(wrongKey.status))
+    await checkResponse(wrongKey, 401, 'wrong-key-denied', 'BadSpaceSignature')
     passed.push('wrong-key-denied')
 
     console.log(
@@ -271,8 +310,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(
-    `Credential lifetime scenario failed: ${error instanceof Error ? error.name : 'UnknownError'}`,
-  )
+  console.error(`Credential lifetime scenario failed: ${failureOutcome(error)}`)
   process.exitCode = 1
 })
