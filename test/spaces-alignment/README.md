@@ -155,3 +155,30 @@ strictly validate the Stratos-specific post record type: its record validator
 only knows built-in lexicons. The blob fixture therefore uses the PDS's default
 best-effort validation path, without disabling validation, and verifies that
 the scoped record write and private blob retrieval both succeed.
+
+## Credential revocation design probe
+
+Select `--suite credential-revocation-contract` for the mandatory baseline and
+13 assertions against the actual pinned October receiver and unchanged Stratos
+unsupported route. This is not the future Stratos `credential-revocation`
+enforcement suite. See [the revocation contract](../../docs/architecture/credential-revocation-contract.md#bounded-design-probe)
+for every required assertion and exact typed denial.
+
+The probe uses Faye's real OAuth/exchange fixture, two distinct grants, the
+seeded record, and the existing disposable authority identity loader. A private
+peer signs notifications without exporting its key. Grants and presentation
+headers travel through pipes between Compose peers; only the final assertion
+receipt reaches the report. Restart targets only `feedgen-e2e-pds-october` and
+waits for its health check. Every Compose operation selects the generated file.
+No new authority server, production endpoint, migration, or enforcement is added.
+
+Cross-space isolation revokes B's ID in `other` and reads `general`. Duplicate
+coverage observes successful retries and unchanged read outcomes, not database
+row counts or expiry extension. Retained inactive-account behavior, a separately
+controlled foreign issuer, concurrency, storage failure, and full 3,610-second
+cleanup retention remain unverified future gates. The design probe neither
+silently skips them nor claims complete Stratos enforcement coverage.
+
+The clean-candidate and independent-review receipt gates still apply. Unit tests
+and source inspection are not runtime acceptance, and no predecessor receipt
+certifies a new candidate.
