@@ -159,7 +159,7 @@ the scoped record write and private blob retrieval both succeed.
 ## Credential revocation design probe
 
 Select `--suite credential-revocation-contract` for the mandatory baseline and
-13 assertions against the actual pinned October receiver and unchanged Stratos
+13 assertions against the actual pinned October Spaces alpha PDS receiver and unchanged Stratos
 unsupported route. This is not the future Stratos `credential-revocation`
 enforcement suite. See [the revocation contract](../../docs/architecture/credential-revocation-contract.md#bounded-design-probe)
 for every required assertion and exact typed denial.
