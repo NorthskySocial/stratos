@@ -20,7 +20,7 @@ describe('delegation transport browser scenario', () => {
       'utf8',
     )
     const start = driver.indexOf('async function getDelegation(page) {')
-    const end = driver.indexOf('\nfunction proofKey()', start)
+    const end = driver.indexOf('\nasync function exchange(', start)
     expect(start).toBeGreaterThanOrEqual(0)
     expect(end).toBeGreaterThan(start)
     const requestedSpace =
@@ -147,6 +147,7 @@ describe('delegation transport browser scenario', () => {
       expect((await readdir(browserAssets)).sort()).toEqual([
         'auth-client.iife.js',
         'driver.mjs',
+        'standard-credential-transport.driver.mjs',
       ])
       expect(
         (await stat(join(browserAssets, 'auth-client.iife.js'))).mode & 0o777,

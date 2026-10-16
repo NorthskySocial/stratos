@@ -28,7 +28,9 @@ const harnessDirectory = dirname(fileURLToPath(import.meta.url))
 const octoberPdsSuites = new Set([
   'standard-credential-transport',
   'rust-production-interop',
+  'october-interop',
 ])
+const rustProbeSuites = new Set(['rust-production-interop', 'october-interop'])
 interface SourcePins {
   atmosphereInABox: {
     url: string
@@ -411,7 +413,7 @@ export async function runSandbox(
         octoberReport,
       )
     }
-    if (options.suite === 'rust-production-interop') {
+    if (rustProbeSuites.has(options.suite)) {
       const browserDockerfile = join(
         atmosphere,
         'stacks/feedgen-ng-e2e-browser.Dockerfile',
@@ -442,13 +444,12 @@ export async function runSandbox(
     failedStep = 'prepare-stack'
     const stackPath = join(atmosphere, 'stacks/feedgen-ng-e2e.yaml')
     const sourceStack = await readFile(stackPath, 'utf8')
-    const stack =
-      options.suite === 'rust-production-interop'
-        ? sourceStack.replace(
-            'context: .\n      dockerfile: stacks/feedgen-ng-e2e-browser.Dockerfile',
-            'context: ../stratos\n      dockerfile: ../atmosphereinabox/stacks/feedgen-ng-e2e-browser.Dockerfile',
-          )
-        : sourceStack
+    const stack = rustProbeSuites.has(options.suite)
+      ? sourceStack.replace(
+          'context: .\n      dockerfile: stacks/feedgen-ng-e2e-browser.Dockerfile',
+          'context: ../stratos\n      dockerfile: ../atmosphereinabox/stacks/feedgen-ng-e2e-browser.Dockerfile',
+        )
+      : sourceStack
     if (!stack.includes('${SPACES_PDS_IMAGE_ID}'))
       throw new Error('PDS image placeholder is missing')
     await writeFile(
@@ -504,7 +505,7 @@ export async function runSandbox(
           secretFiles?: unknown[]
         }>
       ).find((service) => service.service === 'feedgen-e2e-browser')!
-      if (options.suite === 'rust-production-interop') {
+      if (rustProbeSuites.has(options.suite)) {
         browser.secretFiles!.push({
           secret: 'feedgen-e2e-signing-key',
           name: 'probe-service-signing-key',
@@ -521,7 +522,7 @@ export async function runSandbox(
       await writeFile(definitionPath, JSON.stringify(definition))
       const updatedStack = (await readFile(stackPath, 'utf8')).replace(
         'IDENTITY_PRIVATE_ORIGINS: ',
-        'IDENTITY_PRIVATE_ORIGINS: https://october-pds-e2e.atmosbox.test,https://faye.october-pds-e2e.atmosbox.test,https://edward.october-pds-e2e.atmosbox.test,',
+        'IDENTITY_PRIVATE_ORIGINS: https://october-pds-e2e.atmosbox.test,https://faye.october-pds-e2e.atmosbox.test,https://edward.october-pds-e2e.atmosbox.test,https://rustfaye.october-pds-e2e.atmosbox.test,https://rustedward.october-pds-e2e.atmosbox.test,',
       )
       await writeFile(stackPath, updatedStack)
       templateHashes['stacks/october-pds.yaml'] = await sha256File(
