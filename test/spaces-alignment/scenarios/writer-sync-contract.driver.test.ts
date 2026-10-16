@@ -383,6 +383,90 @@ it('checks exact upstream fixture requests with a synthetic transport, without c
     }),
   ).rejects.toThrow('transport failed')
   expect(closed).toBe(2)
+  const own = new URL('./writer-sync-contract.driver.mjs', import.meta.url)
+    .pathname
+  const output = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const prior = process.exitCode
+  try {
+    for (const [target, label] of [
+      ['com.atproto.space.getSpaceCredential', 'get-space-credential'],
+      ['com.atproto.space.listRepos', 'list-repos'],
+      ['stratos-list', 'stratos-list-repos'],
+      ['stratos-notify', 'stratos-notify-write'],
+    ]) {
+      writes = 0
+      const fresh = fixture()
+      backend.write = fresh.write.bind(fresh)
+      backend.list = fresh.list.bind(fresh)
+      backend.notify = fresh.notify.bind(fresh)
+      backend.removeWriter = fresh.removeWriter.bind(fresh)
+      output.mockClear()
+      await main(['node', own], () =>
+        runScenario({
+          ...dependencies,
+          request: async (input, options) => {
+            const url = new URL(String(input))
+            const method = url.pathname.split('/').at(-1)
+            if (
+              method === target ||
+              (url.hostname === 'stratos-e2e.atmosbox.internal' &&
+                ((target === 'stratos-list' && !options?.body) ||
+                  (target === 'stratos-notify' && options?.body)))
+            )
+              return new Response(
+                JSON.stringify({
+                  error: 'InvalidRequest',
+                  message: 'private-token',
+                }),
+                { status: 400 },
+              )
+            return dependencies.request(input, options)
+          },
+        }),
+      )
+      expect(output.mock.calls).toEqual([
+        ['Writer sync contract probe failed'],
+        [
+          JSON.stringify({
+            operation: label,
+            status: 400,
+            error: 'InvalidRequest',
+          }),
+        ],
+      ])
+    }
+    for (const phase of ['prepare-writer', 'close-browser']) {
+      output.mockClear()
+      let prepares = 0
+      await main(['node', own], () =>
+        runScenario({
+          ...dependencies,
+          open: async () => ({
+            close: async () => {
+              if (phase === 'close-browser') throw new Error('private-token')
+            },
+          }),
+          prepare: async () => {
+            if (++prepares === 2 && phase === 'prepare-writer')
+              throw new Error('private-token')
+            return {
+              account: { did: 'private-did', accessJwt: 'private-token' },
+            }
+          },
+          request: async () => {
+            throw new Error('private-token')
+          },
+        }),
+      )
+      expect(output.mock.calls).toEqual([
+        ['Writer sync contract probe failed'],
+        [JSON.stringify({ operation: phase })],
+      ])
+    }
+  } finally {
+    process.exitCode = prior
+    output.mockRestore()
+  }
 })
 
 it.each(['accepted', 'wrong-error', 'changed-listing'])(
@@ -641,5 +725,192 @@ it('uses a valid default sandbox domain and supplies the expected browser API', 
   } finally {
     if (prior === undefined) delete process.env.SANDBOX_DOMAIN
     else process.env.SANDBOX_DOMAIN = prior
+  }
+})
+
+it('reports only trusted phase labels, HTTP status, and allowlisted error codes', async () => {
+  const own = new URL('./writer-sync-contract.driver.mjs', import.meta.url)
+    .pathname
+  const output = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const prior = process.exitCode
+  const browser = { close: vi.fn(async () => {}) }
+  const run = (request: typeof fetch) =>
+    runScenario({
+      domain: 'atmosbox.test',
+      open: async () => browser,
+      prepare: async () => ({
+        account: { did: 'private-did', accessJwt: 'private-token' },
+      }),
+      request,
+    })
+  try {
+    for (const code of [
+      'Forbidden',
+      'FutureRev',
+      'MethodNotImplemented',
+      'InvalidRequest',
+      'InvalidToken',
+      'AuthRequired',
+      'InvalidScope',
+      'private-token',
+      null,
+    ]) {
+      output.mockClear()
+      await main(['node', own], () =>
+        run(
+          async () =>
+            new Response(
+              JSON.stringify({
+                error: code,
+                message: 'private-record',
+                claims: 'private-claims',
+              }),
+              { status: 403 },
+            ),
+        ),
+      )
+      expect(output.mock.calls).toEqual([
+        ['Writer sync contract probe failed'],
+        [
+          JSON.stringify({
+            operation: 'com.atproto.simplespace.createSpace',
+            status: 403,
+            ...(['private-token', null].includes(code) ? {} : { error: code }),
+          }),
+        ],
+      ])
+      expect(process.exitCode).toBe(1)
+    }
+    for (const body of ['private-record', '{', 'null']) {
+      output.mockClear()
+      await main(['node', own], () => run(async () => new Response(body)))
+      expect(JSON.stringify(output.mock.calls)).not.toContain('private-record')
+      if (body !== 'null')
+        expect(output.mock.calls).toEqual([
+          ['Writer sync contract probe failed'],
+          [
+            JSON.stringify({
+              operation: 'com.atproto.simplespace.createSpace',
+              status: 200,
+            }),
+          ],
+        ])
+    }
+    output.mockClear()
+    await main(['node', own], () =>
+      run(async () => {
+        throw new Error('private-token private-stack')
+      }),
+    )
+    expect(output.mock.calls).toEqual([
+      ['Writer sync contract probe failed'],
+      ['{"operation":"com.atproto.simplespace.createSpace"}'],
+    ])
+    for (const thrown of [new Error('private-token'), 'private-token', null]) {
+      output.mockClear()
+      await main(['node', own], async () => {
+        throw thrown
+      })
+      expect(output.mock.calls).toEqual([['Writer sync contract probe failed']])
+    }
+    expect(browser.close).toHaveBeenCalledTimes(13)
+  } finally {
+    process.exitCode = prior
+    output.mockRestore()
+  }
+})
+
+it('names failed contract checks and the first and second write without exposing assertion values', async () => {
+  const own = new URL('./writer-sync-contract.driver.mjs', import.meta.url)
+    .pathname
+  const output = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const prior = process.exitCode
+  try {
+    for (const [broken, label] of [
+      ['wrong-writer', 'upstream-short-page-cursor'],
+      ['accept-invalid', 'upstream-wrong-issuer-denied'],
+      ['unsupported-is-404', 'stratos-standard-writer-routes-unsupported'],
+    ]) {
+      output.mockClear()
+      await main(['node', own], () => verifyContract(fixture(broken)))
+      expect(JSON.parse(String(output.mock.calls[1][0])).operation).toBe(label)
+      expect(JSON.stringify(output.mock.calls)).not.toContain('did:plc:')
+    }
+    for (const failingWrite of [1, 2]) {
+      const api = fixture()
+      const write = api.write.bind(api)
+      let calls = 0
+      api.write = async (text) => {
+        if (++calls === failingWrite) throw new Error('private-record')
+        return write(text)
+      }
+      output.mockClear()
+      await main(['node', own], () => verifyContract(api))
+      expect(output.mock.calls).toEqual([
+        ['Writer sync contract probe failed'],
+        [
+          JSON.stringify({
+            operation: failingWrite === 1 ? 'write-first' : 'write-second',
+          }),
+        ],
+      ])
+    }
+    for (const [label, dependencies] of [
+      [
+        'open-browser',
+        {
+          open: async () => {
+            throw new Error('private-token')
+          },
+        },
+      ],
+      [
+        'prepare-owner',
+        {
+          open: async () => ({ close: async () => {} }),
+          prepare: async () => {
+            throw new Error('private-token')
+          },
+        },
+      ],
+    ] as const) {
+      output.mockClear()
+      await main(['node', own], () =>
+        runScenario({ domain: 'atmosbox.test', ...dependencies }),
+      )
+      expect(output.mock.calls).toEqual([
+        ['Writer sync contract probe failed'],
+        [JSON.stringify({ operation: label })],
+      ])
+    }
+  } finally {
+    process.exitCode = prior
+    output.mockRestore()
+  }
+})
+
+it('preserves non-Error failures without attaching or exposing untrusted values', async () => {
+  const own = new URL('./writer-sync-contract.driver.mjs', import.meta.url)
+    .pathname
+  const output = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const prior = process.exitCode
+  try {
+    const api = fixture()
+    api.write = async () => {
+      throw null
+    }
+    await expect(verifyContract(api)).rejects.toBe(null)
+    await main(['node', own], () => verifyContract(api))
+    expect(output.mock.calls).toEqual([['Writer sync contract probe failed']])
+    const response = {
+      status: 200,
+      text: async () => {
+        throw null
+      },
+    } as unknown as Response
+    await expect(checked(response)).rejects.toBe(null)
+  } finally {
+    process.exitCode = prior
+    output.mockRestore()
   }
 })

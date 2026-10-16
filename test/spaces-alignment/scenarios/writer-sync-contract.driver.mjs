@@ -20,12 +20,49 @@ export const requiredAssertions = [
   'stratos-standard-writer-routes-unsupported',
 ]
 
+const diagnostics = new WeakMap()
+const responseOperations = new WeakMap()
+const safeErrors = new Set([
+  'Forbidden',
+  'FutureRev',
+  'MethodNotImplemented',
+  'InvalidRequest',
+  'InvalidToken',
+  'AuthRequired',
+  'InvalidScope',
+])
+
+async function operation(label, run) {
+  try {
+    return await run()
+  } catch (error) {
+    if (error instanceof Error) {
+      diagnostics.set(error, { operation: label, ...diagnostics.get(error) })
+    }
+    throw error
+  }
+}
+
 export async function checked(response, status = 200, error) {
-  assert.equal(response.status, status)
-  const body = await response.text()
-  const value = body ? JSON.parse(body) : undefined
-  if (error !== undefined) assert.equal(value.error, error)
-  return value
+  let value
+  try {
+    const body = await response.text()
+    value = body ? JSON.parse(body) : undefined
+    assert.equal(response.status, status)
+    if (error !== undefined) assert.equal(value.error, error)
+    return value
+  } catch (failure) {
+    if (failure instanceof Error) {
+      diagnostics.set(failure, {
+        ...(responseOperations.has(response)
+          ? { operation: responseOperations.get(response) }
+          : {}),
+        status: response.status,
+        ...(safeErrors.has(value?.error) ? { error: value.error } : {}),
+      })
+    }
+    throw failure
+  }
 }
 
 export function assertPage(page) {
@@ -54,11 +91,11 @@ export function futureRevision(now) {
 
 export async function verifyContract(api) {
   const passed = []
-  const record = async (id, operation) => {
-    await operation()
+  const record = async (id, run) => {
+    await operation(id, run)
     passed.push(id)
   }
-  const first = await api.write('first')
+  const first = await operation('write-first', () => api.write('first'))
   await record('upstream-commit-rev-unchanged', async () => {
     assert.match(first.rev, /^[234567abcdefghijklmnopqrstuvwxyz]{13}$/)
     assert.equal(first.repoRev, undefined)
@@ -83,7 +120,7 @@ export async function verifyContract(api) {
     assertPage(arbitrary)
     assert.deepEqual(arbitrary.repos, [])
   })
-  const second = await api.write('second')
+  const second = await operation('write-second', () => api.write('second'))
   await record('upstream-repeated-writer-new-state', async () => {
     assert.ok(second.rev > first.rev)
     page = await api.list(checkpoint)
@@ -166,15 +203,25 @@ export async function runScenario({
 } = {}) {
   assert.match(domain, /^[a-z0-9.-]+$/)
   const host = `https://october-pds-e2e.${domain}`
-  const browser = await open()
+  const browser = await operation('open-browser', open)
   try {
-    const { account: owner } = await prepare(browser, 'faye')
-    const { account: writer } = await prepare(browser, 'edward')
+    const { account: owner } = await operation('prepare-owner', () =>
+      prepare(browser, 'faye'),
+    )
+    const { account: writer } = await operation('prepare-writer', () =>
+      prepare(browser, 'edward'),
+    )
+    const send = async (label, ...args) =>
+      operation(label, async () => {
+        const response = await request(...args)
+        responseOperations.set(response, label)
+        return response
+      })
     const rpc = (method, body, token, params) => {
       const url = new URL('/xrpc/' + method, host)
       for (const [key, value] of Object.entries(params ?? {}))
         url.searchParams.set(key, value)
-      return request(url, {
+      return send(method, url, {
         method: body ? 'POST' : 'GET',
         headers: {
           authorization: 'Bearer ' + token,
@@ -214,7 +261,8 @@ export async function runScenario({
         { space },
       ),
     )
-    const exchange = await request(
+    const exchange = await send(
+      'get-space-credential',
       host + '/xrpc/com.atproto.space.getSpaceCredential',
       {
         method: 'POST',
@@ -271,7 +319,7 @@ export async function runScenario({
         url.searchParams.set('limit', '100')
         if (cursor !== undefined) url.searchParams.set('cursor', cursor)
         return checked(
-          await request(url, {
+          await send('list-repos', url, {
             headers: headersFor('Atproto-Space ' + credential, key, owner.did),
           }),
         )
@@ -308,26 +356,31 @@ export async function runScenario({
       async unsupported() {
         const authority = 'https://stratos-e2e.atmosbox.internal/xrpc/'
         return Promise.all([
-          request(
+          send(
+            'stratos-list-repos',
             authority +
               'com.atproto.space.listRepos?space=' +
               encodeURIComponent(space),
           ),
-          request(authority + 'com.atproto.space.notifyWrite', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              space,
-              repo: writer.did,
-              repoRev: futureRevision(Date.now()),
-              hash: { $bytes: Buffer.alloc(32).toString('base64') },
-            }),
-          }),
+          send(
+            'stratos-notify-write',
+            authority + 'com.atproto.space.notifyWrite',
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                space,
+                repo: writer.did,
+                repoRev: futureRevision(Date.now()),
+                hash: { $bytes: Buffer.alloc(32).toString('base64') },
+              }),
+            },
+          ),
         ])
       },
     })
   } finally {
-    await browser.close()
+    await operation('close-browser', () => browser.close())
   }
 }
 
@@ -335,8 +388,10 @@ export async function main(argv = process.argv, run = runScenario) {
   if (argv[1] && import.meta.url === pathToFileURL(argv[1]).href) {
     try {
       console.log(JSON.stringify(await run()))
-    } catch {
+    } catch (error) {
       console.error('Writer sync contract probe failed')
+      const diagnostic = diagnostics.get(error)
+      if (diagnostic) console.error(JSON.stringify(diagnostic))
       process.exitCode = 1
     }
   }
