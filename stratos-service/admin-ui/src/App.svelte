@@ -19,6 +19,7 @@
     '/': Health,
     '/health': Health,
     '/boundaries': Boundaries,
+    '/boundaries/detail': Boundaries,
     '/domains': Boundaries,
     '/enrollments': Enrollments,
     '/admins': Admins,
@@ -29,7 +30,7 @@
     {
       href: '#/boundaries',
       label: 'Boundaries',
-      match: ['/boundaries', '/domains'],
+      match: ['/boundaries', '/boundaries/detail', '/domains'],
     },
     { href: '#/enrollments', label: 'Enrollments', match: ['/enrollments'] },
     { href: '#/admins', label: 'Admins', match: ['/admins'] },

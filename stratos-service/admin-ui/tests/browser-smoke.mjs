@@ -44,6 +44,8 @@ try {
       displayName: 'Pilots',
       listed: true,
       joinable: true,
+      appAccess: 'allowList',
+      clientIds: ['https://spike.test/client'],
     },
     {
       ...base,
@@ -52,12 +54,50 @@ try {
       displayName: 'Archive',
       status: 'inactive',
       memberCount: 0,
+      listed: false,
+      joinable: false,
+      autoEnroll: true,
+      appAccess: 'open',
+      clientIds: [],
+    },
+    {
+      ...base,
+      boundary: 'did:web:nerv.test/' + 'archive-'.repeat(16) + 'long-id',
+      roomId: 'long-id',
+      displayName: 'Long identifier boundary',
+      listed: false,
+      joinable: false,
+      autoEnroll: false,
+    },
+    {
+      ...base,
+      boundary: 'did:web:nerv.test/people',
+      roomId: 'people',
+      displayName: 'People policy',
+      listed: false,
+      joinable: true,
+      autoEnroll: false,
+    },
+    {
+      ...base,
+      boundary: 'did:web:nerv.test/services',
+      roomId: 'services',
+      displayName: 'Service policy',
+      listed: true,
+      joinable: false,
+      autoEnroll: false,
+      appAccess: 'denyList',
+      clientIds: ['https://blocked.test/client'],
     },
   ]
   let failList = false,
+    failDetailList = false,
     conflictNext = false,
     failConflictReload = false,
     drain = false
+  let catalogDelay = null
+  let catalogDelayIndex = 0
+  const catalogRequests = []
   const mutations = []
   async function handleMutation(route, url) {
     const method = url.pathname.split('.').at(-1)
@@ -117,6 +157,24 @@ try {
     if (url.pathname === '/admin/whoami')
       return route.fulfill({ json: { did: 'did:plc:spike', isAdmin: true } })
     if (url.pathname === '/xrpc/zone.stratos.admin.listBoundaries') {
+      catalogRequests.push(route)
+      if (catalogDelay) {
+        const delayedCatalog = catalogDelay
+        const index = catalogDelayIndex++
+        if (index === 0) await delayedCatalog.releaseStale
+        await route.fulfill({
+          json: { boundaries: delayedCatalog.responses[index] },
+        })
+        if (index === 0) delayedCatalog.markStaleFulfilled()
+        return
+      }
+      if (failDetailList) {
+        failDetailList = false
+        return route.fulfill({
+          status: 503,
+          json: { error: 'Unavailable', message: 'Catalog unavailable.' },
+        })
+      }
       if (failList) {
         failList = false
         return route.fulfill({
@@ -152,7 +210,22 @@ try {
       })
     if (url.pathname === '/xrpc/zone.stratos.admin.listEnrollments')
       return route.fulfill({ json: { enrollments: [], total: 0 } })
-    if (url.pathname.startsWith('/xrpc/zone.stratos.admin.'))
+    if (
+      url.pathname.startsWith('/xrpc/zone.stratos.admin.') &&
+      ![
+        '/xrpc/zone.stratos.admin.createBoundary',
+        '/xrpc/zone.stratos.admin.updateBoundary',
+        '/xrpc/zone.stratos.admin.deactivateBoundary',
+        '/xrpc/zone.stratos.admin.reactivateBoundary',
+      ].includes(url.pathname)
+    )
+      throw new Error('Unexpected admin endpoint: ' + url.pathname)
+    if (
+      url.pathname === '/xrpc/zone.stratos.admin.createBoundary' ||
+      url.pathname === '/xrpc/zone.stratos.admin.updateBoundary' ||
+      url.pathname === '/xrpc/zone.stratos.admin.deactivateBoundary' ||
+      url.pathname === '/xrpc/zone.stratos.admin.reactivateBoundary'
+    )
       return handleMutation(route, url)
     if (
       url.pathname.startsWith('/xrpc/') ||
@@ -166,7 +239,7 @@ try {
   await expect(
     page.getByRole('heading', { name: 'Boundaries', exact: true }),
   ).toBeVisible()
-  await expect(page.getByTestId('boundary-row')).toHaveCount(3)
+  await expect(page.getByTestId('boundary-row')).toHaveCount(6)
   await expect(page.getByRole('button', { name: /delete/i })).toHaveCount(0)
   const row = (name) =>
     page
@@ -175,6 +248,165 @@ try {
   await expect(
     row('All members').getByRole('button', { name: 'Deactivate', exact: true }),
   ).toHaveCount(0)
+  const overviewHref =
+    '#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2Fpilots&tab=overview'
+  await row('Pilots')
+    .getByRole('link', { name: 'Overview', exact: true })
+    .click()
+  await expect(page).toHaveURL((url) => url.hash === overviewHref)
+  await expect(page.getByTestId('boundary-overview')).toContainText(
+    'Directory listing does not make boundary content public',
+  )
+  await expect(page.getByTestId('boundary-overview')).toContainText(
+    'Allowed application IDs',
+  )
+  await expect(page.getByTestId('boundary-overview')).toContainText(
+    'https://spike.test/client',
+  )
+  await expect(page.getByTestId('boundary-detail')).toContainText('Pilots')
+  await expect(
+    page.getByTestId('admin-shell').getByTestId('whoami-did'),
+  ).toContainText('did:plc:spike')
+  await expect(page.getByTestId('boundary-overview')).toContainText(
+    'Publicly listed',
+  )
+  await expect(page.getByTestId('boundary-overview')).toContainText(
+    'Members may join',
+  )
+  await expect(page.getByTestId('boundary-overview')).toContainText(
+    'Automatic enrollment',
+  )
+  await expect(page.getByTestId('boundary-overview')).toContainText('Disabled')
+  await expect(page.getByTestId('boundary-overview')).toContainText(
+    'Application policy',
+  )
+  await expect(page.getByTestId('boundary-overview')).toContainText(
+    'Allowlisted applications',
+  )
+  await expect(page.getByTestId('boundary-detail')).toContainText(
+    'did:web:nerv.test/pilots',
+  )
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Administration' })
+      .getByRole('link', { name: 'Boundaries' }),
+  ).toHaveClass(/grad-fill/)
+  expect(mutations).toHaveLength(0)
+  await page.reload()
+  await expect(page.getByTestId('boundary-overview')).toBeVisible()
+  await expect(page.getByTestId('boundary-detail')).toContainText(
+    'did:web:nerv.test/pilots',
+  )
+  await expect(page).toHaveURL((url) => url.hash === overviewHref)
+  await page.goto(
+    'http://127.0.0.1:6174/#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2Farchive&tab=overview',
+  )
+  await expect(page.getByTestId('boundary-detail')).toContainText('Archive')
+  await expect(page.getByTestId('boundary-detail')).toContainText(
+    'did:web:nerv.test/archive',
+  )
+  await expect(page).toHaveURL(
+    /boundary=did%3Aweb%3Anerv.test%2Farchive&tab=overview/,
+  )
+  let releaseStaleCatalog
+  let markStaleFulfilled
+  const staleCatalogReleased = new Promise((resolve) => {
+    releaseStaleCatalog = resolve
+  })
+  const staleCatalogFulfilled = new Promise((resolve) => {
+    markStaleFulfilled = resolve
+  })
+  catalogDelay = {
+    releaseStale: staleCatalogReleased,
+    markStaleFulfilled,
+    responses: [
+      catalog.filter((boundary) => boundary.displayName === 'Pilots'),
+      catalog.filter((boundary) => boundary.displayName === 'Archive'),
+    ],
+  }
+  catalogDelayIndex = 0
+  catalogRequests.length = 0
+  await page.goto(
+    'http://127.0.0.1:6174/#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2Fpilots&tab=overview',
+  )
+  await page.evaluate(() => {
+    window.location.hash =
+      '#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2Farchive&tab=overview'
+  })
+  await expect(page).toHaveURL(
+    /boundary=did%3Aweb%3Anerv.test%2Farchive&tab=overview/,
+  )
+  await expect(page.getByTestId('boundary-detail')).toContainText('Archive')
+  await expect(page.getByTestId('boundary-detail')).not.toContainText('Pilots')
+  await expect.poll(() => catalogRequests.length).toBe(2)
+  expect(catalogRequests).toHaveLength(2)
+  await expect.poll(() => catalogDelayIndex).toBe(2)
+  releaseStaleCatalog()
+  await staleCatalogFulfilled
+  await expect(page.getByTestId('boundary-detail')).toContainText('Archive')
+  await expect(page.getByTestId('boundary-detail')).not.toContainText('Pilots')
+  await expect(page).toHaveURL(
+    /boundary=did%3Aweb%3Anerv.test%2Farchive&tab=overview/,
+  )
+  catalogDelay = null
+  await page.goto('http://127.0.0.1:6174/#/domains')
+  await expect(page.getByTestId('boundary-row')).toHaveCount(6)
+  await page.goBack()
+  await expect(page).toHaveURL(/boundaries\/detail/)
+  await expect(page.getByTestId('boundary-detail')).toContainText('Archive')
+  await expect(page).toHaveURL(
+    /boundary=did%3Aweb%3Anerv.test%2Farchive&tab=overview/,
+  )
+  await page.goForward()
+  await expect(page).toHaveURL(/domains/)
+  await expect(
+    page.getByRole('heading', { name: 'Boundaries', exact: true }),
+  ).toBeVisible()
+  await row('Pilots')
+    .getByRole('link', { name: 'Overview', exact: true })
+    .click()
+  await expect(page.getByTestId('boundary-overview')).toBeVisible()
+  await page.goto(
+    'http://127.0.0.1:6174/#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2Fpilots&tab=members',
+  )
+  await expect(page).toHaveURL(/tab=members/)
+  await expect(page.getByTestId('boundary-detail')).toContainText('Pilots')
+  await expect(
+    page.getByRole('link', { name: 'Return to boundaries', exact: true }),
+  ).toBeVisible()
+  await page.goto(
+    'http://127.0.0.1:6174/#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2Fpilots&tab=settings',
+  )
+  await expect(page).toHaveURL(/tab=settings/)
+  await expect(page.getByTestId('boundary-detail')).toContainText('Pilots')
+  await expect(
+    page.getByRole('link', { name: 'Return to boundaries', exact: true }),
+  ).toBeVisible()
+  await page.goto(
+    'http://127.0.0.1:6174/#/boundaries/detail?boundary=unknown%2Fboundary&tab=members',
+  )
+  await expect(page.getByTestId('boundary-not-found')).toContainText(
+    'not in the current catalog',
+  )
+  await expect(
+    page.getByRole('link', { name: 'Return to boundaries' }),
+  ).toBeVisible()
+  expect(mutations).toHaveLength(0)
+  await page.goto('http://127.0.0.1:6174/#/boundaries/detail?tab=overview')
+  await expect(page.getByTestId('boundary-not-found')).toContainText(
+    'missing or invalid',
+  )
+  expect(mutations).toHaveLength(0)
+  failDetailList = true
+  await page.goto(
+    'http://127.0.0.1:6174/#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2Fpilots&tab=overview',
+  )
+  await expect(page.getByRole('alert')).toContainText('Catalog unavailable')
+  expect(mutations).toHaveLength(0)
+  await page.getByRole('button', { name: 'Retry loading', exact: true }).click()
+  await expect(page.getByTestId('boundary-overview')).toBeVisible()
+  await page.goto('http://127.0.0.1:6174/#/domains')
+  await expect(page.getByTestId('boundary-row')).toHaveCount(6)
   await row('All members')
     .getByRole('button', { name: 'Edit', exact: true })
     .click()
@@ -290,13 +522,10 @@ try {
     row('Pilot recovery').getByText('Active', { exact: true }),
   ).toBeVisible()
   await expect(
-    row('Pilot recovery').getByRole('link', {
-      name: 'Members (0)',
-      exact: true,
-    }),
+    row('Pilot recovery').getByRole('link', { name: 'Overview', exact: true }),
   ).toHaveAttribute(
     'href',
-    '#/enrollments?boundary=did%3Aweb%3Anerv.test%2Fpilots',
+    '#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2Fpilots&tab=overview',
   )
   failList = true
   await page.getByRole('button', { name: 'Refresh', exact: true }).click()
@@ -330,11 +559,34 @@ try {
     .screenshot({ path: '/tmp/boundary-ui-form-dark.png' })
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
   await row('Pilot recovery')
-    .getByRole('link', { name: 'Members (0)', exact: true })
+    .getByRole('link', { name: /Global enrollments/ })
     .click()
   await expect(page).toHaveURL(
     /enrollments\?boundary=did%3Aweb%3Anerv.test%2Fpilots/,
   )
+  await page.goto(
+    'http://127.0.0.1:6174/#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2F' +
+      'archive-'.repeat(16) +
+      'long-id&tab=overview',
+  )
+  await expect(page.getByTestId('boundary-detail')).toContainText(
+    'Long identifier boundary',
+  )
+  await page.keyboard.press('Tab')
+  await expect(
+    page.getByRole('link', { name: '← All boundaries' }),
+  ).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(
+    page.getByRole('link', { name: 'Overview', exact: true }),
+  ).toBeFocused()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByTestId('boundary-detail')).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true)
   expect(errors).toEqual([])
   log(
     JSON.stringify({

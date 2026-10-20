@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
+  import { router } from 'svelte-spa-router'
+  import BoundaryOverview from '../lib/components/boundary/BoundaryOverview.svelte'
+  import { boundaryDetailHref, parseBoundarySelection } from '../lib/boundary-workspace'
   import {
     createBoundary,
     deactivateBoundary,
@@ -36,23 +39,47 @@
   const pending = $derived(
     boundaries.some((item) => item.status === 'deactivating'),
   )
+  const selection = $derived.by(() => {
+    router.querystring
+    return router.location === '/boundaries/detail'
+      ? parseBoundarySelection(router.querystring)
+      : null
+  })
+  const selectedBoundary = $derived(
+    selection?.valid
+      ? boundaries.find((item) => item.boundary === selection.boundary) ?? null
+      : null,
+  )
+  let loadGeneration = 0
 
   async function load() {
+    const generation = ++loadGeneration
     loading = true
     try {
-      boundaries = (await listBoundaries()).boundaries
+      const result = await listBoundaries()
+      if (generation !== loadGeneration) return
+      boundaries = result.boundaries
       loaded = true
       if (needsReload) applyConflictSnapshot()
       else if (!conflict) error = null
     } catch (err) {
+      if (generation !== loadGeneration) return
       error = err instanceof Error ? err.message : String(err)
     } finally {
-      loading = false
+      if (generation === loadGeneration) loading = false
     }
   }
 
+  $effect(() => {
+    const route = router.loc
+    if (route.location === '/boundaries/detail') {
+      route.querystring
+      void load()
+    }
+  })
+
   onMount(() => {
-    void load()
+    if (router.location !== '/boundaries/detail') void load()
     const timer = setInterval(() => {
       if (pending && !loading && !busy) void load()
     }, 3_000)
@@ -210,6 +237,51 @@
   }
 </script>
 
+{#if selection}
+  <div class="space-y-6" data-testid="boundary-detail">
+    {#if !selection.valid}
+      <Card testid="boundary-not-found">
+        <h1 class="font-display text-2xl font-semibold">Boundary not found</h1>
+        <p class="mt-3 text-sm text-muted">The boundary link is missing or invalid. No changes were made.</p>
+        <a class="mt-4 inline-block pill squish px-4 py-2 text-sm no-underline" href="#/boundaries">Return to boundaries</a>
+      </Card>
+    {:else if error}
+      <div role="alert" class="space-y-3">
+        <p class="text-error">The boundary catalog could not be loaded: {error}</p>
+        <Button variant="secondary" onclick={load} disabled={loading}>Retry loading</Button>
+      </div>
+    {:else if !loaded || loading}
+      <p class="text-muted" role="status">Loading boundary…</p>
+    {:else if !selectedBoundary}
+      <Card testid="boundary-not-found">
+        <h1 class="font-display text-2xl font-semibold">Boundary not found</h1>
+        <p class="mt-3 text-sm text-muted">This identifier is not in the current catalog.</p>
+        <a class="mt-4 inline-block pill squish px-4 py-2 text-sm no-underline" href="#/boundaries">Return to boundaries</a>
+      </Card>
+    {:else}
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0">
+          <a class="text-sm text-muted underline" href="#/boundaries">← All boundaries</a>
+          <h1 class="mt-3 break-words font-display text-2xl font-semibold">{selectedBoundary.displayName}</h1>
+          <p class="mt-2 break-all text-xs text-muted">{selectedBoundary.boundary}</p>
+          <p class="mt-2 text-sm text-muted">{selectedBoundary.status === 'deactivating' ? 'Removing members' : selectedBoundary.status === 'active' ? 'Active' : 'Inactive'}</p>
+        </div>
+      </div>
+      <nav aria-label="Boundary workspace" class="flex flex-wrap gap-2">
+        <a aria-current="page" class="grad-fill rounded-full px-4 py-2 text-sm font-semibold no-underline" href={boundaryDetailHref(selectedBoundary.boundary)}>Overview</a>
+        <a class="pill squish px-4 py-2 text-sm no-underline" href="#/boundaries">Members and settings are not available in this release</a>
+      </nav>
+      {#if selection.tab !== 'overview'}
+        <Card>
+          <p class="text-sm text-muted">This workspace section is not available yet. Return to the boundary catalog to manage settings.</p>
+          <a class="mt-3 inline-block text-sm underline" href="#/boundaries">Return to boundaries</a>
+        </Card>
+      {:else}
+        <BoundaryOverview boundary={selectedBoundary} />
+      {/if}
+    {/if}
+  </div>
+{:else}
 <div class="space-y-6" data-testid="boundaries-screen">
   <div class="flex flex-wrap items-start justify-between gap-4">
     <div>
@@ -426,9 +498,11 @@
             <div class="flex flex-wrap items-center gap-3">
               <a
                 class="pill squish px-4 py-2 text-sm no-underline"
-                href="#/enrollments?boundary={encodeURIComponent(
-                  boundary.boundary,
-                )}">Members ({boundary.memberCount})</a
+                href={boundaryDetailHref(boundary.boundary)}>Overview</a
+              >
+              <a
+                class="text-sm text-muted underline"
+                href="#/enrollments?boundary={encodeURIComponent(boundary.boundary)}">Global enrollments ({boundary.memberCount})</a
               >
               <Button
                 variant="secondary"
@@ -456,3 +530,4 @@
     {/if}
   </Card>
 </div>
+{/if}
