@@ -9,6 +9,7 @@ export interface PdsSourcePin {
   revision: string
   dockerfile: string
   lockfile: string
+  sha256?: Record<string, string>
 }
 
 export interface PdsBuildReceipt {
@@ -71,6 +72,16 @@ export async function buildAlphaPds(
 
     const dockerfileSha256 = await sha256File(join(source, pin.dockerfile))
     const lockfileSha256 = await sha256File(join(source, pin.lockfile))
+    const expectedHashes = pin.sha256 ?? {}
+    if (
+      expectedHashes[pin.dockerfile] !== dockerfileSha256 ||
+      expectedHashes[pin.lockfile] !== lockfileSha256
+    )
+      throw new Error('Pinned PDS build input hash mismatch')
+    for (const [path, expected] of Object.entries(expectedHashes)) {
+      if ((await sha256File(join(source, path))) !== expected)
+        throw new Error('Pinned PDS build input hash mismatch')
+    }
     const dockerfile = await readFile(join(source, pin.dockerfile), 'utf8')
     const fromLines = [
       ...dockerfile.matchAll(/^FROM[ \t]+(\S+)(?:[ \t]+AS[ \t]+(\S+))?/gim),

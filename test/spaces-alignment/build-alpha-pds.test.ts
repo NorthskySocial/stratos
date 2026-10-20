@@ -27,6 +27,7 @@ afterEach(async () => {
   delete process.env.RUNNER_TEST_FAIL_DOCKER_BUILD
   delete process.env.RUNNER_TEST_FAIL_DOCKER_INSPECT
   delete process.env.RUNNER_TEST_IMAGE_ID
+  delete process.env.RUNNER_TEST_DOCKER_LOG
   delete process.env.RUNNER_TEST_SOURCE_LOG
   delete process.env.RUNNER_TEST_PDS_DOCKER_CONFIG_PREFIX
   await Promise.all(
@@ -50,6 +51,14 @@ describe('pinned PDS build', () => {
     const lockfile = 'lockfileVersion: 9.0\n'
     await writeFile(join(source, 'services/pds/Dockerfile'), dockerfile)
     await writeFile(join(source, 'pnpm-lock.yaml'), lockfile)
+    await writeFile(join(source, 'extra.txt'), 'Bebop\n')
+    const sha256 = {
+      'services/pds/Dockerfile': createHash('sha256')
+        .update(dockerfile)
+        .digest('hex'),
+      'pnpm-lock.yaml': createHash('sha256').update(lockfile).digest('hex'),
+      'extra.txt': createHash('sha256').update('Bebop\n').digest('hex'),
+    }
     execFileSync('git', ['init', '-q', source])
     execFileSync('git', ['-C', source, 'config', 'user.name', 'Faye Valentine'])
     execFileSync('git', [
@@ -68,6 +77,7 @@ describe('pinned PDS build', () => {
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
 const args = process.argv.slice(2)
+fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, args[0] + '\\n')
 if (args[0] === 'pull') {
   assert.ok(
     [
@@ -126,12 +136,41 @@ process.exit(2)
       'stratos-pds-source-',
     )
 
+    const dockerLog = join(root, 'docker.log')
+    process.env.RUNNER_TEST_DOCKER_LOG = dockerLog
+    const { 'extra.txt': extraHash, ...requiredHashes } = sha256
+    const invalidHashes: Array<Record<string, string> | undefined> = [
+      undefined,
+      {},
+      { 'services/pds/Dockerfile': sha256['services/pds/Dockerfile'] },
+      { 'pnpm-lock.yaml': sha256['pnpm-lock.yaml'] },
+      { ...sha256, 'services/pds/Dockerfile': '0'.repeat(64) },
+      { ...sha256, 'pnpm-lock.yaml': '0'.repeat(64) },
+      { ...sha256, 'extra.txt': '0'.repeat(64) },
+    ]
+    for (const hashes of invalidHashes) {
+      await expect(
+        buildAlphaPds(
+          {
+            url: source,
+            revision,
+            dockerfile: 'services/pds/Dockerfile',
+            lockfile: 'pnpm-lock.yaml',
+            sha256: hashes,
+          },
+          report,
+        ),
+      ).rejects.toThrow('Pinned PDS build input hash mismatch')
+      await expect(access(dockerLog)).rejects.toThrow()
+    }
+    expect(extraHash).toMatch(/^[0-9a-f]{64}$/)
     const receipt = await buildAlphaPds(
       {
         url: source,
         revision,
         dockerfile: 'services/pds/Dockerfile',
         lockfile: 'pnpm-lock.yaml',
+        sha256,
       },
       report,
     )
@@ -166,6 +205,7 @@ process.exit(2)
             revision,
             dockerfile: 'services/pds/Dockerfile',
             lockfile: 'pnpm-lock.yaml',
+            sha256: requiredHashes,
           },
           report,
         ),
@@ -182,6 +222,7 @@ process.exit(2)
           revision,
           dockerfile: 'services/pds/Dockerfile',
           lockfile: 'pnpm-lock.yaml',
+          sha256: requiredHashes,
         },
         report,
       ),
@@ -195,6 +236,7 @@ process.exit(2)
           revision,
           dockerfile: 'services/pds/Dockerfile',
           lockfile: 'pnpm-lock.yaml',
+          sha256: requiredHashes,
         },
         report,
       ),

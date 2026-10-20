@@ -112,7 +112,18 @@ impl MembershipReconciler {
             .get(boundary)
             .await
             .map_err(MembershipReconciliationError::Credential)?;
-        let members = self.enumerate(&space_uri, credential.as_ref()).await?;
+        let members = self
+            .enumerate(&space_uri, credential.as_ref())
+            .await
+            .map_err(|error| {
+                if matches!(
+                    error,
+                    MembershipReconciliationError::Membership(SpaceMembershipError::Authentication)
+                ) {
+                    self.credentials.invalidate(boundary, &credential);
+                }
+                error
+            })?;
         let pds_members = members
             .values()
             .filter(|member| member.custody == RepoCustody::Pds)
@@ -186,7 +197,7 @@ mod tests {
         credential_issuer::{
             CredentialExpiry, CredentialMintError, IssuedSpaceCredential, SpaceCredentialIssuer,
         },
-        space_credential::DpopKey,
+        space_http_signature::SpaceHttpSignatureKey,
         space_membership::{
             RepoCustody, SpaceMembershipClient, SpaceMembershipError, SpaceMembershipPage,
             SpaceRepoMember,
@@ -206,7 +217,7 @@ mod tests {
         async fn mint(
             &self,
             _: &str,
-            _: &DpopKey,
+            _: &SpaceHttpSignatureKey,
             _: u64,
         ) -> Result<IssuedSpaceCredential, CredentialMintError> {
             Ok(IssuedSpaceCredential {
@@ -360,5 +371,18 @@ mod tests {
             reconciler.reconcile(&mut store, BOUNDARY, NOW).await,
             Err(MembershipReconciliationError::CursorStalled)
         ));
+    }
+    #[tokio::test]
+    async fn membership_denial_discards_the_rejected_cached_grant() {
+        let reconciler = reconciler(vec![Err(SpaceMembershipError::Authentication)]);
+        let before = reconciler.credentials.get(BOUNDARY).await.unwrap();
+        assert!(matches!(
+            reconciler.discover(BOUNDARY).await,
+            Err(MembershipReconciliationError::Membership(
+                SpaceMembershipError::Authentication
+            ))
+        ));
+        let after = reconciler.credentials.get(BOUNDARY).await.unwrap();
+        assert_ne!(before.key_id(), after.key_id());
     }
 }

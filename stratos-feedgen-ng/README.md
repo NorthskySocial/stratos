@@ -7,8 +7,37 @@ authority stream has reconciled.
 It also refreshes authority-derived PDS-space membership and synchronizes only
 those targets. Pages are staged locally and become visible only after their
 terminal commit verifies. Requests use `STRATOS_SERVICE_URL` for network
-reachability; `STRATOS_PUBLIC_URL`, when set, is used solely as the public DPoP
-proof target.
+reachability. `STRATOS_PUBLIC_URL` remains validated configuration for the
+authority public endpoint; space signatures do not bind a URL.
+
+## Space credential transport
+
+The Rust client requires the standard HTTP-signature receiver from Plan 014
+(PR #218) and an October-compatible spaces PDS. It sends its existing
+service-signed delegation as `Authorization: Bearer`, signs that header with a
+fresh P-256 `did:key`, and sends only `space` in JSON. Authority service-member
+and app admission still apply. Ordinary service JWTs and caller authentication
+are unchanged; this is not the independent DPoP ADR in PR #217.
+
+Read requests use `Authorization: Atproto-Space`, `Atproto-Space-Audience`,
+`Signature-Input`, and `Signature`. Repo operations name the actual repo owner
+DID; authority membership listing names the space authority DID. Neither a host
+nor a service fragment is a read audience. Presentations may be reused at the
+same audience until the credential expires; no method or URL proof is added.
+
+Each mint flight owns a fresh private key. The cache retains the token and key
+together in memory, refreshes near actual expiry, and discards rejected grants.
+Keys are not persisted or logged and are separate from the service signing key.
+Response decoding checks claims against the authenticated authority transport;
+it does not independently verify the credential signature. Grants must match
+the authority, space, and generated key, with a positive lifetime of at most
+3,600 seconds and issuance no more than five seconds in the future.
+
+Restart the receiver and Rust client together to discard old cached grants.
+The receiver can coexist with legacy OAuth/DPoP clients; the Rust client has no
+legacy transport fallback. The AiaB primary PDS now uses the pinned October
+source. Deployed images must still be traced to that source revision and an
+immutable image digest; a source checkout alone does not prove what is running.
 
 ## Architecture
 
