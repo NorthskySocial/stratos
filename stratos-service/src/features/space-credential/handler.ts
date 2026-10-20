@@ -20,7 +20,8 @@ import {
   type ClientAttestationVerifierDeps,
 } from '../../infra/auth/client-attestation-verifier.js'
 import { resolveAppAccess, type AppAccess } from './app-access.js'
-import { mintSpaceCredential } from './minter.js'
+import { mintSpaceCredential, mintSpaceHttpCredential } from './minter.js'
+import { verifySpaceExchangeSignature } from '../../infra/auth/space-http-signature.js'
 
 /**
  * XRPC method NSID for space-credential issuance.
@@ -85,6 +86,7 @@ export function registerSpaceCredentialHandlers(
 
 /** Minimal request shape needed to check a mint-time DPoP proof. */
 interface MintRequest {
+  rawHeaders?: string[]
   method?: string
   /**
    * The path as the client sent it. Express rewrites `url` to be relative to
@@ -176,6 +178,7 @@ async function handleGetSpaceCredential(
       'InvalidRequest',
     )
   }
+  const hasSignature = usesHttpMintProof(req, credentials, input)
   const delegationToken = headerToken ?? input.delegationToken
   const delegation = delegationToken
     ? await resolveDelegationIdentity(ctx, delegationToken, space)
@@ -221,10 +224,15 @@ async function handleGetSpaceCredential(
 
   // Key binding: the delegation path proves key possession with a standalone
   // mint-time DPoP proof; the DPoP path reuses the session proof's key.
-  const jkt = delegation
-    ? await requireMintProofJkt(ctx, proofChecker, req)
-    : credentials?.jkt
-  if (!jkt && ctx.cfg.stratos.devMode !== true) {
+  const keyId = hasSignature
+    ? await requireHttpMintKey(req, headerToken!)
+    : undefined
+  const jkt = keyId
+    ? undefined
+    : delegation
+      ? await requireMintProofJkt(ctx, proofChecker, req)
+      : credentials?.jkt
+  if (!keyId && !jkt && ctx.cfg.stratos.devMode !== true) {
     // Only dev-mode identities (dev Bearer) have no DPoP key. An unbound
     // credential in production would be freely replayable, so refuse.
     throw new InvalidRequestError(
@@ -250,16 +258,76 @@ async function handleGetSpaceCredential(
     await delegation.consume()
   }
 
-  const { credential, expiresAt } = await mintSpaceCredential({
+  const mintInput = {
     signingKey: ctx.signingKey,
     issuerDid: ctx.serviceDid,
     spaceUri: space,
     ttlSeconds: ctx.cfg.stratos.spaceCredentialTtlSeconds,
     boundaryRevision: definition?.revision,
-    jkt,
-  })
+  }
+  const { credential, expiresAt } = keyId
+    ? await mintSpaceHttpCredential({
+        ...mintInput,
+        keyId,
+        ttlSeconds: ctx.cfg.stratos.spaceHttpCredentialTtlSeconds,
+      })
+    : await mintSpaceCredential({ ...mintInput, jkt })
 
   return { credential, expiresAt }
+}
+
+function usesHttpMintProof(
+  req: MintRequest | undefined,
+  credentials: { jkt?: string; delegationToken?: string } | undefined,
+  input: GetSpaceCredentialInput,
+): boolean {
+  const hasHeader = (name: string) =>
+    req?.headers?.[name] !== undefined ||
+    req?.rawHeaders?.some(
+      (value, index) => index % 2 === 0 && value.toLowerCase() === name,
+    )
+  if (!hasHeader('signature') && !hasHeader('signature-input')) return false
+  const token = /^Bearer ([^\s]+)$/i.exec(
+    String(req?.headers?.authorization ?? ''),
+  )?.[1]
+  if (
+    hasHeader('dpop') ||
+    credentials?.jkt !== undefined ||
+    input.delegationToken !== undefined ||
+    !credentials?.delegationToken ||
+    token !== credentials.delegationToken
+  ) {
+    throw new InvalidRequestError(
+      'Conflicting mint proof families',
+      'InvalidRequest',
+    )
+  }
+  return true
+}
+
+async function requireHttpMintKey(
+  req: MintRequest | undefined,
+  token: string,
+): Promise<string> {
+  try {
+    const rawHeaders = req?.rawHeaders ?? []
+    const keyId = await verifySpaceExchangeSignature({ rawHeaders })
+    const index = rawHeaders.findIndex(
+      (value, index) =>
+        index % 2 === 0 && value.toLowerCase() === 'authorization',
+    )
+    if (
+      /^Bearer ([^\s]+)$/i.exec(rawHeaders[index + 1].trim())?.[1] !== token
+    ) {
+      throw new Error('Delegation authorization mismatch')
+    }
+    return keyId
+  } catch {
+    throw new InvalidRequestError(
+      'A valid HTTP signature is required',
+      'ProofRequired',
+    )
+  }
 }
 
 /**

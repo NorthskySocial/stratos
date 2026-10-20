@@ -120,7 +120,8 @@ interface SpaceCredentialClaims {
   iat?: number
   exp?: number
   jti?: string
-  cnf?: { jkt?: unknown }
+  aud?: unknown
+  cnf?: { jkt?: unknown; kid?: unknown }
 }
 
 /** Successful verification result. */
@@ -130,6 +131,7 @@ export interface SpaceCredentialResult {
   spaceUri: string
   /** The `cnf.jkt` DPoP key binding, when the credential carries one. */
   cnfJkt?: string
+  cnfKid?: string
 }
 
 /** Dependencies for {@link verifySpaceCredential}. */
@@ -225,12 +227,36 @@ export async function verifySpaceCredential(
     throw new SpaceCredentialVerificationError('Invalid boundary revision')
   }
   const cnfJkt = payload.cnf?.jkt
+  const cnfKid = payload.cnf?.kid
+  if (cnfKid !== undefined) {
+    if (
+      typeof cnfKid !== 'string' ||
+      !cnfKid ||
+      cnfJkt !== undefined ||
+      payload.iss !== deps.serviceDid ||
+      payload.aud !== undefined ||
+      typeof payload.jti !== 'string' ||
+      !payload.jti.trim() ||
+      !Number.isFinite(payload.iat) ||
+      !Number.isFinite(payload.exp) ||
+      typeof payload.iat !== 'number' ||
+      payload.iat > now + 5 ||
+      payload.exp <= now ||
+      payload.exp <= payload.iat ||
+      payload.exp - payload.iat > 3600
+    ) {
+      throw new SpaceCredentialVerificationError(
+        'Invalid HTTP credential claims',
+      )
+    }
+  }
   return {
     spaceUri: payload.sub,
     ...(boundaryRevision !== undefined
       ? { boundaryRevision: boundaryRevision as number }
       : {}),
     ...(typeof cnfJkt === 'string' && cnfJkt ? { cnfJkt } : {}),
+    ...(typeof cnfKid === 'string' ? { cnfKid } : {}),
   }
 }
 
@@ -264,7 +290,7 @@ export async function verifyPresentedSpaceCredential(
   const result = await verifySpaceCredential(token, deps)
 
   // 7. cnf.jkt — every presented credential must be key-bound.
-  if (!result.cnfJkt) {
+  if (!result.cnfJkt || result.cnfKid) {
     throw new MissingSpaceCredentialCnfError(
       'Space credential has no cnf.jkt key binding',
     )

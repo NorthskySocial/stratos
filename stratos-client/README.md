@@ -268,7 +268,34 @@ combined with any `Authorization` header, including a DPoP session token, is
 rejected. This custom Stratos endpoint does not advertise the
 upstream `com.atproto.space.*` namespace.
 
-The issued credential covers one whole space until expiry (normally two
+The additive HTTP-signature profile sends the delegation as Bearer authorization
+and uses RFC 9421 `Signature-Input` and `Signature` headers with the
+`atproto-space` label. Exchange covers exactly `authorization` and requires a
+P-256 `did:key` in `keyid`. Do not send a DPoP header with this profile.
+The resulting credential binds `cnf.kid`, not `cnf.jkt`.
+
+Present that credential as `Authorization: Atproto-Space <credential JWT>`.
+The signature covers exactly `authorization` then `atproto-space-audience`.
+Set `Atproto-Space-Audience` to the actual repo owner's DID for
+`zone.stratos.space.getRecord`, `zone.stratos.space.listBlobs`,
+`zone.stratos.sync.listRepoOps`, and `zone.stratos.sync.listRecordPaths`.
+For `zone.stratos.space.listRepos`, use the bare authority DID instead.
+The service derives the expected audience from the operation, never from the
+header itself. Unsupported operations and ambiguous repo parameters are rejected.
+The same signature may be reused for the same credential and audience until
+expiry. An optional presentation `keyid` must match `cnf.kid`; an optional
+`alg` must be `ecdsa-p256-sha256`.
+
+Operators configure this profile with
+`STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS` (default 600, maximum 3600,
+positive integer seconds). Legacy `STRATOS_SPACE_CREDENTIAL_TTL_SECONDS`
+remains unchanged (default 7200). Existing OAuth-session minting, body delegation,
+and Bearer delegation with standalone DPoP continue to produce `cnf.jkt`
+credentials. Keep each cached credential associated with its original key and
+profile. Failed HTTP verification never falls back to OAuth, service auth, or
+legacy DPoP. Ordinary OAuth DPoP and service JWT authentication are unchanged.
+
+The issued legacy credential covers one whole space until expiry (normally two
 hours), not just the member who requested it. Production reads require a fresh
 DPoP proof from the bound key; Bearer presentation is limited to development
 mode. Removing a member blocks new credentials and service-member requests,

@@ -32,6 +32,7 @@ interface SourcePins {
     sha256: Record<string, string>
     archivePaths: string[]
   }
+  octoberSpacesPds?: PdsSourcePin
   spacesPds: PdsSourcePin
 }
 
@@ -365,6 +366,7 @@ export async function runSandbox(
   const steps: Array<{ name: string; exitCode: 0 }> = []
   const results: Record<string, AssertionResult[]> = {}
   let pds: PdsBuildReceipt | undefined
+  let octoberPds: PdsBuildReceipt | undefined
   let failedStep = 'docker-config'
   let gateError: unknown
   let summary: Record<string, unknown> | undefined
@@ -394,6 +396,17 @@ export async function runSandbox(
       pins.spacesPds,
       options.reportDirectory,
     )
+    if (options.suite === 'standard-credential-transport') {
+      failedStep = 'build-october-pds'
+      if (!pins.octoberSpacesPds)
+        throw new Error('October PDS source pin is missing')
+      const octoberReport = join(options.reportDirectory, 'october-pds')
+      await mkdir(octoberReport, { mode: 0o700 })
+      octoberPds = await (dependencies.buildPds ?? buildAlphaPds)(
+        pins.octoberSpacesPds,
+        octoberReport,
+      )
+    }
     failedStep = 'prepare-stack'
     const stackPath = join(atmosphere, 'stacks/feedgen-ng-e2e.yaml')
     const stack = await readFile(stackPath, 'utf8')
@@ -403,6 +416,76 @@ export async function runSandbox(
       stackPath,
       stack.replace('${SPACES_PDS_IMAGE_ID}', pds.imageId),
     )
+
+    if (octoberPds) {
+      const octoberImageId = octoberPds.imageId
+      const octoberStack = await readFile(
+        join(
+          workspace,
+          'stratos/test/spaces-alignment/templates/october-pds.yaml',
+        ),
+        'utf8',
+      )
+      if (!octoberStack.includes('${OCTOBER_PDS_IMAGE_ID}'))
+        throw new Error('October PDS image placeholder is missing')
+      await writeFile(
+        stackPath,
+        (await readFile(stackPath, 'utf8')).replace(
+          '\nvolumes:\n',
+          () =>
+            '\n' +
+            octoberStack
+              .replace('${OCTOBER_PDS_IMAGE_ID}', octoberImageId)
+              .split('\n')
+              .map((line) => (line ? '  ' + line : line))
+              .join('\n') +
+            '\nvolumes:\n  feedgen-e2e-pds-october-data: {}\n',
+        ),
+      )
+      const definitionPath = join(
+        atmosphere,
+        'stacks/feedgen-ng-e2e.definition.json',
+      )
+      const definition = JSON.parse(
+        await readFile(definitionPath, 'utf8'),
+      ) as Record<string, unknown[]>
+      const extraPath = join(
+        workspace,
+        'stratos/test/spaces-alignment/templates/october-pds.definition.json',
+      )
+      const extra = JSON.parse(await readFile(extraPath, 'utf8')) as Record<
+        string,
+        unknown[]
+      >
+      for (const key of ['services', 'routes', 'secrets', 'volumeInit'])
+        definition[key].push(...extra[key])
+      const browser = (
+        definition.services as Array<{
+          service: string
+          secretFiles?: unknown[]
+        }>
+      ).find((service) => service.service === 'feedgen-e2e-browser')!
+      browser.secretFiles!.push({
+        secret: 'feedgen-e2e-october-admin',
+        name: 'october-admin-password',
+        uid: 1001,
+        gid: 1001,
+      })
+      await writeFile(definitionPath, JSON.stringify(definition))
+      const updatedStack = (await readFile(stackPath, 'utf8')).replace(
+        'IDENTITY_PRIVATE_ORIGINS: ',
+        'IDENTITY_PRIVATE_ORIGINS: https://october-pds-e2e.atmosbox.test,https://faye.october-pds-e2e.atmosbox.test,https://edward.october-pds-e2e.atmosbox.test,',
+      )
+      await writeFile(stackPath, updatedStack)
+      templateHashes['stacks/october-pds.yaml'] = await sha256File(
+        join(
+          workspace,
+          'stratos/test/spaces-alignment/templates/october-pds.yaml',
+        ),
+      )
+      templateHashes['stacks/october-pds.definition.json'] =
+        await sha256File(extraPath)
+    }
 
     await runStep('install', 'deno', ['task', 'install'])
     await runStep('create', 'deno', [
@@ -483,6 +566,18 @@ export async function runSandbox(
       atmosphereFingerprint,
       templateHashes,
       pds,
+      octoberPds,
+      pdsServices: {
+        primary: { service: 'feedgen-e2e-pds-spaces', build: pds },
+        ...(octoberPds
+          ? {
+              october: {
+                service: 'feedgen-e2e-pds-october',
+                build: octoberPds,
+              },
+            }
+          : {}),
+      },
       projectName,
       suites: suites.map((suite) => ({
         id: suite.id,
@@ -528,22 +623,35 @@ export async function runSandbox(
   } else {
     cleanup.compose = { status: 'not-needed' }
   }
-  if (pds) {
-    try {
-      await command(
-        'docker',
-        ['image', 'rm', pds.imageTag],
-        atmosphere,
-        childEnvironment,
-      )
-      cleanup.image = { status: 'passed', exitCode: 0, tag: pds.imageTag }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      cleanup.image = { status: 'failed', error: message, tag: pds.imageTag }
-      cleanupErrors.push(new Error(`PDS image cleanup failed: ${message}`))
+  for (const [imageKind, image] of [
+    ['image', pds],
+    ['octoberImage', octoberPds],
+  ] as const) {
+    if (image) {
+      try {
+        await command(
+          'docker',
+          ['image', 'rm', image.imageTag],
+          atmosphere,
+          childEnvironment,
+        )
+        cleanup[imageKind] = {
+          status: 'passed',
+          exitCode: 0,
+          tag: image.imageTag,
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        cleanup[imageKind] = {
+          status: 'failed',
+          error: message,
+          tag: image.imageTag,
+        }
+        cleanupErrors.push(new Error(`PDS image cleanup failed: ${message}`))
+      }
+    } else {
+      if (imageKind === 'image') cleanup[imageKind] = { status: 'not-needed' }
     }
-  } else {
-    cleanup.image = { status: 'not-needed' }
   }
   cleanup.status = cleanupErrors.length === 0 ? 'passed' : 'failed'
   if (cleanupErrors.length > 0) {

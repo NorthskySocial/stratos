@@ -1,0 +1,42 @@
+feedgen-e2e-pds-october:
+  image: ${OCTOBER_PDS_IMAGE_ID}
+  init: true
+  entrypoint: ['dumb-init', '--', 'sh', '-ec']
+  command:
+    - |-
+      export PDS_HOSTNAME="october-pds-e2e.$${SANDBOX_DOMAIN}"
+      export PDS_DID_PLC_URL="$${OCTOBER_PDS_PLC_URL}"
+      export PDS_JWT_SECRET="$${OCTOBER_PDS_JWT_SECRET}"
+      export PDS_ADMIN_PASSWORD="$${OCTOBER_PDS_ADMIN_PASSWORD}"
+      export PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX="$${OCTOBER_PDS_ROTATION_KEY}"
+      export PDS_SERVICE_HANDLE_DOMAINS=".october-pds-e2e.$${SANDBOX_DOMAIN}"
+      exec node --heapsnapshot-signal=SIGUSR2 --enable-source-maps --import=@atproto/pds/telemetry index.ts
+  environment:
+    NODE_EXTRA_CA_CERTS: /ca/root.crt
+    LOG_LEVEL: warn
+    PDS_PORT: '3000'
+    PDS_DATA_DIRECTORY: /app/data
+    PDS_ACTOR_STORE_DIRECTORY: /app/data/actors
+    PDS_BLOBSTORE_DISK_LOCATION: /app/data/blocks
+    PDS_BLOBSTORE_DISK_TMP_LOCATION: /app/data/blob-tmp
+    PDS_DEV_MODE: 'true'
+    PDS_DISABLE_SSRF_PROTECTION: 'true'
+    PDS_RATE_LIMITS_ENABLED: 'false'
+    PDS_INVITE_REQUIRED: 'true'
+    PDS_CRAWLERS: ''
+  volumes:
+    - feedgen-e2e-pds-october-data:/app/data
+  depends_on:
+    plc:
+      condition: service_healthy
+  healthcheck:
+    test:
+      [
+        'CMD',
+        'node',
+        '-e',
+        "fetch('http://localhost:3000/xrpc/_health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+      ]
+    interval: 3s
+    timeout: 3s
+    retries: 60

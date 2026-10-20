@@ -13,7 +13,10 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { P256Keypair, Secp256k1Keypair } from '@atproto/crypto'
-import { mintSpaceCredential } from '../src/features/space-credential/minter.js'
+import {
+  mintSpaceCredential,
+  mintSpaceHttpCredential,
+} from '../src/features/space-credential/minter.js'
 import {
   ForeignSpaceCredentialError,
   InvalidSpaceCredentialAlgError,
@@ -54,6 +57,115 @@ async function signJwt(
   const sig = await key.sign(new TextEncoder().encode(signingInput))
   return `${signingInput}.${Buffer.from(sig).toString('base64url')}`
 }
+
+describe('HTTP credential claims', () => {
+  it('accepts the maximum standard lifetime and preserves the key binding', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const key = await P256Keypair.create()
+    const { credential } = await mintSpaceHttpCredential({
+      signingKey,
+      issuerDid: SERVICE_DID,
+      spaceUri: SPACE_URI,
+      keyId: key.did(),
+      ttlSeconds: 3600,
+    })
+    await expect(
+      verifySpaceCredential(credential, {
+        serviceKey: signingKey,
+        serviceDid: SERVICE_DID,
+      }),
+    ).resolves.toEqual({ spaceUri: SPACE_URI, cnfKid: key.did() })
+  })
+
+  it('accepts exactly five seconds of issuance skew and rejects expiry at the current second', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      const signingKey = await Secp256k1Keypair.create()
+      const key = await P256Keypair.create()
+      const header = {
+        typ: 'atproto-space-credential+jwt',
+        alg: 'ES256K',
+        kid: '#atproto',
+      }
+      const payload = {
+        iss: SERVICE_DID,
+        sub: SPACE_URI,
+        jti: 'asuka',
+        iat: 1005,
+        exp: 1600,
+        cnf: { kid: key.did() },
+      }
+      const deps = { serviceKey: signingKey, serviceDid: SERVICE_DID }
+      await expect(
+        verifySpaceCredential(await signJwt(header, payload, signingKey), deps),
+      ).resolves.toMatchObject({ cnfKid: key.did() })
+      await expect(
+        verifySpaceCredential(
+          await signJwt(
+            header,
+            { ...payload, iat: 400, exp: 1000 },
+            signingKey,
+          ),
+          deps,
+        ),
+      ).rejects.toThrow()
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it.each([
+    { iss: 'did:web:foreign.test' },
+    { jti: undefined },
+    { jti: '' },
+    { jti: ' ' },
+    { iat: undefined },
+    { iat: null },
+    { exp: null },
+    { iat: 1006 },
+    { exp: 1000 },
+    { exp: 999 },
+    { exp: 1001, iat: 1001 },
+    { exp: 4601 },
+    { aud: SERVICE_DID },
+    { cnf: { kid: '' } },
+    { cnf: { kid: 42 } },
+    { cnf: { kid: true } },
+    { cnf: { kid: {} } },
+    { cnf: { kid: 'did:key:invalid', jkt: 'legacy' } },
+  ])('rejects invalid standard claims %j', async (override) => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      const signingKey = await Secp256k1Keypair.create()
+      const key = await P256Keypair.create()
+      const token = await signJwt(
+        { typ: 'atproto-space-credential+jwt', alg: 'ES256K', kid: '#atproto' },
+        {
+          iss: SERVICE_DID,
+          sub: SPACE_URI,
+          jti: 'asuka',
+          iat: 1000,
+          exp: 1600,
+          cnf: { kid: key.did() },
+          ...override,
+        },
+        signingKey,
+      )
+      await expect(
+        verifySpaceCredential(token, {
+          serviceKey: signingKey,
+          serviceDid: SERVICE_DID,
+        }),
+      ).rejects.toThrow(
+        override.exp === null
+          ? 'Missing or invalid exp claim'
+          : 'Invalid HTTP credential claims',
+      )
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+})
 
 describe('verifySpaceCredential', () => {
   it('accepts a valid credential and returns its space URI', async () => {
@@ -272,6 +384,7 @@ describe('verifySpaceCredential', () => {
       serviceDid: SERVICE_DID,
     })
     expect('cnfJkt' in result).toBe(false)
+    expect('cnfKid' in result).toBe(false)
   })
 
   it('ignores a non-string or empty cnf.jkt (no binding surfaced)', async () => {

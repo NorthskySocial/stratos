@@ -13,6 +13,7 @@ import {
   ATPROTO_KID,
   SPACE_CREDENTIAL_TYP,
   mintSpaceCredential,
+  mintSpaceHttpCredential,
 } from '../src/features/space-credential/minter.js'
 import { makeSpaceUri } from './helpers/space-uri.js'
 
@@ -172,5 +173,104 @@ describe('mintSpaceCredential', () => {
     expect(a.payload.jti).not.toBe(b.payload.jti)
     expect(typeof a.payload.jti).toBe('string')
     expect(a.payload.jti.length).toBeGreaterThan(0)
+  })
+})
+
+describe('mintSpaceHttpCredential', () => {
+  async function input() {
+    return {
+      signingKey: await Secp256k1Keypair.create(),
+      issuerDid: ISSUER_DID,
+      spaceUri: SPACE_URI,
+      keyId: (await P256Keypair.create()).did(),
+      iat: 1_700_000_000,
+      jti: 'rei-ayanami',
+      boundaryRevision: 3,
+    }
+  }
+
+  it.each([undefined, 1, 3_600])(
+    'mints a signed kid credential with TTL %s',
+    async (ttlSeconds) => {
+      const opts = await input()
+      const result = await mintSpaceHttpCredential({ ...opts, ttlSeconds })
+      const decoded = decodeJwt(result.credential)
+      expect(decoded.header).toEqual({
+        typ: SPACE_CREDENTIAL_TYP,
+        alg: 'ES256K',
+        kid: ATPROTO_KID,
+      })
+      expect(decoded.payload).toEqual({
+        iss: ISSUER_DID,
+        sub: SPACE_URI,
+        iat: opts.iat,
+        exp: opts.iat + (ttlSeconds ?? 600),
+        jti: opts.jti,
+        cnf: { kid: opts.keyId },
+        stratosBoundaryRevision: 3,
+      })
+      expect(result.payload).toEqual(decoded.payload)
+      expect(result.exp).toBe(decoded.payload.exp)
+      expect(result.expiresAt).toBe(new Date(result.exp * 1000).toISOString())
+      expect(await verifyAgainst(opts.signingKey.did(), decoded)).toBe(true)
+      expect(
+        await verifyAgainst((await Secp256k1Keypair.create()).did(), decoded),
+      ).toBe(false)
+    },
+  )
+
+  it.each([0, -1, 3_601, 0.5, NaN, Infinity])(
+    'rejects invalid TTL %s',
+    async (ttlSeconds) => {
+      await expect(
+        mintSpaceHttpCredential({ ...(await input()), ttlSeconds }),
+      ).rejects.toThrow('Invalid HTTP space credential claims')
+    },
+  )
+
+  it.each([NaN, Infinity, -Infinity, Number.MAX_VALUE])(
+    'rejects invalid issuance time %s',
+    async (iat) => {
+      await expect(
+        mintSpaceHttpCredential({ ...(await input()), iat }),
+      ).rejects.toThrow()
+    },
+  )
+
+  it('rejects a non-string nonce and a lifetime lost to numeric precision', async () => {
+    const opts = await input()
+    await expect(
+      mintSpaceHttpCredential({ ...opts, jti: 42 as unknown as string }),
+    ).rejects.toThrow('Invalid HTTP space credential claims')
+    await expect(
+      mintSpaceHttpCredential({ ...opts, iat: 2 ** 60, ttlSeconds: 1 }),
+    ).rejects.toThrow('Invalid HTTP space credential claims')
+  })
+
+  it.each(['', '  '])('rejects empty jti %s', async (jti) => {
+    await expect(
+      mintSpaceHttpCredential({ ...(await input()), jti }),
+    ).rejects.toThrow()
+  })
+
+  it('requires a P-256 did:key and generates unique nonempty nonces', async () => {
+    const opts = await input()
+    await expect(
+      mintSpaceHttpCredential({ ...opts, keyId: opts.signingKey.did() }),
+    ).rejects.toThrow()
+    await expect(
+      mintSpaceHttpCredential({ ...opts, keyId: '' }),
+    ).rejects.toThrow()
+    const a = await mintSpaceHttpCredential({
+      ...opts,
+      iat: undefined,
+      jti: undefined,
+      boundaryRevision: undefined,
+    })
+    const b = await mintSpaceHttpCredential({ ...opts, jti: undefined })
+    expect(a.payload.jti.length).toBeGreaterThan(0)
+    expect(a.payload.jti).not.toBe(b.payload.jti)
+    expect(a.payload.iat).toBeGreaterThan(0)
+    expect(a.payload).not.toHaveProperty('stratosBoundaryRevision')
   })
 })

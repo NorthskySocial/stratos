@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Keypair } from '@atproto/crypto'
+import { parseDidKey, type Keypair } from '@atproto/crypto'
 import {
   SPACE_CREDENTIAL_KID,
   SPACE_CREDENTIAL_TYP,
@@ -148,6 +148,72 @@ export async function mintSpaceCredential(
 
   return {
     credential,
+    exp,
+    expiresAt: new Date(exp * 1000).toISOString(),
+    payload,
+  }
+}
+
+export interface MintSpaceHttpCredentialInput extends Omit<
+  MintSpaceCredentialInput,
+  'jkt' | 'ttlSeconds'
+> {
+  keyId: string
+  ttlSeconds?: number
+}
+
+export interface SpaceHttpCredentialPayload extends Omit<
+  SpaceCredentialPayload,
+  'cnf'
+> {
+  cnf: { kid: string }
+}
+
+export async function mintSpaceHttpCredential(
+  input: MintSpaceHttpCredentialInput,
+): Promise<
+  Omit<MintSpaceCredentialResult, 'payload'> & {
+    payload: SpaceHttpCredentialPayload
+  }
+> {
+  const ttlSeconds = input.ttlSeconds ?? 600
+  const iat = input.iat ?? Math.floor(Date.now() / 1000)
+  const exp = iat + ttlSeconds
+  const jti = input.jti ?? randomUUID()
+  if (
+    !Number.isInteger(ttlSeconds) ||
+    ttlSeconds <= 0 ||
+    ttlSeconds > 3_600 ||
+    !Number.isFinite(iat) ||
+    !Number.isFinite(exp) ||
+    exp <= iat ||
+    typeof jti !== 'string' ||
+    !jti.trim() ||
+    parseDidKey(input.keyId).jwtAlg !== 'ES256'
+  ) {
+    throw new Error('Invalid HTTP space credential claims')
+  }
+  const payload: SpaceHttpCredentialPayload = {
+    iss: input.issuerDid,
+    sub: input.spaceUri,
+    iat,
+    exp,
+    jti,
+    cnf: { kid: input.keyId },
+  }
+  if (input.boundaryRevision !== undefined)
+    payload.stratosBoundaryRevision = input.boundaryRevision
+  const header: SpaceCredentialHeader = {
+    typ: SPACE_CREDENTIAL_TYP,
+    alg: input.signingKey.jwtAlg,
+    kid: ATPROTO_KID,
+  }
+  const signingInput = `${b64urlJson(header)}.${b64urlJson(payload)}`
+  const sig = await input.signingKey.sign(
+    new TextEncoder().encode(signingInput),
+  )
+  return {
+    credential: `${signingInput}.${Buffer.from(sig).toString('base64url')}`,
     exp,
     expiresAt: new Date(exp * 1000).toISOString(),
     payload,

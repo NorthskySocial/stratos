@@ -103,6 +103,13 @@ const envSchema = z
       .positive()
       .default(7_200),
 
+    STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(3_600)
+      .default(600),
+
     // Enrollment
     STRATOS_ENROLLMENT_MODE: z
       .enum(ENROLLMENT_MODE)
@@ -332,6 +339,7 @@ export interface StratosServiceConfig {
     }
     /** Space-credential lifetime in seconds (`exp = iat + this`). */
     spaceCredentialTtlSeconds: number
+    spaceHttpCredentialTtlSeconds?: number
     /**
      * Per-space app-gating (client attestation). Maps a space boundary
      * to its `appAccess` policy; unconfigured spaces default to `#open`.
@@ -724,6 +732,8 @@ export function envToConfig(env: Env): StratosServiceConfig {
         cooldownJitterMs: env.STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS,
       },
       spaceCredentialTtlSeconds: env.STRATOS_SPACE_CREDENTIAL_TTL_SECONDS,
+      spaceHttpCredentialTtlSeconds:
+        env.STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS,
       spaceAppAccess: loadSpaceAppAccess(env, serviceDid),
       clientJwksCacheTtlMs: env.STRATOS_CLIENT_JWKS_CACHE_TTL_MS,
     },

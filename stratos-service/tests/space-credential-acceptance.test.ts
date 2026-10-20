@@ -21,7 +21,7 @@ import {
   exportJWK,
   generateKeyPair,
 } from 'jose'
-import { Secp256k1Keypair } from '@atproto/crypto'
+import { P256Keypair, Secp256k1Keypair } from '@atproto/crypto'
 import { AuthRequiredError } from '@atproto/xrpc-server'
 import { encodeRecord, spaceUriToBoundary } from '@northskysocial/stratos-core'
 import type { BoundaryCatalogStore } from '@northskysocial/stratos-core'
@@ -39,7 +39,10 @@ import {
 } from '../src/features/pull-sync/handler.js'
 import { registerHydrationHandlers } from '../src/features/index.js'
 import { HydrationServiceImpl } from '../src/features/hydration/adapter.js'
-import { mintSpaceCredential } from '../src/features/space-credential/minter.js'
+import {
+  mintSpaceCredential,
+  mintSpaceHttpCredential,
+} from '../src/features/space-credential/minter.js'
 import { createSqliteBoundaryStore } from '../src/features/boundary/store.js'
 import { migrateSqliteBoundaries } from '../src/features/boundary/migrate.js'
 import { createAuthVerifiers } from '../src/infra/auth/verifiers.js'
@@ -466,6 +469,323 @@ describe('space-credential acceptance', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any
     }
+
+    async function standardRequest(
+      audience = repoDid,
+      path = `/xrpc/zone.stratos.sync.listRecordPaths?did=${repoDid}`,
+    ) {
+      const key = await P256Keypair.create()
+      const { credential } = await mintSpaceHttpCredential({
+        signingKey,
+        issuerDid: SERVICE_DID,
+        spaceUri: SPACE_S,
+        keyId: key.did(),
+        ttlSeconds: 600,
+      })
+      const authorization = `Atproto-Space ${credential}`
+      const parameters = '("authorization" "atproto-space-audience")'
+      const bytes = new TextEncoder().encode(
+        `"authorization": ${authorization}\n"atproto-space-audience": ${audience}\n"@signature-params": ${parameters}`,
+      )
+      const signature = Buffer.from(await key.sign(bytes)).toString('base64')
+      const headers = {
+        authorization,
+        'atproto-space-audience': audience,
+        'signature-input': `atproto-space=${parameters}`,
+        signature: `atproto-space=:${signature}:`,
+      }
+      const request = ctxWithHeader(authorization, headers)
+      request.req.url = path
+      request.req.rawHeaders = Object.entries(headers).flat()
+      return request
+    }
+
+    it.each([
+      'Atproto-Space',
+      'Atproto-Space ',
+      'Atproto-Space two tokens',
+      'Atproto-Space rei Atproto-Space invalid',
+      'Atproto-Space\ttoken',
+    ])(
+      'rejects malformed explicit authorization %j before fallback',
+      async (authorization) => {
+        const verifiers = makeVerifiers()
+        await expect(
+          verifiers.optionalStandardOrSpaceCredential(
+            ctxWithHeader(authorization),
+          ),
+        ).rejects.toThrow('Malformed space authorization')
+      },
+    )
+
+    it.each(['prefixdid:plc:asuka', 'did:plc:asuka/suffix', 'asuka.test', ''])(
+      'rejects invalid operation owner %j even when the signature audience agrees',
+      async (owner) => {
+        const request = await standardRequest(
+          owner || repoDid,
+          `/xrpc/zone.stratos.sync.listRecordPaths?did=${encodeURIComponent(owner)}`,
+        )
+        await expect(makeVerifiers().spaceCredential(request)).rejects.toThrow(
+          'Space read requires an unambiguous repo DID',
+        )
+      },
+    )
+
+    it('rejects repeated identical owners and unsupported operations before signature verification', async () => {
+      const verifiers = makeVerifiers()
+      const duplicate = await standardRequest(
+        repoDid,
+        `/xrpc/zone.stratos.sync.listRecordPaths?did=${repoDid}&did=${repoDid}`,
+      )
+      await expect(verifiers.spaceCredential(duplicate)).rejects.toThrow(
+        'Space read requires an unambiguous repo DID',
+      )
+      const unsupported = await standardRequest()
+      delete unsupported.req.url
+      await expect(verifiers.spaceCredential(unsupported)).rejects.toThrow(
+        'Unsupported space read operation',
+      )
+    })
+
+    it.each(['signature', 'signature-input', 'atproto-space-audience'])(
+      'rejects a legacy credential carrying only the foreign proof header %s',
+      async (name) => {
+        const verifiers = makeVerifiers({ devMode: true })
+        const credential = await credentialFor(SPACE_S)
+        for (const location of ['normalized', 'raw']) {
+          const request = ctxWithHeader(`Bearer ${credential}`)
+          if (location === 'normalized') request.req.headers[name] = 'conflict'
+          else request.req.rawHeaders = [name.toUpperCase(), 'conflict']
+          await expect(verifiers.spaceCredential(request)).rejects.toThrow(
+            'Conflicting credential proof families',
+          )
+        }
+        await expect(
+          verifiers.spaceCredential(ctxWithHeader(`Bearer ${credential}`)),
+        ).resolves.toEqual({
+          credentials: { type: 'space-credential', spaceUri: SPACE_S },
+        })
+      },
+    )
+
+    it('rejects normalized DPoP mixed with standard proof and preserves the public error', async () => {
+      const request = await standardRequest()
+      request.req.headers.dpop = 'conflict'
+      await expect(makeVerifiers().spaceCredential(request)).rejects.toThrow(
+        'Conflicting credential proof families',
+      )
+    })
+
+    it('requires a standard key binding before inspecting presentation headers', async () => {
+      const verifiers = makeVerifiers()
+      for (const jkt of [undefined, 'legacy-asuka']) {
+        const credential = await credentialFor(SPACE_S, jkt)
+        await expect(
+          verifiers.spaceCredential(
+            ctxWithHeader(`Atproto-Space ${credential}`),
+          ),
+        ).rejects.toThrow('HTTP credential key binding required')
+      }
+    })
+
+    it.each(['missing', 'duplicate', 'substituted', 'value-only'])(
+      'rejects %s raw authorization independently of signature validity',
+      async (mode) => {
+        const request = await standardRequest()
+        if (mode === 'missing') delete request.req.rawHeaders
+        if (mode === 'duplicate') {
+          request.req.rawHeaders.push(
+            'Authorization',
+            request.req.headers.authorization,
+          )
+        }
+        if (mode === 'substituted')
+          request.req.headers.authorization = (
+            await standardRequest()
+          ).req.headers.authorization
+        if (mode === 'value-only') {
+          request.req.rawHeaders[0] = 'x-nerv'
+          request.req.rawHeaders.push('x-rei', 'authorization')
+        }
+        await expect(makeVerifiers().spaceCredential(request)).rejects.toThrow(
+          'Ambiguous space authorization',
+        )
+      },
+    )
+
+    it('keeps a prefixed standard scheme on the ordinary optional-auth path', async () => {
+      await expect(
+        makeVerifiers().optionalStandardOrSpaceCredential(
+          ctxWithHeader('Rei Atproto-Space invalid'),
+        ),
+      ).resolves.toEqual({ credentials: { type: 'anonymous' } })
+    })
+
+    it('does not count authorization-valued raw fields as authorization names', async () => {
+      const request = await standardRequest()
+      request.req.rawHeaders.unshift('x-rei', 'authorization')
+      await expect(makeVerifiers().spaceCredential(request)).resolves.toEqual({
+        credentials: { type: 'space-credential', spaceUri: SPACE_S },
+      })
+    })
+
+    it.each(['odd-position', 'unrelated-name'])(
+      'rejects a normalized authorization matching only an %s raw field',
+      async (mode) => {
+        const request = await standardRequest()
+        const normalized = request.req.headers.authorization
+        request.req.rawHeaders[1] = (
+          await standardRequest()
+        ).req.headers.authorization
+        request.req.rawHeaders.push(
+          mode === 'odd-position' ? 'x-rei' : 'x-asuka',
+          mode === 'odd-position' ? 'authorization' : normalized,
+        )
+        if (mode === 'odd-position')
+          request.req.rawHeaders.push(normalized, 'rei')
+        await expect(makeVerifiers().spaceCredential(request)).rejects.toThrow(
+          'Ambiguous space authorization',
+        )
+      },
+    )
+
+    it('does not interpret raw header values as proof header names', async () => {
+      const request = await standardRequest()
+      request.req.rawHeaders.unshift('x-nerv', 'dpop')
+      await expect(makeVerifiers().spaceCredential(request)).resolves.toEqual({
+        credentials: { type: 'space-credential', spaceUri: SPACE_S },
+      })
+    })
+
+    it('reuses the same standard signature without a replay store and keeps boundary filtering', async () => {
+      await actorStore.create(repoDid)
+      await seedRecord(
+        repoDid,
+        'zone.stratos.feed.post',
+        'asuka',
+        BOUNDARY_S.value,
+      )
+      await seedRecord(
+        repoDid,
+        'zone.stratos.feed.post',
+        'rei',
+        BOUNDARY_T.value,
+      )
+      const verifiers = makeVerifiers({ withoutReplayStore: true })
+      const request = await standardRequest()
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const auth = await verifiers.serviceOrSpaceCredential(request)
+        const response = await listRecordPathsHandler(ctx)({
+          params: { did: repoDid, limit: 100 },
+          auth,
+        } as Parameters<ReturnType<typeof listRecordPathsHandler>>[0])
+        expect(
+          (response.body as { records: Array<{ rkey: string }> }).records.map(
+            (record) => record.rkey,
+          ),
+        ).toEqual(['asuka'])
+      }
+    })
+
+    it.each([
+      [
+        '/xrpc/zone.stratos.space.getRecord?repo=did:plc:asuka',
+        'did:plc:asuka',
+      ],
+      [
+        '/xrpc/zone.stratos.space.listBlobs?repo=did:plc:asuka',
+        'did:plc:asuka',
+      ],
+      [
+        '/xrpc/zone.stratos.sync.listRepoOps?did=did:plc:asuka',
+        'did:plc:asuka',
+      ],
+      [
+        '/xrpc/zone.stratos.sync.listRecordPaths?did=did:plc:asuka',
+        'did:plc:asuka',
+      ],
+      ['/xrpc/zone.stratos.space.listRepos', SERVICE_DID],
+    ])(
+      'derives the audience from %s rather than the signed header',
+      async (path, audience) => {
+        const verifiers = makeVerifiers()
+        await expect(
+          verifiers.standardOrSpaceCredential(
+            await standardRequest(audience, path),
+          ),
+        ).resolves.toEqual({
+          credentials: { type: 'space-credential', spaceUri: SPACE_S },
+        })
+        await expect(
+          verifiers.standardOrSpaceCredential(
+            await standardRequest('did:plc:rei', path),
+          ),
+        ).rejects.toBeInstanceOf(AuthRequiredError)
+      },
+    )
+
+    it.each([
+      '/xrpc/zone.stratos.sync.listRecordPaths',
+      '/xrpc/zone.stratos.sync.listRecordPaths?did=did:plc:asuka&did=did:plc:rei',
+      '/xrpc/zone.stratos.sync.listRecordPaths?did=asuka.test',
+      '/xrpc/zone.stratos.repo.importRepo?did=did:plc:asuka',
+    ])(
+      'rejects ambiguous or unsupported standard operation %s',
+      async (path) => {
+        await expect(
+          makeVerifiers().spaceCredential(await standardRequest(repoDid, path)),
+        ).rejects.toBeInstanceOf(AuthRequiredError)
+      },
+    )
+
+    it('rejects standard profile downgrade and mixed proof families', async () => {
+      const verifiers = makeVerifiers({ devMode: true })
+      for (const scheme of ['Bearer', 'DPoP']) {
+        const request = await standardRequest()
+        request.req.headers = {
+          authorization: request.req.headers.authorization.replace(
+            'Atproto-Space',
+            scheme,
+          ),
+        }
+        request.req.rawHeaders = Object.entries(request.req.headers).flat()
+        await expect(verifiers.spaceCredential(request)).rejects.toBeInstanceOf(
+          AuthRequiredError,
+        )
+      }
+      const mixed = await standardRequest()
+      mixed.req.rawHeaders.push('DPoP', 'conflict')
+      await expect(verifiers.spaceCredential(mixed)).rejects.toBeInstanceOf(
+        AuthRequiredError,
+      )
+      const legacy = await credentialFor(SPACE_S, 'legacy')
+      await expect(
+        verifiers.spaceCredential(ctxWithHeader(`Atproto-Space ${legacy}`)),
+      ).rejects.toBeInstanceOf(AuthRequiredError)
+      await expect(
+        verifiers.optionalStandardOrSpaceCredential(
+          ctxWithHeader('Atproto-Space invalid'),
+        ),
+      ).rejects.toBeInstanceOf(AuthRequiredError)
+    })
+
+    it('rejects duplicate raw authorization and normalized-token substitution', async () => {
+      const verifiers = makeVerifiers()
+      const duplicate = await standardRequest()
+      duplicate.req.rawHeaders.push(
+        'Authorization',
+        duplicate.req.headers.authorization,
+      )
+      await expect(verifiers.spaceCredential(duplicate)).rejects.toBeInstanceOf(
+        AuthRequiredError,
+      )
+      const substituted = await standardRequest()
+      const other = await standardRequest()
+      substituted.req.headers.authorization = other.req.headers.authorization
+      await expect(
+        verifiers.spaceCredential(substituted),
+      ).rejects.toBeInstanceOf(AuthRequiredError)
+    })
 
     it('a still-valid credential reads after member removal, then local revision and deletion deny', async () => {
       await actorStore.create(repoDid)
