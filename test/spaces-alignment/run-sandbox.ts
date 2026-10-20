@@ -412,6 +412,7 @@ export async function runSandbox(
       )
     }
     if (options.suite === 'rust-production-interop') {
+      failedStep = 'prepare-browser-dockerfile'
       const browserDockerfile = join(
         atmosphere,
         'stacks/feedgen-ng-e2e-browser.Dockerfile',
@@ -421,17 +422,25 @@ export async function runSandbox(
         join(workspace, 'stratos/stratos-feedgen-ng/Dockerfile'),
         'utf8',
       )
+      const cargoCommand =
+        'RUN cargo build --locked --release --package stratos-feedgen-ng'
+      const builderSource = rustDockerfile.split('FROM debian:')[0]
+      if (!builderSource.includes(cargoCommand))
+        throw new Error('Rust cargo build command is missing')
+      const driverPath = 'runtime/feedgen-ng-e2e-browser.mjs'
+      if (!original.includes(driverPath))
+        throw new Error('Browser driver path is missing')
       const builder = rustDockerfile
         .split('FROM debian:')[0]
         .replace(
-          'RUN cargo build --locked --release --package stratos-feedgen-ng',
+          cargoCommand,
           'RUN cargo build --locked --release --package stratos-feedgen-ng --example space_interop_probe',
         )
       await writeFile(
         browserDockerfile,
         builder +
           original.replace(
-            'runtime/feedgen-ng-e2e-browser.mjs',
+            driverPath,
             'test/spaces-alignment/templates/feedgen-ng-e2e-browser.mjs',
           ) +
           '\nCOPY --from=builder /workspace/target/release/examples/space_interop_probe /usr/local/bin/space_interop_probe\n',
