@@ -1,7 +1,27 @@
+<script module lang="ts">
+  import { auth } from '../lib/stores/auth.svelte'
+
+  let membershipSession = $state({
+    operatorDid: auth.did,
+    uncertain: new Set<string>(),
+    pending: new Set<string>(),
+  })
+
+  $effect.root(() => {
+    $effect(() => {
+      const operatorDid = auth.status === 'authenticated' ? auth.did : null
+      if (membershipSession.operatorDid !== operatorDid) {
+        membershipSession = { operatorDid, uncertain: new Set(), pending: new Set() }
+      }
+    })
+  })
+</script>
+
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import { router } from 'svelte-spa-router'
   import BoundaryOverview from '../lib/components/boundary/BoundaryOverview.svelte'
+  import BoundaryMembers from '../lib/components/boundary/BoundaryMembers.svelte'
   import { boundaryDetailHref, parseBoundarySelection } from '../lib/boundary-workspace'
   import {
     createBoundary,
@@ -51,14 +71,29 @@
       ? boundaries.find((item) => item.boundary === selection.boundary) ?? null
       : null,
   )
-  let loadGeneration = 0
+  let catalogGeneration = 0
+  const membershipOperations = membershipSession
+
+  function membershipKey(did: string, boundary: string) {
+    return JSON.stringify([did, boundary])
+  }
+
+  function markMembershipUncertain(did: string, boundary: string) {
+    membershipOperations.uncertain = new Set([...membershipOperations.uncertain, membershipKey(did, boundary)])
+  }
+
+  function reconcileMembership(did: string, boundary: string) {
+    const next = new Set(membershipOperations.uncertain)
+    next.delete(membershipKey(did, boundary))
+    membershipOperations.uncertain = next
+  }
 
   async function load() {
-    const generation = ++loadGeneration
+    const catalogRequest = ++catalogGeneration
     loading = true
     try {
       const result = await listBoundaries()
-      if (generation !== loadGeneration) return
+      if (catalogRequest !== catalogGeneration) return
       boundaries = result.boundaries
       loaded = true
       catalogError = null
@@ -70,10 +105,10 @@
         }
       }
     } catch (err) {
-      if (generation !== loadGeneration) return
+      if (catalogRequest !== catalogGeneration) return
       catalogError = err instanceof Error ? err.message : String(err)
     } finally {
-      if (generation === loadGeneration) loading = false
+      if (catalogRequest === catalogGeneration) loading = false
     }
   }
 
@@ -252,7 +287,7 @@
         <p class="mt-3 text-sm text-muted">The boundary link is missing or invalid. No changes were made.</p>
         <a class="mt-4 inline-block pill squish px-4 py-2 text-sm no-underline" href="#/boundaries">Return to boundaries</a>
       </Card>
-    {:else if catalogError}
+    {:else if !loaded && catalogError}
       <div role="alert" class="space-y-3">
         <p class="text-error">The boundary catalog could not be loaded: {catalogError}</p>
         <Button variant="secondary" onclick={load} disabled={loading}>Retry loading</Button>
@@ -266,6 +301,12 @@
         <a class="mt-4 inline-block pill squish px-4 py-2 text-sm no-underline" href="#/boundaries">Return to boundaries</a>
       </Card>
     {:else}
+      {#if catalogError}
+        <div role="alert" class="space-y-3">
+          <p class="text-error">The boundary catalog could not be refreshed: {catalogError}</p>
+          <Button variant="secondary" onclick={load} disabled={loading}>Retry loading</Button>
+        </div>
+      {/if}
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div class="min-w-0">
           <a class="text-sm text-muted underline" href="#/boundaries">← All boundaries</a>
@@ -275,12 +316,30 @@
         </div>
       </div>
       <nav aria-label="Boundary workspace" class="flex flex-wrap gap-2">
-        <a aria-current="page" class="grad-fill rounded-full px-4 py-2 text-sm font-semibold no-underline" href={boundaryDetailHref(selectedBoundary.boundary)}>Overview</a>
-        <a class="pill squish px-4 py-2 text-sm no-underline" href="#/boundaries">Members and settings are not available in this release</a>
+        <a aria-current={selection.tab === 'overview' ? 'page' : undefined} class={selection.tab === 'overview' ? 'grad-fill rounded-full px-4 py-2 text-sm font-semibold no-underline' : 'pill squish px-4 py-2 text-sm no-underline'} href={boundaryDetailHref(selectedBoundary.boundary, 'overview')}>Overview</a>
+        <a aria-current={selection.tab === 'members' ? 'page' : undefined} class={selection.tab === 'members' ? 'grad-fill rounded-full px-4 py-2 text-sm font-semibold no-underline' : 'pill squish px-4 py-2 text-sm no-underline'} href={boundaryDetailHref(selectedBoundary.boundary, 'members')}>Members</a>
+        <a class="pill squish px-4 py-2 text-sm no-underline" href="#/boundaries">Settings</a>
       </nav>
-      {#if selection.tab !== 'overview'}
+      {#if selection.tab === 'members'}
+        <BoundaryMembers
+          boundary={selectedBoundary}
+          onrefresh={load}
+          uncertainMemberships={membershipOperations.uncertain}
+          pendingMemberships={membershipOperations.pending}
+          onMembershipPending={(did, boundary, pending) => {
+            const next = new Set(membershipOperations.pending)
+            if (pending) next.add(membershipKey(did, boundary))
+            else next.delete(membershipKey(did, boundary))
+            membershipOperations.pending = next
+          }}
+          onUncertainMembership={(did, boundary, uncertain) => {
+            if (uncertain) markMembershipUncertain(did, boundary)
+            else reconcileMembership(did, boundary)
+          }}
+        />
+      {:else if selection.tab === 'settings'}
         <Card>
-          <p class="text-sm text-muted">This workspace section is not available yet. Return to the boundary catalog to manage settings.</p>
+          <p class="text-sm text-muted">Manage settings from the boundary catalog.</p>
           <a class="mt-3 inline-block text-sm underline" href="#/boundaries">Return to boundaries</a>
         </Card>
       {:else}

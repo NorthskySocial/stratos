@@ -2,7 +2,239 @@ import { describe, expect, it } from 'vitest'
 import {
   boundaryDetailHref,
   parseBoundarySelection,
+  createMembershipPreview,
+  getMembershipAvailability,
+  membershipPreviewMatches,
 } from '../src/lib/boundary-workspace'
+
+describe('boundary workspace membership contract', () => {
+  const snapshot = (
+    overrides: Partial<{
+      status: 'active' | 'deactivating' | 'inactive'
+      reserved: boolean
+      enrolled: boolean
+      active: boolean
+      boundaries: string[]
+      uncertainBoundaries: string[]
+    }> = {},
+  ) => ({
+    lookupIdentity: 'did:plc:rei',
+    boundary: {
+      boundary: 'did:web:nerv.test/engineering',
+      revision: 4,
+      status: overrides.status ?? 'active',
+      reserved: overrides.reserved ?? false,
+    },
+    enrollment: {
+      did: 'did:plc:rei',
+      enrolled: overrides.enrolled ?? true,
+      active: overrides.active ?? true,
+      boundaries: overrides.boundaries ?? [],
+      uncertainBoundaries: overrides.uncertainBoundaries ?? [],
+    },
+  })
+
+  it.each([
+    [{}, { type: 'add' }, { available: true }],
+    [
+      { boundaries: ['did:web:nerv.test/engineering'] },
+      { type: 'add' },
+      { available: false, reason: 'already-member' },
+    ],
+    [{}, { type: 'remove' }, { available: false, reason: 'not-member' }],
+    [
+      { boundaries: ['did:web:nerv.test/engineering'] },
+      { type: 'remove' },
+      { available: true },
+    ],
+    [
+      { status: 'inactive' },
+      { type: 'add' },
+      { available: false, reason: 'boundary-not-active' },
+    ],
+    [
+      { status: 'deactivating' },
+      { type: 'add' },
+      { available: false, reason: 'boundary-not-active' },
+    ],
+    [
+      { status: 'inactive', boundaries: ['did:web:nerv.test/engineering'] },
+      { type: 'remove' },
+      { available: true },
+    ],
+    [
+      { status: 'deactivating', boundaries: ['did:web:nerv.test/engineering'] },
+      { type: 'remove' },
+      { available: true },
+    ],
+    [
+      { reserved: true, boundaries: ['did:web:nerv.test/engineering'] },
+      { type: 'remove' },
+      { available: false, reason: 'reserved-boundary' },
+    ],
+    [
+      { enrolled: false },
+      { type: 'add' },
+      { available: false, reason: 'unenrolled' },
+    ],
+    [
+      { enrolled: false, boundaries: ['did:web:nerv.test/engineering'] },
+      { type: 'remove' },
+      { available: false, reason: 'unenrolled' },
+    ],
+  ] as const)('availability for %j %j', (overrides, operation, expected) => {
+    expect(getMembershipAvailability(operation, snapshot(overrides))).toEqual(
+      expected,
+    )
+  })
+
+  it('rejects a lookup identity that does not match the enrollment DID', () => {
+    const mismatched = {
+      ...snapshot(),
+      lookupIdentity: 'did:plc:asuka',
+    }
+    expect(getMembershipAvailability({ type: 'add' }, mismatched)).toEqual({
+      available: false,
+      reason: 'target-mismatch',
+    })
+    expect(createMembershipPreview({ type: 'add' }, mismatched)).toBeNull()
+  })
+
+  it('rejects a target DID that differs from the confirmed lookup identity', () => {
+    const mismatched = {
+      ...snapshot(),
+      enrollment: { ...snapshot().enrollment, did: 'did:plc:asuka' },
+    }
+    expect(getMembershipAvailability({ type: 'add' }, mismatched)).toEqual({
+      available: false,
+      reason: 'target-mismatch',
+    })
+    expect(createMembershipPreview({ type: 'add' }, mismatched)).toBeNull()
+  })
+
+  it('allows an inactive enrollment to receive a boundary without changing activation', () => {
+    const current = snapshot({ active: false })
+    expect(getMembershipAvailability({ type: 'add' }, current)).toEqual({
+      available: true,
+    })
+    expect(createMembershipPreview({ type: 'add' }, current)).toMatchObject({
+      targetDid: 'did:plc:rei',
+      boundary: 'did:web:nerv.test/engineering',
+      active: false,
+      wasMember: false,
+    })
+  })
+
+  it('matches only the selected membership and invalidates every relevant snapshot field', () => {
+    const original = snapshot({ boundaries: ['did:web:nerv.test/leadership'] })
+    const preview = createMembershipPreview({ type: 'add' }, original)
+    expect(preview).not.toBeNull()
+    if (!preview) throw new Error('Expected an available membership preview')
+    expect(
+      membershipPreviewMatches(
+        preview,
+        snapshot({
+          boundaries: [
+            'did:web:nerv.test/leadership',
+            'did:web:nerv.test/research',
+          ],
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      membershipPreviewMatches(
+        preview,
+        snapshot({
+          status: 'inactive',
+          boundaries: original.enrollment.boundaries,
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      membershipPreviewMatches(preview, {
+        ...original,
+        lookupIdentity: 'did:plc:asuka',
+      }),
+    ).toBe(false)
+    expect(
+      membershipPreviewMatches(preview, {
+        ...original,
+        enrollment: { ...original.enrollment, did: 'did:plc:asuka' },
+      }),
+    ).toBe(false)
+    expect(
+      membershipPreviewMatches(preview, {
+        ...original,
+        enrollment: { ...original.enrollment, active: false },
+      }),
+    ).toBe(false)
+    expect(
+      membershipPreviewMatches(preview, {
+        ...original,
+        boundary: {
+          ...original.boundary,
+          boundary: 'did:web:nerv.test/research',
+        },
+      }),
+    ).toBe(false)
+    expect(
+      membershipPreviewMatches(preview, {
+        ...original,
+        boundary: { ...original.boundary, revision: 5 },
+      }),
+    ).toBe(false)
+    expect(
+      membershipPreviewMatches(preview, {
+        ...original,
+        boundary: { ...original.boundary, reserved: true },
+      }),
+    ).toBe(false)
+    expect(
+      membershipPreviewMatches(preview, {
+        ...original,
+        enrollment: { ...original.enrollment, enrolled: false },
+      }),
+    ).toBe(false)
+    expect(
+      membershipPreviewMatches(preview, {
+        ...original,
+        enrollment: {
+          ...original.enrollment,
+          boundaries: ['did:web:nerv.test/engineering'],
+        },
+      }),
+    ).toBe(false)
+  })
+
+  it('accepts a snapshot without optional uncertainty metadata', () => {
+    const current = snapshot()
+    const enrollment = {
+      did: current.enrollment.did,
+      enrolled: true,
+      active: true,
+      boundaries: [],
+    }
+    expect(
+      getMembershipAvailability({ type: 'add' }, { ...current, enrollment }),
+    ).toEqual({ available: true })
+  })
+
+  it('blocks only the explicitly uncertain boundary in the enrollment snapshot', () => {
+    const boundary = 'did:web:nerv.test/engineering'
+    expect(
+      getMembershipAvailability(
+        { type: 'add' },
+        snapshot({ uncertainBoundaries: [boundary] }),
+      ),
+    ).toEqual({ available: false, reason: 'reconciliation-required' })
+    expect(
+      getMembershipAvailability(
+        { type: 'add' },
+        snapshot({ uncertainBoundaries: ['did:web:nerv.test/research'] }),
+      ),
+    ).toEqual({ available: true })
+  })
+})
 
 describe('boundary workspace route contract', () => {
   it('preserves a full service-qualified boundary identifier', () => {
