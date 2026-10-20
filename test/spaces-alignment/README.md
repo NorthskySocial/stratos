@@ -95,6 +95,69 @@ invalidation triggers this refresh. The runtime scheduler itself is unchanged. T
 TypeScript transport assertions. Neither suite is certified until its reviewed
 sandbox run passes.
 
+## Combined October cutover gate
+
+Select `--suite october-interop` for the mandatory baseline followed by all 15
+standard transport assertions and all 11 Rust assertions. Standard fixtures use
+Faye and Edward; Rust fixtures use Rustfaye and Rustedward on the same October
+host. The runner executes the ten mandatory baseline assertions once with Motoko.
+The Rust ingestion check deliberately reuses that driver with Batou on the primary
+PDS. This is a distinct second-owner scope, not another mandatory baseline receipt:
+it requires Batou's own new post URI and text in the Rust feed response before
+emitting `rust-second-owner-ingestion`. The combined suite then calls the separate
+Rust signing probe, not the standalone Rust suite. Both combined and standalone
+runs preserve the Batou check. These accounts are distinct because the standard
+scenario removes its first member.
+
+The combined suite first checks the default 600-second standard lifetime.
+It then recreates only the disposable authority with a ten-second TTL and waits
+for it to become healthy before the Rust expiry-refresh checks. It does not
+weaken or replace either suite's assertions. Both source-built PDS identities,
+the Rust probe build, private TLS, and cleanup remain required.
+
+After exact-candidate independent Standards and Spec approvals, use a new
+private receipt and a nonexistent report path for each run:
+
+```sh
+pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
+  --sandbox-dir /home/evelyn/git/northsky/ops/sandbox/atmosphereinabox \
+  --source "$(git rev-parse --show-toplevel)" \
+  --suite october-interop \
+  --review-receipt "$REVIEW_RECEIPT" \
+  --report-dir "$NEW_REPORT_DIR"
+```
+
+Repeat `delegation-transport`, `credential-lifetime`, `client-custody`,
+`space-delete`, `feed-errors`, and `baseline` as separate sandbox runs. Each run
+has fresh accounts and its own new report directory. Do not combine their
+shared Motoko fixtures after a removal or OAuth revocation. Delegated transport
+and the foreign lifetime checks now use standard HTTP signatures against the
+October primary PDS. The authority lifetime checks retain legacy compatibility
+coverage. OAuth browser proofs are unchanged. Unit-test receipts are not runtime
+acceptance, and predecessor receipts do not certify this combined candidate.
+
+## Writer-sync design probe
+
+Select `--suite writer-sync-contract` after exact-candidate independent review.
+The mandatory baseline runs first. The suite provisions a disposable upstream
+simplespace authority on the pinned October Spaces alpha PDS, using Faye and
+Edward's real accounts. It checks actual commit `rev`, standard writer metadata,
+short-page cursors, exclusive/opaque cursor behavior, repeated writers, equal and
+older update idempotence, issuer/audience/future-revision denial, current write
+policy removal, and Stratos's unsupported standard routes. This is real upstream
+authority behavior, not Stratos standard-authority support. No fake authority
+server substitutes for the PDS.
+
+`writer-sync-contract.model.test.ts` separately exercises a synthetic reference
+model for durable-processing crash boundaries, coalescing, ordering and bounded
+backoff. Those tests do not prove actual storage atomicity, retry durability,
+forwarding delivery, or generation fencing. The live probe explicitly delivers
+the real signed head through real service authentication to avoid depending on
+immediate automatic-notification timing. It does not certify the retry worker or
+notification fanout. See the [design and follow-ups](../../docs/architecture/october-writer-sync-contract.md).
+A reviewed clean-candidate runtime receipt remains required; unit tests alone
+are not acceptance.
+
 ## Suite API
 
 Each tracked `scenarios/<suite>.ts` exports `suite: ScenarioSuite` with `id`, nonempty `requiredAssertions`, and an async `run(context)` returning one result for each named assertion. Import `ScenarioSuite` from `../rules.js`. The runner discovers modules from the candidate checkout and runs `baseline` before any additional suite. A missing, skipped, failed, or duplicate assertion fails the gate. Add a new suite in its own scenario module. Suites that need the additional October
@@ -114,3 +177,30 @@ strictly validate the Stratos-specific post record type: its record validator
 only knows built-in lexicons. The blob fixture therefore uses the PDS's default
 best-effort validation path, without disabling validation, and verifies that
 the scoped record write and private blob retrieval both succeed.
+
+## Credential revocation design probe
+
+Select `--suite credential-revocation-contract` for the mandatory baseline and
+13 assertions against the actual pinned October Spaces alpha PDS receiver and unchanged Stratos
+unsupported route. This is not the future Stratos `credential-revocation`
+enforcement suite. See [the revocation contract](../../docs/architecture/credential-revocation-contract.md#bounded-design-probe)
+for every required assertion and exact typed denial.
+
+The probe uses Faye's real OAuth/exchange fixture, two distinct grants, the
+seeded record, and the existing disposable authority identity loader. A private
+peer signs notifications without exporting its key. Grants and presentation
+headers travel through pipes between Compose peers; only the final assertion
+receipt reaches the report. Restart targets only `feedgen-e2e-pds-october` and
+waits for its health check. Every Compose operation selects the generated file.
+No new authority server, production endpoint, migration, or enforcement is added.
+
+Cross-space isolation revokes B's ID in `other` and reads `general`. Duplicate
+coverage observes successful retries and unchanged read outcomes, not database
+row counts or expiry extension. Retained inactive-account behavior, a separately
+controlled foreign issuer, concurrency, storage failure, and full 3,610-second
+cleanup retention remain unverified future gates. The design probe neither
+silently skips them nor claims complete Stratos enforcement coverage.
+
+The clean-candidate and independent-review receipt gates still apply. Unit tests
+and source inspection are not runtime acceptance, and no predecessor receipt
+certifies a new candidate.

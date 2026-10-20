@@ -122,6 +122,14 @@ export default defineConfig({
               text: 'Service Key History',
               link: '/architecture/service-key-history',
             },
+            {
+              text: 'Credential Revocation Contract',
+              link: '/architecture/credential-revocation-contract',
+            },
+            {
+              text: 'October Writer Sync',
+              link: '/architecture/october-writer-sync-contract',
+            },
             { text: 'System Diagrams', link: '/architecture/diagrams' },
           ],
         },

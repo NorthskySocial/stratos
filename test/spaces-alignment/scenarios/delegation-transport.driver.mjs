@@ -1,5 +1,37 @@
 import assert from 'node:assert/strict'
-import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
+
+let assertionLabel
+function check(condition, label) {
+  assertionLabel = label
+  assert.ok(condition, label)
+}
+async function checkResponse(response, status, label, code) {
+  assertionLabel = label
+  let errorCode
+  if (code !== undefined) {
+    const body = await response.json()
+    errorCode = body.error === code ? code : 'UnexpectedErrorCode'
+  }
+  if (response.status !== status || errorCode !== code) {
+    const error = new Error()
+    error.outcome = {
+      label,
+      status: response.status,
+      expectedStatus: status,
+      errorCode,
+    }
+    throw error
+  }
+}
+function failureOutcome(error) {
+  return JSON.stringify(
+    error.outcome ?? { label: assertionLabel, status: 'failed' },
+  )
+}
+import {
+  proofKey,
+  signedHeaders,
+} from './standard-credential-transport.driver.mjs'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { mkdir, readFile } from 'node:fs/promises'
@@ -9,7 +41,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 const require = createRequire('/runner/feedgen-ng-e2e-browser.mjs')
 const { chromium } = require('playwright')
 const domain = process.env.SANDBOX_DOMAIN
-assert.match(domain ?? '', /^[a-z0-9.-]+$/)
+check(/^[a-z0-9.-]+$/.test(domain ?? ''), 'sandbox-domain')
 const clubhouse = 'https://clubhouse-e2e.atmosbox.internal'
 const authority = 'https://stratos-e2e.atmosbox.internal'
 const pds = `https://spaces-pds-e2e.${domain}`
@@ -139,7 +171,7 @@ async function oauthSession(page) {
     if (!session) throw new Error('OAuth session was not restored')
     return session.sub
   })
-  assert.ok(did.startsWith('did:'), 'OAuth session has no account DID')
+  check(did.startsWith('did:'), 'oauth-account-did')
   passed.push('oauth-space-session')
   return did
 }
@@ -163,46 +195,12 @@ async function getDelegation(page) {
   )
 }
 
-function proofKey() {
-  const { publicKey, privateKey } = generateKeyPairSync('ec', {
-    namedCurve: 'prime256v1',
-  })
-  const jwk = publicKey.export({ format: 'jwk' })
-  return { privateKey, jwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y } }
-}
-
-function base64url(value) {
-  return Buffer.from(
-    typeof value === 'string' ? value : JSON.stringify(value),
-  ).toString('base64url')
-}
-
-function proof(key, url, method, token) {
-  const header = { typ: 'dpop+jwt', alg: 'ES256', jwk: key.jwk }
-  const claims = {
-    htm: method,
-    htu: new URL(url).origin + new URL(url).pathname,
-    jti: randomUUID(),
-    iat: Math.floor(Date.now() / 1000),
-    ...(token
-      ? { ath: createHash('sha256').update(token).digest('base64url') }
-      : {}),
-  }
-  const signingInput = `${base64url(header)}.${base64url(claims)}`
-  const signature = sign('sha256', Buffer.from(signingInput), {
-    key: key.privateKey,
-    dsaEncoding: 'ieee-p1363',
-  })
-  return `${signingInput}.${signature.toString('base64url')}`
-}
-
 async function exchange(token, key, body = { space }) {
   const response = await fetch(mintUrl, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${token}`,
+      ...signedHeaders(`Bearer ${token}`, key),
       'content-type': 'application/json',
-      dpop: proof(key, mintUrl, 'POST'),
     },
     body: JSON.stringify(body),
   })
@@ -223,12 +221,12 @@ async function exchangeWithoutProof(token) {
 async function assertTamperedDelegationDenied(page, key) {
   const token = await getDelegation(page)
   const [header, payload] = token.split('.')
-  assert.ok(header && payload, 'PDS returned an invalid JWT')
+  check(header && payload, 'delegation-jwt-shape')
   const response = await exchange(
     `${header}.${payload}.tampered-signature`,
     key,
   )
-  assert.equal(response.status, 400, 'Tampered delegation was accepted')
+  await checkResponse(response, 400, 'tampered-delegation', 'InvalidToken')
   passed.push('tampered-delegation-signature-denied')
 }
 
@@ -238,26 +236,25 @@ async function main() {
   try {
     const page = await browser.newPage()
     const did = await oauthSession(page)
-    assert.notEqual(
-      clubhouse,
-      pds,
-      'OAuth authorization server must differ from the PDS endpoint',
-    )
+    check(clubhouse !== pds, 'authorization-server-pds-separation')
     passed.push('authorization-server-pds-separation')
     const firstDelegation = await getDelegation(page)
     const payload = JSON.parse(
       Buffer.from(firstDelegation.split('.')[1], 'base64url'),
     )
-    assert.equal(payload.iss, did)
-    assert.equal(payload.sub, space)
-    assert.equal(payload.aud, `${authorityDid}#atproto_space_host`)
+    check(payload.iss === did, 'delegation-iss')
+    check(payload.sub === space, 'delegation-sub')
+    check(
+      payload.aud === `${authorityDid}#atproto_space_host`,
+      'delegation-aud',
+    )
     passed.push('pds-issued-delegation')
 
     const key = proofKey()
     const mint = await exchange(firstDelegation, key)
-    assert.equal(mint.status, 200, 'Header delegation exchange failed')
+    await checkResponse(mint, 200, 'credential-mint')
     const credential = (await mint.json()).credential
-    assert.equal(typeof credential, 'string')
+    check(typeof credential === 'string', 'credential-string')
     passed.push('header-exchange')
 
     const recordsUrl = new URL('/xrpc/com.atproto.space.listRecords', pds)
@@ -266,13 +263,15 @@ async function main() {
     recordsUrl.searchParams.set('collection', 'zone.stratos.feed.post')
     const recordsResponse = await fetch(recordsUrl, {
       headers: {
-        authorization: `DPoP ${credential}`,
-        dpop: proof(key, recordsUrl.href, 'GET', credential),
+        ...signedHeaders(`Atproto-Space ${credential}`, key, did),
       },
     })
-    assert.equal(recordsResponse.status, 200, 'Foreign repo read failed')
+    await checkResponse(recordsResponse, 200, 'foreign-repo-read')
     const records = (await recordsResponse.json()).records
-    assert.ok(Array.isArray(records) && records.length > 0)
+    check(
+      Array.isArray(records) && records.length > 0,
+      'foreign-records-present',
+    )
     passed.push('foreign-repo-read')
 
     await assertTamperedDelegationDenied(page, proofKey())
@@ -280,22 +279,26 @@ async function main() {
     const wrongKey = proofKey()
     const wrongKeyResponse = await fetch(recordsUrl, {
       headers: {
-        authorization: `DPoP ${credential}`,
-        dpop: proof(wrongKey, recordsUrl.href, 'GET', credential),
+        ...signedHeaders(`Atproto-Space ${credential}`, wrongKey, did),
       },
     })
-    assert.ok([401, 403].includes(wrongKeyResponse.status))
+    await checkResponse(
+      wrongKeyResponse,
+      401,
+      'wrong-key-denied',
+      'BadSpaceSignature',
+    )
     passed.push('wrong-key-denied')
 
     const replay = await exchange(firstDelegation, proofKey())
-    assert.equal(replay.status, 400)
+    await checkResponse(replay, 400, 'delegation-replay', 'InvalidToken')
     passed.push('delegation-replay-denied')
 
     const secondDelegation = await getDelegation(page)
     const proofless = await exchangeWithoutProof(secondDelegation)
-    assert.equal(proofless.status, 400)
+    await checkResponse(proofless, 400, 'missing-proof', 'ProofRequired')
     const retry = await exchange(secondDelegation, proofKey())
-    assert.equal(retry.status, 200)
+    await checkResponse(retry, 200, 'retry-after-missing-proof')
     passed.push('missing-proof-preserves-delegation')
 
     const thirdDelegation = await getDelegation(page)
@@ -303,9 +306,9 @@ async function main() {
       space,
       delegationToken: thirdDelegation,
     })
-    assert.equal(ambiguous.status, 400)
+    await checkResponse(ambiguous, 400, 'ambiguous-transport', 'InvalidRequest')
     const afterAmbiguous = await exchange(thirdDelegation, proofKey())
-    assert.equal(afterAmbiguous.status, 200)
+    await checkResponse(afterAmbiguous, 200, 'retry-after-ambiguous')
     passed.push('ambiguous-transport-denied')
 
     console.log(
@@ -321,7 +324,7 @@ async function main() {
 
 main().catch((error) => {
   console.error(
-    `Delegation transport scenario failed: ${error instanceof Error ? error.name : 'UnknownError'}`,
+    `Delegation transport scenario failed: ${failureOutcome(error)}`,
   )
   process.exitCode = 1
 })

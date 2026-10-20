@@ -256,6 +256,24 @@ describe('sandbox preflight', () => {
       ),
       `export const suite = { id: 'rust-production-interop', requiredAssertions: ['rust-pass'], async run() { return [{ id: 'rust-pass', status: 'passed' }] } }`,
     )
+    await writeFile(
+      join(candidateRepo, 'test/spaces-alignment/scenarios/october-interop.ts'),
+      `export const suite = { id: 'october-interop', requiredAssertions: ['combined-pass'], async run() { return [{ id: 'combined-pass', status: 'passed' }] } }`,
+    )
+    await writeFile(
+      join(
+        candidateRepo,
+        'test/spaces-alignment/scenarios/credential-revocation-contract.ts',
+      ),
+      `export const suite = { id: 'credential-revocation-contract', requiredAssertions: ['upstream-pass'], async run() { return [{ id: 'upstream-pass', status: 'passed' }] } }`,
+    )
+    await writeFile(
+      join(
+        candidateRepo,
+        'test/spaces-alignment/scenarios/writer-sync-contract.ts',
+      ),
+      `export const suite = { id: 'writer-sync-contract', requiredAssertions: ['writer-pass'], async run() { return [{ id: 'writer-pass', status: 'passed' }] } }`,
+    )
     for (const file of ['october-pds.yaml', 'october-pds.definition.json']) {
       await writeFile(
         join(candidateRepo, 'test/spaces-alignment/templates', file),
@@ -391,7 +409,7 @@ describe('sandbox preflight', () => {
     expect(accountLabels).toEqual(['faye', 'edward'])
     const octoberOrigins = [
       'https://october-pds-e2e.atmosbox.test',
-      ...accountLabels.map(
+      ...[...accountLabels, 'rustfaye', 'rustedward'].map(
         (name) => `https://${name}.october-pds-e2e.atmosbox.test`,
       ),
       'https://spaces-pds-e2e.atmosbox.test',
@@ -426,7 +444,7 @@ if (args[1] === 'sandbox' && args[2] === 'check') {
   const browserDockerfile = fs.readFileSync('stacks/feedgen-ng-e2e-browser.Dockerfile', 'utf8')
   if (browserDockerfile.includes('AS builder')) {
     assert.ok(stack.includes('context: ../stratos\\n      dockerfile: ../atmosphereinabox/stacks/feedgen-ng-e2e-browser.Dockerfile'))
-    assert.ok(stack.includes("STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS: '10'"))
+    assert.equal(stack.includes("STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS: '10'"), process.env.RUNNER_TEST_COMBINED !== '1')
     assert.ok(browserDockerfile.includes('RUN cargo build --locked --release --package stratos-feedgen-ng --example space_interop_probe'))
     assert.ok(browserDockerfile.includes('COPY --from=builder /workspace/target/release/examples/space_interop_probe /usr/local/bin/space_interop_probe'))
     assert.ok(browserDockerfile.includes('COPY test/spaces-alignment/templates/feedgen-ng-e2e-browser.mjs /runner/driver.mjs'))
@@ -446,7 +464,7 @@ if (args[1] === 'sandbox' && args[2] === 'check') {
       .join('\\n')
     assert.ok(stack.includes('\\n' + october + '\\nvolumes:\\n  feedgen-e2e-pds-october-data: {}\\n'), 'Preserve the entire October template, including every Compose shell escape')
   } else {
-    assert.deepEqual(origins, ${JSON.stringify(octoberOrigins.slice(3))})
+    assert.deepEqual(origins, ${JSON.stringify(octoberOrigins.slice(5))})
   }
 }
 if (args[1] === 'sandbox' && args[2] === 'up') assert.deepEqual(args, ['task', 'sandbox', 'up', '--build'])
@@ -763,9 +781,14 @@ if (args[0] === 'image' && args[1] === 'rm') {
     ).rejects.toThrow('October PDS source pin is missing')
     const octoberPin = { ...sourcePins.spacesPds, revision: 'c'.repeat(40) }
     for (const selectedSuite of [
+      'writer-sync-contract',
+      'credential-revocation-contract',
       'standard-credential-transport',
       'rust-production-interop',
+      'october-interop',
     ]) {
+      process.env.RUNNER_TEST_COMBINED =
+        selectedSuite === 'october-interop' ? '1' : '0'
       const dualReport = join(root, selectedSuite + '-dual-pds-report')
       const dualBuilds: string[] = []
       await runSandbox(
@@ -821,6 +844,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
       )
     }
 
+    delete process.env.RUNNER_TEST_COMBINED
     const actualFs =
       await vi.importActual<typeof import('node:fs/promises')>(
         'node:fs/promises',
