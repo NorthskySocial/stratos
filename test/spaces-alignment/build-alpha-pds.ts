@@ -72,7 +72,13 @@ export async function buildAlphaPds(
 
     const dockerfileSha256 = await sha256File(join(source, pin.dockerfile))
     const lockfileSha256 = await sha256File(join(source, pin.lockfile))
-    for (const [path, expected] of Object.entries(pin.sha256 ?? {})) {
+    const expectedHashes = pin.sha256 ?? {}
+    if (
+      expectedHashes[pin.dockerfile] !== dockerfileSha256 ||
+      expectedHashes[pin.lockfile] !== lockfileSha256
+    )
+      throw new Error('Pinned PDS build input hash mismatch')
+    for (const [path, expected] of Object.entries(expectedHashes)) {
       if ((await sha256File(join(source, path))) !== expected)
         throw new Error('Pinned PDS build input hash mismatch')
     }

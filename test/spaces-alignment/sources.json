@@ -28,7 +28,11 @@
     "url": "https://github.com/bluesky-social/atproto.git",
     "revision": "79d6307e19908f3af406838ea0e5fae42847f182",
     "dockerfile": "services/pds/Dockerfile",
-    "lockfile": "pnpm-lock.yaml"
+    "lockfile": "pnpm-lock.yaml",
+    "sha256": {
+      "services/pds/Dockerfile": "d30792a7069d4ca9f2105f99b8a55ad7ba521f8ea62233f3062987b8ad580e29",
+      "pnpm-lock.yaml": "244b89da81051ec0f2060e8028707747763764a203ab63d738e400b8a221d927"
+    }
   },
   "spacesPds": {
     "url": "https://github.com/bluesky-social/atproto.git",
