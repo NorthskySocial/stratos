@@ -192,13 +192,7 @@ impl PdsSpaceSynchronizer {
             .connect(target, Arc::clone(&credential))
             .await
             .map_err(|error| {
-                if matches!(
-                    error,
-                    SpaceHostError::Request {
-                        status: 401 | 403,
-                        ..
-                    }
-                ) {
+                if matches!(error, SpaceHostError::Request { status: 401, .. }) {
                     self.credentials.invalidate(&target.boundary, &credential);
                 }
                 PdsSpaceSyncError::Host(error)
@@ -213,13 +207,7 @@ impl PdsSpaceSynchronizer {
                 .list_page(target, cursor.as_deref(), MAX_SPACE_PAGE_OPS)
                 .await
                 .map_err(|error| {
-                    if matches!(
-                        error,
-                        SpaceHostError::Request {
-                            status: 401 | 403,
-                            ..
-                        }
-                    ) {
+                    if matches!(error, SpaceHostError::Request { status: 401, .. }) {
                         self.credentials.invalidate(&target.boundary, &credential);
                     }
                     PdsSpaceSyncError::Host(error)
@@ -863,46 +851,77 @@ mod tests {
 
         assert!(matches!(error, PdsSpaceSyncError::OperationLimit));
     }
-    struct DeniedPages;
+    #[derive(Clone, Copy)]
+    enum Denial {
+        Connect(u16),
+        Page(u16),
+    }
+
     #[async_trait]
-    impl SpacePageSource for DeniedPages {
+    impl SpacePageSource for Denial {
         async fn connect(
             &self,
             _: &PdsPollTarget,
             _: Arc<crate::space_credential::HeldSpaceCredential>,
         ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
-            Ok(Arc::new(Self))
+            match self {
+                Self::Connect(status) => Err(SpaceHostError::Request {
+                    status: *status,
+                    code: Some("HostDenial".to_owned()),
+                }),
+                Self::Page(_) => Ok(Arc::new(*self)),
+            }
         }
     }
+
     #[async_trait]
-    impl SpacePageReader for DeniedPages {
+    impl SpacePageReader for Denial {
         async fn list_page(
             &self,
             _: &PdsPollTarget,
             _: Option<&str>,
             _: usize,
         ) -> Result<SpaceHostPage, SpaceHostError> {
+            let Self::Page(status) = self else {
+                panic!("Connect denial must not read pages");
+            };
             Err(SpaceHostError::Request {
-                status: 401,
-                code: Some("InvalidCredential".to_owned()),
+                status: *status,
+                code: Some("HostDenial".to_owned()),
             })
         }
     }
+
     #[tokio::test]
-    async fn host_denial_discards_the_rejected_cached_grant() {
-        let sync = synchronizer_with(
-            Arc::new(DeniedPages),
-            Arc::new(Decision(CommitVerification::Verified)),
-        );
-        let before = sync.credentials.get(BOUNDARY).await.unwrap();
-        assert!(matches!(
-            sync.sync_target(&lifecycle(), &target(), NOW, NOW).await,
-            Err(PdsSpaceSyncError::Host(SpaceHostError::Request {
-                status: 401,
-                ..
-            }))
-        ));
-        let after = sync.credentials.get(BOUNDARY).await.unwrap();
-        assert_ne!(before.key_id(), after.key_id());
+    async fn only_unauthorized_host_errors_invalidate_the_shared_grant() {
+        for denial in [
+            Denial::Connect(401),
+            Denial::Connect(403),
+            Denial::Page(401),
+            Denial::Page(403),
+        ] {
+            let status = match denial {
+                Denial::Connect(status) | Denial::Page(status) => status,
+            };
+            let sync = synchronizer_with(
+                Arc::new(denial),
+                Arc::new(Decision(CommitVerification::Verified)),
+            );
+            let before = sync.credentials.get(BOUNDARY).await.unwrap();
+            let error = sync
+                .sync_target(&lifecycle(), &target(), NOW, NOW)
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                error,
+                PdsSpaceSyncError::Host(SpaceHostError::Request {
+                    status: actual,
+                    code: Some(code),
+                }) if actual == status && code == "HostDenial"
+            ));
+            let after = sync.credentials.get(BOUNDARY).await.unwrap();
+            assert_eq!(Arc::ptr_eq(&before, &after), status == 403);
+            assert_eq!(before.key_id() == after.key_id(), status == 403);
+        }
     }
 }

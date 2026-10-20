@@ -11,7 +11,7 @@ import {
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   command,
   ensureSeparatePaths,
@@ -21,6 +21,11 @@ import {
 } from './run-sandbox.js'
 
 import { runScenario } from './scenarios/standard-credential-transport.driver.mjs'
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, readFile: vi.fn(actual.readFile) }
+})
 
 const temporary: string[] = []
 const originalPath = process.env.PATH
@@ -840,6 +845,63 @@ if (args[0] === 'image' && args[1] === 'rm') {
     }
 
     delete process.env.RUNNER_TEST_COMBINED
+    const actualFs =
+      await vi.importActual<typeof import('node:fs/promises')>(
+        'node:fs/promises',
+      )
+    for (const [path, from, to, message] of [
+      [
+        'stratos-feedgen-ng/Dockerfile',
+        'RUN cargo build',
+        'RUN cargo check',
+        'Rust cargo build command is missing',
+      ],
+      [
+        'stacks/feedgen-ng-e2e-browser.Dockerfile',
+        'runtime/feedgen-ng-e2e-browser.mjs',
+        'runtime/changed-driver.mjs',
+        'Browser driver path is missing',
+      ],
+    ]) {
+      vi.mocked(readFile).mockImplementation(
+        async (...args: Parameters<typeof readFile>) => {
+          const content = await actualFs.readFile(...args)
+          return String(args[0]).endsWith(path) && typeof content === 'string'
+            ? content.replace(from, to)
+            : content
+        },
+      )
+      const driftReport = join(
+        root,
+        path.startsWith('stratos-') ? 'cargo-drift' : 'driver-drift',
+      )
+      try {
+        await expect(
+          runSandbox(
+            {
+              ...options,
+              suite: 'rust-production-interop',
+              reportDirectory: driftReport,
+            },
+            {
+              ...dependencies,
+              sourcePins: { ...sourcePins, octoberSpacesPds: octoberPin },
+            },
+          ),
+        ).rejects.toThrow(message)
+      } finally {
+        vi.mocked(readFile).mockImplementation(actualFs.readFile)
+      }
+      const failure = JSON.parse(
+        await readFile(join(driftReport, 'failure.json'), 'utf8'),
+      )
+      expect(failure.failedStep).toBe('prepare-browser-dockerfile')
+      expect(failure.completedSteps).toEqual([])
+      expect(failure.cleanup.compose.status).toBe('not-needed')
+      expect(failure.cleanup.image.status).toBe('passed')
+      expect(failure.cleanup.octoberImage.status).toBe('passed')
+    }
+
     process.env.RUNNER_TEST_FAIL_IMAGE = '1'
     const imageFailedReport = join(root, 'image-failed-report')
     await expect(

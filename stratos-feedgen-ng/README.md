@@ -35,8 +35,9 @@ the authority, space, and generated key, with a positive lifetime of at most
 
 Restart the receiver and Rust client together to discard old cached grants.
 The receiver can coexist with legacy OAuth/DPoP clients; the Rust client has no
-legacy transport fallback. The legacy AiaB primary PDS must be migrated to the
-pinned October source before full production-path interoperability can pass.
+legacy transport fallback. The AiaB primary PDS now uses the pinned October
+source. Deployed images must still be traced to that source revision and an
+immutable image digest; a source checkout alone does not prove what is running.
 
 ## Architecture
 
