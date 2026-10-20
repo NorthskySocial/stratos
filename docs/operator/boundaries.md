@@ -4,7 +4,15 @@ The admin **Boundaries** tab owns boundary definitions, room metadata and enroll
 
 A boundary's name and public room ID are permanent. You can edit its display name, description, room listing, whether people may join, automatic enrollment, and application access policy. A listed room appears in public discovery; closing joins does not remove existing members. An unlisted boundary can still hold members.
 
-Use the member link to open the existing Enrollments view for that boundary. The same administration flow manages user and service-account memberships. Creating a boundary does not grant a feed generator, indexer, or other service access to it.
+Open a boundary's Overview, Members or Settings without losing its context. Overview shows configured policy, not effective access or feed readiness. Public listing is not public content access. Application allowlisting does not grant membership. Creating a boundary does not grant a feed generator, indexer, or other service access to it.
+
+Members lists this boundary's enrollments, including inactive people and service accounts. Review one add/remove change at a time. The preview names the target DID and selected boundary; unrelated memberships stay unchanged. The pre-confirmation re-read is advisory, not membership revision/CAS. A race can still occur after that read. Removing membership is not a ban. Adding an inactive enrollment does not activate it. Unenrolled identities are not invited or created here.
+
+Global Enrollments remains available for service-wide operations and existing filtered links. A failed response can follow a saved change: refresh before retrying uncertain results. Local success does not guarantee immediate PDS publication; pending publication is reported separately.
+
+Settings shows all saved and proposed payload fields before writing. Confirm saves the reviewed revision and payload. Editing or a refreshed revision cancels that review. Conflicts retain the raw draft and reload saved settings for renewed review. If reload fails, saving stays disabled until Retry loading succeeds.
+
+Unsaved settings offer Stay or Discard when changing tabs, selected boundaries, catalog/global routes, browser history or signing out. Stay retains the draft and review; Discard does not save. Forced session loss immediately removes privileged UI. Drafts do not persist across refresh or closure. Lifecycle controls are separate, and dirty settings require explicit discard before continuing.
 
 ## Move from file configuration
 

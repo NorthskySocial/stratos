@@ -6,10 +6,38 @@ creates and edits boundary settings, links to members, deactivates with a clear
 confirmation, polls membership removal, and reactivates empty boundaries. It has
 no boundary deletion operation.
 
-A stale revision reloads the saved boundary while retaining the form values.
-Saving stays disabled if that reload fails; **Retry loading** recovers the
-current revision before the operator retries. Reserved boundaries keep automatic
-enrollment enabled and have no deactivation control.
+## Contextual workspace
+
+Open Overview, Members or Settings for a selected boundary. Overview reports
+configured policy, not effective access or feed readiness. Members includes
+inactive enrollments and service accounts. Global Enrollments remains available
+for service-wide administration and old filtered links.
+
+Membership review previews one add/remove delta. It revalidates before writing,
+but is advisory: membership APIs have no revision/CAS guarantee. Other boundaries
+remain unchanged. Removal is not a ban, and adding an inactive enrollment does
+not activate it. Unenrolled identities must use global enrollment tools.
+Uncertain results require fresh reads before retry; no rollback is implied.
+Local success and pending PDS publication are reported separately.
+
+Settings review shows every before/after payload field and its expected revision.
+The existing conversion trims the display name and clears client IDs for open
+application access. Editing or a refreshed revision invalidates review. Confirm
+sends that reviewed payload once; cancel sends no write. A stale revision reloads
+the saved boundary while retaining raw form values. Saving stays disabled if
+that reload fails; **Retry loading** recovers the current revision before review.
+Reserved boundaries keep automatic enrollment enabled and cannot deactivate.
+
+Unsaved settings require Stay or Discard for tabs, selected-boundary changes,
+catalog/global links, browser history and explicit sign-out. Stay retains the
+draft and review. Forced session loss removes privileged UI immediately.
+Drafts are not stored across reloads or document closure.
+
+Lifecycle controls are separate from membership actions. Discard dirty settings
+explicitly before a lifecycle operation. Deactivation removes all memberships,
+retains records/name/history, and polls progress. Reactivation starts empty.
+Settings changes invalidate earlier local boundary credentials, not credentials
+validated offline by foreign PDSs before their expiry.
 
 ## Local verification
 
@@ -17,12 +45,13 @@ Install workspace dependencies with `pnpm install --frozen-lockfile`. From this
 directory:
 
 ```sh
-pnpm exec vitest run --config vitest.config.ts
-pnpm exec stryker run
+node ../node_modules/vitest/vitest.mjs run --config vitest.config.ts
+node ../../node_modules/@stryker-mutator/core/bin/stryker.js run --mutate 'src/lib/boundary-workspace.ts' --testFiles 'tests/boundary-workspace.test.ts' --dryRunOnly > /tmp/boundary-workspace-mutation-dry.log 2>&1
+node ../../node_modules/@stryker-mutator/core/bin/stryker.js run --mutate 'src/lib/boundary-workspace.ts' --testFiles 'tests/boundary-workspace.test.ts' > /tmp/boundary-workspace-mutation.log 2>&1
 ```
 
-This Stryker config covers only the boundary form conversion, new XRPC client,
-and changed shared request-wrapper region. Its in-place run is isolated to the
+Use direct Node here because nested pnpm exec fails in this manifest-less directory.
+The scoped mutation command covers the workspace helper and selects its tests. Its in-place run is isolated to the
 admin UI directory; do not edit these files while it is running. Component
 workflows are exercised in Chromium by the browser smoke below.
 
@@ -35,7 +64,7 @@ pnpm exec vite --config admin-ui/vite.config.ts --host 127.0.0.1 --port 6174
 Then, from this directory, run:
 
 ```sh
-node tests/browser-smoke.mjs
+timeout 120 node tests/browser-smoke.mjs
 ```
 
 The browser smoke uses the webapp's Playwright dependency and installed Chromium.

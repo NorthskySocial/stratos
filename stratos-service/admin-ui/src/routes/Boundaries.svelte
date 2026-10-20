@@ -18,23 +18,19 @@
 </script>
 
 <script lang="ts">
-  import { onMount, tick } from 'svelte'
-  import { router } from 'svelte-spa-router'
+  import { getContext, onMount, tick } from 'svelte'
+  let { route }: { route: { location: string; querystring: string } } = $props()
   import BoundaryOverview from '../lib/components/boundary/BoundaryOverview.svelte'
+  import BoundarySettings from '../lib/components/boundary/BoundarySettings.svelte'
   import BoundaryMembers from '../lib/components/boundary/BoundaryMembers.svelte'
-  import { boundaryDetailHref, parseBoundarySelection } from '../lib/boundary-workspace'
+  import { BOUNDARY_NAVIGATION, boundaryDraftChanged, boundaryDetailHref, parseBoundarySelection, type BoundaryNavigation } from '../lib/boundary-workspace'
   import {
     createBoundary,
-    deactivateBoundary,
     listBoundaries,
-    reactivateBoundary,
-    updateBoundary,
     type BoundaryDetails,
   } from '../lib/api/boundary-catalog'
-  import { ApiError } from '../lib/api/client'
   import {
     boundarySettings,
-    editBoundaryDraft,
     newBoundaryDraft,
     type BoundaryDraft,
   } from '../lib/boundary-form'
@@ -50,20 +46,21 @@
   let error = $state<string | null>(null)
   let notice = $state<string | null>(null)
   let draft = $state<BoundaryDraft | null>(null)
-  let editing = $state<BoundaryDetails | null>(null)
-  let confirming = $state<BoundaryDetails | null>(null)
-  let conflict = $state(false)
-  let needsReload = $state(false)
+  let initialDraft = $state<BoundaryDraft | null>(null)
+  const navigation = getContext<BoundaryNavigation>(BOUNDARY_NAVIGATION)
+  onMount(() => navigation.register({
+    isDirty: () => draft !== null && initialDraft !== null && boundaryDraftChanged(draft, initialDraft),
+    discard: closeEditor,
+  }))
   let editorHeading = $state<HTMLHeadingElement>()
-  let confirmationHeading = $state<HTMLHeadingElement>()
   let errorNotice = $state<HTMLDivElement>()
   const pending = $derived(
     boundaries.some((item) => item.status === 'deactivating'),
   )
   const selection = $derived.by(() => {
-    router.querystring
-    return router.location === '/boundaries/detail'
-      ? parseBoundarySelection(router.querystring)
+    route.querystring
+    return route.location === '/boundaries/detail'
+      ? parseBoundarySelection(route.querystring)
       : null
   })
   const selectedBoundary = $derived(
@@ -93,78 +90,49 @@
     loading = true
     try {
       const result = await listBoundaries()
-      if (catalogRequest !== catalogGeneration) return
+      if (catalogRequest !== catalogGeneration) return boundaries
       boundaries = result.boundaries
       loaded = true
       catalogError = null
-      if (needsReload) {
-        try {
-          applyConflictSnapshot()
-        } catch (err) {
-          error = err instanceof Error ? err.message : String(err)
-        }
-      }
-      return true
+      return result.boundaries
     } catch (err) {
-      if (catalogRequest !== catalogGeneration) return
+      if (catalogRequest !== catalogGeneration) return boundaries
       catalogError = err instanceof Error ? err.message : String(err)
-      return false
+      throw err
     } finally {
       if (catalogRequest === catalogGeneration) loading = false
     }
   }
 
   $effect(() => {
-    const route = router.loc
-    if (route.location === '/boundaries/detail') {
-      route.querystring
-      void load()
-    }
+    route.location
+    route.querystring
+    void load().catch(() => {})
   })
 
   onMount(() => {
-    if (router.location !== '/boundaries/detail') void load()
     const timer = setInterval(() => {
-      if (pending && !loading && !busy) void load()
+      if (pending && !loading && !busy) void load().catch(() => {})
     }, 3_000)
-    return () => clearInterval(timer)
+    return () => { catalogGeneration++; clearInterval(timer) }
   })
 
   function clearFeedback() {
     error = null
     notice = null
-    conflict = false
-    needsReload = false
   }
 
   async function startCreate() {
     clearFeedback()
-    editing = null
-    confirming = null
     draft = newBoundaryDraft()
+    initialDraft = { ...draft }
     await tick()
     editorHeading?.focus()
-  }
-
-  async function startEdit(boundary: BoundaryDetails) {
-    clearFeedback()
-    editing = boundary
-    confirming = null
-    draft = editBoundaryDraft(boundary)
-    await tick()
-    editorHeading?.focus()
-  }
-
-  async function confirmDeactivation(boundary: BoundaryDetails) {
-    clearFeedback()
-    draft = null
-    editing = null
-    confirming = boundary
-    await tick()
-    confirmationHeading?.focus()
   }
 
   function replaceBoundary(boundary: BoundaryDetails) {
+    catalogGeneration++
+    loading = false
     boundaries = boundaries.some((item) => item.boundary === boundary.boundary)
       ? boundaries.map((item) =>
           item.boundary === boundary.boundary ? boundary : item,
@@ -172,100 +140,18 @@
       : [...boundaries, boundary]
   }
 
-  async function recover(err: unknown) {
-    error = err instanceof Error ? err.message : String(err)
-    if (!(err instanceof ApiError) || err.code !== 'BoundaryConflict') return
-    needsReload = true
-    try {
-      boundaries = (await listBoundaries()).boundaries
-      applyConflictSnapshot()
-    } catch {
-      error =
-        'This boundary changed, but its current settings could not be loaded. Your form values are still here. Retry loading before saving.'
-    }
-  }
-
-  function applyConflictSnapshot() {
-    if (editing) {
-      const current = boundaries.find(
-        (item) => item.boundary === editing?.boundary,
-      )
-      if (!current)
-        throw new Error(
-          'The boundary is no longer in the catalog. Your form values have been kept.',
-        )
-      editing = current
-    }
-    if (confirming) {
-      const current = boundaries.find(
-        (item) => item.boundary === confirming?.boundary,
-      )
-      if (!current) throw new Error('The boundary is no longer in the catalog.')
-      confirming = current
-    }
-    conflict = true
-    needsReload = false
-    error = draft
-      ? 'This boundary changed while you were working. Your form values are still here. Review the current saved settings below before trying again.'
-      : 'This boundary changed while you were working. Its current state has been reloaded. Review it before trying again.'
-  }
-
   async function save(event: SubmitEvent) {
     event.preventDefault()
-    if (!draft || busy || loading || needsReload) return
+    if (!draft || busy || loading) return
     busy = true
     clearFeedback()
     try {
-      const settings = boundarySettings(draft)
-      const res = editing
-        ? await updateBoundary(editing.boundary, editing.revision, settings)
-        : await createBoundary(draft.name.trim(), settings)
+      const res = await createBoundary(draft.name.trim(), boundarySettings(draft))
       replaceBoundary(res.boundary)
       notice = `${res.boundary.displayName} saved.`
       draft = null
-      editing = null
     } catch (err) {
-      await recover(err)
-      await tick()
-      errorNotice?.focus()
-    } finally {
-      busy = false
-    }
-  }
-
-  async function deactivate() {
-    if (!confirming || busy || loading || needsReload) return
-    busy = true
-    clearFeedback()
-    try {
-      const res = await deactivateBoundary(
-        confirming.boundary,
-        confirming.revision,
-      )
-      replaceBoundary(res.boundary)
-      confirming = null
-      notice =
-        res.boundary.status === 'inactive'
-          ? `${res.boundary.displayName} is inactive. Its members have been removed; its records and name are retained.`
-          : `Removing members from ${res.boundary.displayName}. Progress refreshes automatically.`
-    } catch (err) {
-      await recover(err)
-      await tick()
-      errorNotice?.focus()
-    } finally {
-      busy = false
-    }
-  }
-
-  async function reactivate(boundary: BoundaryDetails) {
-    busy = true
-    clearFeedback()
-    try {
-      const res = await reactivateBoundary(boundary.boundary, boundary.revision)
-      replaceBoundary(res.boundary)
-      notice = `${res.boundary.displayName} is active again. Previous members have not been re-added.`
-    } catch (err) {
-      await recover(err)
+      error = err instanceof Error ? err.message : String(err)
       await tick()
       errorNotice?.focus()
     } finally {
@@ -275,8 +161,7 @@
 
   function closeEditor() {
     draft = null
-    editing = null
-    confirming = null
+    initialDraft = null
     clearFeedback()
   }
 </script>
@@ -292,7 +177,7 @@
     {:else if !loaded && catalogError}
       <div role="alert" class="space-y-3">
         <p class="text-error">The boundary catalog could not be loaded: {catalogError}</p>
-        <Button variant="secondary" onclick={load} disabled={loading}>Retry loading</Button>
+        <Button variant="secondary" onclick={() => { void load().catch(() => {}) }} disabled={loading}>Retry loading</Button>
       </div>
     {:else if !loaded || (loading && !selectedBoundary)}
       <p class="text-muted" role="status">Loading boundary…</p>
@@ -303,10 +188,10 @@
         <a class="mt-4 inline-block pill squish px-4 py-2 text-sm no-underline" href="#/boundaries">Return to boundaries</a>
       </Card>
     {:else}
-      {#if catalogError}
+      {#if catalogError && selection.tab !== 'settings'}
         <div role="alert" class="space-y-3">
           <p class="text-error">The boundary catalog could not be refreshed: {catalogError}</p>
-          <Button variant="secondary" onclick={load} disabled={loading}>Retry loading</Button>
+          <Button variant="secondary" onclick={() => { void load().catch(() => {}) }} disabled={loading}>Retry loading</Button>
         </div>
       {/if}
       <div class="flex flex-wrap items-start justify-between gap-4">
@@ -320,7 +205,7 @@
       <nav aria-label="Boundary workspace" class="flex flex-wrap gap-2">
         <a aria-current={selection.tab === 'overview' ? 'page' : undefined} class={selection.tab === 'overview' ? 'grad-fill rounded-full px-4 py-2 text-sm font-semibold no-underline' : 'pill squish px-4 py-2 text-sm no-underline'} href={boundaryDetailHref(selectedBoundary.boundary, 'overview')}>Overview</a>
         <a aria-current={selection.tab === 'members' ? 'page' : undefined} class={selection.tab === 'members' ? 'grad-fill rounded-full px-4 py-2 text-sm font-semibold no-underline' : 'pill squish px-4 py-2 text-sm no-underline'} href={boundaryDetailHref(selectedBoundary.boundary, 'members')}>Members</a>
-        <a class="pill squish px-4 py-2 text-sm no-underline" href="#/boundaries">Settings</a>
+        <a aria-current={selection.tab === 'settings' ? 'page' : undefined} class="pill squish px-4 py-2 text-sm no-underline" href={boundaryDetailHref(selectedBoundary.boundary, 'settings')}>Settings</a>
       </nav>
       {#if selection.tab === 'members'}
         <BoundaryMembers
@@ -340,10 +225,9 @@
           }}
         />
       {:else if selection.tab === 'settings'}
-        <Card>
-          <p class="text-sm text-muted">Manage settings from the boundary catalog.</p>
-          <a class="mt-3 inline-block text-sm underline" href="#/boundaries">Return to boundaries</a>
-        </Card>
+        {#key selectedBoundary.boundary}
+          <BoundarySettings boundary={selectedBoundary} {loading} onrefresh={load} onreplace={replaceBoundary} onclose={() => { window.location.hash = '#/boundaries' }} />
+        {/key}
       {:else}
         <BoundaryOverview boundary={selectedBoundary} />
       {/if}
@@ -368,7 +252,7 @@
   {#if catalogError}
     <div class="space-y-3" role="alert">
       <p class="text-error">The boundary catalog could not be loaded: {catalogError}</p>
-      <Button variant="secondary" onclick={load} disabled={loading || busy}
+      <Button variant="secondary" onclick={() => { void load().catch(() => {}) }} disabled={loading || busy}
         >Retry loading</Button
       >
     </div>
@@ -376,7 +260,7 @@
   {#if error}
     <div bind:this={errorNotice} tabindex="-1" class="space-y-3" role="alert">
       <p class="text-error">{error}</p>
-      <Button variant="secondary" onclick={load} disabled={loading || busy}
+      <Button variant="secondary" onclick={() => { void load().catch(() => {}) }} disabled={loading || busy}
         >Retry loading</Button
       >
     </div>
@@ -392,73 +276,17 @@
         tabindex="-1"
         class="mb-2 font-display text-lg"
       >
-        {editing ? `Edit ${editing.displayName}` : 'Add boundary'}
+        Add boundary
       </h2>
-      {#if editing}<p class="mb-5 break-all text-xs text-muted">
-          {editing.boundary}
-        </p>{/if}
-      {#if conflict && editing}
-        <details class="mb-5 rounded-2xl bg-bubble p-4 text-sm" open>
-          <summary class="cursor-pointer font-semibold"
-            >Current saved settings</summary
-          >
-          <dl class="mt-3 space-y-2">
-            <div>
-              <dt class="text-muted">Display name</dt>
-              <dd>{editing.displayName}</dd>
-            </div>
-            <div>
-              <dt class="text-muted">Description</dt>
-              <dd class="whitespace-pre-wrap break-words">
-                {editing.description || 'No description'}
-              </dd>
-            </div>
-            <div>
-              <dt class="text-muted">Joining</dt>
-              <dd>
-                {editing.joinable
-                  ? 'Members may join'
-                  : 'Admin-managed membership'} · {editing.autoEnroll
-                  ? 'New enrollments added'
-                  : 'No automatic enrollment'}
-              </dd>
-            </div>
-            <div>
-              <dt class="text-muted">Directory</dt>
-              <dd>{editing.listed ? 'Publicly listed' : 'Unlisted'}</dd>
-            </div>
-            <div>
-              <dt class="text-muted">App access</dt>
-              <dd class="break-all">
-                {editing.appAccess === 'open'
-                  ? 'Any authorized app'
-                  : editing.clientIds.join(', ')}
-              </dd>
-            </div>
-          </dl>
-        </details>
-      {/if}
-      {#if editing && editing.status !== 'active'}
-        <p class="mb-5 text-sm text-muted">
-          This boundary is {editing.status}. Settings can be saved, but
-          membership stays closed until it is active again.
-        </p>
-      {/if}
       <form onsubmit={save} class="space-y-6">
         <BoundaryForm
           bind:draft
-          creating={!editing}
-          reserved={editing?.reserved ?? false}
+          creating={true}
+          reserved={false}
           disabled={busy}
         />
         <div class="flex flex-wrap gap-3">
-          <Button type="submit" disabled={busy || loading || needsReload}
-            >{busy
-              ? 'Saving…'
-              : editing
-                ? 'Save changes'
-                : 'Create boundary'}</Button
-          >
+          <Button type="submit" disabled={busy || loading}>{busy ? 'Saving…' : 'Create boundary'}</Button>
           <Button variant="secondary" onclick={closeEditor} disabled={busy}
             >Cancel</Button
           >
@@ -467,47 +295,10 @@
     </Card>
   {/if}
 
-  {#if confirming}
-    <Card testid="deactivation-confirmation">
-      <h2
-        bind:this={confirmationHeading}
-        tabindex="-1"
-        class="mb-3 font-display text-lg"
-      >
-        Deactivate {confirming.displayName}?
-      </h2>
-      <p class="text-sm">
-        All {confirming.memberCount} members will be removed. New joins and access
-        will stop. Records and the boundary name will be retained.
-      </p>
-      <p class="mt-3 text-sm text-muted">
-        You can reactivate this boundary later. Previous members will not be
-        added back automatically.
-      </p>
-      {#if confirming.status !== 'active'}<p class="mt-3 text-sm" role="status">
-          This boundary is already {confirming.status}.
-        </p>{/if}
-      <div class="mt-5 flex flex-wrap gap-3">
-        <Button
-          variant="danger"
-          disabled={busy ||
-            loading ||
-            needsReload ||
-            confirming.status !== 'active'}
-          onclick={deactivate}
-          >{busy ? 'Deactivating…' : 'Remove members and deactivate'}</Button
-        >
-        <Button variant="secondary" onclick={closeEditor} disabled={busy}
-          >Cancel</Button
-        >
-      </div>
-    </Card>
-  {/if}
-
   <Card testid="boundary-list">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h2 class="font-display text-lg">All boundaries</h2>
-      <Button variant="secondary" onclick={load} disabled={loading || busy}
+      <Button variant="secondary" onclick={() => { void load().catch(() => {}) }} disabled={loading || busy}
         >{loading ? 'Refreshing…' : 'Refresh'}</Button
       >
     </div>
@@ -580,24 +371,9 @@
                 class="text-sm text-muted underline"
                 href="#/enrollments?boundary={encodeURIComponent(boundary.boundary)}">Global enrollments ({boundary.memberCount})</a
               >
-              <Button
-                variant="secondary"
-                disabled={busy || loading || draft !== null}
-                onclick={() => startEdit(boundary)}>Edit</Button
-              >
-              {#if !boundary.reserved && boundary.status === 'active'}
-                <Button
-                  variant="secondary"
-                  disabled={busy || loading || draft !== null}
-                  onclick={() => confirmDeactivation(boundary)}
-                  >Deactivate</Button
-                >
-              {:else if !boundary.reserved && boundary.status === 'inactive'}
-                <Button
-                  variant="secondary"
-                  disabled={busy || loading || draft !== null}
-                  onclick={() => reactivate(boundary)}>Reactivate</Button
-                >
+              <a class="pill squish px-4 py-2 text-sm no-underline" href={boundaryDetailHref(boundary.boundary, 'settings')}>Edit</a>
+              {#if !boundary.reserved}
+                <a class="pill squish px-4 py-2 text-sm no-underline" href={boundaryDetailHref(boundary.boundary, 'settings')}>{boundary.status === 'inactive' ? 'Reactivate' : 'Deactivate'}</a>
               {/if}
             </div>
           </li>

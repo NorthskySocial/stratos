@@ -1,11 +1,124 @@
 import { describe, expect, it } from 'vitest'
 import {
+  createSettingsPreview,
+  settingsPreviewMatches,
   boundaryDetailHref,
+  boundaryDraftChanged,
   parseBoundarySelection,
   createMembershipPreview,
   getMembershipAvailability,
   membershipPreviewMatches,
 } from '../src/lib/boundary-workspace'
+
+describe('boundary workspace', () => {
+  const saved = {
+    name: 'pilots',
+    displayName: 'Pilots',
+    description: '',
+    listed: false,
+    joinable: false,
+    autoEnroll: false,
+    appAccess: 'open' as const,
+    clientIdsText: '',
+  }
+  const boundary = {
+    boundary: 'did:web:nerv.test/pilots',
+    roomId: 'pilots',
+    revision: 4,
+    displayName: 'Pilots',
+    description: 'Saved',
+    listed: true,
+    joinable: true,
+    autoEnroll: true,
+    appAccess: 'allowList' as const,
+    clientIds: ['https://rei.test/client'],
+    status: 'active' as const,
+    memberCount: 2,
+    reserved: false,
+    createdAt: '1995-10-04T00:00:00Z',
+    updatedAt: '1995-10-04T00:00:00Z',
+  }
+  it('captures every converted field and saved value without rebasing', () => {
+    const draft = {
+      ...saved,
+      displayName: '  Misato  ',
+      description: 'Draft',
+      clientIdsText: 'https://unused.test/client',
+    }
+    const preview = createSettingsPreview(draft, boundary)
+    expect(preview).toEqual({
+      boundary: boundary.boundary,
+      revision: 4,
+      rawDraft: JSON.stringify(draft),
+      before: {
+        displayName: 'Pilots',
+        description: 'Saved',
+        listed: true,
+        joinable: true,
+        autoEnroll: true,
+        appAccess: 'allowList',
+        clientIds: ['https://rei.test/client'],
+      },
+      settings: {
+        displayName: 'Misato',
+        description: 'Draft',
+        listed: false,
+        joinable: false,
+        autoEnroll: false,
+        appAccess: 'open',
+        clientIds: [],
+      },
+    })
+    expect(settingsPreviewMatches(preview, draft, boundary)).toBe(true)
+    expect(
+      settingsPreviewMatches(
+        preview,
+        { ...draft, displayName: 'Misato' },
+        boundary,
+      ),
+    ).toBe(false)
+    expect(
+      settingsPreviewMatches(preview, draft, { ...boundary, revision: 5 }),
+    ).toBe(false)
+    expect(
+      settingsPreviewMatches(preview, draft, {
+        ...boundary,
+        boundary: 'other',
+      }),
+    ).toBe(false)
+    draft.description = 'Later'
+    boundary.clientIds.push('https://asuka.test/client')
+    expect(preview.settings.description).toBe('Draft')
+    expect(preview.before.clientIds).toEqual(['https://rei.test/client'])
+    boundary.clientIds.pop()
+  })
+  it('uses the existing allowlist conversion', () => {
+    expect(
+      createSettingsPreview(
+        {
+          ...saved,
+          appAccess: 'allowList',
+          clientIdsText:
+            ' https://rei.test/client \n\nhttps://asuka.test/client ',
+        },
+        boundary,
+      ).settings.clientIds,
+    ).toEqual(['https://rei.test/client', 'https://asuka.test/client'])
+  })
+  it('does not guard an unchanged draft', () => {
+    expect(boundaryDraftChanged({ ...saved }, saved)).toBe(false)
+  })
+  it.each(Object.keys(saved) as (keyof typeof saved)[])(
+    'protects raw changes to %s',
+    (key) => {
+      const draft = {
+        ...saved,
+        [key]: typeof saved[key] === 'boolean' ? !saved[key] : `${saved[key]} `,
+      }
+      expect(boundaryDraftChanged(draft, saved)).toBe(true)
+    },
+  )
+})
 
 describe('boundary workspace membership contract', () => {
   const snapshot = (

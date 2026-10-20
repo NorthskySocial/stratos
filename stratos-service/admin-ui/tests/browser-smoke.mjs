@@ -132,6 +132,7 @@ try {
   let membershipFault = ''
   let authFault = ''
   let listFailure = ''
+  let settingsRefreshFault = ''
   let refreshCatalogFailure = false
   let failCatalogAfterMembershipSave = false
   let contradictoryMembership = false
@@ -443,6 +444,15 @@ try {
         if (index === 0) delayedCatalog.markStaleFulfilled()
         return
       }
+      if (settingsRefreshFault) {
+        const fault = settingsRefreshFault
+        settingsRefreshFault = ''
+        if (fault === 'network') return route.abort('failed')
+        return route.fulfill({
+          status: 500,
+          json: { error: 'Unavailable', message: 'Settings refresh failed.' },
+        })
+      }
       if (refreshCatalogFailure) {
         refreshCatalogFailure = false
         return route.fulfill({
@@ -703,7 +713,7 @@ try {
   await page.goto('http://127.0.0.1:6174/#/domains')
   await expect(page.getByTestId('boundary-row')).toHaveCount(6)
   await row('All members')
-    .getByRole('button', { name: 'Edit', exact: true })
+    .getByRole('link', { name: 'Edit', exact: true })
     .click()
   await expect(
     page.getByLabel('Add new enrollments automatically'),
@@ -751,12 +761,92 @@ try {
       },
     },
   })
-  await row('Pilots').getByRole('button', { name: 'Edit', exact: true }).click()
+  await row('Pilots').getByRole('link', { name: 'Edit', exact: true }).click()
+  await page
+    .getByLabel('Display name', { exact: true })
+    .fill('Pilot operations')
+  const beforeReviewWrites = mutations.length
+  await page
+    .getByLabel('Display name', { exact: true })
+    .fill('  Pilot operations  ')
+  await page.getByLabel('Description', { exact: true }).fill('Misato policy')
+  await page.getByLabel('Show in the public room directory').uncheck()
+  await page.getByLabel('Allow members to join').uncheck()
+  await page.getByLabel('Add new enrollments automatically').check()
+  await page.getByLabel('App access', { exact: true }).selectOption('open')
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  const expectedSettings = {
+    displayName: 'Pilot operations',
+    description: 'Misato policy',
+    listed: false,
+    joinable: false,
+    autoEnroll: true,
+    appAccess: 'open',
+    clientIds: [],
+  }
+  expect(
+    JSON.parse(await page.getByTestId('settings-after').textContent()),
+  ).toEqual(expectedSettings)
+  expect(
+    JSON.parse(await page.getByTestId('settings-before').textContent()),
+  ).toMatchObject({
+    displayName: 'Pilots',
+    appAccess: 'allowList',
+    clientIds: ['https://spike.test/client'],
+  })
+  await page.getByRole('button', { name: 'Cancel review', exact: true }).click()
+  expect(mutations).toHaveLength(beforeReviewWrites)
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await page
+    .getByLabel('Description', { exact: true })
+    .fill('Misato revised policy')
+  await expect(page.getByTestId('settings-preview')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  const retainedRefreshPreview = await page
+    .getByTestId('settings-preview')
+    .textContent()
+  for (const fault of ['500', 'network']) {
+    settingsRefreshFault = fault
+    const beforeRefreshReads = catalogRequests.length
+    await page
+      .getByRole('button', { name: 'Refresh catalog', exact: true })
+      .click()
+    await expect(page.getByRole('alert')).toContainText(
+      'catalog could not be refreshed',
+    )
+    await expect(page.getByLabel('Description', { exact: true })).toHaveValue(
+      'Misato revised policy',
+    )
+    expect(await page.getByTestId('settings-preview').textContent()).toBe(
+      retainedRefreshPreview,
+    )
+    await page
+      .getByRole('button', { name: 'Retry loading', exact: true })
+      .click()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    expect(catalogRequests).toHaveLength(beforeRefreshReads + 2)
+    await expect(page.getByLabel('Description', { exact: true })).toHaveValue(
+      'Misato revised policy',
+    )
+    expect(await page.getByTestId('settings-preview').textContent()).toBe(
+      retainedRefreshPreview,
+    )
+    expect(mutations).toHaveLength(beforeReviewWrites)
+  }
+  catalog = catalog.map((item) =>
+    item.roomId === 'pilots' ? { ...item, revision: item.revision + 1 } : item,
+  )
+  await page
+    .getByRole('button', { name: 'Refresh catalog', exact: true })
+    .click()
+  await expect(page.getByTestId('settings-preview')).toHaveCount(0)
+  expect(mutations).toHaveLength(beforeReviewWrites)
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Pilot operations')
   conflictNext = true
   await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await page.getByRole('button', { name: 'Confirm save', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText(
     'Your form values are still here',
   )
@@ -769,38 +859,66 @@ try {
       .getByTestId('boundary-editor')
       .getByText('Pilots — updated by Rei', { exact: true }),
   ).toBeVisible()
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  const writesBeforeConflictRefresh = mutations.length
+  await page
+    .getByRole('button', { name: 'Refresh catalog', exact: true })
+    .click()
   await expect(
-    page.getByRole('button', { name: 'Refresh', exact: true }),
+    page.getByRole('button', { name: 'Refresh catalog', exact: true }),
   ).toBeEnabled()
   await expect(page.getByRole('alert')).toContainText(
     'Your form values are still here',
   )
-  await row('Pilots — updated by Rei')
-    .getByRole('link', { name: 'Overview', exact: true })
-    .click()
+  await expect(page.getByLabel('Display name', { exact: true })).toHaveValue(
+    'Pilot operations',
+  )
+  expect(mutations).toHaveLength(writesBeforeConflictRefresh)
+  await page.getByRole('link', { name: 'Overview', exact: true }).click()
+  await expect(page.getByTestId('navigation-confirmation')).toBeVisible()
+  await page.getByRole('button', { name: 'Discard', exact: true }).click()
   await expect(page.getByTestId('boundary-overview')).toBeVisible()
   await expect(page.getByTestId('boundary-detail')).toContainText(
     'Pilots — updated by Rei',
   )
   await expect(page.getByRole('alert')).toHaveCount(0)
-  await page.getByRole('link', { name: '← All boundaries' }).click()
-  await row('Pilots — updated by Rei')
-    .getByRole('button', { name: 'Edit', exact: true })
-    .click()
+  expect(mutations).toHaveLength(writesBeforeConflictRefresh)
+  await page.getByRole('link', { name: 'Settings', exact: true }).click()
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Pilot operations')
+  await page
+    .getByLabel('Description', { exact: true })
+    .fill('Misato revised policy')
+  await page.getByLabel('Show in the public room directory').uncheck()
+  await page.getByLabel('Allow members to join').uncheck()
+  await page.getByLabel('Add new enrollments automatically').check()
+  await page.getByLabel('App access', { exact: true }).selectOption('open')
   await page.getByRole('button', { name: 'Save changes', exact: true }).click()
-  await expect(row('Pilot operations')).toBeVisible()
-  expect(mutations.at(-1).body.revision).toBe(2)
+  const writesBeforeDoubleConfirm = mutations.length
+  await page
+    .getByRole('button', { name: 'Confirm save', exact: true })
+    .evaluate((button) => {
+      button.click()
+      button.click()
+    })
+  await expect(page.getByRole('status')).toContainText(
+    'Pilot operations saved.',
+  )
+  await page.getByRole('link', { name: '← All boundaries' }).click()
+  expect(mutations).toHaveLength(writesBeforeDoubleConfirm + 1)
+  expect(mutations.at(-1).body.revision).toBe(3)
+  expect(mutations.at(-1).body.settings).toEqual({
+    ...expectedSettings,
+    description: 'Misato revised policy',
+  })
   await row('Pilot operations')
-    .getByRole('button', { name: 'Edit', exact: true })
+    .getByRole('link', { name: 'Edit', exact: true })
     .click()
   await page.getByLabel('Display name', { exact: true }).fill('Pilot recovery')
   conflictNext = true
   failConflictReload = true
   await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await page.getByRole('button', { name: 'Confirm save', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('could not be loaded')
   await expect(
     page.getByRole('button', { name: 'Save changes', exact: true }),
@@ -813,10 +931,52 @@ try {
     page.getByRole('button', { name: 'Save changes', exact: true }),
   ).toBeEnabled()
   await page.getByRole('button', { name: 'Save changes', exact: true }).click()
-  await expect(row('Pilot recovery')).toBeVisible()
+  await page.getByRole('button', { name: 'Confirm save', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('Pilot recovery saved.')
+  await page.getByRole('link', { name: '← All boundaries' }).click()
   await row('Pilot recovery')
-    .getByRole('button', { name: 'Deactivate', exact: true })
+    .getByRole('link', { name: 'Deactivate', exact: true })
     .click()
+  const beforeLateDraft = mutations.length
+  await page.getByRole('button', { name: 'Deactivate', exact: true }).click()
+  await expect(page.getByTestId('deactivation-confirmation')).toBeVisible()
+  await page
+    .getByLabel('Description', { exact: true })
+    .fill('Draft entered after confirmation opened')
+  await page
+    .getByRole('button', { name: 'Remove members and deactivate', exact: true })
+    .click()
+  await expect(page.getByRole('alertdialog')).toContainText(
+    'Discard unsaved settings',
+  )
+  expect(mutations).toHaveLength(beforeLateDraft)
+  await page
+    .getByRole('button', { name: 'Review settings', exact: true })
+    .click()
+  await expect(page.getByLabel('Description', { exact: true })).toHaveValue(
+    'Draft entered after confirmation opened',
+  )
+  await expect(page.getByTestId('deactivation-confirmation')).toHaveCount(0)
+  expect(mutations).toHaveLength(beforeLateDraft)
+  await page
+    .getByLabel('Description', { exact: true })
+    .fill('Unsaved lifecycle draft')
+  const beforeLifecycle = mutations.length
+  await page.getByRole('button', { name: 'Deactivate', exact: true }).click()
+  await expect(page.getByRole('alertdialog')).toContainText(
+    'Discard unsaved settings',
+  )
+  await page
+    .getByRole('button', { name: 'Review settings', exact: true })
+    .click()
+  await expect(page.getByLabel('Description', { exact: true })).toHaveValue(
+    'Unsaved lifecycle draft',
+  )
+  await page.getByRole('button', { name: 'Deactivate', exact: true }).click()
+  await page
+    .getByRole('button', { name: 'Discard settings and continue', exact: true })
+    .click()
+  expect(mutations).toHaveLength(beforeLifecycle)
   await expect(page.getByTestId('deactivation-confirmation')).toContainText(
     'All 2 members will be removed',
   )
@@ -826,18 +986,17 @@ try {
   await page
     .getByRole('button', { name: 'Remove members and deactivate', exact: true })
     .click()
-  await expect(row('Pilot recovery')).toContainText(
+  await expect(page.getByTestId('boundary-lifecycle')).toContainText(
     'Removing members: 2 remaining',
   )
   await expect(
-    row('Pilot recovery').getByText('Inactive', { exact: true }),
+    page.getByTestId('boundary-detail').getByText('Inactive', { exact: true }),
   ).toBeVisible({ timeout: 10000 })
-  await row('Pilot recovery')
-    .getByRole('button', { name: 'Reactivate', exact: true })
-    .click()
+  await page.getByRole('button', { name: 'Reactivate', exact: true }).click()
   await expect(
-    row('Pilot recovery').getByText('Active', { exact: true }),
+    page.getByTestId('boundary-detail').getByText('Active', { exact: true }),
   ).toBeVisible()
+  await page.getByRole('link', { name: '← All boundaries' }).click()
   await expect(
     row('Pilot recovery').getByRole('link', { name: 'Overview', exact: true }),
   ).toHaveAttribute(
@@ -865,7 +1024,7 @@ try {
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true)
-  await row('Bebop').getByRole('button', { name: 'Edit', exact: true }).click()
+  await row('Bebop').getByRole('link', { name: 'Edit', exact: true }).click()
   await page
     .getByTestId('boundary-editor')
     .screenshot({ path: '/tmp/boundary-ui-form-mobile.png' })
@@ -1716,6 +1875,181 @@ try {
     await focusedNode.evaluate((node) => node === document.activeElement),
   ).toBe(true)
   deferredPoll = null
+  await page.clock.resume()
+  await page.getByRole('link', { name: '← All boundaries' }).click()
+  const acceptedHash =
+    '#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2Fpilots&tab=settings'
+  const writesBeforeGuard = mutations.length
+  async function dirtyEditor() {
+    if (await page.getByTestId('boundary-settings').count()) {
+      await page.getByRole('link', { name: '← All boundaries' }).click()
+    }
+    await row('Pilot recovery')
+      .getByRole('link', { name: 'Edit', exact: true })
+      .click()
+    await page
+      .getByLabel('Display name', { exact: true })
+      .fill('  Misato draft  ')
+    await page
+      .getByRole('button', { name: 'Save changes', exact: true })
+      .click()
+    await expect(page.getByTestId('settings-preview')).toBeVisible()
+  }
+  async function retainedDraft() {
+    await expect(page.getByTestId('navigation-confirmation')).toHaveCount(1)
+    await expect
+      .poll(() => page.evaluate(() => location.hash))
+      .toBe(acceptedHash)
+    await expect(page.getByTestId('boundary-editor')).toBeVisible()
+    await page.getByRole('button', { name: 'Stay', exact: true }).click()
+    await expect(page.getByLabel('Display name', { exact: true })).toHaveValue(
+      '  Misato draft  ',
+    )
+    await expect(page.getByTestId('settings-preview')).toContainText(
+      'Misato draft',
+    )
+  }
+  await page.getByRole('link', { name: 'Health', exact: true }).click()
+  await page.reload()
+  await page.getByRole('link', { name: 'Boundaries', exact: true }).click()
+  await expect(page.getByTestId('boundaries-screen')).toBeVisible()
+  await page.evaluate(() =>
+    history.replaceState({ ...history.state, crew: { captain: 'Misato' } }, ''),
+  )
+  const entryBeforeReload = await page.evaluate(() => history.state)
+  await page.reload()
+  await expect(page.getByTestId('boundaries-screen')).toBeVisible()
+  let reloadHistoryLength = await page.evaluate(() => history.length)
+  let documentsAfterReload = 0
+  const countDocuments = (request) => {
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+      documentsAfterReload++
+    }
+  }
+  page.on('request', countDocuments)
+  await dirtyEditor()
+  reloadHistoryLength = await page.evaluate(() => history.length)
+  const reloadPreview = await page.getByTestId('settings-preview').textContent()
+  await page.evaluate(() => history.back())
+  await retainedDraft()
+  expect(await page.getByTestId('settings-preview').textContent()).toBe(
+    reloadPreview,
+  )
+  expect(await page.evaluate(() => history.state.crew)).toEqual(
+    entryBeforeReload.crew,
+  )
+  for (let traversal = 0; traversal < 3; traversal++) {
+    await page.evaluate(() => history.back())
+    await expect(page.getByTestId('navigation-confirmation')).toHaveCount(1)
+    await expect
+      .poll(() => page.evaluate(() => location.hash))
+      .toBe(acceptedHash)
+    await page.evaluate(() => history.forward())
+    await expect(page.getByTestId('navigation-confirmation')).toHaveCount(1)
+    await expect
+      .poll(() => page.evaluate(() => location.hash))
+      .toBe(acceptedHash)
+  }
+  await page.getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect
+    .poll(() => page.evaluate(() => location.hash))
+    .toBe('#/boundaries')
+  await expect(page.getByTestId('boundary-settings')).toHaveCount(0)
+  await expect(page.getByTestId('navigation-confirmation')).toHaveCount(0)
+  await page.evaluate(() => history.forward())
+  await expect(page.getByTestId('boundary-settings')).toBeVisible()
+  await expect(page.getByLabel('Display name', { exact: true })).toHaveValue(
+    'Pilot recovery',
+  )
+  await expect(page.getByTestId('navigation-confirmation')).toHaveCount(0)
+  expect(await page.evaluate(() => history.state.crew)).toEqual(
+    entryBeforeReload.crew,
+  )
+  expect(await page.evaluate(() => history.length)).toBe(reloadHistoryLength)
+  expect(documentsAfterReload).toBe(0)
+  page.off('request', countDocuments)
+  await page.evaluate(() =>
+    history.replaceState(
+      { ...history.state, crew: 'Misato', __svelte_spa_router_scrollX: 23 },
+      '',
+    ),
+  )
+  await dirtyEditor()
+  await page.getByRole('link', { name: 'Health', exact: true }).click()
+  await retainedDraft()
+  expect(await page.evaluate(() => history.state.crew)).toBe('Misato')
+  await page.getByTestId('logout').click()
+  await retainedDraft()
+  await page.getByRole('link', { name: 'Members', exact: true }).click()
+  await retainedDraft()
+  await page.getByRole('link', { name: 'Overview', exact: true }).click()
+  await retainedDraft()
+  await page.getByRole('link', { name: '← All boundaries' }).click()
+  await retainedDraft()
+
+  for (const hash of [
+    '#/boundaries?catalog=attempt',
+    '#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2Farchive&tab=settings',
+  ]) {
+    await page.evaluate((hash) => {
+      location.hash = hash
+    }, hash)
+    await retainedDraft()
+  }
+  await page.evaluate(() => history.back())
+  await expect(page.getByTestId('navigation-confirmation')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe(acceptedHash)
+  for (let traversal = 0; traversal < 3; traversal++) {
+    await page.evaluate(() => history.forward())
+    await expect
+      .poll(() => page.evaluate(() => location.hash))
+      .toBe(acceptedHash)
+    await expect(page.getByTestId('navigation-confirmation')).toHaveCount(1)
+  }
+  await retainedDraft()
+  await page.evaluate(() => history.forward())
+  await expect(page.getByTestId('navigation-confirmation')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe(acceptedHash)
+  await page.getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect(page.getByTestId('boundary-detail')).toContainText('Archive')
+  await expect(page.getByTestId('navigation-confirmation')).toHaveCount(0)
+  await page.getByRole('link', { name: '← All boundaries' }).click()
+  await dirtyEditor()
+  await page.getByRole('link', { name: 'Health', exact: true }).click()
+  await page.getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect(page.getByTestId('boundary-editor')).toHaveCount(0)
+  await page.getByRole('link', { name: 'Boundaries', exact: true }).click()
+  for (const tab of ['Members', 'Overview']) {
+    await dirtyEditor()
+    await page.getByRole('link', { name: tab, exact: true }).click()
+    await page.getByRole('button', { name: 'Discard', exact: true }).click()
+    await expect(
+      page.getByTestId(
+        tab === 'Members' ? 'boundary-members' : 'boundary-overview',
+      ),
+    ).toBeVisible()
+    await page.getByRole('link', { name: '← All boundaries' }).click()
+  }
+  await dirtyEditor()
+  await page.getByRole('link', { name: '← All boundaries' }).click()
+  await page.getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect(page.getByTestId('boundaries-screen')).toBeVisible()
+  await dirtyEditor()
+  await page.getByTestId('logout').click()
+  await page.getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect(page.getByTestId('admin-shell')).toHaveCount(0)
+  await page.reload()
+  await expect(page.getByTestId('admin-shell')).toBeVisible()
+  await dirtyEditor()
+  await page.route('**/xrpc/zone.stratos.admin.listBoundaries*', (route) =>
+    route.fulfill({ status: 401, json: { error: 'AuthRequired' } }),
+  )
+  await page
+    .getByRole('button', { name: 'Refresh catalog', exact: true })
+    .click()
+  await expect(page.getByTestId('admin-shell')).toHaveCount(0)
+  await expect(page.getByTestId('navigation-confirmation')).toHaveCount(0)
+  expect(mutations).toHaveLength(writesBeforeGuard)
   expect(errors).toEqual([])
   log(
     JSON.stringify({
@@ -1739,6 +2073,8 @@ try {
         'catalog refresh preserves mutation recovery feedback',
         'deferred detail poll preserves DOM identity and focus',
         'conflict reload failure and retry',
+        'late lifecycle draft requires explicit discard or review with zero writes',
+        'settings catalog 500 and network refresh show retry and retain draft and preview',
         'deactivate confirmation',
         'deactivating progress polling',
         'reactivate empty',
@@ -1752,6 +2088,9 @@ try {
         'inactive enrollment membership without activation',
         'membership add/remove exact payload and single-write double-click guard',
         'un-enrolled lookup does not expose enrollment creation',
+        'reload retains history stamp and unrelated state keys',
+        'reload dirty preview Back Stay preserves exact URL, draft and preview',
+        'repeated traversal and Discard reach Health without reload or history growth',
         'no browser exceptions',
       ],
     }),

@@ -1,3 +1,63 @@
+import {
+  boundarySettings,
+  editBoundaryDraft,
+  type BoundaryDraft,
+} from './boundary-form'
+import type { BoundaryDetails, BoundarySettings } from './api/boundary-catalog'
+
+export interface SettingsPreview {
+  boundary: string
+  revision: number
+  rawDraft: string
+  before: BoundarySettings
+  settings: BoundarySettings
+}
+
+export function createSettingsPreview(
+  draft: BoundaryDraft,
+  saved: BoundaryDetails,
+): SettingsPreview {
+  return {
+    boundary: saved.boundary,
+    revision: saved.revision,
+    rawDraft: JSON.stringify(draft),
+    before: boundarySettings(editBoundaryDraft(saved)),
+    settings: boundarySettings(draft),
+  }
+}
+
+export function settingsPreviewMatches(
+  preview: SettingsPreview,
+  draft: BoundaryDraft,
+  saved: BoundaryDetails,
+): boolean {
+  return (
+    preview.boundary === saved.boundary &&
+    preview.revision === saved.revision &&
+    preview.rawDraft === JSON.stringify(draft)
+  )
+}
+
+export const BOUNDARY_NAVIGATION = Symbol('boundary-navigation')
+
+export interface BoundaryNavigationGuard {
+  isDirty: () => boolean
+  discard: () => void
+}
+
+export interface BoundaryNavigation {
+  register: (guard: BoundaryNavigationGuard) => () => void
+}
+
+export function boundaryDraftChanged(
+  draft: BoundaryDraft,
+  saved: BoundaryDraft,
+): boolean {
+  return (Object.keys(saved) as (keyof BoundaryDraft)[]).some(
+    (key) => draft[key] !== saved[key],
+  )
+}
+
 export const BOUNDARY_TABS = ['overview', 'members', 'settings'] as const
 
 export type BoundaryTab = (typeof BOUNDARY_TABS)[number]
