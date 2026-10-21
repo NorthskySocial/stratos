@@ -700,8 +700,10 @@ if (args.includes('build')) {
   assert.ok(args.includes('--progress'))
   assert.ok(args.includes('plain'))
   fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, 'build ' + process.env.DOCKER_CONFIG + '\\n')
-  console.error('token=build-secret')
-  process.exit(11)
+  if (!args.includes('runner')) {
+    console.error('token=build-secret')
+    process.exit(11)
+  }
 }
 if (args.includes('ps')) {
   assert.ok(args.includes('--all'))
@@ -879,7 +881,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
     expect(upFailure.failedStep).toBe('up')
     expect(
       upFailure.completedSteps.map((step: { name: string }) => step.name),
-    ).toEqual(['install', 'create', 'check'])
+    ).toEqual(['install', 'create', 'check', 'build-tools'])
     const upDiagnostics = await readFile(dockerLog, 'utf8')
     expect(upDiagnostics).toContain('build ')
     expect(upDiagnostics).toContain('ps ')
@@ -979,6 +981,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
       'install',
       'create',
       'check',
+      'build-tools',
       'up',
       'seed',
     ])
@@ -996,7 +999,10 @@ if (args[0] === 'image' && args[1] === 'rm') {
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
-    expect(dockerConfigs).toHaveLength(18)
+    expect(dockerConfigs).toHaveLength(24)
+    expect(
+      dockerConfigs.filter((line) => line.startsWith('build ')),
+    ).toHaveLength(7)
     expect(
       dockerConfigs.filter((line) => line.startsWith('image rm ')),
     ).toHaveLength(9)

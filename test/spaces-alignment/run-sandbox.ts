@@ -761,6 +761,19 @@ export async function runSandbox(
         'Pinned sandbox domain differs from the OAuth route templates',
       )
     await runStep('check', 'deno', ['task', 'sandbox', 'check'])
+    await runStep('build-tools', 'docker', [
+      'compose',
+      '--file',
+      composeFile,
+      '--project-name',
+      projectName,
+      '--project-directory',
+      atmosphere,
+      '--progress',
+      'plain',
+      'build',
+      'runner',
+    ])
     await runStep('up', 'deno', ['task', 'sandbox', 'up', '--build'])
     await runStep('seed', 'deno', ['task', 'sandbox', 'seed'])
     failedStep = 'prepare-browser-accounts'
