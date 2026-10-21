@@ -312,6 +312,18 @@ describe('sandbox preflight', () => {
     expect(output).not.toContain('query-secret')
   })
 
+  it('retains a sanitized terminal failure when output is truncated', () => {
+    const output = sanitizeOutput(
+      `initial install output\n${'download progress\n'.repeat(600)}token=tail-secret\nfinal install failure`,
+    )
+    expect(output).toContain('initial install output')
+    expect(output).toContain('[output truncated; showing beginning and end]')
+    expect(output).toContain('token=[REDACTED]')
+    expect(output).toContain('final install failure')
+    expect(output).not.toContain('tail-secret')
+    expect(output.length).toBeLessThanOrEqual(8_000)
+  })
+
   it('treats nonzero child exits as failures', async () => {
     const cwd = await directory()
     await expect(

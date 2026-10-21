@@ -313,9 +313,13 @@ export function sanitizeOutput(output: string): string {
     .replace(/(https?:\/\/[^\s:/]+:)[^@\s]+@/gi, '$1[REDACTED]@')
     .trim()
   if (!redacted) return ''
-  return redacted.length > 8_000
-    ? `${redacted.slice(0, 8_000)}\n[output truncated]`
-    : redacted
+  const outputLimit = 8_000
+  if (redacted.length <= outputLimit) return redacted
+  const truncationMarker = '\n[output truncated; showing beginning and end]\n'
+  const retainedLength = outputLimit - truncationMarker.length
+  const beginningLength = Math.ceil(retainedLength / 2)
+  const endingLength = Math.floor(retainedLength / 2)
+  return `${redacted.slice(0, beginningLength)}${truncationMarker}${redacted.slice(-endingLength)}`
 }
 
 function logStepOutput(name: string, output: string): void {
