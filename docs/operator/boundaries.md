@@ -83,7 +83,10 @@ settings. This covers:
 - signing out
 
 **Stay** keeps the draft and the review. **Discard** leaves the page without
-saving. Neither choice writes settings.
+saving the draft.
+
+If a save is already in flight, the prompt says so, and that request can still
+finish after you leave.
 
 Forced session loss removes the admin interface immediately. Drafts are held in
 memory only and are lost on reload or when the document closes.

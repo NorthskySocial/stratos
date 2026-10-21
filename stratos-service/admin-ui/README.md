@@ -66,6 +66,8 @@ visible while a background refresh runs.
 ### Navigation guard
 
 - Stay keeps the draft and the review. Discard leaves without saving.
+- An in-flight save is not a draft. The guard reports it through `pending`, and
+  the prompt states that the request may still complete.
 - The prompt covers tabs, selected-boundary changes, catalog and global routes,
   browser Back and Forward, and explicit sign-out.
 - Forced session loss removes privileged UI immediately.
