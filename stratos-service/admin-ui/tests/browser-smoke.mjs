@@ -95,6 +95,7 @@ try {
     conflictNext = false,
     failConflictReload = false,
     drain = false
+  let deferredPoll = null
   let catalogDelay = null
   let catalogDelayIndex = 0
   const catalogRequests = []
@@ -158,6 +159,10 @@ try {
       return route.fulfill({ json: { did: 'did:plc:spike', isAdmin: true } })
     if (url.pathname === '/xrpc/zone.stratos.admin.listBoundaries') {
       catalogRequests.push(route)
+      if (deferredPoll) {
+        await deferredPoll
+        return route.fulfill({ json: { boundaries: catalog } })
+      }
       if (catalogDelay) {
         const delayedCatalog = catalogDelay
         const index = catalogDelayIndex++
@@ -474,6 +479,28 @@ try {
       .getByTestId('boundary-editor')
       .getByText('Pilots — updated by Rei', { exact: true }),
   ).toBeVisible()
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect(
+    page.getByRole('button', { name: 'Refresh', exact: true }),
+  ).toBeEnabled()
+  await expect(page.getByRole('alert')).toContainText(
+    'Your form values are still here',
+  )
+  await row('Pilots — updated by Rei')
+    .getByRole('link', { name: 'Overview', exact: true })
+    .click()
+  await expect(page.getByTestId('boundary-overview')).toBeVisible()
+  await expect(page.getByTestId('boundary-detail')).toContainText(
+    'Pilots — updated by Rei',
+  )
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await page.getByRole('link', { name: '← All boundaries' }).click()
+  await row('Pilots — updated by Rei')
+    .getByRole('button', { name: 'Edit', exact: true })
+    .click()
+  await page
+    .getByLabel('Display name', { exact: true })
+    .fill('Pilot operations')
   await page.getByRole('button', { name: 'Save changes', exact: true }).click()
   await expect(row('Pilot operations')).toBeVisible()
   expect(mutations.at(-1).body.revision).toBe(2)
@@ -587,6 +614,56 @@ try {
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true)
+  catalog = catalog.map((boundary) =>
+    boundary.roomId === 'pilots'
+      ? { ...boundary, status: 'deactivating' }
+      : boundary,
+  )
+  await page.clock.install()
+  await page.goto('http://127.0.0.1:6174/' + overviewHref)
+  await expect(page.getByTestId('boundary-overview')).toContainText(
+    'Removing members',
+  )
+  const overviewNode = await page
+    .getByTestId('boundary-overview')
+    .elementHandle()
+  const overviewLink = page.getByRole('link', { name: 'Overview', exact: true })
+  const focusedNode = await overviewLink.elementHandle()
+  await overviewLink.focus()
+  let releasePoll
+  deferredPoll = new Promise((resolve) => {
+    releasePoll = resolve
+  })
+  const beforePoll = catalogRequests.length
+  await page.clock.fastForward(3_000)
+  await expect.poll(() => catalogRequests.length).toBe(beforePoll + 1)
+  await expect(page.getByTestId('boundary-overview')).toBeVisible()
+  expect(
+    await overviewNode.evaluate(
+      (node) =>
+        node === document.querySelector('[data-testid="boundary-overview"]'),
+    ),
+  ).toBe(true)
+  expect(
+    await focusedNode.evaluate((node) => node === document.activeElement),
+  ).toBe(true)
+  catalog = catalog.map((boundary) =>
+    boundary.roomId === 'pilots'
+      ? { ...boundary, status: 'inactive', memberCount: 0 }
+      : boundary,
+  )
+  releasePoll()
+  await expect(page.getByTestId('boundary-overview')).toContainText('Inactive')
+  expect(
+    await overviewNode.evaluate(
+      (node) =>
+        node === document.querySelector('[data-testid="boundary-overview"]'),
+    ),
+  ).toBe(true)
+  expect(
+    await focusedNode.evaluate((node) => node === document.activeElement),
+  ).toBe(true)
+  deferredPoll = null
   expect(errors).toEqual([])
   log(
     JSON.stringify({
@@ -597,6 +674,9 @@ try {
         'reserved boundary constraints',
         'create exact XRPC payload',
         'conflict preserves draft and reloads revision',
+        'mutation conflict does not hide successfully loaded detail',
+        'catalog refresh preserves mutation recovery feedback',
+        'deferred detail poll preserves DOM identity and focus',
         'conflict reload failure and retry',
         'deactivate confirmation',
         'deactivating progress polling',

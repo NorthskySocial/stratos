@@ -26,6 +26,7 @@
   let loading = $state(true)
   let loaded = $state(false)
   let busy = $state(false)
+  let catalogError = $state<string | null>(null)
   let error = $state<string | null>(null)
   let notice = $state<string | null>(null)
   let draft = $state<BoundaryDraft | null>(null)
@@ -60,11 +61,17 @@
       if (generation !== loadGeneration) return
       boundaries = result.boundaries
       loaded = true
-      if (needsReload) applyConflictSnapshot()
-      else if (!conflict) error = null
+      catalogError = null
+      if (needsReload) {
+        try {
+          applyConflictSnapshot()
+        } catch (err) {
+          error = err instanceof Error ? err.message : String(err)
+        }
+      }
     } catch (err) {
       if (generation !== loadGeneration) return
-      error = err instanceof Error ? err.message : String(err)
+      catalogError = err instanceof Error ? err.message : String(err)
     } finally {
       if (generation === loadGeneration) loading = false
     }
@@ -245,12 +252,12 @@
         <p class="mt-3 text-sm text-muted">The boundary link is missing or invalid. No changes were made.</p>
         <a class="mt-4 inline-block pill squish px-4 py-2 text-sm no-underline" href="#/boundaries">Return to boundaries</a>
       </Card>
-    {:else if error}
+    {:else if catalogError}
       <div role="alert" class="space-y-3">
-        <p class="text-error">The boundary catalog could not be loaded: {error}</p>
+        <p class="text-error">The boundary catalog could not be loaded: {catalogError}</p>
         <Button variant="secondary" onclick={load} disabled={loading}>Retry loading</Button>
       </div>
-    {:else if !loaded || loading}
+    {:else if !loaded || (loading && !selectedBoundary)}
       <p class="text-muted" role="status">Loading boundary…</p>
     {:else if !selectedBoundary}
       <Card testid="boundary-not-found">
@@ -297,6 +304,14 @@
     >
   </div>
 
+  {#if catalogError}
+    <div class="space-y-3" role="alert">
+      <p class="text-error">The boundary catalog could not be loaded: {catalogError}</p>
+      <Button variant="secondary" onclick={load} disabled={loading || busy}
+        >Retry loading</Button
+      >
+    </div>
+  {/if}
   {#if error}
     <div bind:this={errorNotice} tabindex="-1" class="space-y-3" role="alert">
       <p class="text-error">{error}</p>
