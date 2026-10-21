@@ -1,7 +1,7 @@
 {
   "atmosphereInABox": {
     "url": "https://tangled.org/kandake.africa/atmosphereinabox",
-    "revision": "ecf52fac4abaa681717f2ed2ce2afc2253d1a366",
+    "revision": "6e9a39a94c102e4d42fa5868bd90b881bb5be695",
     "sha256": {
       "deno.json": "ec705f2ff10e659cb87edbd1b0ac4e9f9bf2feb2375bd2296e1b969c87cc8862",
       "deno.lock": "4381041f8eb59d531ac149b18417a390568f6bbbaa4f9db56768d30cf6486253"
