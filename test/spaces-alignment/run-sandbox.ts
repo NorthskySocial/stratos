@@ -66,6 +66,10 @@ interface Options {
   reviewReceipt?: string
 }
 
+/**
+ * Evidence that binds a sandbox run to a candidate, its base, and an optional
+ * independent review receipt.
+ */
 export interface SandboxEvidence {
   candidate: string
   base: string
@@ -77,6 +81,11 @@ interface CommandResult {
   exitCode: 0
 }
 
+/**
+ * Parse sandbox runner arguments and select review or CI evidence mode.
+ * @param args - Process arguments after the script name.
+ * @returns Validated runner options.
+ */
 export function parseOptions(args: string[]): Options {
   const names: Record<string, keyof Omit<Options, 'evidenceMode'>> = {
     '--sandbox-dir': 'sandboxDirectory',
@@ -123,6 +132,12 @@ export function parseOptions(args: string[]): Options {
     : ({ ...options, evidenceMode: 'review' } as Options)
 }
 
+/**
+ * Resolve the candidate and base commits for the selected evidence mode.
+ * @param options - Validated runner options.
+ * @param source - Candidate checkout.
+ * @returns Candidate, base, and the review receipt when one is required.
+ */
 export async function resolveEvidence(
   options: Options,
   source: string,

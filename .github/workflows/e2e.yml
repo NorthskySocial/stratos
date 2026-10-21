@@ -51,6 +51,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -96,6 +97,7 @@ jobs:
       - name: Run Atmosphere in a Box baseline
         run: |
           pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
+            --sandbox-dir "$RUNNER_TEMP/aiab-sandbox" \
             --source "$GITHUB_WORKSPACE" \
             --suite baseline \
             --ci-evidence \
