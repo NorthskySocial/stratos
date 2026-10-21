@@ -95,6 +95,7 @@ try {
     conflictNext = false,
     failConflictReload = false,
     drain = false
+  let saveGate = null
   let deferredPoll = null
   let catalogDelay = null
   let catalogDelayIndex = 0
@@ -357,6 +358,7 @@ try {
     const method = url.pathname.split('.').at(-1)
     const body = route.request().postDataJSON()
     mutations.push({ method, body, verb: route.request().method() })
+    if (saveGate) await saveGate
     if (route.request().method() !== 'POST')
       throw new Error('Expected XRPC POST')
     if (method === 'createBoundary') {
@@ -1014,6 +1016,30 @@ try {
   await expect(
     page.getByTestId('boundary-detail').getByText('Active', { exact: true }),
   ).toBeVisible()
+  await page
+    .getByLabel('Description', { exact: true })
+    .fill('Queued while leaving')
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await expect(page.getByTestId('settings-preview')).toBeVisible()
+  const writesBeforeSave = mutations.length
+  let releaseSave
+  saveGate = new Promise((resolve) => {
+    releaseSave = resolve
+  })
+  await page.getByRole('button', { name: 'Confirm save', exact: true }).click()
+  await page.getByRole('link', { name: 'Members', exact: true }).click()
+  await expect(page.getByTestId('navigation-confirmation')).toContainText(
+    'A save is still in progress.',
+  )
+  await page.getByRole('button', { name: 'Stay', exact: true }).click()
+  await expect(page.getByTestId('navigation-confirmation')).toHaveCount(0)
+  await expect(
+    page.getByRole('link', { name: 'Members', exact: true }),
+  ).toBeFocused()
+  releaseSave()
+  saveGate = null
+  await expect(page.getByRole('status')).toContainText('saved.')
+  expect(mutations).toHaveLength(writesBeforeSave + 1)
   await page.getByRole('link', { name: '← All boundaries' }).click()
   await expect(
     row('Pilot recovery').getByRole('link', { name: 'Overview', exact: true }),
@@ -2142,6 +2168,9 @@ try {
         'reload retains history stamp and unrelated state keys',
         'reload dirty preview Back Stay preserves exact URL, draft and preview',
         'repeated traversal and Discard reach Health without reload or history growth',
+        'settings save in flight warns and restores focus to the workspace',
+        'create draft keeps its guard after a Settings visit',
+        'refresh adopts boundary data and rebases a clean settings form',
         'no browser exceptions',
       ],
     }),

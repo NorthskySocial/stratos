@@ -50,7 +50,11 @@
   })
   onMount(() => {
     editorHeading?.focus()
-    const unregister = navigation.register({ isDirty: () => dirty || busy, discard: reset })
+    const unregister = navigation.register({
+      isDirty: () => dirty || busy,
+      discard: reset,
+      pending: () => busy,
+    })
     return () => { alive = false; unregister() }
   })
 

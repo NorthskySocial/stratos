@@ -128,10 +128,15 @@
     }
   }
 
-  function stay() {
+  async function stay() {
     if (restoring) return
     attempted = null
+    await tick()
     previousFocus?.focus()
+  }
+
+  function pendingWrites() {
+    return [...guards].some((entry) => entry.pending?.())
   }
 
   function discard() {
@@ -247,6 +252,9 @@
       <div tabindex="-1" role="alertdialog" aria-modal="true" aria-labelledby="discard-title" class="mb-6 rounded-2xl bg-bubble p-5" data-testid="navigation-confirmation">
         <h2 id="discard-title" class="font-display text-lg">Discard unsaved changes?</h2>
         <p class="mt-2 text-sm">Your draft has not been saved. Stay to keep it, or discard it and continue.</p>
+        {#if pendingWrites()}
+          <p class="mt-2 text-sm">A save is still in progress. It may complete after you leave.</p>
+        {/if}
         <div class="mt-4 flex gap-3">
           <button bind:this={stayButton} type="button" class="pill squish px-4 py-2" onclick={stay}>Stay</button>
           <button type="button" class="pill squish px-4 py-2" onclick={discard}>Discard</button>

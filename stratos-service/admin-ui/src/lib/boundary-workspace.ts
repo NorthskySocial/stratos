@@ -43,6 +43,7 @@ export const BOUNDARY_NAVIGATION = Symbol('boundary-navigation')
 export interface BoundaryNavigationGuard {
   isDirty: () => boolean
   discard: () => void
+  pending?: () => boolean
 }
 
 export interface BoundaryNavigation {
