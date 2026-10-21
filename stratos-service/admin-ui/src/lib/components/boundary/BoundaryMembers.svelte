@@ -28,7 +28,7 @@
 
   interface Props {
     boundary: BoundaryDetails
-    onrefresh: () => Promise<void> | void
+    onrefresh: () => Promise<boolean | BoundaryDetails[] | void> | boolean | BoundaryDetails[] | void
     uncertainMemberships: Set<string>
     pendingMemberships: Set<string>
     onMembershipPending: (did: string, boundary: string, pending: boolean) => void
@@ -262,6 +262,8 @@
     previewSnapshot = null
     const state = snapshot()
     if (targetWritePending || uncertainWrite || writePending) return
+    detailError = null
+    detailWarning = null
     if (!state) {
       detailError = 'Reload enrollment status before reviewing a membership change.'
       return
@@ -401,10 +403,11 @@
     const targetRefresh = selectedDid
       ? Promise.all([resolveEnrollments(selectedDid), getEnrollmentStatus(selectedDid)])
       : Promise.resolve(null)
-    const catalogRefresh = Promise.resolve().then(async () => {
-      await onrefresh()
-      return listBoundaries()
-    })
+    const catalogRefresh = Promise.resolve()
+      .then(() => onrefresh())
+      .then((refreshed) => {
+        if (refreshed === false) throw new Error('Catalog refresh failed.')
+      })
     const [listRefreshed, refreshedTarget, catalogResult] = await Promise.allSettled([
       listRefresh,
       targetRefresh,

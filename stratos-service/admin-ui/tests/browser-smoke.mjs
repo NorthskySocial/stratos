@@ -1093,6 +1093,9 @@ try {
   await expect(page.getByRole('alert')).toContainText(
     'catalog could not be refreshed',
   )
+  await expect(
+    page.getByText('The catalog could not be refreshed.', { exact: true }),
+  ).toBeVisible()
   expect(membershipMutations).toHaveLength(5)
   expect(enrollmentState.get('did:plc:rei').boundaries).not.toContain(
     'did:web:nerv.test/pilots',

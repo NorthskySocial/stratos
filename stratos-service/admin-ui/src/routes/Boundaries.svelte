@@ -104,9 +104,11 @@
           error = err instanceof Error ? err.message : String(err)
         }
       }
+      return true
     } catch (err) {
       if (catalogRequest !== catalogGeneration) return
       catalogError = err instanceof Error ? err.message : String(err)
+      return false
     } finally {
       if (catalogRequest === catalogGeneration) loading = false
     }
