@@ -933,6 +933,24 @@ try {
   await page.getByRole('button', { name: 'Save changes', exact: true }).click()
   await page.getByRole('button', { name: 'Confirm save', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('Pilot recovery saved.')
+  catalog = catalog.map((item) =>
+    item.roomId === 'pilots'
+      ? {
+          ...item,
+          description: 'Rei revised this policy',
+          revision: item.revision + 1,
+        }
+      : item,
+  )
+  await page
+    .getByRole('button', { name: 'Refresh catalog', exact: true })
+    .click()
+  await expect(page.getByLabel('Description', { exact: true })).toHaveValue(
+    'Rei revised this policy',
+  )
+  await expect(
+    page.getByRole('button', { name: 'Save changes', exact: true }),
+  ).toBeEnabled()
   await page.getByRole('link', { name: '← All boundaries' }).click()
   await row('Pilot recovery')
     .getByRole('link', { name: 'Deactivate', exact: true })
@@ -2053,6 +2071,26 @@ try {
   await expect(page.getByTestId('admin-shell')).toHaveCount(0)
   await page.reload()
   await expect(page.getByTestId('admin-shell')).toBeVisible()
+  await page.getByRole('link', { name: 'Boundaries', exact: true }).click()
+  await expect(page.getByTestId('boundaries-screen')).toBeVisible()
+  await page.getByTestId('create-boundary').click()
+  await expect(page.getByTestId('boundary-editor')).toBeVisible()
+  await row('Pilot recovery')
+    .getByRole('link', { name: 'Edit', exact: true })
+    .click()
+  await expect(page.getByTestId('boundary-settings')).toBeVisible()
+  await page.getByRole('link', { name: '← All boundaries' }).click()
+  await expect(page.getByTestId('boundaries-screen')).toBeVisible()
+  await expect(page.getByTestId('boundary-editor')).toBeVisible()
+  await page.getByLabel('Display name', { exact: true }).fill('Misato draft')
+  await page.getByRole('link', { name: 'Health', exact: true }).click()
+  await expect(page.getByTestId('navigation-confirmation')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Stay', exact: true }).click()
+  await expect(page.getByLabel('Display name', { exact: true })).toHaveValue(
+    'Misato draft',
+  )
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page.getByTestId('boundary-editor')).toHaveCount(0)
   await dirtyEditor()
   await page.route('**/xrpc/zone.stratos.admin.listBoundaries*', (route) =>
     route.fulfill({ status: 401, json: { error: 'AuthRequired' } }),

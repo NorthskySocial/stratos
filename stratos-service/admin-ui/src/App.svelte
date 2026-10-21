@@ -21,7 +21,7 @@
   import Enrollments from './routes/Enrollments.svelte'
   import Admins from './routes/Admins.svelte'
 
-  let guard: BoundaryNavigationGuard | null = null
+  const guards = new Set<BoundaryNavigationGuard>()
   let attempted = $state<{ href: string; index: number; source: 'link' | 'history' } | 'logout' | null>(null)
   let stayButton = $state<HTMLButtonElement>()
   let previousFocus: HTMLElement | null = null
@@ -39,15 +39,13 @@
 
   setContext<BoundaryNavigation>(BOUNDARY_NAVIGATION, {
     register(next) {
-      guard = next
-      return () => {
-        if (guard === next) guard = null
-      }
+      guards.add(next)
+      return () => { guards.delete(next) }
     },
   })
 
   function dirty() {
-    return auth.status === 'authenticated' && guard?.isDirty()
+    return auth.status === 'authenticated' && [...guards].some((entry) => entry.isDirty())
   }
 
   async function prompt(destination: NonNullable<typeof attempted>) {
@@ -139,7 +137,7 @@
   function discard() {
     if (!attempted || restoring) return
     const destination = attempted
-    guard?.discard()
+    for (const entry of guards) entry.discard()
     attempted = null
     if (destination === 'logout') void performLogout()
     else if (destination.source === 'link') {

@@ -34,9 +34,17 @@
   const navigation = getContext<BoundaryNavigation>(BOUNDARY_NAVIGATION)
   const dirty = $derived(boundaryDraftChanged(draft, initialDraft))
   $effect(() => {
-    if (boundary.revision !== editing.revision) {
+    if (boundary !== editing && !needsReload) {
+      const revisionChanged = boundary.revision !== editing.revision
+      const clean = !untrack(() => dirty)
       editing = boundary
-      preview = null
+      if (revisionChanged) {
+        preview = null
+        if (clean) {
+          draft = editBoundaryDraft(boundary)
+          initialDraft = editBoundaryDraft(boundary)
+        }
+      }
     }
     if (preview && !settingsPreviewMatches(preview, draft, editing)) preview = null
   })
