@@ -130,7 +130,7 @@ describe('client custody sandbox suite', () => {
     try {
       const results = await suite.run({
         sandboxDirectory: directory,
-        reportDirectory: directory,
+        scratchDirectory: directory,
         projectName: 'stratos-test',
         runCommand,
       })
@@ -175,7 +175,7 @@ describe('client custody sandbox suite', () => {
       await expect(
         suite.run({
           sandboxDirectory: directory,
-          reportDirectory: directory,
+          scratchDirectory: directory,
           projectName: 'stratos-test',
           runCommand: async () => output,
         }),
@@ -193,7 +193,7 @@ describe('client custody sandbox suite', () => {
       await expect(
         suite.run({
           sandboxDirectory: directory,
-          reportDirectory: directory,
+          scratchDirectory: directory,
           projectName: 'stratos-test',
           runCommand: async (_file, args) => {
             stagingDirectory = dirname(args.at(-3)!.split(':')[0])
@@ -225,7 +225,7 @@ describe('client custody sandbox suite', () => {
       await expect(
         suite.run({
           sandboxDirectory: directory,
-          reportDirectory: directory,
+          scratchDirectory: directory,
           projectName: 'stratos-test',
           runCommand,
         }),

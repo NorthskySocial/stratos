@@ -109,7 +109,7 @@ export function createProxyServer(upstreamFetch = fetch) {
             const headers = { ...req.headers }
             delete headers.connection
             const upstream = await upstreamFetch(
-              `http://feedgen-e2e-pds-spaces:3000${query.pathname}${query.search}`,
+              `http://pds-space1:3000${query.pathname}${query.search}`,
               { headers },
             )
             commitRequests += 1
@@ -161,14 +161,11 @@ export function createProxyServer(upstreamFetch = fetch) {
       for await (const chunk of req) chunks.push(chunk)
       const headers = { ...req.headers }
       delete headers.connection
-      const upstream = await upstreamFetch(
-        'http://feedgen-e2e-pds-spaces:3000' + req.url,
-        {
-          method: req.method,
-          headers,
-          body: chunks.length ? Buffer.concat(chunks) : undefined,
-        },
-      )
+      const upstream = await upstreamFetch('http://pds-space1:3000' + req.url, {
+        method: req.method,
+        headers,
+        body: chunks.length ? Buffer.concat(chunks) : undefined,
+      })
       const body = Buffer.from(await upstream.arrayBuffer())
       const responseHeaders = Object.fromEntries(upstream.headers)
       delete responseHeaders['content-length']

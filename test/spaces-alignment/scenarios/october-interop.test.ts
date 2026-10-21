@@ -31,7 +31,7 @@ const context = () => ({
   composeFile: '/private/compose.yaml',
   sandboxDirectory: '/private/sandbox',
   projectName: 'faye',
-  reportDirectory: '/private/report',
+  scratchDirectory: '/private/report',
   runCommand: vi.fn(async () => ''),
 })
 const results = (selected: typeof suite) =>

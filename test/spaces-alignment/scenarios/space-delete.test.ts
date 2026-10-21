@@ -61,7 +61,7 @@ it('adds the candidate webapp with private OAuth routing', async () => {
   const assertions = await suite.run({
     sandboxDirectory,
     projectName: 'space-delete-test',
-    reportDirectory: sandboxDirectory,
+    scratchDirectory: sandboxDirectory,
     runCommand,
   })
   validateAssertions(suite, assertions)
@@ -102,7 +102,7 @@ it('adds the candidate webapp with private OAuth routing', async () => {
           },
           {
             name: 'VITE_ATPROTO_HANDLE_RESOLVER',
-            source: { kind: 'host-url', host: 'spaces-pds-e2e' },
+            source: { kind: 'host-url', host: 'pds-space1' },
           },
           {
             name: 'VITE_PLC_DIRECTORY',
@@ -182,7 +182,7 @@ it('adds the candidate webapp with private OAuth routing', async () => {
     '--project-directory',
     sandboxDirectory,
     'restart',
-    'feedgen-e2e-pds-spaces',
+    'pds-space1',
   ])
   expect(runCommand.mock.calls[4]?.[1]).toEqual(['task', 'sandbox', 'up'])
   expect(runCommand.mock.calls[5]?.[1]).toEqual(
@@ -227,7 +227,7 @@ it('rejects an empty browser receipt', async () => {
     suite.run({
       sandboxDirectory,
       projectName: 'space-delete-test',
-      reportDirectory: sandboxDirectory,
+      scratchDirectory: sandboxDirectory,
       runCommand,
     }),
   ).rejects.toThrow('Browser returned no space-delete receipt')
@@ -247,7 +247,7 @@ it('rejects malformed browser assertions', async () => {
     suite.run({
       sandboxDirectory,
       projectName: 'space-delete-test',
-      reportDirectory: sandboxDirectory,
+      scratchDirectory: sandboxDirectory,
       runCommand,
     }),
   ).rejects.toThrow('Browser returned an invalid space-delete receipt')
@@ -264,7 +264,7 @@ it('does not register the app twice', async () => {
     suite.run({
       sandboxDirectory,
       projectName: 'space-delete-test',
-      reportDirectory: sandboxDirectory,
+      scratchDirectory: sandboxDirectory,
       runCommand,
     }),
   ).rejects.toThrow('Disposable sandbox already has the space-delete app')

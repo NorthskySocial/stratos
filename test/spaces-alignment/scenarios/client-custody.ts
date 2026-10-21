@@ -82,7 +82,7 @@ export const suite: ScenarioSuite = {
     const esbuild = fromTsx('esbuild') as {
       build(options: Record<string, unknown>): Promise<void>
     }
-    const bundle = join(context.reportDirectory, 'client-custody-sdk.mjs')
+    const bundle = join(context.scratchDirectory, 'client-custody-sdk.mjs')
     const source = resolve(
       fileURLToPath(
         new URL('../../../stratos-client/src/index.ts', import.meta.url),

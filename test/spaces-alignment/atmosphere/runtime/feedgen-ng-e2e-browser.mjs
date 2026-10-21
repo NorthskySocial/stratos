@@ -100,6 +100,10 @@ async function clickEnabled(locator) {
 async function completeOAuth(page, account, origin) {
   const deadline = Date.now() + 60_000
   let leftClubhouse = false
+  page.on('framenavigated', (frame) => {
+    if (frame !== page.mainFrame()) return
+    if (new URL(frame.url()).origin !== origin) leftClubhouse = true
+  })
   while (Date.now() < deadline) {
     const current = new URL(page.url())
     if (current.origin !== origin) leftClubhouse = true
@@ -318,15 +322,15 @@ async function requestJson(url, options, context) {
 }
 
 async function provisionAccount(domain) {
-  const pdsUrl = `https://spaces-pds-e2e.${domain}`
+  const pdsUrl = `https://pds-space1.${domain}`
   const name = process.env.FEEDGEN_E2E_PDS_ACCOUNT || 'motoko'
   assert.match(name, /^(motoko|batou)$/)
-  const username = `${name}.spaces-pds-e2e.${domain}`
+  const username = `${name}.pds-space1.${domain}`
   const password = (
     await readFile('/run/sandbox-secrets/browser-password', 'utf8')
   ).trim()
   const adminPassword = (
-    await readFile('/run/sandbox-secrets/pds-admin-password', 'utf8')
+    await readFile('/sandbox-state/pds-admin-password', 'utf8')
   ).trim()
   const sessionBody = { identifier: username, password }
   const session = await fetch(
@@ -368,7 +372,7 @@ async function provisionAccount(domain) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        email: `${name}@spaces-pds-e2e.${domain}`,
+        email: `${name}@pds-space1.${domain}`,
         handle: username,
         password,
         inviteCode: invitation.code,
@@ -411,7 +415,7 @@ const pdsSessions = new Map()
 function accountPdsUrl(domain, account) {
   const host = account.username.includes(`.pds1.${domain}`)
     ? `pds1.${domain}`
-    : `spaces-pds-e2e.${domain}`
+    : `pds-space1.${domain}`
   return `https://${host}`
 }
 
@@ -484,13 +488,13 @@ async function assertSpaceLexicon(domain, authorityDid, account) {
   assert.equal(enrollment.custody, 'pds', 'PDS did not grant the space scope')
   assert.equal(
     new URL(enrollment.repoHost).origin,
-    `https://spaces-pds-e2e.${domain}`,
+    `https://pds-space1.${domain}`,
     'PDS grant did not select the space repo host',
   )
 }
 
 async function assertSpaceBlob(domain, account, authorityDid, roomId) {
-  const pdsUrl = `https://spaces-pds-e2e.${domain}`
+  const pdsUrl = `https://pds-space1.${domain}`
   const session = await pdsSession(domain, account)
   const payload = Buffer.from(`Private space blob ${randomUUID()}`)
   const upload = await requestJson(

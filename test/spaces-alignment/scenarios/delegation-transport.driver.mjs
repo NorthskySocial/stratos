@@ -44,7 +44,7 @@ const domain = process.env.SANDBOX_DOMAIN
 check(/^[a-z0-9.-]+$/.test(domain ?? ''), 'sandbox-domain')
 const clubhouse = 'https://clubhouse-e2e.atmosbox.internal'
 const authority = 'https://stratos-e2e.atmosbox.internal'
-const pds = `https://spaces-pds-e2e.${domain}`
+const pds = `https://pds-space1.${domain}`
 const authorityDid = `did:web:stratos-e2e.${domain}`
 const space = `at://${authorityDid}/space/zone.stratos.space.feed/general`
 const mintUrl = `${authority}/xrpc/zone.stratos.space.getSpaceCredential`
@@ -151,7 +151,7 @@ async function loadAuth(page) {
 }
 
 async function oauthSession(page) {
-  const username = `motoko.spaces-pds-e2e.${domain}`
+  const username = `motoko.pds-space1.${domain}`
   const password = (
     await readFile('/run/sandbox-secrets/browser-password', 'utf8')
   ).trim()

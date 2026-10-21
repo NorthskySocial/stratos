@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
+  cp,
   mkdir,
   mkdtemp,
   readFile,
@@ -14,6 +15,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   command,
+  enforceReportContents,
   ensureSeparatePaths,
   parseOptions,
   pinnedCheckout,
@@ -252,46 +254,6 @@ describe('sandbox preflight', () => {
     await expect(pinnedCheckout(repo, pin)).rejects.toThrow()
   })
 
-  it('clones the verified AiaB bundle without reaching its remote', async () => {
-    const root = await directory()
-    const checkout = await pinnedCheckout(join(root, 'checkout'), {
-      url: 'https://invalid.example.test/atmosphereinabox',
-      revision: 'ecf52fac4abaa681717f2ed2ce2afc2253d1a366',
-      bundle: 'fixtures/atmosphereinabox.bundle',
-      bundleSha256:
-        '4fc54ec830230ec319d16b4b8ec6d07dc1bc67bd6612601361afc0a3502dea16',
-      sha256: {
-        'deno.json':
-          'ec705f2ff10e659cb87edbd1b0ac4e9f9bf2feb2375bd2296e1b969c87cc8862',
-        'deno.lock':
-          '4381041f8eb59d531ac149b18417a390568f6bbbaa4f9db56768d30cf6486253',
-      },
-    })
-    expect(git(checkout.checkout, 'rev-parse', 'HEAD')).toBe(
-      'ecf52fac4abaa681717f2ed2ce2afc2253d1a366',
-    )
-    await rm(checkout.acquisition!, { recursive: true, force: true })
-    await expect(
-      pinnedCheckout(join(root, 'invalid'), {
-        url: 'https://invalid.example.test/atmosphereinabox',
-        revision: 'ecf52fac4abaa681717f2ed2ce2afc2253d1a366',
-        bundle: '../fixtures/atmosphereinabox.bundle',
-        bundleSha256:
-          '4fc54ec830230ec319d16b4b8ec6d07dc1bc67bd6612601361afc0a3502dea16',
-        sha256: {},
-      }),
-    ).rejects.toThrow('inside the harness directory')
-    await expect(
-      pinnedCheckout(join(root, 'tampered'), {
-        url: 'https://invalid.example.test/atmosphereinabox',
-        revision: 'ecf52fac4abaa681717f2ed2ce2afc2253d1a366',
-        bundle: 'fixtures/atmosphereinabox.bundle',
-        bundleSha256: '0'.repeat(64),
-        sha256: {},
-      }),
-    ).rejects.toThrow('bundle hash differs')
-  })
-
   it('redacts command secrets before logging', () => {
     const output = sanitizeOutput(
       [
@@ -310,6 +272,51 @@ describe('sandbox preflight', () => {
     expect(output).not.toContain('json-secret')
     expect(output).not.toContain('bearer-secret')
     expect(output).not.toContain('query-secret')
+  })
+
+  it('clears metadata, non-metadata files, directories and links from reports', async () => {
+    const root = await directory()
+    await writeFile(join(root, 'receipt.json'), 'receipt secret')
+    await writeFile(join(root, 'failure.json'), 'failure secret')
+    await writeFile(join(root, 'candidate-source.tar'), 'canary')
+    await mkdir(join(root, 'browser-assets'))
+    await enforceReportContents(root)
+    expect(await readdir(root)).toEqual([])
+  })
+
+  it.each([
+    'adminPassword',
+    'ADMIN_PASSWORD',
+    'PDS_ADMIN_PASSWORD',
+    'accessJwt',
+    'access_jwt',
+    'refreshJwt',
+    'REFRESH_JWT',
+    'privateKey',
+    'private_key',
+    'd',
+    'p',
+    'q',
+    'dp',
+    'dq',
+    'qi',
+    'k',
+  ])('redacts %s canaries', (key) => {
+    expect(
+      sanitizeOutput(JSON.stringify({ [key]: 'canary secret' })),
+    ).not.toContain('canary')
+    expect(sanitizeOutput(`${key}=canary`)).not.toContain('canary')
+  })
+
+  it('redacts Basic credentials and PEM private keys', () => {
+    expect(sanitizeOutput('Authorization: Basic canary')).not.toContain(
+      'canary',
+    )
+    expect(
+      sanitizeOutput(
+        '-----BEGIN EC PRIVATE KEY-----\ncanary\n-----END EC PRIVATE KEY-----',
+      ),
+    ).not.toContain('canary')
   })
 
   it('retains a sanitized terminal failure when output is truncated', () => {
@@ -361,43 +368,10 @@ describe('sandbox preflight', () => {
         return [{ id: 'browser-pass', status: 'passed' }]
       } }\n`,
     )
-    await writeFile(
-      join(
-        candidateRepo,
-        'test/spaces-alignment/templates/feedgen-ng-e2e.yaml',
-      ),
-      await readFile(
-        new URL('./templates/feedgen-ng-e2e.yaml', import.meta.url),
-        'utf8',
-      ),
-    )
-    await writeFile(
-      join(
-        candidateRepo,
-        'test/spaces-alignment/templates/feedgen-ng-e2e-browser.mjs',
-      ),
-      'console.log("browser-ok")\n',
-    )
-    await writeFile(
-      join(
-        candidateRepo,
-        'test/spaces-alignment/templates/feedgen-ng-e2e.definition.json',
-      ),
-      '{"services":[{"service":"feedgen-e2e-browser","secretFiles":[]}],"secrets":[],"volumeInit":[],"routes":[{"hostname":"stratos-e2e.atmosbox.internal"}]}\n',
-    )
-    await writeFile(
-      join(
-        candidateRepo,
-        'test/spaces-alignment/templates/feedgen-ng-e2e-clubhouse.yaml',
-      ),
-      'services: {}\n',
-    )
-    await writeFile(
-      join(
-        candidateRepo,
-        'test/spaces-alignment/templates/feedgen-ng-e2e-clubhouse.definition.json',
-      ),
-      '{"buildArguments":[{"name":"VITE_PLC_DIRECTORY"}]}\n',
+    await cp(
+      new URL('./atmosphere', import.meta.url),
+      join(candidateRepo, 'test/spaces-alignment/atmosphere'),
+      { recursive: true },
     )
     await writeFile(
       join(
@@ -495,35 +469,8 @@ describe('sandbox preflight', () => {
       join(sandboxRepo, 'stacks/feedgen-ng-e2e-browser.Dockerfile'),
       'FROM browser\nCOPY runtime/feedgen-ng-e2e-browser.mjs /runner/driver.mjs\n',
     )
-    await writeFile(
-      join(sandboxRepo, 'stacks/components.json'),
-      JSON.stringify([
-        {
-          id: 'feedgen-ng-e2e',
-          file: 'stacks/feedgen-ng-e2e.yaml',
-          application: 'feedgen-ng-e2e',
-          definition: 'stacks/feedgen-ng-e2e.definition.json',
-        },
-        {
-          id: 'feedgen-ng-e2e-clubhouse',
-          file: 'stacks/feedgen-ng-e2e-clubhouse.yaml',
-          application: 'feedgen-ng-e2e-clubhouse',
-          definition: 'stacks/feedgen-ng-e2e-clubhouse.definition.json',
-        },
-      ]),
-    )
-    await writeFile(
-      join(sandboxRepo, 'stacks/presets.json'),
-      JSON.stringify({
-        'feedgen-ng-e2e': {
-          applications: [
-            'lexicon-authority',
-            'feedgen-ng-e2e',
-            'feedgen-ng-e2e-clubhouse',
-          ],
-        },
-      }),
-    )
+    await writeFile(join(sandboxRepo, 'stacks/components.json'), '[]')
+    await writeFile(join(sandboxRepo, 'stacks/presets.json'), '{}')
     git(sandboxRepo, 'add', '.')
     git(sandboxRepo, 'commit', '-qm', 'Pin sandbox')
     const revision = git(sandboxRepo, 'rev-parse', 'HEAD')
@@ -598,9 +545,9 @@ describe('sandbox preflight', () => {
       ...[...accountLabels, 'rustfaye', 'rustedward'].map(
         (name) => `https://${name}.october-pds-e2e.atmosbox.test`,
       ),
-      'https://spaces-pds-e2e.atmosbox.test',
-      'https://motoko.spaces-pds-e2e.atmosbox.test',
-      'https://batou.spaces-pds-e2e.atmosbox.test',
+      'https://pds-space1.atmosbox.test',
+      'https://motoko.pds-space1.atmosbox.test',
+      'https://batou.pds-space1.atmosbox.test',
       'https://pds1.atmosbox.test',
       'https://user1.pds1.atmosbox.test',
       'https://user2.pds1.atmosbox.test',
@@ -617,36 +564,37 @@ if (args[0] !== 'task') process.exit(2)
 if (args[1] === 'install') assert.deepEqual(args, ['task', 'install'])
 if (args[1] === 'sandbox' && args[2] === 'create') {
   assert.deepEqual(args.slice(0, -3), [
-    'task', 'sandbox', 'create', '--pds', '1', '--users-per-pds', '2',
+    'task', 'sandbox', 'create', '--pds', '1', '--pds-space', '1', '--users-per-pds', '2',
     '--preset', 'feedgen-ng-e2e', '--project'
   ])
   assert.match(args.at(-3), /^stratos-[0-9a-f]{12}$/)
   assert.deepEqual(args.slice(-2), ['--subnet', 'auto'])
   const components = JSON.parse(fs.readFileSync('stacks/components.json', 'utf8'))
   assert.ok(components.some(component => component.application === 'feedgen-ng-e2e'))
-  assert.ok(components.some(component => component.application === 'feedgen-ng-e2e-clubhouse'))
+  assert.equal(components.filter(component => component.application === 'feedgen-ng-e2e').length, 1)
   const presets = JSON.parse(fs.readFileSync('stacks/presets.json', 'utf8'))
   assert.deepEqual(presets['feedgen-ng-e2e'], {
-    applications: ['lexicon-authority', 'feedgen-ng-e2e', 'feedgen-ng-e2e-clubhouse']
+    applications: ['lexicon-authority', 'feedgen-ng-e2e']
   })
 }
 if (args[1] === 'sandbox' && args[2] === 'check') assert.deepEqual(args, ['task', 'sandbox', 'check'])
 if (args[1] === 'sandbox' && args[2] === 'check') {
   const stack = fs.readFileSync('compose.yaml', 'utf8')
-  assert.equal(stack, fs.readFileSync('stacks/feedgen-ng-e2e.yaml', 'utf8'))
+  assert.ok(stack.startsWith('# orchestration fixture'))
   const browserDockerfile = fs.readFileSync('stacks/feedgen-ng-e2e-browser.Dockerfile', 'utf8')
   if (browserDockerfile.includes('AS builder')) {
     assert.ok(stack.includes('context: ../stratos\\n      dockerfile: ../atmosphereinabox/stacks/feedgen-ng-e2e-browser.Dockerfile'))
     assert.equal(stack.includes("STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS: '10'"), process.env.RUNNER_TEST_COMBINED !== '1')
     assert.ok(browserDockerfile.includes('RUN cargo build --locked --release --package stratos-feedgen-ng --example space_interop_probe'))
     assert.ok(browserDockerfile.includes('COPY --from=builder /workspace/target/release/examples/space_interop_probe /usr/local/bin/space_interop_probe'))
-    assert.ok(browserDockerfile.includes('COPY test/spaces-alignment/templates/feedgen-ng-e2e-browser.mjs /runner/driver.mjs'))
+    assert.ok(browserDockerfile.includes('COPY --chown=pwuser:pwuser test/spaces-alignment/atmosphere/runtime/feedgen-ng-e2e-browser.mjs /runner/feedgen-ng-e2e-browser.mjs'))
     const definition = JSON.parse(fs.readFileSync('stacks/feedgen-ng-e2e.definition.json', 'utf8'))
     assert.ok(definition.services.find(s => s.service === 'feedgen-e2e-browser').secretFiles.some(s => s.name === 'probe-service-signing-key' && s.secret === 'feedgen-e2e-signing-key' && s.uid === 1001 && s.gid === 1001))
   } else {
     assert.ok(!stack.includes('STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS'))
   }
-  assert.ok(stack.includes('image: sha256:${'a'.repeat(64)}'))
+  assert.ok(stack.includes('pds-space1:'))
+  assert.ok(!stack.includes('SPACES_PDS_IMAGE_ID'))
   const origins = stack.match(/IDENTITY_PRIVATE_ORIGINS: (.+)/)[1].split(',')
   if (stack.includes('feedgen-e2e-pds-october:')) {
     assert.deepEqual(origins, ${JSON.stringify(octoberOrigins)})
@@ -667,8 +615,11 @@ if (process.env.RUNNER_TEST_FAIL_STEP && process.argv.includes(process.env.RUNNE
   process.exit(7)
 }
 if (process.argv.includes('create')) {
-  fs.copyFileSync('stacks/feedgen-ng-e2e.yaml', 'compose.yaml')
-  fs.mkdirSync('state', { recursive: true })
+  fs.writeFileSync('compose.yaml', '# orchestration fixture' + String.fromCharCode(10) + fs.readFileSync('stacks/feedgen-ng-e2e.yaml', 'utf8'))
+  fs.mkdirSync('state/apps/feedgen-ng-e2e/secret-files', { recursive: true })
+  fs.writeFileSync('state/pds-space1.secrets.json', JSON.stringify({adminPassword: 'synthetic-admin'}))
+  for (const secret of ['feedgen-e2e-browser-password', 'feedgen-e2e-signing-key', 'feedgen-e2e-storage-key'])
+    fs.writeFileSync('state/apps/feedgen-ng-e2e/secret-files/' + secret, 'synthetic-secret')
   fs.writeFileSync('state/manifest.json', JSON.stringify({
     domain: process.env.RUNNER_TEST_WRONG_DOMAIN ? 'atmosbox.internal' : 'atmosbox.test'
   }))
@@ -716,12 +667,21 @@ if (args.includes('run')) {
   const composeFile = args[args.indexOf('--file') + 1]
   assert.ok(composeFile.endsWith('/compose.yaml'))
   assert.ok(fs.existsSync(composeFile))
-  assert.equal(fs.statSync('state/browser-accounts.json').mode & 0o777, 0o444)
-  const accounts = JSON.parse(fs.readFileSync('state/browser-accounts.json', 'utf8')).accounts
-  assert.equal(Object.keys(accounts).length, 2)
-  assert.equal(accounts['user1.pds1.atmosbox.test'].password, 'synthetic-one')
-  assert.equal(accounts['user2.pds1.atmosbox.test'].password, 'synthetic-two')
-  console.log('browser-ok')
+  if (!fs.existsSync('state/browser-accounts.json')) {
+    assert.equal(args[args.indexOf('--user') + 1], '0:0')
+    assert.equal(args[args.indexOf('--entrypoint') + 1], 'sh')
+    assert.equal(args[args.indexOf('--entrypoint') + 2], 'pds-space1')
+    assert.equal(args.at(-2), '-ec')
+    assert.match(args.at(-1), /chown 1000:1000 \\/data/)
+    fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, 'initialize-space-pds ' + process.env.DOCKER_CONFIG + '\\n')
+  } else {
+    assert.equal(fs.statSync('state/browser-accounts.json').mode & 0o777, 0o444)
+    const accounts = JSON.parse(fs.readFileSync('state/browser-accounts.json', 'utf8')).accounts
+    assert.equal(Object.keys(accounts).length, 2)
+    assert.equal(accounts['user1.pds1.atmosbox.test'].password, 'synthetic-one')
+    assert.equal(accounts['user2.pds1.atmosbox.test'].password, 'synthetic-two')
+    console.log('browser-ok')
+  }
 }
 if (args.includes('down')) {
   const composeFile = args[args.indexOf('--file') + 1]
@@ -741,6 +701,9 @@ if (args[0] === 'image' && args[1] === 'rm') {
 `
     await writeFile(join(bin, 'deno'), fakeDeno, { mode: 0o755 })
     await writeFile(join(bin, 'docker'), fakeDocker, { mode: 0o755 })
+    await writeFile(join(bin, 'selinuxenabled'), '#!/bin/sh\nexit 1\n', {
+      mode: 0o755,
+    })
     process.env.PATH = `${bin}:${originalPath}`
     process.env.COMPOSE_FILE = '/unsafe/inherited-compose.yaml'
     process.env.COMPOSE_PROJECT_NAME = 'unsafe-project'
@@ -830,21 +793,6 @@ if (args[0] === 'image' && args[1] === 'rm') {
       'Report directory already exists',
     )
     await rm(reportDirectory, { recursive: true })
-    process.env.RUNNER_TEST_FAIL_PDS_BUILD = '1'
-    const pdsFailedReport = join(root, 'pds-failed-report')
-    await expect(
-      runSandbox(
-        { ...options, reportDirectory: pdsFailedReport },
-        dependencies,
-      ),
-    ).rejects.toThrow('docker build failed with exit 17')
-    const pdsFailure = JSON.parse(
-      await readFile(join(pdsFailedReport, 'failure.json'), 'utf8'),
-    )
-    expect(pdsFailure.completedSteps).toEqual([])
-    expect(pdsFailure.failedStep).toBe('build-pds')
-    expect(pdsFailure.error).toBe('docker build failed with exit 17')
-    delete process.env.RUNNER_TEST_FAIL_PDS_BUILD
     process.env.RUNNER_TEST_FAIL_STEP = 'install'
     const failedReport = join(root, 'failed-report')
     await expect(
@@ -853,6 +801,9 @@ if (args[0] === 'image' && args[1] === 'rm') {
     const failure = JSON.parse(
       await readFile(join(failedReport, 'failure.json'), 'utf8'),
     )
+    expect(await readdir(failedReport)).toEqual(['failure.json'])
+    expect(failure.error).toBe('Sandbox gate failed')
+    expect(JSON.stringify(failure)).not.toContain('synthetic-secret')
     expect(failure.completedSteps).toEqual([])
     expect(failure.failedStep).toBe('install')
     delete process.env.RUNNER_TEST_FAIL_STEP
@@ -941,6 +892,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
     const receipt = JSON.parse(
       await readFile(join(reportDirectory, 'receipt.json'), 'utf8'),
     )
+    expect(await readdir(reportDirectory)).toEqual(['receipt.json'])
     expect(receipt.candidateSha).toBe(candidateSha)
     expect(receipt.baseSha).toBe(baseSha)
     expect(receipt.atmosphereSourceSha).toBe(revision)
@@ -952,7 +904,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
       receipt.templateHashes['runtime/feedgen-ng-e2e-browser.mjs'],
     ).toMatch(/^[0-9a-f]{64}$/)
     expect(
-      receipt.templateHashes['stacks/feedgen-ng-e2e-clubhouse.definition.json'],
+      receipt.templateHashes['stacks/feedgen-ng-e2e.definition.json'],
     ).toMatch(/^[0-9a-f]{64}$/)
     expect(receipt.reviews).toEqual({
       standards: {
@@ -988,24 +940,22 @@ if (args[0] === 'image' && args[1] === 'rm') {
     expect(receipt.cleanup).toEqual({
       status: 'passed',
       compose: { status: 'passed', exitCode: 0 },
-      image: {
-        status: 'passed',
-        exitCode: 0,
-        tag: 'stratos-spaces-pds-00000000-0000-0000-0000-000000000000:local',
-      },
     })
     expect(receipt.evidenceMode).toBe('review')
     expect(receipt.reviews).toBeDefined()
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
-    expect(dockerConfigs).toHaveLength(24)
+    expect(dockerConfigs).toHaveLength(21)
+    expect(
+      dockerConfigs.filter((line) => line.startsWith('initialize-space-pds ')),
+    ).toHaveLength(6)
     expect(
       dockerConfigs.filter((line) => line.startsWith('build ')),
     ).toHaveLength(7)
     expect(
       dockerConfigs.filter((line) => line.startsWith('image rm ')),
-    ).toHaveLength(9)
+    ).toHaveLength(0)
     process.env.GITHUB_ACTIONS = 'true'
     process.env.GITHUB_BASE_SHA = baseSha
     await runSandbox(
@@ -1072,16 +1022,11 @@ if (args[0] === 'image' && args[1] === 'rm') {
           },
         },
       )
-      expect(dualBuilds).toEqual([
-        sourcePins.spacesPds.revision,
-        octoberPin.revision,
-      ])
+      expect(dualBuilds).toEqual([octoberPin.revision])
       const dual = JSON.parse(
         await readFile(join(dualReport, 'receipt.json'), 'utf8'),
       )
-      expect(dual.pdsServices.primary.build.sourceSha).toBe(
-        sourcePins.spacesPds.revision,
-      )
+      expect(dual.pdsServices.primary).toEqual({ service: 'pds-space1' })
       expect(dual.pdsServices.october.build.sourceSha).toBe(octoberPin.revision)
       expect(dual.pdsServices.october.build.imageId).toBe(
         `sha256:${'c'.repeat(64)}`,
@@ -1091,7 +1036,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
         'baseline',
         selectedSuite,
       ])
-      expect(dual.cleanup.image.status).toBe('passed')
+      expect(dual.cleanup.image).toBeUndefined()
       expect(dual.cleanup.compose.status).toBe('passed')
       expect(dual.templateHashes['stacks/october-pds.yaml']).toMatch(
         /^[0-9a-f]{64}$/,
@@ -1155,7 +1100,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
       expect(failure.failedStep).toBe('prepare-browser-dockerfile')
       expect(failure.completedSteps).toEqual([])
       expect(failure.cleanup.compose.status).toBe('not-needed')
-      expect(failure.cleanup.image.status).toBe('passed')
+      expect(failure.cleanup.image).toBeUndefined()
       expect(failure.cleanup.octoberImage.status).toBe('passed')
     }
 
@@ -1163,16 +1108,27 @@ if (args[0] === 'image' && args[1] === 'rm') {
     const imageFailedReport = join(root, 'image-failed-report')
     await expect(
       runSandbox(
-        { ...options, reportDirectory: imageFailedReport },
-        dependencies,
+        {
+          ...options,
+          suite: 'standard-credential-transport',
+          reportDirectory: imageFailedReport,
+        },
+        {
+          ...dependencies,
+          sourcePins: { ...sourcePins, octoberSpacesPds: octoberPin },
+          buildPds: async () => ({
+            ...(await dependencies.buildPds()),
+            imageId: `sha256:${'c'.repeat(64)}`,
+          }),
+        },
       ),
-    ).rejects.toThrow('PDS image cleanup failed: docker image exited 8')
+    ).rejects.toThrow('PDS image cleanup failed: Cleanup command failed')
     const imageFailure = JSON.parse(
       await readFile(join(imageFailedReport, 'failure.json'), 'utf8'),
     )
-    expect(imageFailure.cleanup.image).toEqual({
+    expect(imageFailure.cleanup.octoberImage).toEqual({
       status: 'failed',
-      error: 'docker image exited 8',
+      error: 'Cleanup command failed',
       tag: 'stratos-spaces-pds-00000000-0000-0000-0000-000000000000:local',
     })
     delete process.env.RUNNER_TEST_FAIL_IMAGE
@@ -1183,20 +1139,16 @@ if (args[0] === 'image' && args[1] === 'rm') {
         { ...options, reportDirectory: cleanupFailedReport },
         dependencies,
       ),
-    ).rejects.toThrow('Sandbox cleanup failed: docker compose exited 9')
+    ).rejects.toThrow('Sandbox cleanup failed: Cleanup command failed')
     const cleanupFailure = JSON.parse(
       await readFile(join(cleanupFailedReport, 'failure.json'), 'utf8'),
     )
     expect(cleanupFailure.cleanup.status).toBe('failed')
     expect(cleanupFailure.cleanup.compose).toEqual({
       status: 'failed',
-      error: 'docker compose exited 9',
+      error: 'Cleanup command failed',
     })
-    expect(cleanupFailure.cleanup.image).toEqual({
-      status: 'passed',
-      exitCode: 0,
-      tag: 'stratos-spaces-pds-00000000-0000-0000-0000-000000000000:local',
-    })
+    expect(cleanupFailure.cleanup.image).toBeUndefined()
     expect(cleanupFailure.cleanup.recoveryComposeFile).toMatch(/compose\.yaml$/)
     expect(await stat(cleanupFailure.cleanup.recoveryComposeFile)).toBeDefined()
     await rm(dirname(dirname(cleanupFailure.cleanup.recoveryComposeFile)), {
@@ -1242,36 +1194,6 @@ if (args[0] === 'image' && args[1] === 'rm') {
         },
       ),
     ).rejects.toThrow('October PDS image placeholder is missing')
-    await writeFile(
-      join(
-        candidateRepo,
-        'test/spaces-alignment/templates/feedgen-ng-e2e.yaml',
-      ),
-      'services: {}\n',
-    )
-    git(candidateRepo, 'add', '.')
-    git(candidateRepo, 'commit', '-qm', 'Remove PDS image placeholder')
-    const withoutPlaceholder = git(candidateRepo, 'rev-parse', 'HEAD')
-    await writeFile(
-      reviewReceipt,
-      JSON.stringify({
-        ...review,
-        candidateSha: withoutPlaceholder,
-        reviews: {
-          standards: {
-            ...review.reviews.standards,
-            reviewedSha: withoutPlaceholder,
-          },
-          spec: { ...review.reviews.spec, reviewedSha: withoutPlaceholder },
-        },
-      }),
-    )
-    await expect(
-      runSandbox(
-        { ...options, reportDirectory: join(root, 'missing-image-report') },
-        dependencies,
-      ),
-    ).rejects.toThrow('PDS image placeholder is missing')
     expect(await temporaryAiaBSources()).toEqual(aiabSources)
   })
 })

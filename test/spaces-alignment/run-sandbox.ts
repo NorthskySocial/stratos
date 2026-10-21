@@ -37,13 +37,10 @@ interface SourcePins {
   atmosphereInABox: {
     url: string
     revision: string
-    bundle?: string
-    bundleSha256?: string
     sha256: Record<string, string>
     archivePaths: string[]
   }
   octoberSpacesPds?: PdsSourcePin
-  spacesPds: PdsSourcePin
 }
 
 const sources = JSON.parse(
@@ -54,7 +51,7 @@ export interface RunnerDependencies {
   sourcePins?: SourcePins
   runnerSource?: string
   buildPds?: (
-    pin: SourcePins['spacesPds'],
+    pin: PdsSourcePin,
     reportDirectory: string,
   ) => Promise<PdsBuildReceipt>
 }
@@ -238,8 +235,6 @@ export async function pinnedCheckout(
   pin: {
     url: string
     revision: string
-    bundle?: string
-    bundleSha256?: string
     sha256: Record<string, string>
   },
 ): Promise<PinnedCheckout> {
@@ -249,16 +244,12 @@ export async function pinnedCheckout(
     if (!existsSync(checkout)) {
       acquisition = await mkdtemp(join(tmpdir(), 'stratos-aiab-source-'))
       checkout = join(acquisition, 'atmosphereinabox')
-      const source = pin.bundle
-        ? await validatedBundle(pin.bundle, pin.bundleSha256)
-        : pin.url
       await command(
         'git',
-        ['clone', '--no-checkout', source, checkout],
+        ['clone', '--no-checkout', pin.url, checkout],
         acquisition,
       )
-      if (!pin.bundle)
-        await command('git', ['fetch', 'origin', pin.revision], checkout)
+      await command('git', ['fetch', 'origin', pin.revision], checkout)
       await command('git', ['checkout', '--detach', pin.revision], checkout)
     }
     if (
@@ -280,30 +271,22 @@ export async function pinnedCheckout(
   }
 }
 
-async function validatedBundle(
-  bundle: string,
-  expectedHash: string | undefined,
-): Promise<string> {
-  if (!expectedHash || !/^[0-9a-f]{64}$/.test(expectedHash))
-    throw new Error('AiaB bundle hash is invalid')
-  if (isAbsolute(bundle)) throw new Error('AiaB bundle path must be relative')
-  const path = resolve(harnessDirectory, bundle)
-  if (relative(harnessDirectory, path).startsWith('..'))
-    throw new Error('AiaB bundle must be inside the harness directory')
-  if (!existsSync(path)) throw new Error('AiaB bundle is missing')
-  if ((await sha256File(path)) !== expectedHash)
-    throw new Error('AiaB bundle hash differs')
-  return path
-}
-
 export function sanitizeOutput(output: string): string {
   const redacted = output
+    .replace(
+      /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
+      '[REDACTED]',
+    )
+    .replace(
+      /(["']?(?:[a-z0-9]*[_-])*(?:admin[_-]?password|password|access[_-]?jwt|refresh[_-]?jwt|private[_-]?key|client[_-]?secret|signing[_-]?key|d|p|q|dp|dq|qi|k)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,}\]]+)/gi,
+      '$1[REDACTED]',
+    )
     .replace(
       /(^|[\s,{])((?:["']?(?:password|pass|token|secret|api[_-]?key)["']?)\s*[:=]\s*["']?)[^"'\s,}\]]+/gim,
       '$1$2[REDACTED]',
     )
     .replace(
-      /((?:proxy-)?authorization\s*:\s*bearer\s+)[^\s,]+/gi,
+      /((?:proxy-)?authorization["']?\s*[:=]\s*["']?(?:bearer|basic|dpop)\s+)[^\s,]+/gi,
       '$1[REDACTED]',
     )
     .replace(
@@ -414,7 +397,6 @@ async function exportSources(
   source: string,
   candidate: string,
   workspace: string,
-  reportDirectory: string,
   pins: SourcePins,
 ): Promise<{
   atmosphereFingerprint: string
@@ -424,7 +406,7 @@ async function exportSources(
   const stratos = join(workspace, 'stratos')
   await mkdir(atmosphere)
   await mkdir(stratos)
-  const archive = join(reportDirectory, 'aiab-source.tar')
+  const archive = join(workspace, 'aiab-source.tar')
   await command(
     'git',
     [
@@ -439,40 +421,87 @@ async function exportSources(
   )
   const atmosphereFingerprint = await sha256File(archive)
   await command('tar', ['-xf', archive, '-C', atmosphere], workspace)
-  const candidateArchive = join(reportDirectory, 'candidate-source.tar')
+  const candidateArchive = join(workspace, 'candidate-source.tar')
   await command(
     'git',
     ['archive', '--format=tar', '--output', candidateArchive, candidate],
     source,
   )
   await command('tar', ['-xf', candidateArchive, '-C', stratos], workspace)
-  const templateFiles = [
-    ['templates/feedgen-ng-e2e.yaml', 'stacks/feedgen-ng-e2e.yaml'],
-    [
-      'templates/feedgen-ng-e2e.definition.json',
-      'stacks/feedgen-ng-e2e.definition.json',
-    ],
-    [
-      'templates/feedgen-ng-e2e-browser.mjs',
-      'runtime/feedgen-ng-e2e-browser.mjs',
-    ],
-    [
-      'templates/feedgen-ng-e2e-clubhouse.yaml',
-      'stacks/feedgen-ng-e2e-clubhouse.yaml',
-    ],
-    [
-      'templates/feedgen-ng-e2e-clubhouse.definition.json',
-      'stacks/feedgen-ng-e2e-clubhouse.definition.json',
-    ],
-  ]
-  const templateHashes: Record<string, string> = {}
-  for (const [from, to] of templateFiles) {
-    const sourcePath = join(stratos, 'test/spaces-alignment', from)
-    const destination = join(atmosphere, to)
-    await copyFile(sourcePath, destination)
-    templateHashes[to] = await sha256File(sourcePath)
-  }
+  const templateHashes = await installAtmosphereAssets(
+    join(stratos, 'test/spaces-alignment/atmosphere'),
+    atmosphere,
+  )
   return { atmosphereFingerprint, templateHashes }
+}
+
+const feedgenComponent = {
+  id: 'feedgen-ng-e2e',
+  file: 'stacks/feedgen-ng-e2e.yaml',
+  application: 'feedgen-ng-e2e',
+  definition: 'stacks/feedgen-ng-e2e.definition.json',
+}
+
+const feedgenPreset = {
+  applications: ['lexicon-authority', 'feedgen-ng-e2e'],
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+export async function installAtmosphereAssets(
+  assets: string,
+  atmosphere: string,
+): Promise<Record<string, string>> {
+  const componentsPath = join(atmosphere, 'stacks/components.json')
+  const componentsData = JSON.parse(
+    await readFile(componentsPath, 'utf8'),
+  ) as unknown
+  if (!Array.isArray(componentsData) || !componentsData.every(isRecord))
+    throw new Error('AiaB components registry has an invalid shape')
+  const existingComponent = componentsData.find(
+    (component) => component.id === feedgenComponent.id,
+  )
+  if (existingComponent && !sameJson(existingComponent, feedgenComponent))
+    throw new Error('AiaB component ID conflicts with feedgen-ng-e2e')
+
+  const presetsPath = join(atmosphere, 'stacks/presets.json')
+  const presetsData = JSON.parse(await readFile(presetsPath, 'utf8')) as unknown
+  if (!isRecord(presetsData))
+    throw new Error('AiaB presets registry has an invalid shape')
+  const existingPreset = presetsData['feedgen-ng-e2e']
+  if (existingPreset !== undefined && !sameJson(existingPreset, feedgenPreset))
+    throw new Error('AiaB preset ID conflicts with feedgen-ng-e2e')
+
+  const hashes: Record<string, string> = {}
+  for (const path of [
+    'stacks/lexicon-authority.definition.json',
+    'examples/lexicon-fixtures/zone.stratos.space.feed.json',
+    'stacks/feedgen-ng-e2e.yaml',
+    'stacks/feedgen-ng-e2e.definition.json',
+    'stacks/feedgen-ng-e2e-browser.Dockerfile',
+    'stacks/feedgen-ng-local/identity.Dockerfile',
+    'stacks/feedgen-ng-local/feedgen-identity.mjs',
+    'runtime/feedgen-ng-e2e-browser.mjs',
+  ]) {
+    const destination = join(atmosphere, path)
+    await mkdir(dirname(destination), { recursive: true })
+    await copyFile(join(assets, path), destination)
+    hashes[path] = await sha256File(destination)
+  }
+  if (!existingComponent) componentsData.push(feedgenComponent)
+  if (existingPreset === undefined)
+    presetsData['feedgen-ng-e2e'] = feedgenPreset
+  await writeFile(componentsPath, JSON.stringify(componentsData))
+  await writeFile(presetsPath, JSON.stringify(presetsData))
+  hashes['stacks/components.json'] = await sha256File(componentsPath)
+  hashes['stacks/presets.json'] = await sha256File(presetsPath)
+  return hashes
 }
 
 function sandboxEnvironment(dockerConfig: string): NodeJS.ProcessEnv {
@@ -484,6 +513,63 @@ function sandboxEnvironment(dockerConfig: string): NodeJS.ProcessEnv {
     ),
     DOCKER_CONFIG: dockerConfig,
     COMPOSE_PROFILES: '',
+  }
+}
+
+async function labelContainerFiles(
+  paths: string[],
+  cwd: string,
+): Promise<void> {
+  try {
+    await command('selinuxenabled', [], cwd)
+  } catch {
+    return
+  }
+  await command('chcon', ['-t', 'container_file_t', ...paths], cwd)
+}
+
+async function initializeSpacePdsData(
+  composeFile: string,
+  projectName: string,
+  atmosphere: string,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  try {
+    await command(
+      'docker',
+      [
+        'compose',
+        '--file',
+        composeFile,
+        '--project-name',
+        projectName,
+        '--project-directory',
+        atmosphere,
+        'run',
+        '--rm',
+        '--no-deps',
+        '--user',
+        '0:0',
+        '--entrypoint',
+        'sh',
+        'pds-space1',
+        '-ec',
+        `owner=$(stat -c %u:%g /data)
+test "$owner" = 0:0
+contents=$(find /data -mindepth 1 -maxdepth 1 -print -quit)
+test -z "$contents"
+chmod 0750 /data
+chown 1000:1000 /data`,
+      ],
+      atmosphere,
+      env,
+    )
+  } catch (error) {
+    throw new Error(
+      `Space PDS volume initialization failed: ${
+        error instanceof Error ? error.message : 'unknown error'
+      }`,
+    )
   }
 }
 
@@ -536,7 +622,6 @@ export async function runSandbox(
   const childEnvironment = sandboxEnvironment(dockerConfig)
   const steps: Array<{ name: string; exitCode: 0 }> = []
   const results: Record<string, AssertionResult[]> = {}
-  let pds: PdsBuildReceipt | undefined
   let octoberPds: PdsBuildReceipt | undefined
   let failedStep = 'docker-config'
   let gateError: unknown
@@ -576,19 +661,13 @@ export async function runSandbox(
       source,
       candidate,
       workspace,
-      options.reportDirectory,
       pins,
-    )
-    failedStep = 'build-pds'
-    pds = await (dependencies.buildPds ?? buildAlphaPds)(
-      pins.spacesPds,
-      options.reportDirectory,
     )
     if (suites.some((suite) => octoberPdsSuites.has(suite.id))) {
       failedStep = 'build-october-pds'
       if (!pins.octoberSpacesPds)
         throw new Error('October PDS source pin is missing')
-      const octoberReport = join(options.reportDirectory, 'october-pds')
+      const octoberReport = join(workspace, 'october-pds')
       await mkdir(octoberReport, { mode: 0o700 })
       octoberPds = await (dependencies.buildPds ?? buildAlphaPds)(
         pins.octoberSpacesPds,
@@ -625,7 +704,7 @@ export async function runSandbox(
         builder +
           original.replace(
             driverPath,
-            'test/spaces-alignment/templates/feedgen-ng-e2e-browser.mjs',
+            'test/spaces-alignment/atmosphere/runtime/feedgen-ng-e2e-browser.mjs',
           ) +
           '\nCOPY --from=builder /workspace/target/release/examples/space_interop_probe /usr/local/bin/space_interop_probe\n',
       )
@@ -641,12 +720,7 @@ export async function runSandbox(
           'context: ../stratos\n      dockerfile: ../atmosphereinabox/stacks/feedgen-ng-e2e-browser.Dockerfile',
         )
       : sourceStack
-    if (!stack.includes('${SPACES_PDS_IMAGE_ID}'))
-      throw new Error('PDS image placeholder is missing')
-    await writeFile(
-      stackPath,
-      stack.replace('${SPACES_PDS_IMAGE_ID}', pds.imageId),
-    )
+    await writeFile(stackPath, stack)
 
     if (octoberPds) {
       const octoberImageId = octoberPds.imageId
@@ -742,6 +816,8 @@ export async function runSandbox(
       'create',
       '--pds',
       '1',
+      '--pds-space',
+      '1',
       '--users-per-pds',
       '2',
       '--preset',
@@ -760,6 +836,32 @@ export async function runSandbox(
       throw new Error(
         'Pinned sandbox domain differs from the OAuth route templates',
       )
+    const pdsSecrets = JSON.parse(
+      await readFile(join(atmosphere, 'state/pds-space1.secrets.json'), 'utf8'),
+    ) as { adminPassword: string }
+    await writeFile(
+      join(atmosphere, 'state/browser-pds-admin'),
+      pdsSecrets.adminPassword,
+      { mode: 0o444 },
+    )
+    const applicationSecrets = [
+      'feedgen-e2e-browser-password',
+      'feedgen-e2e-signing-key',
+      'feedgen-e2e-storage-key',
+    ].map((secret) =>
+      join(atmosphere, 'state/apps/feedgen-ng-e2e/secret-files', secret),
+    )
+    await labelContainerFiles(
+      [join(atmosphere, 'state/browser-pds-admin'), ...applicationSecrets],
+      atmosphere,
+    )
+    failedStep = 'initialize-space-pds'
+    await initializeSpacePdsData(
+      composeFile,
+      projectName,
+      atmosphere,
+      childEnvironment,
+    )
     await runStep('check', 'deno', ['task', 'sandbox', 'check'])
     await runStep('build-tools', 'docker', [
       'compose',
@@ -812,13 +914,14 @@ export async function runSandbox(
         sandboxDirectory: atmosphere,
         composeFile,
         projectName,
-        reportDirectory: options.reportDirectory,
+        scratchDirectory: workspace,
         runCommand: async (file, args, cwd) =>
           (await command(file, args, cwd, childEnvironment)).output,
       })
       validateAssertions(suite, results[suite.id])
     }
     failedStep = 'write-receipt'
+    await enforceReportContents(options.reportDirectory)
     summary = {
       candidateSha: candidate,
       baseSha: base,
@@ -832,10 +935,9 @@ export async function runSandbox(
       atmosphereSourceSha: pins.atmosphereInABox.revision,
       atmosphereFingerprint,
       templateHashes,
-      pds,
       octoberPds,
       pdsServices: {
-        primary: { service: 'feedgen-e2e-pds-spaces', build: pds },
+        primary: { service: 'pds-space1' },
         ...(octoberPds
           ? {
               october: {
@@ -882,7 +984,7 @@ export async function runSandbox(
       )
       cleanup.compose = { status: 'passed', exitCode: 0 }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = 'Cleanup command failed'
       cleanup.compose = { status: 'failed', error: message }
       cleanup.recoveryComposeFile = composeFile
       cleanupErrors.push(new Error(`Sandbox cleanup failed: ${message}`))
@@ -890,10 +992,7 @@ export async function runSandbox(
   } else {
     cleanup.compose = { status: 'not-needed' }
   }
-  for (const [imageKind, image] of [
-    ['image', pds],
-    ['octoberImage', octoberPds],
-  ] as const) {
+  for (const [imageKind, image] of [['octoberImage', octoberPds]] as const) {
     if (image) {
       try {
         await command(
@@ -908,7 +1007,7 @@ export async function runSandbox(
           tag: image.imageTag,
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = 'Cleanup command failed'
         cleanup[imageKind] = {
           status: 'failed',
           error: message,
@@ -916,8 +1015,6 @@ export async function runSandbox(
         }
         cleanupErrors.push(new Error(`PDS image cleanup failed: ${message}`))
       }
-    } else {
-      if (imageKind === 'image') cleanup[imageKind] = { status: 'not-needed' }
     }
   }
   cleanup.status = cleanupErrors.length === 0 ? 'passed' : 'failed'
@@ -934,6 +1031,7 @@ export async function runSandbox(
       : cleanupError
   }
 
+  await enforceReportContents(options.reportDirectory)
   if (gateError) {
     await writeFile(
       join(options.reportDirectory, 'failure.json'),
@@ -945,8 +1043,7 @@ export async function runSandbox(
           projectName,
           failedStep,
           completedSteps: steps,
-          error:
-            gateError instanceof Error ? gateError.message : String(gateError),
+          error: 'Sandbox gate failed',
           cleanup,
         },
         null,
@@ -969,6 +1066,11 @@ export async function runSandbox(
   await rm(workspace, { recursive: true, force: true })
   if (sandbox.acquisition)
     await rm(sandbox.acquisition, { recursive: true, force: true })
+}
+
+export async function enforceReportContents(directory: string): Promise<void> {
+  for (const entry of await readdir(directory, { withFileTypes: true }))
+    await rm(join(directory, entry.name), { recursive: true })
 }
 
 function summarizeReviews(
@@ -995,7 +1097,7 @@ if (
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
   runSandbox(parseOptions(process.argv.slice(2))).catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error))
+    console.error('Sandbox gate failed')
     process.exitCode = 1
   })
 }

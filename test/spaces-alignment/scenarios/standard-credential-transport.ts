@@ -28,9 +28,9 @@ const clubhousePackage = new URL(
   import.meta.url,
 )
 export async function prepareBrowserRunner(
-  reportDirectory: string,
+  scratchDirectory: string,
 ): Promise<string> {
-  const browserAssets = join(reportDirectory, 'standard-browser-assets')
+  const browserAssets = join(scratchDirectory, 'standard-browser-assets')
   await rm(browserAssets, { recursive: true, force: true })
   await mkdir(browserAssets)
   await chmod(browserAssets, 0o755)
@@ -74,7 +74,7 @@ export const suite: ScenarioSuite = {
   id: 'standard-credential-transport',
   requiredAssertions,
   async run(context): Promise<AssertionResult[]> {
-    const browserAssets = await prepareBrowserRunner(context.reportDirectory)
+    const browserAssets = await prepareBrowserRunner(context.scratchDirectory)
     const output = await context.runCommand(
       'docker',
       [

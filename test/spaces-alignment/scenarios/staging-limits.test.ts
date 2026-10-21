@@ -31,7 +31,7 @@ describe('staging limits sandbox receipt', () => {
       sandboxDirectory: '/tmp/disposable-sandbox',
       composeFile: '/tmp/disposable-sandbox/compose.yaml',
       projectName: 'disposable',
-      reportDirectory: '/tmp/disposable-report',
+      scratchDirectory: '/tmp/disposable-report',
       runCommand,
     })
     expect(results).toEqual(assertions)
@@ -67,7 +67,7 @@ describe('staging limits sandbox receipt', () => {
           sandboxDirectory: '/tmp/disposable-sandbox',
           composeFile: '/tmp/disposable-sandbox/compose.yaml',
           projectName: 'disposable',
-          reportDirectory: '/tmp/disposable-report',
+          scratchDirectory: '/tmp/disposable-report',
           runCommand: vi.fn().mockResolvedValue(output),
         }),
       ).rejects.toThrow(error)

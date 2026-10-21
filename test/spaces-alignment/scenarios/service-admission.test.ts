@@ -10,7 +10,7 @@ function context(
   return {
     sandboxDirectory: '/tmp/private-sandbox',
     projectName: 'stratos-private-test',
-    reportDirectory: '/tmp/private-report',
+    scratchDirectory: '/tmp/private-report',
     runCommand: async (file, args, cwd) => {
       expect(file).toBe('docker')
       expect(cwd).toBe('/tmp/private-sandbox')
