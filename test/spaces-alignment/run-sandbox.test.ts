@@ -684,6 +684,13 @@ assert.ok(process.env.DOCKER_CONFIG?.startsWith(process.env.RUNNER_TEST_DOCKER_C
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 assert.equal(process.env.COMPOSE_FILE, undefined)
 assert.equal(process.env.COMPOSE_PROJECT_NAME, undefined)
+if (args.includes('build')) {
+  assert.ok(args.includes('--progress'))
+  assert.ok(args.includes('plain'))
+  fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, 'build ' + process.env.DOCKER_CONFIG + '\\n')
+  console.error('token=build-secret')
+  process.exit(11)
+}
 if (args.includes('ps')) {
   assert.ok(args.includes('--all'))
   assert.ok(args.includes('--format'))
@@ -861,7 +868,10 @@ if (args[0] === 'image' && args[1] === 'rm') {
     expect(
       upFailure.completedSteps.map((step: { name: string }) => step.name),
     ).toEqual(['install', 'create', 'check'])
-    expect(await readFile(dockerLog, 'utf8')).toContain('ps ')
+    const upDiagnostics = await readFile(dockerLog, 'utf8')
+    expect(upDiagnostics).toContain('build ')
+    expect(upDiagnostics).toContain('ps ')
+    expect(JSON.stringify(upFailure)).not.toContain('build-secret')
     expect(JSON.stringify(upFailure)).not.toContain('Exited (1)')
     delete process.env.RUNNER_TEST_FAIL_STEP
     process.env.RUNNER_TEST_WRONG_DOMAIN = '1'
@@ -974,7 +984,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
-    expect(dockerConfigs).toHaveLength(17)
+    expect(dockerConfigs).toHaveLength(18)
     expect(
       dockerConfigs.filter((line) => line.startsWith('image rm ')),
     ).toHaveLength(9)

@@ -323,13 +323,13 @@ function logStepOutput(name: string, output: string): void {
   if (sanitized) console.log(`AiaB [${name}] output:\n${sanitized}`)
 }
 
-async function logFailedUpStatus(
+async function logFailedUpDiagnostics(
   composeFile: string,
   projectName: string,
   atmosphere: string,
   env: NodeJS.ProcessEnv,
 ): Promise<void> {
-  const args = [
+  const composeArgs = [
     'compose',
     '--file',
     composeFile,
@@ -337,21 +337,22 @@ async function logFailedUpStatus(
     projectName,
     '--project-directory',
     atmosphere,
-    'ps',
-    '--all',
-    '--format',
-    'json',
   ]
-  console.log(`AiaB [up:status]: docker ${args.join(' ')}`)
-  try {
-    logStepOutput(
-      'up:status',
-      (await command('docker', args, atmosphere, env)).output,
-    )
-  } catch (error) {
-    if (error instanceof SandboxCommandFailure) {
-      logStepOutput('up:status', error.stdout)
-      logStepOutput('up:status', error.stderr)
+  for (const [name, args] of [
+    ['up:build', [...composeArgs, 'build', '--progress', 'plain']],
+    ['up:status', [...composeArgs, 'ps', '--all', '--format', 'json']],
+  ]) {
+    console.log(`AiaB [${name}]: docker ${args.join(' ')}`)
+    try {
+      logStepOutput(
+        name,
+        (await command('docker', args, atmosphere, env)).output,
+      )
+    } catch (error) {
+      if (error instanceof SandboxCommandFailure) {
+        logStepOutput(name, error.stdout)
+        logStepOutput(name, error.stderr)
+      }
     }
   }
 }
@@ -554,7 +555,7 @@ export async function runSandbox(
         logStepOutput(name, error.stderr)
       }
       if (name === 'up' && existsSync(composeFile))
-        await logFailedUpStatus(
+        await logFailedUpDiagnostics(
           composeFile,
           projectName,
           atmosphere,
