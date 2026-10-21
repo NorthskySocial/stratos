@@ -37,6 +37,8 @@ interface SourcePins {
   atmosphereInABox: {
     url: string
     revision: string
+    bundle?: string
+    bundleSha256?: string
     sha256: Record<string, string>
     archivePaths: string[]
   }
@@ -188,6 +190,16 @@ export async function resolveEvidence(
   return { candidate, base, receipt }
 }
 
+export class SandboxCommandFailure extends Error {
+  constructor(
+    readonly stdout: string,
+    readonly stderr: string,
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
 export async function command(
   file: string,
   args: string[],
@@ -201,9 +213,14 @@ export async function command(
     })
     return { output, exitCode: 0 }
   } catch (error) {
-    throw new Error(
-      `${file} ${args[0] ?? ''} exited ${error instanceof CommandFailure ? (error.code ?? 'unknown') : 'unknown'}`,
-    )
+    if (error instanceof CommandFailure) {
+      throw new SandboxCommandFailure(
+        error.stdout,
+        error.stderr,
+        `${file} ${args[0] ?? ''} exited ${error.code ?? 'unknown'}`,
+      )
+    }
+    throw new Error(`${file} ${args[0] ?? ''} exited unknown`)
   }
 }
 
@@ -218,7 +235,13 @@ export interface PinnedCheckout {
 
 export async function pinnedCheckout(
   path: string,
-  pin: { url: string; revision: string; sha256: Record<string, string> },
+  pin: {
+    url: string
+    revision: string
+    bundle?: string
+    bundleSha256?: string
+    sha256: Record<string, string>
+  },
 ): Promise<PinnedCheckout> {
   let checkout = path
   let acquisition: string | undefined
@@ -226,12 +249,16 @@ export async function pinnedCheckout(
     if (!existsSync(checkout)) {
       acquisition = await mkdtemp(join(tmpdir(), 'stratos-aiab-source-'))
       checkout = join(acquisition, 'atmosphereinabox')
+      const source = pin.bundle
+        ? await validatedBundle(pin.bundle, pin.bundleSha256)
+        : pin.url
       await command(
         'git',
-        ['clone', '--no-checkout', pin.url, checkout],
+        ['clone', '--no-checkout', source, checkout],
         acquisition,
       )
-      await command('git', ['fetch', 'origin', pin.revision], checkout)
+      if (!pin.bundle)
+        await command('git', ['fetch', 'origin', pin.revision], checkout)
       await command('git', ['checkout', '--detach', pin.revision], checkout)
     }
     if (
@@ -251,6 +278,49 @@ export async function pinnedCheckout(
     if (acquisition) await rm(acquisition, { recursive: true, force: true })
     throw error
   }
+}
+
+async function validatedBundle(
+  bundle: string,
+  expectedHash: string | undefined,
+): Promise<string> {
+  if (!expectedHash || !/^[0-9a-f]{64}$/.test(expectedHash))
+    throw new Error('AiaB bundle hash is invalid')
+  if (isAbsolute(bundle)) throw new Error('AiaB bundle path must be relative')
+  const path = resolve(harnessDirectory, bundle)
+  if (relative(harnessDirectory, path).startsWith('..'))
+    throw new Error('AiaB bundle must be inside the harness directory')
+  if (!existsSync(path)) throw new Error('AiaB bundle is missing')
+  if ((await sha256File(path)) !== expectedHash)
+    throw new Error('AiaB bundle hash differs')
+  return path
+}
+
+export function sanitizeOutput(output: string): string {
+  const redacted = output
+    .replace(
+      /(^|[\s,{])((?:["']?(?:password|pass|token|secret|api[_-]?key)["']?)\s*[:=]\s*["']?)[^"'\s,}\]]+/gim,
+      '$1$2[REDACTED]',
+    )
+    .replace(
+      /((?:proxy-)?authorization\s*:\s*bearer\s+)[^\s,]+/gi,
+      '$1[REDACTED]',
+    )
+    .replace(
+      /([?&](?:access_token|api[_-]?key|password|pass|token|secret)=)[^&\s]+/gi,
+      '$1[REDACTED]',
+    )
+    .replace(/(https?:\/\/[^\s:/]+:)[^@\s]+@/gi, '$1[REDACTED]@')
+    .trim()
+  if (!redacted) return ''
+  return redacted.length > 8_000
+    ? `${redacted.slice(0, 8_000)}\n[output truncated]`
+    : redacted
+}
+
+function logStepOutput(name: string, output: string): void {
+  const sanitized = sanitizeOutput(output)
+  if (sanitized) console.log(`AiaB [${name}] output:\n${sanitized}`)
 }
 
 async function discoverSuites(source: string): Promise<ScenarioSuite[]> {
@@ -439,9 +509,19 @@ export async function runSandbox(
     args: string[],
   ): Promise<string> => {
     failedStep = name
-    const result = await command(file, args, atmosphere, childEnvironment)
-    steps.push({ name, exitCode: result.exitCode })
-    return result.output
+    console.log(`AiaB [${name}]: ${file} ${args.join(' ')}`)
+    try {
+      const result = await command(file, args, atmosphere, childEnvironment)
+      if (name !== 'seed') logStepOutput(name, result.output)
+      steps.push({ name, exitCode: result.exitCode })
+      return result.output
+    } catch (error) {
+      if (error instanceof SandboxCommandFailure && name !== 'seed') {
+        logStepOutput(name, error.stdout)
+        logStepOutput(name, error.stderr)
+      }
+      throw error
+    }
   }
   try {
     await mkdir(dockerConfig, { mode: 0o700 })
@@ -669,6 +749,7 @@ export async function runSandbox(
     await chmod(browserAccounts, 0o444)
     for (const suite of suites) {
       failedStep = `suite:${suite.id}`
+      console.log(`AiaB [suite:${suite.id}]`)
       results[suite.id] = await suite.run({
         sandboxDirectory: atmosphere,
         composeFile,

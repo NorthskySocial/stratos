@@ -19,6 +19,7 @@ import {
   pinnedCheckout,
   resolveEvidence,
   runSandbox,
+  sanitizeOutput,
 } from './run-sandbox.js'
 
 import { runScenario } from './scenarios/standard-credential-transport.driver.mjs'
@@ -250,6 +251,66 @@ describe('sandbox preflight', () => {
     await expect(pinnedCheckout(repo, pin)).rejects.toThrow()
   })
 
+  it('clones the verified AiaB bundle without reaching its remote', async () => {
+    const root = await directory()
+    const checkout = await pinnedCheckout(join(root, 'checkout'), {
+      url: 'https://invalid.example.test/atmosphereinabox',
+      revision: 'ecf52fac4abaa681717f2ed2ce2afc2253d1a366',
+      bundle: 'fixtures/atmosphereinabox.bundle',
+      bundleSha256:
+        '4fc54ec830230ec319d16b4b8ec6d07dc1bc67bd6612601361afc0a3502dea16',
+      sha256: {
+        'deno.json':
+          'ec705f2ff10e659cb87edbd1b0ac4e9f9bf2feb2375bd2296e1b969c87cc8862',
+        'deno.lock':
+          '4381041f8eb59d531ac149b18417a390568f6bbbaa4f9db56768d30cf6486253',
+      },
+    })
+    expect(git(checkout.checkout, 'rev-parse', 'HEAD')).toBe(
+      'ecf52fac4abaa681717f2ed2ce2afc2253d1a366',
+    )
+    await rm(checkout.acquisition!, { recursive: true, force: true })
+    await expect(
+      pinnedCheckout(join(root, 'invalid'), {
+        url: 'https://invalid.example.test/atmosphereinabox',
+        revision: 'ecf52fac4abaa681717f2ed2ce2afc2253d1a366',
+        bundle: '../fixtures/atmosphereinabox.bundle',
+        bundleSha256:
+          '4fc54ec830230ec319d16b4b8ec6d07dc1bc67bd6612601361afc0a3502dea16',
+        sha256: {},
+      }),
+    ).rejects.toThrow('inside the harness directory')
+    await expect(
+      pinnedCheckout(join(root, 'tampered'), {
+        url: 'https://invalid.example.test/atmosphereinabox',
+        revision: 'ecf52fac4abaa681717f2ed2ce2afc2253d1a366',
+        bundle: 'fixtures/atmosphereinabox.bundle',
+        bundleSha256: '0'.repeat(64),
+        sha256: {},
+      }),
+    ).rejects.toThrow('bundle hash differs')
+  })
+
+  it('redacts command secrets before logging', () => {
+    const output = sanitizeOutput(
+      [
+        'password=plain-secret',
+        '{"token":"json-secret","safe":"value"}',
+        'Authorization: Bearer bearer-secret',
+        'https://example.test/callback?access_token=query-secret&safe=value',
+      ].join('\n'),
+    )
+    expect(output).toContain('password=[REDACTED]')
+    expect(output).toContain('"token":"[REDACTED]"')
+    expect(output).toContain('"safe":"value"')
+    expect(output).toContain('Authorization: Bearer [REDACTED]')
+    expect(output).toContain('access_token=[REDACTED]&safe=value')
+    expect(output).not.toContain('plain-secret')
+    expect(output).not.toContain('json-secret')
+    expect(output).not.toContain('bearer-secret')
+    expect(output).not.toContain('query-secret')
+  })
+
   it('treats nonzero child exits as failures', async () => {
     const cwd = await directory()
     await expect(
@@ -421,6 +482,35 @@ describe('sandbox preflight', () => {
       join(sandboxRepo, 'stacks/feedgen-ng-e2e-browser.Dockerfile'),
       'FROM browser\nCOPY runtime/feedgen-ng-e2e-browser.mjs /runner/driver.mjs\n',
     )
+    await writeFile(
+      join(sandboxRepo, 'stacks/components.json'),
+      JSON.stringify([
+        {
+          id: 'feedgen-ng-e2e',
+          file: 'stacks/feedgen-ng-e2e.yaml',
+          application: 'feedgen-ng-e2e',
+          definition: 'stacks/feedgen-ng-e2e.definition.json',
+        },
+        {
+          id: 'feedgen-ng-e2e-clubhouse',
+          file: 'stacks/feedgen-ng-e2e-clubhouse.yaml',
+          application: 'feedgen-ng-e2e-clubhouse',
+          definition: 'stacks/feedgen-ng-e2e-clubhouse.definition.json',
+        },
+      ]),
+    )
+    await writeFile(
+      join(sandboxRepo, 'stacks/presets.json'),
+      JSON.stringify({
+        'feedgen-ng-e2e': {
+          applications: [
+            'lexicon-authority',
+            'feedgen-ng-e2e',
+            'feedgen-ng-e2e-clubhouse',
+          ],
+        },
+      }),
+    )
     git(sandboxRepo, 'add', '.')
     git(sandboxRepo, 'commit', '-qm', 'Pin sandbox')
     const revision = git(sandboxRepo, 'rev-parse', 'HEAD')
@@ -519,6 +609,13 @@ if (args[1] === 'sandbox' && args[2] === 'create') {
   ])
   assert.match(args.at(-3), /^stratos-[0-9a-f]{12}$/)
   assert.deepEqual(args.slice(-2), ['--subnet', 'auto'])
+  const components = JSON.parse(fs.readFileSync('stacks/components.json', 'utf8'))
+  assert.ok(components.some(component => component.application === 'feedgen-ng-e2e'))
+  assert.ok(components.some(component => component.application === 'feedgen-ng-e2e-clubhouse'))
+  const presets = JSON.parse(fs.readFileSync('stacks/presets.json', 'utf8'))
+  assert.deepEqual(presets['feedgen-ng-e2e'], {
+    applications: ['lexicon-authority', 'feedgen-ng-e2e', 'feedgen-ng-e2e-clubhouse']
+  })
 }
 if (args[1] === 'sandbox' && args[2] === 'check') assert.deepEqual(args, ['task', 'sandbox', 'check'])
 if (args[1] === 'sandbox' && args[2] === 'check') {
@@ -552,7 +649,10 @@ if (args[1] === 'sandbox' && args[2] === 'check') {
 }
 if (args[1] === 'sandbox' && args[2] === 'up') assert.deepEqual(args, ['task', 'sandbox', 'up', '--build'])
 if (args[1] === 'sandbox' && args[2] === 'seed') assert.deepEqual(args, ['task', 'sandbox', 'seed'])
-if (process.env.RUNNER_TEST_FAIL_STEP && process.argv.includes(process.env.RUNNER_TEST_FAIL_STEP)) process.exit(7)
+if (process.env.RUNNER_TEST_FAIL_STEP && process.argv.includes(process.env.RUNNER_TEST_FAIL_STEP)) {
+  console.error('password=synthetic-secret')
+  process.exit(7)
+}
 if (process.argv.includes('create')) {
   fs.copyFileSync('stacks/feedgen-ng-e2e.yaml', 'compose.yaml')
   fs.mkdirSync('state', { recursive: true })
@@ -727,6 +827,20 @@ if (args[0] === 'image' && args[1] === 'rm') {
     expect(failure.completedSteps).toEqual([])
     expect(failure.failedStep).toBe('install')
     delete process.env.RUNNER_TEST_FAIL_STEP
+    process.env.RUNNER_TEST_FAIL_STEP = 'create'
+    const createFailedReport = join(root, 'create-failed-report')
+    await expect(
+      runSandbox(
+        { ...options, reportDirectory: createFailedReport },
+        dependencies,
+      ),
+    ).rejects.toThrow('deno task exited 7')
+    const createFailure = JSON.parse(
+      await readFile(join(createFailedReport, 'failure.json'), 'utf8'),
+    )
+    expect(createFailure.failedStep).toBe('create')
+    expect(JSON.stringify(createFailure)).not.toContain('synthetic-secret')
+    delete process.env.RUNNER_TEST_FAIL_STEP
     process.env.RUNNER_TEST_FAIL_STEP = 'up'
     const upFailedReport = join(root, 'up-failed-report')
     await expect(
@@ -850,10 +964,10 @@ if (args[0] === 'image' && args[1] === 'rm') {
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
-    expect(dockerConfigs).toHaveLength(15)
+    expect(dockerConfigs).toHaveLength(16)
     expect(
       dockerConfigs.filter((line) => line.startsWith('image rm ')),
-    ).toHaveLength(8)
+    ).toHaveLength(9)
     process.env.GITHUB_ACTIONS = 'true'
     process.env.GITHUB_BASE_SHA = baseSha
     await runSandbox(

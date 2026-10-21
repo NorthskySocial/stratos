@@ -83,7 +83,9 @@ status without copying child stderr, account passwords, or environment values.
 If cleanup fails, the gate fails and preserves the private generated Compose
 file at the recorded recovery path rather than deleting the only recovery config.
 
-The AiaB checkout must be clean at the SHA in `sources.json`. If the path is absent, the runner clones the pinned source into a disposable directory. The PDS source build always uses the pinned source revision. Do not replace it with an unproven public image digest.
+The AiaB checkout must be clean at the SHA in `sources.json`. If the path is absent, the runner clones the pinned source into a disposable directory. The exact required AiaB revision is retained in `fixtures/atmosphereinabox.bundle` because Tangled no longer serves that historical commit; `bundleSha256` verifies the immutable bundle before cloning. The PDS source build always uses the pinned source revision. Do not replace it with an unproven public image digest.
+
+The runner writes each AiaB phase and command to standard output. It prints bounded, sanitized output for install, create, check, and up, including a failed command's stdout and stderr. Seed command output remains suppressed because it can contain generated account credentials. The receipt or failure artifact remains the only uploaded report and does not contain command output.
 
 The pinned AiaB creates `atmosbox.test` for the private PLC and PDS handles.
 Its explicit application routes also serve Stratos and Clubhouse OAuth at

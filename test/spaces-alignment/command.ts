@@ -12,7 +12,11 @@ export interface CommandOptions {
 }
 
 export class CommandFailure extends Error {
-  constructor(readonly code: number | string | undefined) {
+  constructor(
+    readonly code: number | string | undefined,
+    readonly stdout: string,
+    readonly stderr: string,
+  ) {
     super('Child process failed')
   }
 }
@@ -31,7 +35,16 @@ export async function executeCommand(
     })
     return stdout
   } catch (error) {
-    throw new CommandFailure((error as { code?: number | string }).code)
+    const failure = error as {
+      code?: number | string
+      stdout?: string | Buffer
+      stderr?: string | Buffer
+    }
+    throw new CommandFailure(
+      failure.code,
+      String(failure.stdout ?? ''),
+      String(failure.stderr ?? ''),
+    )
   }
 }
 
