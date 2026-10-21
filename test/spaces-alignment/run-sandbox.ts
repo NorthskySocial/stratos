@@ -323,6 +323,39 @@ function logStepOutput(name: string, output: string): void {
   if (sanitized) console.log(`AiaB [${name}] output:\n${sanitized}`)
 }
 
+async function logFailedUpStatus(
+  composeFile: string,
+  projectName: string,
+  atmosphere: string,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const args = [
+    'compose',
+    '--file',
+    composeFile,
+    '--project-name',
+    projectName,
+    '--project-directory',
+    atmosphere,
+    'ps',
+    '--all',
+    '--format',
+    'json',
+  ]
+  console.log(`AiaB [up:status]: docker ${args.join(' ')}`)
+  try {
+    logStepOutput(
+      'up:status',
+      (await command('docker', args, atmosphere, env)).output,
+    )
+  } catch (error) {
+    if (error instanceof SandboxCommandFailure) {
+      logStepOutput('up:status', error.stdout)
+      logStepOutput('up:status', error.stderr)
+    }
+  }
+}
+
 async function discoverSuites(source: string): Promise<ScenarioSuite[]> {
   const suiteDirectory = join(source, 'test/spaces-alignment/scenarios')
   const files = (await readdir(suiteDirectory)).filter((file) =>
@@ -520,6 +553,13 @@ export async function runSandbox(
         logStepOutput(name, error.stdout)
         logStepOutput(name, error.stderr)
       }
+      if (name === 'up' && existsSync(composeFile))
+        await logFailedUpStatus(
+          composeFile,
+          projectName,
+          atmosphere,
+          childEnvironment,
+        )
       throw error
     }
   }

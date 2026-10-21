@@ -107,6 +107,7 @@ describe('sandbox preflight', () => {
       parseOptions([...args.slice(0, 5), 'bad/id', ...args.slice(6)]),
     ).toThrow('Invalid suite ID')
     const ciArgs = args.slice(0, -2)
+    delete process.env.GITHUB_ACTIONS
     expect(() => parseOptions([...ciArgs, '--ci-evidence'])).toThrow(
       'only valid in GitHub Actions',
     )
@@ -683,6 +684,13 @@ assert.ok(process.env.DOCKER_CONFIG?.startsWith(process.env.RUNNER_TEST_DOCKER_C
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 assert.equal(process.env.COMPOSE_FILE, undefined)
 assert.equal(process.env.COMPOSE_PROJECT_NAME, undefined)
+if (args.includes('ps')) {
+  assert.ok(args.includes('--all'))
+  assert.ok(args.includes('--format'))
+  assert.ok(args.includes('json'))
+  fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, 'ps ' + process.env.DOCKER_CONFIG + '\\n')
+  console.log(JSON.stringify([{ Service: 'feedgen-e2e-rust', State: 'exited', Status: 'Exited (1)' }]))
+}
 if (args.includes('run')) {
   const composeFile = args[args.indexOf('--file') + 1]
   assert.ok(composeFile.endsWith('/compose.yaml'))
@@ -853,6 +861,8 @@ if (args[0] === 'image' && args[1] === 'rm') {
     expect(
       upFailure.completedSteps.map((step: { name: string }) => step.name),
     ).toEqual(['install', 'create', 'check'])
+    expect(await readFile(dockerLog, 'utf8')).toContain('ps ')
+    expect(JSON.stringify(upFailure)).not.toContain('Exited (1)')
     delete process.env.RUNNER_TEST_FAIL_STEP
     process.env.RUNNER_TEST_WRONG_DOMAIN = '1'
     const wrongDomainReport = join(root, 'wrong-domain-report')
@@ -964,7 +974,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
-    expect(dockerConfigs).toHaveLength(16)
+    expect(dockerConfigs).toHaveLength(17)
     expect(
       dockerConfigs.filter((line) => line.startsWith('image rm ')),
     ).toHaveLength(9)
