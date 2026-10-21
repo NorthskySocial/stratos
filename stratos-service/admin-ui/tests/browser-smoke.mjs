@@ -1898,7 +1898,7 @@ try {
   async function retainedDraft() {
     await expect(page.getByTestId('navigation-confirmation')).toHaveCount(1)
     await expect
-      .poll(() => page.evaluate(() => location.hash))
+      .poll(() => page.evaluate(() => window.location.hash))
       .toBe(acceptedHash)
     await expect(page.getByTestId('boundary-editor')).toBeVisible()
     await page.getByRole('button', { name: 'Stay', exact: true }).click()
@@ -1914,12 +1914,15 @@ try {
   await page.getByRole('link', { name: 'Boundaries', exact: true }).click()
   await expect(page.getByTestId('boundaries-screen')).toBeVisible()
   await page.evaluate(() =>
-    history.replaceState({ ...history.state, crew: { captain: 'Misato' } }, ''),
+    window.history.replaceState(
+      { ...window.history.state, crew: { captain: 'Misato' } },
+      '',
+    ),
   )
-  const entryBeforeReload = await page.evaluate(() => history.state)
+  const entryBeforeReload = await page.evaluate(() => window.history.state)
   await page.reload()
   await expect(page.getByTestId('boundaries-screen')).toBeVisible()
-  let reloadHistoryLength = await page.evaluate(() => history.length)
+  let reloadHistoryLength = await page.evaluate(() => window.history.length)
   let documentsAfterReload = 0
   const countDocuments = (request) => {
     if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
@@ -1928,56 +1931,62 @@ try {
   }
   page.on('request', countDocuments)
   await dirtyEditor()
-  reloadHistoryLength = await page.evaluate(() => history.length)
+  reloadHistoryLength = await page.evaluate(() => window.history.length)
   const reloadPreview = await page.getByTestId('settings-preview').textContent()
-  await page.evaluate(() => history.back())
+  await page.evaluate(() => window.history.back())
   await retainedDraft()
   expect(await page.getByTestId('settings-preview').textContent()).toBe(
     reloadPreview,
   )
-  expect(await page.evaluate(() => history.state.crew)).toEqual(
+  expect(await page.evaluate(() => window.history.state.crew)).toEqual(
     entryBeforeReload.crew,
   )
   for (let traversal = 0; traversal < 3; traversal++) {
-    await page.evaluate(() => history.back())
+    await page.evaluate(() => window.history.back())
     await expect(page.getByTestId('navigation-confirmation')).toHaveCount(1)
     await expect
-      .poll(() => page.evaluate(() => location.hash))
+      .poll(() => page.evaluate(() => window.location.hash))
       .toBe(acceptedHash)
-    await page.evaluate(() => history.forward())
+    await page.evaluate(() => window.history.forward())
     await expect(page.getByTestId('navigation-confirmation')).toHaveCount(1)
     await expect
-      .poll(() => page.evaluate(() => location.hash))
+      .poll(() => page.evaluate(() => window.location.hash))
       .toBe(acceptedHash)
   }
   await page.getByRole('button', { name: 'Discard', exact: true }).click()
   await expect
-    .poll(() => page.evaluate(() => location.hash))
+    .poll(() => page.evaluate(() => window.location.hash))
     .toBe('#/boundaries')
   await expect(page.getByTestId('boundary-settings')).toHaveCount(0)
   await expect(page.getByTestId('navigation-confirmation')).toHaveCount(0)
-  await page.evaluate(() => history.forward())
+  await page.evaluate(() => window.history.forward())
   await expect(page.getByTestId('boundary-settings')).toBeVisible()
   await expect(page.getByLabel('Display name', { exact: true })).toHaveValue(
     'Pilot recovery',
   )
   await expect(page.getByTestId('navigation-confirmation')).toHaveCount(0)
-  expect(await page.evaluate(() => history.state.crew)).toEqual(
+  expect(await page.evaluate(() => window.history.state.crew)).toEqual(
     entryBeforeReload.crew,
   )
-  expect(await page.evaluate(() => history.length)).toBe(reloadHistoryLength)
+  expect(await page.evaluate(() => window.history.length)).toBe(
+    reloadHistoryLength,
+  )
   expect(documentsAfterReload).toBe(0)
   page.off('request', countDocuments)
   await page.evaluate(() =>
-    history.replaceState(
-      { ...history.state, crew: 'Misato', __svelte_spa_router_scrollX: 23 },
+    window.history.replaceState(
+      {
+        ...window.history.state,
+        crew: 'Misato',
+        __svelte_spa_router_scrollX: 23,
+      },
       '',
     ),
   )
   await dirtyEditor()
   await page.getByRole('link', { name: 'Health', exact: true }).click()
   await retainedDraft()
-  expect(await page.evaluate(() => history.state.crew)).toBe('Misato')
+  expect(await page.evaluate(() => window.history.state.crew)).toBe('Misato')
   await page.getByTestId('logout').click()
   await retainedDraft()
   await page.getByRole('link', { name: 'Members', exact: true }).click()
@@ -1992,24 +2001,28 @@ try {
     '#/boundaries/detail?boundary=did%3Aweb%3Anerv.test%2Farchive&tab=settings',
   ]) {
     await page.evaluate((hash) => {
-      location.hash = hash
+      window.location.hash = hash
     }, hash)
     await retainedDraft()
   }
-  await page.evaluate(() => history.back())
+  await page.evaluate(() => window.history.back())
   await expect(page.getByTestId('navigation-confirmation')).toBeVisible()
-  await expect.poll(() => page.evaluate(() => location.hash)).toBe(acceptedHash)
+  await expect
+    .poll(() => page.evaluate(() => window.location.hash))
+    .toBe(acceptedHash)
   for (let traversal = 0; traversal < 3; traversal++) {
-    await page.evaluate(() => history.forward())
+    await page.evaluate(() => window.history.forward())
     await expect
-      .poll(() => page.evaluate(() => location.hash))
+      .poll(() => page.evaluate(() => window.location.hash))
       .toBe(acceptedHash)
     await expect(page.getByTestId('navigation-confirmation')).toHaveCount(1)
   }
   await retainedDraft()
-  await page.evaluate(() => history.forward())
+  await page.evaluate(() => window.history.forward())
   await expect(page.getByTestId('navigation-confirmation')).toBeVisible()
-  await expect.poll(() => page.evaluate(() => location.hash)).toBe(acceptedHash)
+  await expect
+    .poll(() => page.evaluate(() => window.location.hash))
+    .toBe(acceptedHash)
   await page.getByRole('button', { name: 'Discard', exact: true }).click()
   await expect(page.getByTestId('boundary-detail')).toContainText('Archive')
   await expect(page.getByTestId('navigation-confirmation')).toHaveCount(0)
