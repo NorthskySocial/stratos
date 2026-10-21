@@ -1,7 +1,7 @@
 /* global document, window */
 import { env } from 'node:process'
 import { log } from 'node:console'
-import { URL } from 'node:url'
+import { URL, URLSearchParams } from 'node:url'
 
 // Reuses the webapp's Playwright dev dependency; no service or account is needed.
 const { chromium, expect } = await import(
