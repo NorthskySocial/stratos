@@ -62,7 +62,14 @@ interface Options {
   source: string
   suite: string
   reportDirectory: string
-  reviewReceipt: string
+  evidenceMode: 'review' | 'ci'
+  reviewReceipt?: string
+}
+
+export interface SandboxEvidence {
+  candidate: string
+  base: string
+  receipt?: ReviewReceipt
 }
 
 interface CommandResult {
@@ -71,7 +78,7 @@ interface CommandResult {
 }
 
 export function parseOptions(args: string[]): Options {
-  const names: Record<string, keyof Options> = {
+  const names: Record<string, keyof Omit<Options, 'evidenceMode'>> = {
     '--sandbox-dir': 'sandboxDirectory',
     '--source': 'source',
     '--suite': 'suite',
@@ -79,27 +86,91 @@ export function parseOptions(args: string[]): Options {
     '--review-receipt': 'reviewReceipt',
   }
   const options: Partial<Options> = {}
-  for (let i = 0; i < args.length; i += 2) {
+  let ciEvidence = false
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--ci-evidence') {
+      if (ciEvidence) throw new Error('Invalid argument --ci-evidence')
+      ciEvidence = true
+      continue
+    }
     const key = names[args[i]]
     const value = args[i + 1]
     if (!key || !value || value.startsWith('--') || options[key])
       throw new Error(`Invalid argument ${args[i] ?? ''}`)
     options[key] = value
+    i++
   }
-  if (Object.keys(options).length !== Object.keys(names).length)
-    throw new Error('Five required options must be supplied')
   for (const key of [
     'sandboxDirectory',
     'source',
     'reportDirectory',
-    'reviewReceipt',
   ] as const) {
-    if (!isAbsolute(options[key]!))
+    if (!options[key] || !isAbsolute(options[key]))
       throw new Error(`${key} must be an absolute path`)
   }
-  if (!/^[a-z][a-z0-9-]*$/.test(options.suite!))
+  if (!options.suite || !/^[a-z][a-z0-9-]*$/.test(options.suite))
     throw new Error('Invalid suite ID')
-  return options as Options
+  if (ciEvidence && options.reviewReceipt)
+    throw new Error('--ci-evidence and --review-receipt are mutually exclusive')
+  if (ciEvidence && process.env.GITHUB_ACTIONS !== 'true')
+    throw new Error('--ci-evidence is only valid in GitHub Actions')
+  if (!ciEvidence && !options.reviewReceipt)
+    throw new Error('--review-receipt is required outside GitHub Actions')
+  if (options.reviewReceipt && !isAbsolute(options.reviewReceipt))
+    throw new Error('reviewReceipt must be an absolute path')
+  return ciEvidence
+    ? ({ ...options, evidenceMode: 'ci' } as Options)
+    : ({ ...options, evidenceMode: 'review' } as Options)
+}
+
+export async function resolveEvidence(
+  options: Options,
+  source: string,
+): Promise<SandboxEvidence> {
+  const candidate = await git(source, 'rev-parse', 'HEAD')
+  let base: string
+  let receipt: ReviewReceipt | undefined
+  if (options.evidenceMode === 'ci') {
+    base = process.env.GITHUB_BASE_SHA
+      ? process.env.GITHUB_BASE_SHA
+      : await git(source, 'rev-parse', '--verify', `${candidate}^`).catch(
+          () => '',
+        )
+  } else {
+    const reviewData = JSON.parse(
+      await readFile(options.reviewReceipt!, 'utf8'),
+    ) as unknown
+    const claimedBase =
+      reviewData !== null &&
+      typeof reviewData === 'object' &&
+      !Array.isArray(reviewData)
+        ? (reviewData as Record<string, unknown>).baseSha
+        : undefined
+    receipt = validateReviewReceipt(
+      reviewData,
+      candidate,
+      typeof claimedBase === 'string' ? claimedBase : '',
+    )
+    base = receipt.baseSha
+  }
+  const resolvedBase = await git(
+    source,
+    'rev-parse',
+    '--verify',
+    `${base}^{commit}`,
+  ).catch(() => '')
+  if (resolvedBase !== base)
+    throw new Error('Evidence base is not a commit in the candidate checkout')
+  try {
+    await command(
+      'git',
+      ['merge-base', '--is-ancestor', base, candidate],
+      source,
+    )
+  } catch {
+    throw new Error('Evidence base must be an ancestor of the candidate')
+  }
+  return { candidate, base, receipt }
 }
 
 export async function command(
@@ -300,7 +371,8 @@ export async function runSandbox(
   const pins = dependencies.sourcePins ?? sources
   await ensureSeparatePaths(options)
   const source = await realpath(options.source)
-  const candidate = await git(source, 'rev-parse', 'HEAD')
+  const evidence = await resolveEvidence(options, source)
+  const { candidate, base, receipt } = evidence
   if (await git(source, 'status', '--porcelain', '--untracked-files=all'))
     throw new Error('Candidate work is dirty')
   if (
@@ -310,38 +382,6 @@ export async function runSandbox(
     ))
   )
     throw new Error('Runner must execute from the candidate checkout')
-  const reviewData = JSON.parse(
-    await readFile(options.reviewReceipt, 'utf8'),
-  ) as unknown
-  const claimedBase =
-    reviewData !== null &&
-    typeof reviewData === 'object' &&
-    !Array.isArray(reviewData)
-      ? (reviewData as Record<string, unknown>).baseSha
-      : undefined
-  const receipt = validateReviewReceipt(
-    reviewData,
-    candidate,
-    typeof claimedBase === 'string' ? claimedBase : '',
-  )
-  const base = receipt.baseSha
-  const resolvedBase = await git(
-    source,
-    'rev-parse',
-    '--verify',
-    `${base}^{commit}`,
-  ).catch(() => '')
-  if (resolvedBase !== base)
-    throw new Error('Review base is not a commit in the candidate checkout')
-  try {
-    await command(
-      'git',
-      ['merge-base', '--is-ancestor', base, candidate],
-      source,
-    )
-  } catch {
-    throw new Error('Review base must be an ancestor of the candidate')
-  }
   const suites = suiteExecutionOrder(
     options.suite,
     await discoverSuites(source),
@@ -628,8 +668,13 @@ export async function runSandbox(
     summary = {
       candidateSha: candidate,
       baseSha: base,
-      reviewedSha: receipt.candidateSha,
-      reviews: summarizeReviews(receipt),
+      evidenceMode: options.evidenceMode,
+      ...(receipt
+        ? {
+            reviewedSha: receipt.candidateSha,
+            reviews: summarizeReviews(receipt),
+          }
+        : {}),
       atmosphereSourceSha: pins.atmosphereInABox.revision,
       atmosphereFingerprint,
       templateHashes,
@@ -742,6 +787,7 @@ export async function runSandbox(
         {
           candidateSha: candidate,
           baseSha: base,
+          evidenceMode: options.evidenceMode,
           projectName,
           failedStep,
           completedSteps: steps,

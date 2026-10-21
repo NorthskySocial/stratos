@@ -17,6 +17,7 @@ import {
   ensureSeparatePaths,
   parseOptions,
   pinnedCheckout,
+  resolveEvidence,
   runSandbox,
 } from './run-sandbox.js'
 
@@ -55,6 +56,8 @@ afterEach(async () => {
   delete process.env.COMPOSE_FILE
   delete process.env.COMPOSE_PROJECT_NAME
   delete process.env.RUNNER_TEST_DOCKER_CONFIG_PREFIX
+  delete process.env.GITHUB_ACTIONS
+  delete process.env.GITHUB_BASE_SHA
   await Promise.all(
     temporary
       .splice(0)
@@ -73,7 +76,7 @@ function initializeRepo(repo: string): void {
 }
 
 describe('sandbox preflight', () => {
-  it('requires exactly the five declared options', () => {
+  it('parses review and CI evidence modes', () => {
     const args = [
       '--sandbox-dir',
       '/tmp/aiab',
@@ -87,6 +90,7 @@ describe('sandbox preflight', () => {
       '/tmp/review.json',
     ]
     expect(parseOptions(args).suite).toBe('baseline')
+    expect(parseOptions(args).evidenceMode).toBe('review')
     expect(() => parseOptions(args.slice(0, -2))).toThrow()
     expect(() => parseOptions([...args, '--suite', 'other'])).toThrow()
     expect(() =>
@@ -101,6 +105,84 @@ describe('sandbox preflight', () => {
     expect(() =>
       parseOptions([...args.slice(0, 5), 'bad/id', ...args.slice(6)]),
     ).toThrow('Invalid suite ID')
+    const ciArgs = args.slice(0, -2)
+    expect(() => parseOptions([...ciArgs, '--ci-evidence'])).toThrow(
+      'only valid in GitHub Actions',
+    )
+    process.env.GITHUB_ACTIONS = 'true'
+    expect(parseOptions([...ciArgs, '--ci-evidence']).evidenceMode).toBe('ci')
+    expect(() =>
+      parseOptions([...ciArgs, '--ci-evidence', '--review-receipt', '/tmp/r']),
+    ).toThrow('mutually exclusive')
+    expect(() =>
+      parseOptions([...ciArgs, '--ci-evidence', '--ci-evidence']),
+    ).toThrow('Invalid argument')
+  })
+
+  it('resolves review and CI evidence against the candidate', async () => {
+    const root = await directory()
+    const repo = join(root, 'repo')
+    await mkdir(repo)
+    initializeRepo(repo)
+    await writeFile(join(repo, 'first.txt'), 'first')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-qm', 'First')
+    const base = git(repo, 'rev-parse', 'HEAD')
+    await writeFile(join(repo, 'second.txt'), 'second')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-qm', 'Second')
+    const candidate = git(repo, 'rev-parse', 'HEAD')
+    const reviewReceipt = join(root, 'review.json')
+    await writeFile(
+      reviewReceipt,
+      JSON.stringify({
+        candidateSha: candidate,
+        baseSha: base,
+        reviews: {
+          standards: {
+            model: 'gpt-6.1-sol',
+            verdict: 'approved',
+            reviewedSha: candidate,
+            sessionId: 'standards',
+            evidenceRef: 'private:standards',
+            unresolvedBlockingFindings: 0,
+          },
+          spec: {
+            model: 'gpt-6.1-sol',
+            verdict: 'approved',
+            reviewedSha: candidate,
+            sessionId: 'spec',
+            evidenceRef: 'private:spec',
+            unresolvedBlockingFindings: 0,
+          },
+        },
+      }),
+    )
+    const common = {
+      sandboxDirectory: join(root, 'sandbox'),
+      source: repo,
+      suite: 'baseline',
+      reportDirectory: join(root, 'report'),
+    }
+    await expect(
+      resolveEvidence(
+        { ...common, evidenceMode: 'review', reviewReceipt },
+        repo,
+      ),
+    ).resolves.toMatchObject({ candidate, base })
+    process.env.GITHUB_ACTIONS = 'true'
+    process.env.GITHUB_BASE_SHA = base
+    await expect(
+      resolveEvidence({ ...common, evidenceMode: 'ci' }, repo),
+    ).resolves.toMatchObject({ candidate, base, receipt: undefined })
+    delete process.env.GITHUB_BASE_SHA
+    await expect(
+      resolveEvidence({ ...common, evidenceMode: 'ci' }, repo),
+    ).resolves.toMatchObject({ candidate, base })
+    process.env.GITHUB_BASE_SHA = 'f'.repeat(40)
+    await expect(
+      resolveEvidence({ ...common, evidenceMode: 'ci' }, repo),
+    ).rejects.toThrow('Evidence base is not a commit')
   })
 
   it('rejects source, sandbox, or report aliasing and reused report paths', async () => {
@@ -112,6 +194,7 @@ describe('sandbox preflight', () => {
       sandboxDirectory: sandbox,
       reportDirectory: join(root, 'report'),
       suite: 'baseline',
+      evidenceMode: 'review' as const,
       reviewReceipt: join(root, 'review.json'),
     }
     await expect(ensureSeparatePaths(options)).resolves.toBeUndefined()
@@ -544,6 +627,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
       source: candidateRepo,
       suite: 'baseline',
       reportDirectory,
+      evidenceMode: 'review' as const,
       reviewReceipt,
     }
     const dependencies = {
@@ -761,6 +845,8 @@ if (args[0] === 'image' && args[1] === 'rm') {
         tag: 'stratos-spaces-pds-00000000-0000-0000-0000-000000000000:local',
       },
     })
+    expect(receipt.evidenceMode).toBe('review')
+    expect(receipt.reviews).toBeDefined()
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
@@ -768,6 +854,25 @@ if (args[0] === 'image' && args[1] === 'rm') {
     expect(
       dockerConfigs.filter((line) => line.startsWith('image rm ')),
     ).toHaveLength(8)
+    process.env.GITHUB_ACTIONS = 'true'
+    process.env.GITHUB_BASE_SHA = baseSha
+    await runSandbox(
+      {
+        ...options,
+        reportDirectory: join(root, 'ci-report'),
+        evidenceMode: 'ci',
+        reviewReceipt: undefined,
+      },
+      dependencies,
+    )
+    const ciReceipt = JSON.parse(
+      await readFile(join(root, 'ci-report', 'receipt.json'), 'utf8'),
+    )
+    expect(ciReceipt.evidenceMode).toBe('ci')
+    expect(ciReceipt.reviews).toBeUndefined()
+    expect(ciReceipt.reviewedSha).toBeUndefined()
+    delete process.env.GITHUB_ACTIONS
+    delete process.env.GITHUB_BASE_SHA
 
     await expect(
       runSandbox(
