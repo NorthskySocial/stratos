@@ -94,7 +94,7 @@ http.createServer(async (req, res) => {
     for await (const chunk of req) chunks.push(chunk)
     const headers = { ...req.headers }
     delete headers.connection
-    const upstream = await fetch('http://feedgen-e2e-pds-spaces:3000' + req.url, {
+    const upstream = await fetch('http://pds-space1:3000' + req.url, {
       method: req.method, headers,
       body: chunks.length ? Buffer.concat(chunks) : undefined,
     })
@@ -142,9 +142,9 @@ async function session(url, identifier, password) {
   return response.json()
 }
 if (action === 'write') {
-  const url = 'https://spaces-pds-e2e.' + domain
+  const url = 'https://pds-space1.' + domain
   const password = (await readFile('/run/sandbox-secrets/browser-password', 'utf8')).trim()
-  const actor = await session(url, 'motoko.spaces-pds-e2e.' + domain, password)
+  const actor = await session(url, 'motoko.pds-space1.' + domain, password)
   const response = await fetch(url + '/xrpc/com.atproto.space.createRecord', {
     method: 'POST',
     headers: { authorization: 'Bearer ' + actor.accessJwt, 'content-type': 'application/json' },
@@ -346,7 +346,7 @@ async function waitFor(check, label, timeout = 45_000) {
 
 const caddyPath = join(sandbox, 'state/Caddyfile')
 const originalCaddy = await readFile(caddyPath, 'utf8')
-const route = `${'spaces-pds-e2e.' + domain} {\n  tls internal\n  reverse_proxy feedgen-e2e-pds-spaces:3000\n}`
+const route = `${'pds-space1.' + domain} {\n  tls internal\n  reverse_proxy pds-space1:3000\n}`
 assert.ok(
   originalCaddy.includes(route),
   'PDS route no longer matches the pinned sandbox',
@@ -366,7 +366,7 @@ try {
   const config = JSON.parse(
     await compose(['config', '--format', 'json'], 'inspect sandbox compose'),
   )
-  const image = config.services['feedgen-e2e-pds-spaces']?.image
+  const image = config.services['pds-space1']?.image
   assert.ok(typeof image === 'string' && image.length > 0)
   const proxyPath = join(sandbox, 'state/pds-revocation-proxy.mjs')
   await writeFile(proxyPath, proxyScript, { mode: 0o600 })
@@ -392,7 +392,7 @@ try {
     caddyPath,
     originalCaddy.replace(
       route,
-      route.replace('feedgen-e2e-pds-spaces:3000', 'pds-revocation-proxy:3000'),
+      route.replace('pds-space1:3000', 'pds-revocation-proxy:3000'),
     ),
   )
   await compose(['restart', 'gateway'], 'route private PDS through proxy')

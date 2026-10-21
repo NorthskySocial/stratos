@@ -13,7 +13,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 
 describe('standard credential transport', () => {
   it('waits for both asset permissions before invoking Docker', async () => {
-    const reportDirectory = await mkdtemp(
+    const scratchDirectory = await mkdtemp(
       join(tmpdir(), 'standard-permissions-'),
     )
     const original =
@@ -32,7 +32,7 @@ describe('standard credential transport', () => {
       sandboxDirectory: '/tmp/faye',
       composeFile: '/tmp/faye/compose.yaml',
       projectName: 'faye',
-      reportDirectory,
+      scratchDirectory,
       runCommand,
     })
     const result = running.catch((error: unknown) => error)
@@ -55,21 +55,23 @@ describe('standard credential transport', () => {
       for (const release of releases) release()
       await result
       chmod.mockImplementation(original.chmod)
-      await rm(reportDirectory, { recursive: true, force: true })
+      await rm(scratchDirectory, { recursive: true, force: true })
     }
   })
   it('runs the real driver and rejects absent or incomplete receipts', async () => {
-    const reportDirectory = await mkdtemp(join(tmpdir(), 'standard-transport-'))
+    const scratchDirectory = await mkdtemp(
+      join(tmpdir(), 'standard-transport-'),
+    )
     try {
       let output = ''
       const context = {
         sandboxDirectory: '/tmp/faye',
         composeFile: '/tmp/faye/compose.yaml',
         projectName: 'faye',
-        reportDirectory,
+        scratchDirectory,
         async runCommand(file: string, args: string[]) {
           expect(file).toBe('docker')
-          const assets = join(reportDirectory, 'standard-browser-assets')
+          const assets = join(scratchDirectory, 'standard-browser-assets')
           expect(args).toEqual([
             'compose',
             '--file',
@@ -103,9 +105,9 @@ describe('standard credential transport', () => {
           return output
         },
       }
-      await writeFile(join(reportDirectory, 'sentinel'), 'retained')
+      await writeFile(join(scratchDirectory, 'sentinel'), 'retained')
       await expect(suite.run(context)).rejects.toThrow('no assertion receipt')
-      expect(await readFile(join(reportDirectory, 'sentinel'), 'utf8')).toBe(
+      expect(await readFile(join(scratchDirectory, 'sentinel'), 'utf8')).toBe(
         'retained',
       )
       output =
@@ -136,7 +138,7 @@ describe('standard credential transport', () => {
       }
       validateAssertions(suite, assertions)
     } finally {
-      await rm(reportDirectory, { recursive: true, force: true })
+      await rm(scratchDirectory, { recursive: true, force: true })
     }
   })
 })

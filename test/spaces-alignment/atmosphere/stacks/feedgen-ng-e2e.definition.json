@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "id": "feedgen-ng-e2e",
+  "services": [
+    {
+      "service": "feedgen-e2e-identity",
+      "environment": [
+        {
+          "name": "SANDBOX_DOMAIN",
+          "source": {
+            "kind": "domain"
+          }
+        }
+      ],
+      "secretFiles": [
+        {
+          "secret": "feedgen-e2e-signing-key",
+          "name": "feedgen-signing-key",
+          "uid": 0,
+          "gid": 0
+        }
+      ]
+    },
+    {
+      "service": "feedgen-e2e-valkey",
+      "environment": []
+    },
+    {
+      "service": "feedgen-e2e-stratos",
+      "environment": [
+        {
+          "name": "SANDBOX_DOMAIN",
+          "source": {
+            "kind": "domain"
+          }
+        },
+        {
+          "name": "STRATOS_PLC_URL",
+          "source": {
+            "kind": "plc-url"
+          }
+        }
+      ]
+    },
+    {
+      "service": "feedgen-e2e-rust",
+      "environment": [
+        {
+          "name": "SANDBOX_DOMAIN",
+          "source": {
+            "kind": "domain"
+          }
+        },
+        {
+          "name": "FEEDGEN_PLC_URL",
+          "source": {
+            "kind": "plc-url"
+          }
+        }
+      ],
+      "secretFiles": [
+        {
+          "secret": "feedgen-e2e-signing-key",
+          "name": "feedgen-signing-key",
+          "uid": 65532,
+          "gid": 65532
+        },
+        {
+          "secret": "feedgen-e2e-storage-key",
+          "name": "feedgen-storage-key",
+          "uid": 65532,
+          "gid": 65532
+        }
+      ]
+    },
+    {
+      "service": "feedgen-e2e-browser",
+      "environment": [
+        {
+          "name": "SANDBOX_DOMAIN",
+          "source": {
+            "kind": "domain"
+          }
+        }
+      ],
+      "secretFiles": [
+        {
+          "secret": "feedgen-e2e-browser-password",
+          "name": "browser-password",
+          "uid": 1001,
+          "gid": 1001
+        }
+      ]
+    },
+    {
+      "service": "feedgen-e2e-clubhouse",
+      "environment": []
+    }
+  ],
+  "routes": [
+    {
+      "id": "stratos",
+      "service": "feedgen-e2e-stratos",
+      "host": "stratos-e2e",
+      "port": 3100
+    },
+    {
+      "id": "stratos-oauth",
+      "service": "feedgen-e2e-stratos",
+      "hostname": "stratos-e2e.atmosbox.internal",
+      "port": 3100
+    },
+    {
+      "id": "feedgen",
+      "service": "feedgen-e2e-rust",
+      "host": "feedgen-e2e",
+      "port": 3000
+    },
+    {
+      "id": "clubhouse",
+      "service": "feedgen-e2e-clubhouse",
+      "host": "clubhouse-e2e",
+      "port": 80
+    },
+    {
+      "id": "clubhouse-oauth",
+      "service": "feedgen-e2e-clubhouse",
+      "hostname": "clubhouse-e2e.atmosbox.internal",
+      "port": 80
+    }
+  ],
+  "secrets": [
+    {
+      "id": "feedgen-e2e-signing-key",
+      "bytes": 32
+    },
+    {
+      "id": "feedgen-e2e-storage-key",
+      "bytes": 32
+    },
+    {
+      "id": "feedgen-e2e-browser-password",
+      "bytes": 24
+    }
+  ],
+  "volumeInit": [
+    {
+      "volume": "feedgen-e2e-stratos-data",
+      "uid": 1000,
+      "gid": 1000
+    },
+    {
+      "volume": "feedgen-e2e-rust-data",
+      "uid": 65532,
+      "gid": 65532
+    }
+  ]
+}

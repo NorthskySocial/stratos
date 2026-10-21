@@ -12,7 +12,7 @@ const domain = process.env.SANDBOX_DOMAIN
 assert.equal(domain, 'atmosbox.test')
 const authorityDid = `did:web:stratos-e2e.${domain}`
 const authorityUrl = 'https://stratos-e2e.atmosbox.internal'
-const spacesPdsUrl = `https://spaces-pds-e2e.${domain}`
+const spacesPdsUrl = `https://pds-space1.${domain}`
 const ordinaryPdsUrl = `https://pds1.${domain}`
 
 async function session(url, identifier, password) {
@@ -49,7 +49,7 @@ async function main() {
   ).trim()
   const spacesSession = await session(
     spacesPdsUrl,
-    `motoko.spaces-pds-e2e.${domain}`,
+    `motoko.pds-space1.${domain}`,
     spacesPassword,
   )
   const ordinarySession = await session(

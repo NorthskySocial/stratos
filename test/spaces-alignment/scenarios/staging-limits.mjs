@@ -112,9 +112,9 @@ async function generalFeed() {
     '--input-type=module',
     '-e',
     `const password=(await (await import('node:fs/promises')).readFile('/run/sandbox-secrets/browser-password','utf8')).trim();
-     const session=await fetch('https://spaces-pds-e2e.${domain}/xrpc/com.atproto.server.createSession',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({identifier:'rei.spaces-pds-e2e.${domain}',password})});
+     const session=await fetch('https://pds-space1.${domain}/xrpc/com.atproto.server.createSession',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({identifier:'rei.pds-space1.${domain}',password})});
      if(!session.ok)throw new Error('Feed viewer session failed ('+session.status+'): '+await session.text());const {accessJwt}=await session.json();
-     const response=await fetch('https://spaces-pds-e2e.${domain}/xrpc/zone.stratos.feedgen.getFeed?feed=general&limit=50',{headers:{authorization:'Bearer '+accessJwt,'atproto-proxy':'did:web:feedgen-e2e.${domain}#stratos_feedgen'}});
+     const response=await fetch('https://pds-space1.${domain}/xrpc/zone.stratos.feedgen.getFeed?feed=general&limit=50',{headers:{authorization:'Bearer '+accessJwt,'atproto-proxy':'did:web:feedgen-e2e.${domain}#stratos_feedgen'}});
      console.log(JSON.stringify({status:response.status,body:await response.json()}))`,
   ])
   return JSON.parse(
@@ -175,10 +175,10 @@ async function configureLimits(overrides = {}) {
 
 const caddyPath = join(sandbox, 'state/Caddyfile')
 const originalCaddy = await readFile(caddyPath, 'utf8')
-const route = `spaces-pds-e2e.${domain} {\n  tls internal\n  reverse_proxy feedgen-e2e-pds-spaces:3000\n}`
+const route = `pds-space1.${domain} {\n  tls internal\n  reverse_proxy pds-space1:3000\n}`
 assert.ok(originalCaddy.includes(route), 'Pinned PDS route changed')
 const config = JSON.parse(await compose(['config', '--format', 'json']))
-const image = config.services['feedgen-e2e-pds-spaces']?.image
+const image = config.services['pds-space1']?.image
 assert.ok(typeof image === 'string' && image.length > 0)
 // Reuse the locked feedgen build, including its bundled SQLCipher, for a
 // read-only inspector. The inspector never emits keys or record contents.
@@ -325,10 +325,10 @@ const privateOrigins =
   config.services['feedgen-e2e-stratos']?.environment?.IDENTITY_PRIVATE_ORIGINS
 assert.ok(
   typeof privateOrigins === 'string' &&
-    privateOrigins.includes(`https://motoko.spaces-pds-e2e.${domain}`),
+    privateOrigins.includes(`https://motoko.pds-space1.${domain}`),
   'Pinned Stratos private identity origins changed',
 )
-const secondAccountOrigin = `https://rei.spaces-pds-e2e.${domain}`
+const secondAccountOrigin = `https://rei.pds-space1.${domain}`
 const accountScript = join(sandbox, 'state/staging-limits.account.mjs')
 await writeFile(
   accountScript,
@@ -444,7 +444,7 @@ try {
     caddyPath,
     originalCaddy.replace(
       route,
-      route.replace('feedgen-e2e-pds-spaces:3000', 'staging-limits-proxy:3000'),
+      route.replace('pds-space1:3000', 'staging-limits-proxy:3000'),
     ),
   )
   await compose(['restart', 'gateway'])

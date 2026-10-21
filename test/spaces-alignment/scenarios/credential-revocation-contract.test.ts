@@ -64,7 +64,7 @@ esac
     }
   })
   it('wires the real exchange, private authority peer, restart, and strict receipt', async () => {
-    const reportDirectory = await mkdtemp(
+    const scratchDirectory = await mkdtemp(
       join(tmpdir(), 'revocation-contract-'),
     )
     const assertions = suite.requiredAssertions.map((id) => ({
@@ -73,7 +73,7 @@ esac
     }))
     let output = JSON.stringify({ suite: suite.id, assertions })
     const runCommand = vi.fn(async (file, args, cwd) => {
-      const assets = join(reportDirectory, 'standard-browser-assets')
+      const assets = join(scratchDirectory, 'standard-browser-assets')
       expect(file).toBe('bash')
       expect(args).toEqual([
         '-ec',
@@ -123,7 +123,7 @@ esac
       return output
     })
     const context = {
-      reportDirectory,
+      scratchDirectory,
       composeFile: '/tmp/nerv/compose.yaml',
       projectName: 'nerv',
       sandboxDirectory: '/tmp/nerv',
@@ -158,7 +158,7 @@ esac
       output = 'not json'
       await expect(suite.run(context)).rejects.toThrow()
     } finally {
-      await rm(reportDirectory, { recursive: true, force: true })
+      await rm(scratchDirectory, { recursive: true, force: true })
     }
   })
 })

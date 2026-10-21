@@ -16,7 +16,7 @@ window.delegationScenarioAuth = createBrowserAuth({
     serviceDid: `did:web:stratos-e2e.${domain}`,
     actions: ['read', 'create', 'update', 'delete'],
   },
-  handleResolver: `https://spaces-pds-e2e.${domain}`,
+  handleResolver: `https://pds-space1.${domain}`,
   plcDirectoryUrl: `https://plc.${domain}`,
   getBaseUrl: () => origin,
   getClientId: () => `${origin}/client-metadata.json`,

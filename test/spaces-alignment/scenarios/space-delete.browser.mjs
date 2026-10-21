@@ -238,7 +238,7 @@ async function requestJson(url, options) {
 }
 
 async function createSecondAccount(domain, password) {
-  const pds = `https://spaces-pds-e2e.${domain}`
+  const pds = `https://pds-space1.${domain}`
   const adminPassword = (
     await readFile('/run/sandbox-secrets/pds-admin-password', 'utf8')
   ).trim()
@@ -254,14 +254,14 @@ async function createSecondAccount(domain, password) {
       body: JSON.stringify({ useCount: 1 }),
     },
   )
-  const username = `asuka.spaces-pds-e2e.${domain}`
+  const username = `asuka.pds-space1.${domain}`
   const session = await requestJson(
     `${pds}/xrpc/com.atproto.server.createAccount`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        email: `asuka@spaces-pds-e2e.${domain}`,
+        email: `asuka@pds-space1.${domain}`,
         handle: username,
         password,
         inviteCode: invite.code,
@@ -352,9 +352,9 @@ async function main() {
   const password = (
     await readFile('/run/sandbox-secrets/browser-password', 'utf8')
   ).trim()
-  const pds = `https://spaces-pds-e2e.${domain}`
+  const pds = `https://pds-space1.${domain}`
   const account = {
-    username: `motoko.spaces-pds-e2e.${domain}`,
+    username: `motoko.pds-space1.${domain}`,
     password,
   }
   const session = await requestJson(

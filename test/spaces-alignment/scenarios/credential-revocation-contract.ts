@@ -35,7 +35,7 @@ export const suite: ScenarioSuite = {
     'stratos-unsupported-role-unadvertised',
   ],
   async run(context): Promise<AssertionResult[]> {
-    const assets = await prepareBrowserRunner(context.reportDirectory)
+    const assets = await prepareBrowserRunner(context.scratchDirectory)
     await copyFile(
       join(assets, 'driver.mjs'),
       join(assets, 'standard-credential-transport.driver.mjs'),

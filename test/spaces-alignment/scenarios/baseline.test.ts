@@ -18,7 +18,7 @@ describe('baseline browser receipt', () => {
       sandboxDirectory: '/tmp/faye-sandbox',
       composeFile: '/tmp/faye-sandbox/compose.yaml',
       projectName: 'faye-test',
-      reportDirectory: '/tmp/faye-report',
+      scratchDirectory: '/tmp/faye-report',
       async runCommand(file, args, cwd) {
         calls.push({ file, args, cwd })
         return `Browser output\n  ${JSON.stringify({ suite: 'baseline', assertions })}\nBrowser finished\n`
@@ -53,7 +53,7 @@ describe('baseline browser receipt', () => {
       sandboxDirectory: '/tmp/faye-sandbox',
       composeFile: '/tmp/faye-sandbox/compose.yaml',
       projectName: 'faye-test',
-      reportDirectory: '/tmp/faye-report',
+      scratchDirectory: '/tmp/faye-report',
       async runCommand() {
         return output
       },

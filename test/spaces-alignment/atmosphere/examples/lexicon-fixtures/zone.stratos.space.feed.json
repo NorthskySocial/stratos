@@ -1,0 +1,13 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.space.feed",
+  "defs": {
+    "main": {
+      "type": "space",
+      "description": "A members-only Stratos post feed",
+      "key": "any",
+      "name": "Stratos Feed",
+      "collections": ["zone.stratos.feed.post"]
+    }
+  }
+}

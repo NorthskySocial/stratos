@@ -72,16 +72,31 @@ it('revokes the test webapp grant before releasing the denied browser request', 
   const assertions = await suite.run({
     sandboxDirectory,
     projectName: 'feed-errors-test',
-    reportDirectory: sandboxDirectory,
+    scratchDirectory: sandboxDirectory,
     runCommand,
   })
   validateAssertions(suite, assertions)
+  expect(
+    runCommand.mock.calls.some(
+      ([, args]) => args.slice(-2).join(' ') === 'restart pds-space1',
+    ),
+  ).toBe(true)
+  const definition = JSON.parse(
+    await readFile(
+      join(sandboxDirectory, 'stacks/feed-errors-webapp.definition.json'),
+      'utf8',
+    ),
+  )
+  expect(definition.services[0].buildArguments).toContainEqual({
+    name: 'VITE_ATPROTO_HANDLE_RESOLVER',
+    source: { kind: 'host-url', host: 'pds-space1' },
+  })
   const revocation = runCommand.mock.calls.find(([, args]) =>
     args.includes('exec'),
   )
   expect(revocation?.[1]).toEqual(
     expect.arrayContaining([
-      'feedgen-e2e-pds-spaces',
+      'pds-space1',
       did,
       'https://webapp-e2e.atmosbox.internal/client-metadata.json',
     ]),
@@ -90,7 +105,7 @@ it('revokes the test webapp grant before releasing the denied browser request', 
   expect(command.slice(command.indexOf('exec'))).toEqual([
     'exec',
     '-T',
-    'feedgen-e2e-pds-spaces',
+    'pds-space1',
     'node',
     '-e',
     expect.stringContaining('DELETE FROM token WHERE did = ? AND clientId = ?'),
@@ -108,7 +123,7 @@ it.each(['x-did:plc:motoko', 'did:plc:motoko!'])(
       suite.run({
         sandboxDirectory,
         projectName: 'feed-errors-test',
-        reportDirectory: sandboxDirectory,
+        scratchDirectory: sandboxDirectory,
         runCommand,
       }),
     ).rejects.toThrow('invalid test account DID')
@@ -129,7 +144,7 @@ it.each(['revoked:1x', 'prefixrevoked:1'])(
       suite.run({
         sandboxDirectory,
         projectName: 'feed-errors-test',
-        reportDirectory: sandboxDirectory,
+        scratchDirectory: sandboxDirectory,
         runCommand,
       }),
     ).rejects.toThrow('grant revocation was not confirmed')

@@ -43,7 +43,7 @@ function context(
     sandboxDirectory: '/tmp/faye',
     composeFile: '/tmp/faye/compose.yaml',
     projectName: 'faye',
-    reportDirectory: '/tmp/faye-report',
+    scratchDirectory: '/tmp/faye-report',
     runCommand: vi.fn(async (file: string, args: readonly string[]) => {
       if (file === 'cargo') return ''
       return args.includes('FEEDGEN_E2E_PDS_ACCOUNT=batou')

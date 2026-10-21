@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "id": "lexicon-authority",
+  "services": [{ "service": "lexicon-authority", "environment": [] }],
+  "routes": [
+    {
+      "id": "authority",
+      "service": "lexicon-authority",
+      "host": "authority",
+      "port": 3000
+    },
+    {
+      "id": "authority-accounts",
+      "service": "lexicon-authority",
+      "host": "*.authority",
+      "port": 3000
+    }
+  ],
+  "txt": [
+    {
+      "owner": "_lexicon.hypercerts.org",
+      "value": { "kind": "authority", "authority": "lexicon-authority" }
+    },
+    {
+      "owner": "_lexicon.certified.app",
+      "value": { "kind": "authority", "authority": "lexicon-authority" }
+    },
+    {
+      "owner": "_lexicon.space.stratos.zone",
+      "value": { "kind": "authority", "authority": "lexicon-authority" }
+    }
+  ],
+  "authority": {
+    "name": "lexicon-authority",
+    "route": "authority",
+    "account": {
+      "name": "schemas",
+      "email": "schemas@authority.atmosbox.test"
+    },
+    "fixtures": [
+      {
+        "nsid": "org.hypercerts.authWrite",
+        "file": "examples/lexicon-fixtures/org.hypercerts.authWrite.json"
+      },
+      {
+        "nsid": "app.certified.authWrite",
+        "file": "examples/lexicon-fixtures/app.certified.authWrite.json"
+      },
+      {
+        "nsid": "zone.stratos.space.feed",
+        "file": "examples/lexicon-fixtures/zone.stratos.space.feed.json"
+      }
+    ]
+  },
+  "secrets": []
+}

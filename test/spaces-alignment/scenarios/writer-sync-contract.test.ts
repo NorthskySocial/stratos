@@ -5,19 +5,19 @@ import { expect, it, vi } from 'vitest'
 import { suite } from './writer-sync-contract.js'
 
 it('runs the real driver with explicit Compose identity and validates every receipt assertion', async () => {
-  const reportDirectory = await mkdtemp(join(tmpdir(), 'writer-contract-'))
+  const scratchDirectory = await mkdtemp(join(tmpdir(), 'writer-contract-'))
   const assertions = suite.requiredAssertions.map((id) => ({
     id,
     status: 'passed' as const,
   }))
   let output = JSON.stringify({ suite: suite.id, assertions })
   const context = {
-    reportDirectory,
+    scratchDirectory,
     composeFile: '/tmp/nerv/compose.yaml',
     projectName: 'nerv',
     sandboxDirectory: '/tmp/nerv',
     runCommand: vi.fn(async (file, args, cwd) => {
-      const assets = join(reportDirectory, 'standard-browser-assets')
+      const assets = join(scratchDirectory, 'standard-browser-assets')
       expect(file).toBe('docker')
       expect(args).toEqual([
         'compose',
@@ -78,6 +78,6 @@ it('runs the real driver with explicit Compose identity and validates every rece
     context.runCommand.mockRejectedValueOnce(new Error('child failed'))
     await expect(suite.run(context)).rejects.toThrow('child failed')
   } finally {
-    await rm(reportDirectory, { recursive: true, force: true })
+    await rm(scratchDirectory, { recursive: true, force: true })
   }
 })
