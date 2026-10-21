@@ -13,6 +13,12 @@ import {
   whoami,
 } from '../src/lib/api/client'
 import { boundarySettings, newBoundaryDraft } from '../src/lib/boundary-form'
+import {
+  addBoundary,
+  listEnrollments,
+  removeBoundary,
+  resolveEnrollments,
+} from '../src/lib/api/client'
 
 const settings = boundarySettings({
   ...newBoundaryDraft(),
@@ -73,6 +79,72 @@ describe('boundary catalog XRPC transport', () => {
       },
     )
   })
+})
+
+describe('boundary member XRPC transport', () => {
+  it('lists the selected boundary page with exact query and cookie behavior', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ enrollments: [], cursor: 'next' })),
+      )
+    vi.stubGlobal('fetch', fetcher)
+    expect(
+      await listEnrollments({
+        limit: 25,
+        boundary: 'did:web:nerv.test/engineering',
+        active: false,
+        custody: 'pds',
+      }),
+    ).toEqual({ enrollments: [], cursor: 'next' })
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith(
+      '/xrpc/zone.stratos.admin.listEnrollments?limit=25&boundary=did%3Aweb%3Anerv.test%2Fengineering&active=false&custody=pds',
+      { credentials: 'include' },
+    )
+  })
+
+  it('resolves enrollment detail with the session cookie', async () => {
+    const result = { did: 'did:plc:rei', enrolled: true, boundaries: [] }
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify(result)))
+    vi.stubGlobal('fetch', fetcher)
+    expect(await resolveEnrollments(result.did)).toEqual(result)
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith(
+      '/xrpc/zone.stratos.identity.resolveEnrollments?did=did%3Aplc%3Arei',
+      { credentials: 'include' },
+    )
+  })
+
+  it.each([
+    ['addBoundary', addBoundary],
+    ['removeBoundary', removeBoundary],
+  ])(
+    'sends one scoped %s delta and no replacement set',
+    async (method, call) => {
+      const result = {
+        did: 'did:plc:rei',
+        boundaries: ['did:web:nerv.test/engineering'],
+      }
+      const fetcher = vi
+        .fn()
+        .mockResolvedValue(new Response(JSON.stringify(result)))
+      vi.stubGlobal('fetch', fetcher)
+      expect(await call(result.did, result.boundaries[0])).toEqual(result)
+      expect(fetcher).toHaveBeenCalledExactlyOnceWith(
+        `/xrpc/zone.stratos.admin.${method}`,
+        {
+          credentials: 'include',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            did: result.did,
+            boundary: result.boundaries[0],
+          }),
+        },
+      )
+    },
+  )
 })
 
 describe('admin session error recovery', () => {
