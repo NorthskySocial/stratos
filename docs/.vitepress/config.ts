@@ -123,7 +123,7 @@ export default defineConfig({
               link: '/architecture/service-key-history',
             },
             {
-              text: 'Require DPoP for Private Reads',
+              text: 'Negotiated DPoP for Private Reads',
               link: '/architecture/require-dpop',
             },
             { text: 'System Diagrams', link: '/architecture/diagrams' },
