@@ -1,5 +1,32 @@
 # Permissioned spaces: current contract
 
+## STAR source update versus current runtime
+
+Upstream PR 5705 merged at `232b2cdcec7a54a92d6e3c6461d07775d611d1ad`.
+Its `com.atproto.space.getRepo` returns `application/octet-stream` STAR-lite v1
+with magic `2a6c0100`, framed canonical metadata and path/record pairs through EOF.
+Metadata uses `atproto-space-repo`, `did`, `space`, and flattened signed-commit
+fields. There is no standalone hash prefix or index-only export. Only `space`
+and `repo` are request parameters; deltas remain `listRepoOps`, blobs remain separate.
+The existing context signature/MAC is deniable content binding, not a direct
+signature over the repository hash. Complete-content verification requires all
+records and the final EOF hash comparison; upstream paged export does not visibly
+hold one snapshot transaction, so consumers must reject/retry mismatches.
+
+This is upstream source behavior, not shipped Stratos STAR support. Current
+Stratos custody still uses MST/CAR and actor subscriptions; current PDS ingestion
+uses `listRepoOps` and terminal envelope verification, not full-content recovery.
+The AiaB source pin remains `79d6307e19908f3af406838ea0e5fae42847f182`.
+No pin, runtime code or deployment changes accompany this documentation.
+Planned PDS recovery requires an independently reviewed source/image pin and real
+STAR suite, stays opt-in, and validates actual response profile rather than an
+invented capability advertisement. A credential for ONE space can authorize the
+full author repo in that space; it does not authorize a whole Stratos actor export.
+
+See [the STAR architecture](star-repository.md) for the distinct proposed internal
+actor signature, reader gates and migration. Spaces custody signing compatibility
+remains unresolved; shared framing alone does not resolve it.
+
 The October transport targets reference implementation `5b95b2f2723a2882824fbb0b819fd6aad884ef20` and alpha PDS `79d6307e19908f3af406838ea0e5fae42847f182`. The sandbox pins the alpha PDS source and checks its Dockerfile and lockfile hashes before building. These are separate snapshots. The deployed PDS image must also be traced to its source revision and immutable image digest; a source checkout alone does not prove what is running.
 
 | Concern              | Stratos custody                                                           | PDS custody                                                                    |

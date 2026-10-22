@@ -1,5 +1,34 @@
 # Stratos Feed Generator
 
+## STAR source update versus current runtime
+
+Upstream PR 5705 merged at `232b2cdcec7a54a92d6e3c6461d07775d611d1ad`.
+Its `com.atproto.space.getRepo` returns `application/octet-stream` STAR-lite v1
+with magic `2a6c0100`, framed canonical metadata and path/record pairs through EOF.
+Metadata uses `atproto-space-repo`, `did`, `space`, and flattened signed-commit
+fields. There is no standalone hash prefix or index-only export. Only `space`
+and `repo` are request parameters; deltas remain `listRepoOps`, blobs remain separate.
+The existing context signature/MAC is deniable content binding, not a direct
+signature over the repository hash. Complete-content verification requires all
+records and the final EOF hash comparison; upstream paged export does not visibly
+hold one snapshot transaction, so consumers must reject/retry mismatches.
+
+This is upstream source behavior, not shipped Stratos STAR support. Current
+Stratos custody still uses MST/CAR and actor subscriptions; current PDS ingestion
+uses `listRepoOps` and terminal envelope verification, not full-content recovery.
+The AiaB source pin remains `79d6307e19908f3af406838ea0e5fae42847f182`.
+No pin, runtime code or deployment changes accompany this documentation.
+Planned PDS recovery requires an independently reviewed source/image pin and real
+STAR suite, stays opt-in, and validates actual response profile rather than an
+invented capability advertisement. A credential for ONE space can authorize the
+full author repo in that space; it does not authorize a whole Stratos actor export.
+
+See [the STAR architecture](../docs/architecture/star-repository.md). Plan 031
+upgrades PDS-space recovery only, not Stratos actor-stream readers. Its full ledger
+must include non-feed/application-rejected records, stage until EOF verification,
+and atomically promote deletions and checkpoints under revocation/host fences.
+Quotas, cleanup and gap-free snapshot-to-oplog catch-up are activation gates.
+
 The Rust feed generator maintains an encrypted, bounded local projection,
 serves authenticated boundary-scoped feeds, and stays closed until the
 authority stream has reconciled.

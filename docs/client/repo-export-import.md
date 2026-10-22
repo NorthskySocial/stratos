@@ -1,10 +1,27 @@
 # Repo Export & Import
 
-Stratos repos are Merkle Search Trees which provides "feature parity" with the PDS. You can export a
-full repo as a CAR file and import it into another service.
+## Current runtime and planned STAR migration
 
-::: warning Note: Not yet implemented
-:::
+Stratos-custody repositories currently use MSTs. The owner-only
+`zone.stratos.sync.getRepo` export returns `application/vnd.ipld.car` and retains
+its legacy `since` parameter. A partial export is not a complete-state proof.
+The import contract below is not implemented; do not treat the example or its
+proposed constraints as an available recovery path.
+
+Upstream PR 5705 at `232b2cdcec7a54a92d6e3c6461d07775d611d1ad` changes
+`com.atproto.space.getRepo`, not this Stratos endpoint. Upstream now uses
+`application/octet-stream` STAR-lite v1 (`2a6c0100`), framed metadata and ordered
+path/record pairs to EOF, with no separate hash prefix. It takes only `space`
+and `repo`, not `since`, `collection`, or `excludeValues`. A space credential
+can recover one author's complete repo within that space; blobs are separate.
+
+The [STAR architecture](../architecture/star-repository.md) plans a distinct
+private actor profile and direct custody-service signature. It is not shipped,
+not an upstream account proof, and not a replacement for current proof APIs yet.
+The AiaB pin remains `79d6307e19908f3af406838ea0e5fae42847f182`; merged upstream
+source does not establish live interoperability. Reader migration and rollback
+gates must pass before CAR retirement. Independent public-repository proof support
+remains separate from private MST removal.
 
 ## Verifying a Record (Inclusion Proof)
 
@@ -54,7 +71,7 @@ async function getRecordProof(
 
 The returned CAR contains:
 
-1. **Signed commit** — the repo root with the service's secp256k1 signature.
+1. **Signed commit** — the repo root with the custody service's per-actor P-256 signature.
 2. **MST inclusion proof** — tree nodes proving the record exists in the repo.
 3. **Record block** — the actual record data.
 
@@ -81,7 +98,7 @@ async function exportRepo(
 }
 ```
 
-## Importing a Repository
+## Importing a Repository (planned, not implemented)
 
 Import a previously exported CAR file. The caller must be enrolled and the CAR's commit DID must
 match the authenticated user:
@@ -119,5 +136,5 @@ async function importRepo(
 | CID integrity | Verified for every block                 |
 | Target repo   | Must not already have an existing commit |
 
-The import validates that the commit DID matches the authenticated user, then indexes all records
+The proposed import contract validates that the commit DID matches the authenticated user, then indexes all records
 from the MST.
