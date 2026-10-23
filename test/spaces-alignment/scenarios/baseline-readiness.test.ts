@@ -19,7 +19,10 @@ async function probe(
   options: { privatePost?: boolean; composer?: boolean } = {},
 ) {
   const source = await readFile(
-    new URL('../templates/feedgen-ng-e2e-browser.mjs', import.meta.url),
+    new URL(
+      '../atmosphere/runtime/feedgen-ng-e2e-browser.mjs',
+      import.meta.url,
+    ),
     'utf8',
   )
   const calls: string[] = []

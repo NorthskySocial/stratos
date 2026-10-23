@@ -30,6 +30,7 @@ COPY stratos-service/ ./stratos-service/
 COPY stratos-client/ ./stratos-client/
 COPY stratos-indexer/ ./stratos-indexer/
 COPY lexicons/ ./lexicons/
+COPY lexicons-spaces/ ./lexicons-spaces/
 
 # Re-link workspace node_modules (COPY can disrupt pnpm symlinks)
 RUN pnpm install --frozen-lockfile

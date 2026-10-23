@@ -7,7 +7,7 @@ import { suite } from './credential-lifetime.js'
 
 describe('credential lifetime sandbox scenario', () => {
   it('runs the real browser lifecycle and requires every receipt', async () => {
-    const reportDirectory = await mkdtemp(
+    const scratchDirectory = await mkdtemp(
       join(tmpdir(), 'credential-lifetime-'),
     )
     try {
@@ -21,7 +21,7 @@ describe('credential lifetime sandbox scenario', () => {
       const result = await suite.run({
         sandboxDirectory: '/tmp/sandbox',
         projectName: 'lifetime-test',
-        reportDirectory,
+        scratchDirectory,
         async runCommand(file, args) {
           expect(file).toBe('docker')
           const service =
@@ -38,7 +38,7 @@ describe('credential lifetime sandbox scenario', () => {
             '--rm',
             '--no-deps',
             '--volume',
-            `${join(reportDirectory, 'browser-assets')}:/scenario:ro,z`,
+            `${join(scratchDirectory, 'browser-assets')}:/scenario:ro,z`,
             '--entrypoint',
             'node',
             service,
@@ -51,11 +51,11 @@ describe('credential lifetime sandbox scenario', () => {
       })
       expect(calls).toBe(2)
       const driver = await readFile(
-        join(reportDirectory, 'browser-assets/driver.mjs'),
+        join(scratchDirectory, 'browser-assets/driver.mjs'),
         'utf8',
       )
       expect(driver).toContain("new URL('/oauth/revoke', authorityUrl).href")
-      const assets = join(reportDirectory, 'browser-assets')
+      const assets = join(scratchDirectory, 'browser-assets')
       expect((await readdir(assets)).sort()).toEqual([
         'auth-client.iife.js',
         'authority.mjs',
@@ -88,7 +88,7 @@ describe('credential lifetime sandbox scenario', () => {
       await suite.run({
         sandboxDirectory: '/tmp/sandbox',
         projectName: 'lifetime-test',
-        reportDirectory,
+        scratchDirectory,
         async runCommand(_file, args) {
           return args.at(-1) === '/scenario/driver.mjs'
             ? JSON.stringify({
@@ -102,12 +102,12 @@ describe('credential lifetime sandbox scenario', () => {
         },
       })
     } finally {
-      await rm(reportDirectory, { recursive: true, force: true })
+      await rm(scratchDirectory, { recursive: true, force: true })
     }
   })
 
   it('rejects missing and malformed browser receipts', async () => {
-    const reportDirectory = await mkdtemp(
+    const scratchDirectory = await mkdtemp(
       join(tmpdir(), 'credential-lifetime-'),
     )
     try {
@@ -127,7 +127,7 @@ describe('credential lifetime sandbox scenario', () => {
           suite.run({
             sandboxDirectory: '/tmp/sandbox',
             projectName: 'lifetime-test',
-            reportDirectory,
+            scratchDirectory,
             async runCommand() {
               return output
             },
@@ -135,12 +135,12 @@ describe('credential lifetime sandbox scenario', () => {
         ).rejects.toThrow(message)
       }
     } finally {
-      await rm(reportDirectory, { recursive: true, force: true })
+      await rm(scratchDirectory, { recursive: true, force: true })
     }
   })
 
   it('rejects missing and malformed authority receipts', async () => {
-    const reportDirectory = await mkdtemp(
+    const scratchDirectory = await mkdtemp(
       join(tmpdir(), 'credential-lifetime-'),
     )
     try {
@@ -163,7 +163,7 @@ describe('credential lifetime sandbox scenario', () => {
           suite.run({
             sandboxDirectory: '/tmp/sandbox',
             projectName: 'lifetime-test',
-            reportDirectory,
+            scratchDirectory,
             async runCommand(_file, args) {
               return args.at(-1) === '/scenario/driver.mjs'
                 ? browserReceipt
@@ -173,7 +173,7 @@ describe('credential lifetime sandbox scenario', () => {
         ).rejects.toThrow(message)
       }
     } finally {
-      await rm(reportDirectory, { recursive: true, force: true })
+      await rm(scratchDirectory, { recursive: true, force: true })
     }
   })
 })

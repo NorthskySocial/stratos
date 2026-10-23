@@ -25,7 +25,7 @@ describe('delegation transport browser scenario', () => {
     expect(end).toBeGreaterThan(start)
     const requestedSpace =
       'at://did:web:stratos-e2e.atmosbox.test/space/zone.stratos.space.feed/general'
-    const pdsUrl = 'https://spaces-pds-e2e.atmosbox.test'
+    const pdsUrl = 'https://pds-space1.atmosbox.test'
     const session = {
       async fetchHandler(pathname: string | URL, init?: RequestInit) {
         const target = new URL(pathname, pdsUrl)
@@ -58,11 +58,11 @@ describe('delegation transport browser scenario', () => {
   })
 
   it('bundles the public OAuth client and requires a PDS-issued delegation receipt', async () => {
-    const reportDirectory = await mkdtemp(
+    const scratchDirectory = await mkdtemp(
       join(tmpdir(), 'delegation-scenario-'),
     )
     try {
-      await writeFile(join(reportDirectory, 'keep'), 'sentinel')
+      await writeFile(join(scratchDirectory, 'keep'), 'sentinel')
       const assertions = suite.requiredAssertions.map((id) => ({
         id,
         status: 'passed' as const,
@@ -74,7 +74,7 @@ describe('delegation transport browser scenario', () => {
       const results = await suite.run({
         sandboxDirectory: '/tmp/delegation-sandbox',
         projectName: 'delegation-test',
-        reportDirectory,
+        scratchDirectory,
         async runCommand(file, args) {
           expect(file).toBe('docker')
           calls.push(args)
@@ -132,17 +132,17 @@ describe('delegation transport browser scenario', () => {
         '--rm',
         '--no-deps',
         '--volume',
-        `${join(reportDirectory, 'browser-assets')}:/scenario:ro,z`,
+        `${join(scratchDirectory, 'browser-assets')}:/scenario:ro,z`,
         '--entrypoint',
         'node',
         'feedgen-e2e-browser',
         '/scenario/driver.mjs',
       ])
-      expect(await readFile(join(reportDirectory, 'keep'), 'utf8')).toBe(
+      expect(await readFile(join(scratchDirectory, 'keep'), 'utf8')).toBe(
         'sentinel',
       )
-      const browserAssets = join(reportDirectory, 'browser-assets')
-      expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
+      const browserAssets = join(scratchDirectory, 'browser-assets')
+      expect((await stat(scratchDirectory)).mode & 0o777).toBe(0o700)
       expect((await stat(browserAssets)).mode & 0o777).toBe(0o755)
       expect((await readdir(browserAssets)).sort()).toEqual([
         'auth-client.iife.js',
@@ -172,12 +172,12 @@ describe('delegation transport browser scenario', () => {
       expect(() => validateSuite(suite)).not.toThrow()
       expect(() => validateAssertions(suite, results)).not.toThrow()
     } finally {
-      await rm(reportDirectory, { recursive: true, force: true })
+      await rm(scratchDirectory, { recursive: true, force: true })
     }
   })
 
   it('rejects a browser run with no receipt', async () => {
-    const reportDirectory = await mkdtemp(
+    const scratchDirectory = await mkdtemp(
       join(tmpdir(), 'delegation-scenario-'),
     )
     try {
@@ -185,19 +185,19 @@ describe('delegation transport browser scenario', () => {
         suite.run({
           sandboxDirectory: '/tmp/delegation-sandbox',
           projectName: 'delegation-test',
-          reportDirectory,
+          scratchDirectory,
           async runCommand() {
             return 'Browser exited without a receipt'
           },
         }),
       ).rejects.toThrow('no assertion receipt')
     } finally {
-      await rm(reportDirectory, { recursive: true, force: true })
+      await rm(scratchDirectory, { recursive: true, force: true })
     }
   })
 
   it('rejects malformed browser receipts', async () => {
-    const reportDirectory = await mkdtemp(
+    const scratchDirectory = await mkdtemp(
       join(tmpdir(), 'delegation-scenario-'),
     )
     try {
@@ -209,7 +209,7 @@ describe('delegation transport browser scenario', () => {
           suite.run({
             sandboxDirectory: '/tmp/delegation-sandbox',
             projectName: 'delegation-test',
-            reportDirectory,
+            scratchDirectory,
             async runCommand() {
               return receipt
             },
@@ -217,12 +217,12 @@ describe('delegation transport browser scenario', () => {
         ).rejects.toThrow('invalid assertion receipt')
       }
     } finally {
-      await rm(reportDirectory, { recursive: true, force: true })
+      await rm(scratchDirectory, { recursive: true, force: true })
     }
   })
 
   it('rejects invalid service-token receipts without revealing a token', async () => {
-    const reportDirectory = await mkdtemp(
+    const scratchDirectory = await mkdtemp(
       join(tmpdir(), 'delegation-scenario-'),
     )
     const privateToken = 'signed.service.jwt'
@@ -231,7 +231,7 @@ describe('delegation transport browser scenario', () => {
         suite.run({
           sandboxDirectory: '/tmp/delegation-sandbox',
           projectName: 'delegation-test',
-          reportDirectory,
+          scratchDirectory,
           async runCommand(_file, args) {
             if (args.includes('feedgen-e2e-browser')) {
               return JSON.stringify({
@@ -275,7 +275,7 @@ describe('delegation transport browser scenario', () => {
         ).rejects.toThrow('invalid assertion receipt')
       }
     } finally {
-      await rm(reportDirectory, { recursive: true, force: true })
+      await rm(scratchDirectory, { recursive: true, force: true })
     }
   }, 30_000)
 })

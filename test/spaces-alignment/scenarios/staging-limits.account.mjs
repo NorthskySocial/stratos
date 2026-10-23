@@ -9,10 +9,10 @@ const require = createRequire('/runner/feedgen-ng-e2e-browser.mjs')
 const { chromium } = require('playwright')
 const domain = process.env.SANDBOX_DOMAIN
 assert.equal(domain, 'atmosbox.test')
-const pds = `https://spaces-pds-e2e.${domain}`
+const pds = `https://pds-space1.${domain}`
 const clubhouse = `https://clubhouse-e2e.atmosbox.internal`
 const account = {
-  username: `rei.spaces-pds-e2e.${domain}`,
+  username: `rei.pds-space1.${domain}`,
   password: (
     await readFile('/run/sandbox-secrets/browser-password', 'utf8')
   ).trim(),
@@ -59,7 +59,7 @@ const created = await fetch(`${pds}/xrpc/com.atproto.server.createAccount`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({
-    email: `rei@spaces-pds-e2e.${domain}`,
+    email: `rei@pds-space1.${domain}`,
     handle: account.username,
     password: account.password,
     inviteCode: code,

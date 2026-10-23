@@ -42,53 +42,10 @@ services:
       timeout: 2s
       retries: 20
 
-  feedgen-e2e-pds-spaces:
-    image: ${SPACES_PDS_IMAGE_ID}
-    init: true
-    entrypoint: ['dumb-init', '--', 'sh', '-ec']
-    command:
-      - |-
-        export PDS_HOSTNAME="spaces-pds-e2e.$${SANDBOX_DOMAIN}"
-        export PDS_DID_PLC_URL="$${SPACES_PDS_PLC_URL}"
-        export PDS_JWT_SECRET="$${SPACES_PDS_JWT_SECRET}"
-        export PDS_ADMIN_PASSWORD="$${SPACES_PDS_ADMIN_PASSWORD}"
-        export PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX="$${SPACES_PDS_ROTATION_KEY}"
-        export PDS_SERVICE_HANDLE_DOMAINS=".spaces-pds-e2e.$${SANDBOX_DOMAIN}"
-        exec node --heapsnapshot-signal=SIGUSR2 --enable-source-maps --import=@atproto/pds/telemetry index.ts
-    environment:
-      NODE_EXTRA_CA_CERTS: /ca/root.crt
-      LOG_LEVEL: warn
-      PDS_PORT: '3000'
-      PDS_DATA_DIRECTORY: /app/data
-      PDS_ACTOR_STORE_DIRECTORY: /app/data/actors
-      PDS_BLOBSTORE_DISK_LOCATION: /app/data/blocks
-      PDS_BLOBSTORE_DISK_TMP_LOCATION: /app/data/blob-tmp
-      PDS_DEV_MODE: 'true'
-      PDS_DISABLE_SSRF_PROTECTION: 'true'
-      PDS_RATE_LIMITS_ENABLED: 'false'
-      PDS_INVITE_REQUIRED: 'true'
-      PDS_CRAWLERS: ''
-    volumes:
-      - feedgen-e2e-pds-spaces-data:/app/data
-    depends_on:
-      plc:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'node',
-          '-e',
-          "fetch('http://localhost:3000/xrpc/_health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
-        ]
-      interval: 3s
-      timeout: 3s
-      retries: 60
-
   feedgen-e2e-stratos:
     build:
       context: ../stratos
-      dockerfile: ../atmosphereinabox/stacks/feedgen-ng-local/stratos.Dockerfile
+      dockerfile: Dockerfile
       target: stratos
     init: true
     read_only: true
@@ -119,7 +76,7 @@ services:
       STRATOS_ALLOWED_REDIRECT_ORIGINS: https://clubhouse-e2e.atmosbox.internal
       PLC_DIRECTORY: https://plc.atmosbox.test
       PLC_DIRECTORY_PRIVATE_CIDRS: 172.16.0.0/12
-      IDENTITY_PRIVATE_ORIGINS: https://spaces-pds-e2e.atmosbox.test,https://motoko.spaces-pds-e2e.atmosbox.test,https://batou.spaces-pds-e2e.atmosbox.test,https://pds1.atmosbox.test,https://user1.pds1.atmosbox.test,https://user2.pds1.atmosbox.test
+      IDENTITY_PRIVATE_ORIGINS: https://pds-space1.atmosbox.test,https://motoko.pds-space1.atmosbox.test,https://batou.pds-space1.atmosbox.test,https://pds1.atmosbox.test,https://user1.pds1.atmosbox.test,https://user2.pds1.atmosbox.test
       IDENTITY_PRIVATE_CIDRS: 172.16.0.0/12
       STORAGE_BACKEND: sqlite
       STRATOS_DATA_DIR: /app/data
@@ -193,7 +150,7 @@ services:
       FEEDGEN_PROJECTION_MAX_AGE_MS: '86400000'
       FEEDGEN_PROJECTION_MAX_BYTES: '33554432'
       FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS: '4'
-      FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN: https://spaces-pds-e2e.atmosbox.test
+      FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN: https://pds-space1.atmosbox.test
       FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS: 172.16.0.0/12
       PLC_DIRECTORY: https://plc.atmosbox.test
       PLC_DIRECTORY_PRIVATE_CIDRS: 172.16.0.0/12
@@ -223,17 +180,51 @@ services:
       XDG_CONFIG_HOME: /tmp/config
       NODE_EXTRA_CA_CERTS: /ca/root.crt
     volumes:
+      - ./state/browser-pds-admin:/sandbox-state/pds-admin-password:ro
       - ./state/browser-accounts.json:/sandbox-state/accounts.json:ro
     depends_on:
-      feedgen-e2e-pds-spaces:
+      pds-space1:
         condition: service_healthy
       feedgen-e2e-rust:
         condition: service_started
       feedgen-e2e-clubhouse:
         condition: service_healthy
 
+  feedgen-e2e-clubhouse:
+    build:
+      context: ../stratos
+      dockerfile: clubhouse/Dockerfile
+      args:
+        VITE_STRATOS_SERVICE_DID: did:web:stratos-e2e.atmosbox.test
+        VITE_FEEDGEN_URL: https://feedgen-e2e.atmosbox.test
+        VITE_FEEDGEN_DID: did:web:feedgen-e2e.atmosbox.test
+        VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON: '{"general":"at://did:web:stratos-e2e.atmosbox.test/space/zone.stratos.space.feed/general"}'
+        VITE_ATPROTO_HANDLE_RESOLVER: https://pds-space1.atmosbox.test
+        VITE_PLC_DIRECTORY: https://plc.atmosbox.test
+        VITE_STRATOS_URL: https://stratos-e2e.atmosbox.internal
+        VITE_CLUBHOUSE_URL: https://clubhouse-e2e.atmosbox.internal
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=16m,uid=0,gid=0,mode=0755
+      - /var/run:rw,noexec,nosuid,size=4m,uid=0,gid=0,mode=0755
+    cap_drop: [ALL]
+    cap_add: [CHOWN, NET_BIND_SERVICE, SETGID, SETUID]
+    security_opt: ['no-new-privileges:true']
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://127.0.0.1/',
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
 volumes:
   feedgen-e2e-stratos-data: {}
   feedgen-e2e-rust-data: {}
   feedgen-e2e-runtime: {}
-  feedgen-e2e-pds-spaces-data: {}

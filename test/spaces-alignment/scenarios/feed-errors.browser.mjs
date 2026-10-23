@@ -123,7 +123,7 @@ async function requestJson(url, options) {
 }
 
 async function createFixtures(account, domain) {
-  const pds = `https://spaces-pds-e2e.${domain}`
+  const pds = `https://pds-space1.${domain}`
   const session = await requestJson(
     `${pds}/xrpc/com.atproto.server.createSession`,
     {
@@ -240,7 +240,7 @@ async function main() {
   assert.equal(domain, 'atmosbox.test')
   await trustSandboxCa()
   const account = {
-    username: `motoko.spaces-pds-e2e.${domain}`,
+    username: `motoko.pds-space1.${domain}`,
     password: (
       await readFile('/run/sandbox-secrets/browser-password', 'utf8')
     ).trim(),

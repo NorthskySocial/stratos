@@ -6,6 +6,7 @@ const mockHandleResolve = vi.fn()
 const mockDidResolve = vi.fn()
 vi.mock('@northskysocial/stratos-core/network', () => {
   return {
+    createPublicFetch: (fetch: typeof globalThis.fetch) => fetch,
     createPublicIdResolver: () => ({
       handle: {
         resolve: mockHandleResolve,
@@ -49,6 +50,61 @@ describe('identity-resolver', () => {
 
     expect(result).toBe(did)
     expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('resolves a trusted PDS handle through describeRepo', async () => {
+    const handle = 'motoko.pds-space1.atmosbox.test'
+    const did = 'did:plc:motoko'
+    mockHandleResolve.mockResolvedValue(undefined)
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ handle, did, didDoc: { id: did } })),
+    )
+    const cfg = {
+      ...mockCfg,
+      identity: {
+        ...mockCfg.identity,
+        privateOrigins: ['https://pds-space1.atmosbox.test'],
+        privateCidrs: ['172.16.0.0/12'],
+      },
+    }
+
+    const idResolver = createIdResolver(cfg, mockFetch, mockLogger)
+    const result = await idResolver.handle.resolve(handle)
+
+    expect(result).toBe(did)
+    expect(mockFetch).toHaveBeenCalledOnce()
+    const [url, request] = mockFetch.mock.calls[0]
+    expect(String(url)).toBe(
+      `https://pds-space1.atmosbox.test/xrpc/com.atproto.repo.describeRepo?repo=${handle}`,
+    )
+    expect(request).toEqual({ redirect: 'error' })
+  })
+
+  it('rejects a trusted PDS response for another handle', async () => {
+    const handle = 'motoko.pds-space1.atmosbox.test'
+    mockHandleResolve.mockResolvedValue(undefined)
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          handle: 'batou.pds-space1.atmosbox.test',
+          did: 'did:plc:batou',
+        }),
+      ),
+    )
+    mockFetch.mockResolvedValueOnce({ ok: false })
+    const cfg = {
+      ...mockCfg,
+      identity: {
+        ...mockCfg.identity,
+        privateOrigins: ['https://pds-space1.atmosbox.test'],
+        privateCidrs: ['172.16.0.0/12'],
+      },
+    }
+
+    const idResolver = createIdResolver(cfg, mockFetch, mockLogger)
+
+    await expect(idResolver.handle.resolve(handle)).resolves.toBeUndefined()
+    expect(mockFetch).toHaveBeenCalledTimes(2)
   })
 
   it('should fallback to PLC directory if standard resolution fails', async () => {

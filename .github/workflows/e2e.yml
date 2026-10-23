@@ -1,0 +1,128 @@
+name: Atmosphere in a Box E2E
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: aiab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - 'stratos-*/**'
+              - 'lexicons/**'
+              - 'test/spaces-alignment/**'
+              - 'webapp/**'
+              - 'clubhouse/**'
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain*'
+              - '.cargo/**'
+              - 'rustfmt.toml'
+              - '.rustfmt.toml'
+              - 'clippy.toml'
+              - '.clippy.toml'
+              - 'tsconfig*.json'
+              - 'patches/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'vitest.config.ts'
+              - '.github/workflows/e2e.yml'
+
+  aiab:
+    name: aiab
+    needs: gate
+    if: >-
+      always() &&
+      (needs.gate.outputs.relevant == 'true' || github.event_name != 'pull_request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-aiab-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-aiab-pnpm-store-
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.8.3
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Select evidence base
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="$(git rev-parse HEAD^)"
+          fi
+          echo "GITHUB_BASE_SHA=$base" >> "$GITHUB_ENV"
+
+      - name: Run Atmosphere in a Box baseline
+        run: |
+          pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
+            --sandbox-dir "$RUNNER_TEMP/aiab-sandbox" \
+            --source "$GITHUB_WORKSPACE" \
+            --suite baseline \
+            --ci-evidence \
+            --report-dir "$RUNNER_TEMP/aiab-report"
+
+      - name: Upload sandbox receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiab-receipt
+          path: |
+            ${{ runner.temp }}/aiab-report/receipt.json
+            ${{ runner.temp }}/aiab-report/failure.json
+          if-no-files-found: ignore
+          retention-days: 30

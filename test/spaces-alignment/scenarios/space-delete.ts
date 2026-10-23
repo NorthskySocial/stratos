@@ -31,7 +31,7 @@ const definition = {
         },
         {
           name: 'VITE_ATPROTO_HANDLE_RESOLVER',
-          source: { kind: 'host-url', host: 'spaces-pds-e2e' },
+          source: { kind: 'host-url', host: 'pds-space1' },
         },
         {
           name: 'VITE_PLC_DIRECTORY',
@@ -135,7 +135,7 @@ export const suite: ScenarioSuite = {
         '--project-directory',
         context.sandboxDirectory,
         'restart',
-        'feedgen-e2e-pds-spaces',
+        'pds-space1',
       ],
       context.sandboxDirectory,
     )

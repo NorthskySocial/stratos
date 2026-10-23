@@ -36,7 +36,7 @@ describe('real October Rust composition', () => {
         composeFile: '/private/compose.yaml',
         sandboxDirectory: '/private/sandbox',
         projectName: 'faye',
-        reportDirectory: '/private/report',
+        scratchDirectory: '/private/report',
         runCommand: vi.fn(async (_file: string, args: string[]) => {
           commands.push(args)
           if (args.includes('/scenario/rust-production-interop.driver.mjs'))
@@ -111,7 +111,7 @@ describe('real October Rust composition', () => {
         composeFile: '/private/compose.yaml',
         sandboxDirectory: '/private/sandbox',
         projectName: 'faye',
-        reportDirectory: '/private/report',
+        scratchDirectory: '/private/report',
         runCommand,
       }),
     ).rejects.toThrow()

@@ -29,6 +29,26 @@ export function trustedIdentityOrigins(
   return policies
 }
 
+function trustedIdentityFetch(
+  cfg: StratosServiceConfig,
+  fetchWithUserAgent: typeof fetch,
+): typeof fetch {
+  const policies = trustedIdentityOrigins(cfg)
+  return policies.length
+    ? createPublicFetch(fetchWithUserAgent, policies)
+    : fetchWithUserAgent
+}
+
+function trustedIdentityOrigin(
+  cfg: StratosServiceConfig,
+  handle: string,
+): string | undefined {
+  return (cfg.identity.privateOrigins ?? []).find((origin) => {
+    const hostname = new URL(origin).hostname
+    return handle === hostname || handle.endsWith(`.${hostname}`)
+  })
+}
+
 /**
  * Create an ID resolver with PLC fallback logic
  * @param cfg - The Stratos service configuration.
@@ -48,9 +68,7 @@ export function createIdResolver(
     },
     policies,
   )
-  const plcFetch = policies.length
-    ? createPublicFetch(fetchWithUserAgent, policies)
-    : fetchWithUserAgent
+  const identityFetch = trustedIdentityFetch(cfg, fetchWithUserAgent)
 
   installServiceKeyShortcut(
     idResolver,
@@ -71,11 +89,38 @@ export function createIdResolver(
       )
     }
 
+    const origin = trustedIdentityOrigin(cfg, handle)
+    if (origin) {
+      try {
+        const url = new URL('/xrpc/com.atproto.repo.describeRepo', origin)
+        url.searchParams.set('repo', handle)
+        const response = await identityFetch(url, { redirect: 'error' })
+        if (response.ok) {
+          const body = (await response.json()) as {
+            did?: unknown
+            handle?: unknown
+          }
+          if (
+            body.handle === handle &&
+            typeof body.did === 'string' &&
+            body.did.startsWith('did:')
+          ) {
+            return body.did
+          }
+        }
+      } catch (err) {
+        logger?.debug(
+          { handle, err: err instanceof Error ? err.message : String(err) },
+          'trusted handle resolution fallback failed',
+        )
+      }
+    }
+
     // The operator chooses the PLC endpoint; it must not redirect elsewhere.
     try {
       const plcUrl = cfg.identity.plcUrl
       const resolveUrl = `${plcUrl}/did-by-handle/${encodeURIComponent(handle)}`
-      const resp = await plcFetch(resolveUrl, { redirect: 'error' })
+      const resp = await identityFetch(resolveUrl, { redirect: 'error' })
       if (resp.ok) {
         const did = await resp.text()
         if (did && did.startsWith('did:')) {

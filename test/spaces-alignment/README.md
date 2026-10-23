@@ -1,6 +1,10 @@
 # Spaces alignment sandbox gate
 
-Run this gate only after the candidate commit has separate Standards and Spec approvals from an accepted reviewer model. The runner requires a clean candidate checkout. It rejects an earlier commit's review receipt, an unknown suite, reused report paths, skipped assertions, and any failed child command.
+Local delivery runs require the candidate commit to have separate Standards and
+Spec approvals from an accepted reviewer model. CI runs use the regression-only
+evidence mode described below. In both modes the runner requires a clean candidate
+checkout. It rejects an earlier commit's review receipt, an unknown suite, reused
+report paths, skipped assertions, and any failed child command.
 
 ## Review receipt
 
@@ -50,7 +54,27 @@ pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
   --report-dir /tmp/new-spaces-report
 ```
 
-The report directory must not exist. The runner exports the pinned AiaB source and the exact candidate into a unique private directory. It overlays only reviewed templates from this checkout, builds the pinned alpha PDS from source, creates one ordinary PDS with two synthetic users, runs the selected suite, and removes its unique Compose project and volumes. It never modifies the supplied AiaB checkout. The output `receipt.json` contains source pins, image ID, review references, commands, and assertion counts. Archive files and image metadata stay private with the report.
+## CI evidence mode
+
+`.github/workflows/e2e.yml` runs the same real sandbox on pull requests, pushes
+to `main`, and manual dispatch. A CI run has no reviewer, so it uses
+`--ci-evidence` instead of a review receipt. The flag is accepted only when
+`GITHUB_ACTIONS=true` and is mutually exclusive with `--review-receipt`.
+
+CI mode still requires a clean candidate and a valid ancestor base. It records
+the base from `GITHUB_BASE_SHA` (the PR base SHA), or `HEAD^` on pushes and manual
+runs. The receipt records `"evidenceMode": "ci"` and no `reviews` object.
+
+CI evidence is regression evidence only. It cannot approve a PR, satisfy either
+independent review, or be copied into a local review receipt. Local and delivery
+runs must keep using the approved review receipt above.
+
+The CI job uploads only `receipt.json` and, on failure, `failure.json`. It does
+not upload sandbox state, Compose files, browser traces, logs, or account data.
+The runner performs its own project-scoped cleanup. The job has a 60-minute
+budget; do not extend it by weakening assertions or skipping the real sandbox.
+
+The report directory must not exist. The runner exports the pinned AiaB source and the exact candidate into a unique private directory. It overlays only reviewed templates from this checkout, builds the pinned alpha PDS from source, creates one ordinary PDS with two synthetic users, runs the selected suite, and removes its unique Compose project and volumes. It never modifies the supplied AiaB checkout. The output `receipt.json` contains source pins, image ID, evidence mode, review references when present, commands, and assertion counts. Archive files and image metadata stay private with the report.
 Each run uses a disposable private Docker client config and clears inherited
 `COMPOSE_*` overrides. Browser and cleanup commands select the generated
 `compose.yaml` explicitly. The successful receipt records a passed cleanup.
@@ -59,7 +83,11 @@ status without copying child stderr, account passwords, or environment values.
 If cleanup fails, the gate fails and preserves the private generated Compose
 file at the recorded recovery path rather than deleting the only recovery config.
 
-The AiaB checkout must be clean at the SHA in `sources.json`. If the path is absent, the runner clones the pinned source into a disposable directory. The PDS source build always uses the pinned source revision. Do not replace it with an unproven public image digest.
+The AiaB checkout must be clean at v0.7.2 (`6e9a39a94c102e4d42fa5868bd90b881bb5be695`). If absent, the runner clones, fetches, and checks out that exact SHA. Repo-owned `atmosphere/` assets are installed only in the disposable export. The baseline uses AiaB's digest-pinned `pds-space1`, alongside ordinary `pds1`; it does not build a primary PDS. October suites retain their separate source-built PDS and cleanup receipts.
+
+The integration is one generic application with native Compose build arguments. Its identity Dockerfile/script and browser Dockerfile originated at historical AiaB commit `ecf52fac4abaa681717f2ed2ce2afc2253d1a366`; the stack and browser driver incorporate the reviewed Stratos templates. The Stratos space lexicon fixture and authority definition are retained as readable assets. Legacy templates remain for later non-baseline suite migration; those suites are not claimed as runtime-verified by this baseline slice.
+
+The runner writes each AiaB phase and command to standard output. It prints bounded, sanitized output for install, create, check, the local tools-image prebuild, and up, including a failed command's stdout and stderr. Before `up`, it builds AiaB's local `runner` image because dependent Dockerfiles use it as their base image. After an `up` failure, it replays only the generated Compose build with plain progress and reports Compose status. Seed command output remains suppressed because it can contain generated account credentials. The receipt or failure artifact remains the only uploaded report and does not contain command output.
 
 The pinned AiaB creates `atmosbox.test` for the private PLC and PDS handles.
 Its explicit application routes also serve Stratos and Clubhouse OAuth at

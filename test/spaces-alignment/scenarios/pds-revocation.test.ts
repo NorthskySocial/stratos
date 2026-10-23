@@ -6,7 +6,7 @@ function context(output: string): ScenarioContext {
   return {
     sandboxDirectory: '/tmp/private-sandbox',
     projectName: 'private-test',
-    reportDirectory: '/tmp/private-report',
+    scratchDirectory: '/tmp/private-report',
     runCommand: async (file, args, cwd) => {
       expect(file).toBe('node')
       expect(args[0]).toMatch(/pds-revocation\.mjs$/)

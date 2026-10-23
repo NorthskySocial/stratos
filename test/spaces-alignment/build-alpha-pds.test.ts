@@ -31,9 +31,14 @@ afterEach(async () => {
   delete process.env.RUNNER_TEST_SOURCE_LOG
   delete process.env.RUNNER_TEST_PDS_DOCKER_CONFIG_PREFIX
   await Promise.all(
-    temporary
-      .splice(0)
-      .map((path) => rm(path, { recursive: true, force: true })),
+    temporary.splice(0).map((path) =>
+      rm(path, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 100,
+      }),
+    ),
   )
 })
 

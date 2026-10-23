@@ -29,7 +29,7 @@ export interface ScenarioContext {
   sandboxDirectory: string
   composeFile: string
   projectName: string
-  reportDirectory: string
+  scratchDirectory: string
   runCommand: (file: string, args: string[], cwd: string) => Promise<string>
 }
 
