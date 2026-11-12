@@ -104,6 +104,8 @@ export class StratosBlobReader {
    * Lists blobs referenced by records that currently reside in the boundary.
    * Boundary residence is derived from stratos_record_boundary, which follows
    * the record lifecycle, so moved or deleted records drop out immediately.
+   * Taken-down records do not count as residence, and a taken-down blob is
+   * omitted outright. Both filters run in the query so pages stay full.
    *
    * @param opts - Boundary plus the listBlobs paging options.
    * @returns Blob CIDs in ascending order.
@@ -116,7 +118,11 @@ export class StratosBlobReader {
   }): Promise<string[]> {
     const { boundary, since, cursor, limit } = opts
 
-    const conditions = [eq(stratosRecordBoundary.boundary, boundary)]
+    const conditions = [
+      eq(stratosRecordBoundary.boundary, boundary),
+      isNull(stratosRecord.takedownRef),
+      isNull(stratosBlob.takedownRef),
+    ]
     if (cursor) {
       conditions.push(gt(stratosRecordBlob.blobCid, cursor))
     }
@@ -133,6 +139,7 @@ export class StratosBlobReader {
           stratosRecord,
           eq(stratosRecord.uri, stratosRecordBlob.recordUri),
         )
+        .leftJoin(stratosBlob, eq(stratosBlob.cid, stratosRecordBlob.blobCid))
         .where(and(gt(stratosRecord.repoRev, since), ...conditions))
         .orderBy(asc(stratosRecordBlob.blobCid))
         .limit(limit)
@@ -146,6 +153,11 @@ export class StratosBlobReader {
         stratosRecordBoundary,
         eq(stratosRecordBoundary.recordUri, stratosRecordBlob.recordUri),
       )
+      .innerJoin(
+        stratosRecord,
+        eq(stratosRecord.uri, stratosRecordBlob.recordUri),
+      )
+      .leftJoin(stratosBlob, eq(stratosBlob.cid, stratosRecordBlob.blobCid))
       .where(and(...conditions))
       .orderBy(asc(stratosRecordBlob.blobCid))
       .limit(limit)

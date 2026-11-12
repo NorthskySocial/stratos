@@ -389,4 +389,68 @@ describe('zone.stratos.space.listBlobs', () => {
     expect(res.body.cids).toEqual([asukaBlob])
     expect(res.body.cids).not.toContain(reiBlob)
   })
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function markTakedown(fn: (store: any) => Promise<void>) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await actorStore.transact(repoDid, async (store: any) => fn(store))
+  }
+
+  it("a taken-down record's only blob is absent", async () => {
+    await markTakedown((store) =>
+      store.record.updateRecordTakedown(`at://${repoDid}/${COLLECTION}/rei`, {
+        applied: true,
+        ref: 'takedown-rei',
+      }),
+    )
+
+    const res = await call({}, userAuth(memberDid))
+    expect(res.body.cids).toEqual([asukaBlob])
+    expect(res.body.cids).not.toContain(reiBlob)
+  })
+
+  it('a blob that is itself taken down is absent', async () => {
+    await markTakedown((store) =>
+      store.blob.updateBlobTakedown(parseCid(asukaBlob), {
+        applied: true,
+        ref: 'takedown-asuka',
+      }),
+    )
+
+    const res = await call({}, userAuth(memberDid))
+    expect(res.body.cids).toEqual([reiBlob])
+    expect(res.body.cids).not.toContain(asukaBlob)
+  })
+
+  it('cursor paging across a hidden blob has full pages, no gaps or repeats', async () => {
+    const extraBlobs = [
+      await seedRecordWithBlob('misato', BOUNDARY_S.value, 'misato blob'),
+      await seedRecordWithBlob('ritsuko', BOUNDARY_S.value, 'ritsuko blob'),
+      await seedRecordWithBlob('kaji', BOUNDARY_S.value, 'kaji blob'),
+      await seedRecordWithBlob('maya', BOUNDARY_S.value, 'maya blob'),
+    ]
+    const ordered = [reiBlob, asukaBlob, ...extraBlobs].sort()
+    const hiddenBlob = ordered[1]
+    await markTakedown((store) =>
+      store.blob.updateBlobTakedown(parseCid(hiddenBlob), {
+        applied: true,
+        ref: 'takedown-hidden',
+      }),
+    )
+    const live = ordered.filter((cid) => cid !== hiddenBlob)
+
+    const pages: string[][] = []
+    const cursors: Array<string | undefined> = []
+    let cursor: string | undefined
+    do {
+      const res = await call({ limit: 2, cursor }, userAuth(memberDid))
+      pages.push(res.body.cids)
+      cursors.push(res.body.cursor)
+      cursor = res.body.cursor
+    } while (cursor)
+
+    expect(pages).toEqual([live.slice(0, 2), live.slice(2, 4), live.slice(4)])
+    expect(cursors).toEqual([live[1], live[3], undefined])
+    expect(pages.flat()).toEqual(live)
+  })
 })

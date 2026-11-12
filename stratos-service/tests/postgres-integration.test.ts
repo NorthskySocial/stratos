@@ -271,6 +271,358 @@ describe('PostgreSQL Backend Integration', () => {
     })
   })
 
+  describe('listBlobsForBoundary takedown filtering', () => {
+    const BOUNDARY = 'nerv'
+    const OTHER_BOUNDARY = 'seele'
+    const TAKEDOWN_REF = 'takedown-ref-nerv'
+    const WITHOUT_SINCE = undefined
+    const WITH_SINCE = 'rev0'
+
+    const recordUriOf = (rkey: string) =>
+      `at://${testDid}/zone.stratos.feed.post/${rkey}`
+
+    const addRecordWithBlob = async (opts: {
+      rkey: string
+      blobSeed: string
+      boundaries: string[]
+      repoRev?: string
+    }): Promise<string> => {
+      const blobCid = await createCid(opts.blobSeed)
+      const uri = recordUriOf(opts.rkey)
+      await actorStore.transact(testDid, async (store) => {
+        await store.record.indexRecord(
+          uri,
+          await createCid(`record ${opts.rkey}`),
+          {
+            text: opts.rkey,
+            boundary: {
+              $type: 'zone.stratos.boundary.defs#Domains',
+              values: opts.boundaries.map((value) => ({ value })),
+            },
+          },
+          'create',
+          opts.repoRev ?? 'rev1',
+        )
+        await store.blob.associateBlobWithRecord(blobCid, uri)
+      })
+      return blobCid.toString()
+    }
+
+    const trackBlobRow = (blobSeed: string) =>
+      actorStore.transact(testDid, async (store) => {
+        await store.blob.trackBlob({
+          cid: await createCid(blobSeed),
+          mimeType: 'image/png',
+          size: 1,
+        })
+      })
+
+    const markRecord = (rkey: string, ref: string | null) =>
+      actorStore.transact(testDid, (store) =>
+        store.record.updateRecordTakedown(
+          recordUriOf(rkey),
+          ref === null ? { applied: false } : { applied: true, ref },
+        ),
+      )
+
+    const markBlob = (blobSeed: string, ref: string | null) =>
+      actorStore.transact(testDid, async (store) =>
+        store.blob.updateBlobTakedown(
+          await createCid(blobSeed),
+          ref === null ? { applied: false } : { applied: true, ref },
+        ),
+      )
+
+    const list = (boundary: string, since: string | undefined) =>
+      actorStore.read(testDid, (store) =>
+        store.blob.listBlobsForBoundary({ boundary, since, limit: 50 }),
+      )
+
+    beforeEach(async () => {
+      await actorStore.create(testDid)
+    })
+
+    it('omits a blob whose only in-boundary record is taken down', async () => {
+      const hidden = await addRecordWithBlob({
+        rkey: 'ikari',
+        blobSeed: 'ikari blob',
+        boundaries: [BOUNDARY],
+      })
+      const visible = await addRecordWithBlob({
+        rkey: 'hikari',
+        blobSeed: 'hikari blob',
+        boundaries: [BOUNDARY],
+      })
+      await markRecord('ikari', TAKEDOWN_REF)
+
+      for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+        const result = await list(BOUNDARY, since)
+        expect(result).toEqual([visible])
+        expect(result).not.toContain(hidden)
+      }
+    })
+
+    it('lists a blob that still has a live in-boundary record', async () => {
+      const shared = await addRecordWithBlob({
+        rkey: 'toji-a',
+        blobSeed: 'toji shared blob',
+        boundaries: [BOUNDARY],
+      })
+      await addRecordWithBlob({
+        rkey: 'toji-b',
+        blobSeed: 'toji shared blob',
+        boundaries: [BOUNDARY],
+      })
+      await markRecord('toji-a', TAKEDOWN_REF)
+
+      for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+        expect(await list(BOUNDARY, since)).toEqual([shared])
+      }
+    })
+
+    it('judges since and takedown on the same record', async () => {
+      const shared = await addRecordWithBlob({
+        rkey: 'gendo-old',
+        blobSeed: 'gendo shared blob',
+        boundaries: [BOUNDARY],
+        repoRev: 'rev1',
+      })
+      await addRecordWithBlob({
+        rkey: 'gendo-new',
+        blobSeed: 'gendo shared blob',
+        boundaries: [BOUNDARY],
+        repoRev: 'rev3',
+      })
+      await markRecord('gendo-new', TAKEDOWN_REF)
+
+      expect(await list(BOUNDARY, 'rev2')).not.toContain(shared)
+      expect(await list(BOUNDARY, 'rev0')).toEqual([shared])
+    })
+
+    it('judges a taken-down record only within its own boundary', async () => {
+      const shared = await addRecordWithBlob({
+        rkey: 'misato-a',
+        blobSeed: 'misato shared blob',
+        boundaries: [BOUNDARY],
+      })
+      await addRecordWithBlob({
+        rkey: 'misato-b',
+        blobSeed: 'misato shared blob',
+        boundaries: [OTHER_BOUNDARY],
+      })
+      await markRecord('misato-a', TAKEDOWN_REF)
+
+      for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+        expect(await list(BOUNDARY, since)).toEqual([])
+        expect(await list(OTHER_BOUNDARY, since)).toEqual([shared])
+      }
+    })
+
+    it('omits a taken-down blob that has a live in-boundary record', async () => {
+      const hidden = await addRecordWithBlob({
+        rkey: 'nagisa',
+        blobSeed: 'nagisa blob',
+        boundaries: [BOUNDARY],
+      })
+      const visible = await addRecordWithBlob({
+        rkey: 'mari',
+        blobSeed: 'mari blob',
+        boundaries: [BOUNDARY],
+      })
+      await trackBlobRow('nagisa blob')
+      await markBlob('nagisa blob', TAKEDOWN_REF)
+
+      for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+        const result = await list(BOUNDARY, since)
+        expect(result).toEqual([visible])
+        expect(result).not.toContain(hidden)
+      }
+    })
+
+    it('lists a live blob that has no stratos_blob row', async () => {
+      const untracked = await addRecordWithBlob({
+        rkey: 'asuka',
+        blobSeed: 'asuka blob',
+        boundaries: [BOUNDARY],
+      })
+      const hasRow = await actorStore.read(testDid, async (store) =>
+        store.blob.hasBlob(await createCid('asuka blob')),
+      )
+      expect(hasRow).toBe(false)
+
+      for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+        expect(await list(BOUNDARY, since)).toEqual([untracked])
+      }
+    })
+
+    it('lists a blob again once either marker is cleared', async () => {
+      const recordHidden = await addRecordWithBlob({
+        rkey: 'maya',
+        blobSeed: 'maya blob',
+        boundaries: [BOUNDARY],
+      })
+      const blobHidden = await addRecordWithBlob({
+        rkey: 'fuyutsuki',
+        blobSeed: 'fuyutsuki blob',
+        boundaries: [BOUNDARY],
+      })
+      await trackBlobRow('fuyutsuki blob')
+      await markRecord('maya', TAKEDOWN_REF)
+      await markBlob('fuyutsuki blob', TAKEDOWN_REF)
+      expect(await list(BOUNDARY, WITHOUT_SINCE)).toEqual([])
+
+      await markRecord('maya', null)
+      await markBlob('fuyutsuki blob', null)
+
+      for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+        expect(await list(BOUNDARY, since)).toEqual(
+          [recordHidden, blobHidden].sort(),
+        )
+      }
+    })
+
+    it('pages in full without gaps or repeats across hidden blobs', async () => {
+      const names = [
+        'usagi',
+        'mamoru',
+        'ami',
+        'rei',
+        'makoto',
+        'minako',
+        'luna',
+        'artemis',
+      ]
+      const rkeyByBlob = new Map<string, string>()
+      const seedByBlob = new Map<string, string>()
+      for (const name of names) {
+        const blobCid = await addRecordWithBlob({
+          rkey: name,
+          blobSeed: `${name} blob`,
+          boundaries: [BOUNDARY],
+        })
+        rkeyByBlob.set(blobCid, name)
+        seedByBlob.set(blobCid, `${name} blob`)
+        await trackBlobRow(`${name} blob`)
+      }
+      const ordered = [...rkeyByBlob.keys()].sort()
+      // Hidden entries sit at the edge and between live ones in CID order,
+      // alternating between the record marker and the blob marker.
+      await markRecord(rkeyByBlob.get(ordered[0])!, TAKEDOWN_REF)
+      await markBlob(seedByBlob.get(ordered[2])!, TAKEDOWN_REF)
+      await markRecord(rkeyByBlob.get(ordered[3])!, TAKEDOWN_REF)
+      const expectedLive = [1, 4, 5, 6, 7].map((index) => ordered[index])
+
+      for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+        const pages: string[][] = []
+        let cursor: string | undefined
+        for (;;) {
+          const page = await actorStore.read(testDid, (store) =>
+            store.blob.listBlobsForBoundary({
+              boundary: BOUNDARY,
+              since,
+              cursor,
+              limit: 2,
+            }),
+          )
+          if (page.length === 0) break
+          pages.push(page)
+          cursor = page[page.length - 1]
+          if (page.length < 2) break
+        }
+
+        expect(pages.slice(0, -1).every((page) => page.length === 2)).toBe(true)
+        const flattened = pages.flat()
+        expect(new Set(flattened).size).toBe(flattened.length)
+        expect(flattened).toEqual(expectedLive)
+        expect(pages).toHaveLength(Math.ceil(expectedLive.length / 2))
+      }
+    })
+  })
+
+  describe('backlink takedown filtering', () => {
+    const COLLECTION = 'zone.stratos.graph.follow'
+    const TARGET = 'did:plc:lain'
+    const uriOf = (collection: string, rkey: string) =>
+      `at://${testDid}/${collection}/${rkey}`
+    const liveUri = uriOf(COLLECTION, 'ed')
+    const hiddenUri = uriOf(COLLECTION, 'faye')
+    const newUri = uriOf(COLLECTION, 'jet')
+    const otherCollectionUri = uriOf('zone.stratos.feed.like', 'spike')
+
+    const markHidden = (ref: string | null) =>
+      actorStore.transact(testDid, (store) =>
+        store.record.updateRecordTakedown(
+          hiddenUri,
+          ref === null ? { applied: false } : { applied: true, ref },
+        ),
+      )
+
+    const query = () =>
+      actorStore.read(testDid, (store) =>
+        store.record.getRecordBacklinks({
+          collection: COLLECTION,
+          path: 'subject',
+          linkTo: TARGET,
+        }),
+      )
+
+    beforeEach(async () => {
+      await actorStore.create(testDid)
+      await actorStore.transact(testDid, async (store) => {
+        for (const uri of [liveUri, hiddenUri, otherCollectionUri]) {
+          await store.record.indexRecord(
+            uri,
+            await createCid(uri),
+            { subject: TARGET },
+            'create',
+            'rev1',
+          )
+        }
+        await store.record.addBacklinks(
+          [liveUri, hiddenUri, otherCollectionUri].map((uri) => ({
+            uri,
+            path: 'subject',
+            linkTo: TARGET,
+          })),
+        )
+      })
+      await markHidden('TD-LAIN')
+    })
+
+    it('getRecordBacklinks omits taken-down records', async () => {
+      const rows = await query()
+
+      expect(rows.map((row) => row.uri)).toEqual([liveUri])
+    })
+
+    it('getRecordBacklinks returns a record again once the takedown is cleared', async () => {
+      const whileTakenDown = await query()
+      await markHidden(null)
+
+      const rows = await query()
+
+      expect(whileTakenDown.map((row) => row.uri)).toEqual([liveUri])
+      expect(rows.map((row) => row.uri).sort()).toEqual([liveUri, hiddenUri])
+    })
+
+    it('getBacklinkConflicts still reports taken-down records', async () => {
+      const conflicts = await actorStore.read(testDid, (store) =>
+        store.record.getBacklinkConflicts(newUri, { subject: TARGET }),
+      )
+
+      expect(conflicts.map((conflict) => conflict.toString()).sort()).toEqual([
+        liveUri,
+        hiddenUri,
+      ])
+    })
+
+    it('getRecordBacklinks ignores records in other collections', async () => {
+      const rows = await query()
+
+      expect(rows.map((row) => row.uri)).not.toContain(otherCollectionUri)
+    })
+  })
+
   describe('Repo Operations', () => {
     beforeEach(async () => {
       await actorStore.create(testDid)

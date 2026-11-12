@@ -1,6 +1,17 @@
 import postgres from 'postgres'
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  type SQL,
+  sql,
+} from 'drizzle-orm'
 import { Cid } from '@atproto/lex-data'
 import { AtUri } from '@atproto/syntax'
 import * as crypto from '@atproto/crypto'
@@ -299,6 +310,16 @@ export class PgActorRecordReader {
    * @returns An array of backlink records.
    */
   async getRecordBacklinks(opts: GetBacklinksOpts) {
+    return this.selectBacklinkRows(opts, isNull(pgStratosRecord.takedownRef))
+  }
+
+  /**
+   * Conflict checks use the unfiltered rows so taken-down records still block.
+   */
+  private async selectBacklinkRows(
+    opts: GetBacklinksOpts,
+    extraCondition?: SQL,
+  ) {
     const { collection, path, linkTo } = opts
     return this.db
       .select({
@@ -320,6 +341,7 @@ export class PgActorRecordReader {
           eq(pgStratosBacklink.path, path),
           eq(pgStratosBacklink.linkTo, linkTo),
           eq(pgStratosRecord.collection, collection),
+          extraCondition,
         ),
       )
   }
@@ -339,7 +361,7 @@ export class PgActorRecordReader {
     const conflicts: AtUri[] = []
 
     for (const backlink of getStratosBacklinks(uriObj, record)) {
-      const backlinks = await this.getRecordBacklinks({
+      const backlinks = await this.selectBacklinkRows({
         collection: uriObj.collection,
         path: backlink.path,
         linkTo: backlink.linkTo,
@@ -1064,6 +1086,8 @@ export class PgActorBlobReader {
    * List blobs referenced by records that currently reside in the boundary.
    * Boundary residence is derived from stratos_record_boundary, which follows
    * the record lifecycle, so moved or deleted records drop out immediately.
+   * Taken-down records do not count as residence, and a taken-down blob is
+   * omitted outright. Both filters run in the query so pages stay full.
    *
    * @param opts - Boundary plus the listBlobs paging options.
    * @returns Blob CIDs in ascending order.
@@ -1076,7 +1100,11 @@ export class PgActorBlobReader {
   }): Promise<string[]> {
     const { boundary, since, cursor, limit } = opts
 
-    const conditions = [eq(pgStratosRecordBoundary.boundary, boundary)]
+    const conditions = [
+      eq(pgStratosRecordBoundary.boundary, boundary),
+      isNull(pgStratosRecord.takedownRef),
+      isNull(pgStratosBlob.takedownRef),
+    ]
     if (cursor) {
       conditions.push(gt(pgStratosRecordBlob.blobCid, cursor))
     }
@@ -1093,6 +1121,10 @@ export class PgActorBlobReader {
           pgStratosRecord,
           eq(pgStratosRecord.uri, pgStratosRecordBlob.recordUri),
         )
+        .leftJoin(
+          pgStratosBlob,
+          eq(pgStratosBlob.cid, pgStratosRecordBlob.blobCid),
+        )
         .where(and(gt(pgStratosRecord.repoRev, since), ...conditions))
         .orderBy(asc(pgStratosRecordBlob.blobCid))
         .limit(limit)
@@ -1105,6 +1137,14 @@ export class PgActorBlobReader {
       .innerJoin(
         pgStratosRecordBoundary,
         eq(pgStratosRecordBoundary.recordUri, pgStratosRecordBlob.recordUri),
+      )
+      .innerJoin(
+        pgStratosRecord,
+        eq(pgStratosRecord.uri, pgStratosRecordBlob.recordUri),
+      )
+      .leftJoin(
+        pgStratosBlob,
+        eq(pgStratosBlob.cid, pgStratosRecordBlob.blobCid),
       )
       .where(and(...conditions))
       .orderBy(asc(pgStratosRecordBlob.blobCid))

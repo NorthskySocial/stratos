@@ -2,7 +2,18 @@ import type { Cid } from '@atproto/lex-data'
 import { parseCid } from '../atproto'
 import * as syntax from '@atproto/syntax'
 import { AtUri } from '@atproto/syntax'
-import { and, asc, desc, eq, gt, gte, isNull, lt, lte } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  isNull,
+  lt,
+  lte,
+  type SQL,
+} from 'drizzle-orm'
 import {
   countAll,
   StratosBacklink,
@@ -315,6 +326,16 @@ export class StratosRecordReader {
    * @returns An array of backlinks for the specified record.
    */
   async getRecordBacklinks(opts: GetBacklinksOpts): Promise<StratosRecord[]> {
+    return this.selectBacklinkRows(opts, isNull(stratosRecord.takedownRef))
+  }
+
+  /**
+   * Conflict checks use the unfiltered rows so taken-down records still block.
+   */
+  private async selectBacklinkRows(
+    opts: GetBacklinksOpts,
+    extraCondition?: SQL,
+  ): Promise<StratosRecord[]> {
     const { collection, path, linkTo } = opts
     return this.db
       .select({
@@ -333,6 +354,7 @@ export class StratosRecordReader {
           eq(stratosBacklink.path, path),
           eq(stratosBacklink.linkTo, linkTo),
           eq(stratosRecord.collection, collection),
+          extraCondition,
         ),
       )
   }
@@ -351,7 +373,7 @@ export class StratosRecordReader {
     const atUri = typeof uri === 'string' ? new AtUri(uri) : uri
 
     for (const backlink of getStratosBacklinks(atUri, record)) {
-      const backlinks = await this.getRecordBacklinks({
+      const backlinks = await this.selectBacklinkRows({
         collection: atUri.collection,
         path: backlink.path,
         linkTo: backlink.linkTo,

@@ -523,3 +523,92 @@ describe('Record Transactor', () => {
     })
   })
 })
+
+describe('Record backlinks and takedown', () => {
+  let db: StratosDb
+  let transactor: StratosRecordTransactor
+  let testDir: string
+
+  const COLLECTION = 'zone.stratos.graph.follow'
+  const TARGET = 'did:plc:lain'
+  const liveUri = `at://did:plc:test/${COLLECTION}/ed`
+  const hiddenUri = `at://did:plc:test/${COLLECTION}/faye`
+  const newUri = `at://did:plc:test/${COLLECTION}/jet`
+  const otherCollectionUri = 'at://did:plc:test/zone.stratos.feed.like/spike'
+
+  const query = () =>
+    transactor.getRecordBacklinks({
+      collection: COLLECTION,
+      path: 'subject',
+      linkTo: TARGET,
+    })
+
+  const seedBacklinks = async (uris: string[]) => {
+    for (const uri of uris) {
+      await transactor.indexRecord(
+        new AtUri(uri),
+        await createCid({ uri }),
+        { subject: TARGET },
+        'create',
+        'rev1',
+      )
+    }
+    await transactor.addBacklinks(
+      uris.map((uri) => ({ uri, path: 'subject', linkTo: TARGET })),
+    )
+  }
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `stratos-backlink-test-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(testDir, { recursive: true })
+    db = createStratosDb(join(testDir, 'test.db'))
+    await migrateStratosDb(db)
+    transactor = new StratosRecordTransactor(db, decodeRecord)
+    await seedBacklinks([liveUri, hiddenUri, otherCollectionUri])
+    await transactor.updateRecordTakedown(hiddenUri, {
+      applied: true,
+      ref: 'TD-LAIN',
+    })
+  })
+
+  afterEach(async () => {
+    await closeStratosDb(db)
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('getRecordBacklinks omits taken-down records', async () => {
+    const rows = await query()
+
+    expect(rows.map((row) => row.uri)).toEqual([liveUri])
+  })
+
+  it('getRecordBacklinks returns a record again once the takedown is cleared', async () => {
+    const whileTakenDown = await query()
+    await transactor.updateRecordTakedown(hiddenUri, { applied: false })
+
+    const rows = await query()
+
+    expect(whileTakenDown.map((row) => row.uri)).toEqual([liveUri])
+    expect(rows.map((row) => row.uri).sort()).toEqual([liveUri, hiddenUri])
+  })
+
+  it('getBacklinkConflicts still reports taken-down records', async () => {
+    const conflicts = await transactor.getBacklinkConflicts(newUri, {
+      subject: TARGET,
+    })
+
+    expect(conflicts.map((conflict) => conflict.toString()).sort()).toEqual([
+      liveUri,
+      hiddenUri,
+    ])
+  })
+
+  it('getRecordBacklinks ignores records in other collections', async () => {
+    const rows = await query()
+
+    expect(rows.map((row) => row.uri)).not.toContain(otherCollectionUri)
+  })
+})

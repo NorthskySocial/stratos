@@ -448,6 +448,254 @@ describe('Blob Reader', () => {
       expect(result).toEqual([stayingBlob])
       expect(result).not.toContain(movedBlob)
     })
+
+    describe('takedown markers', () => {
+      const TAKEDOWN_REF = 'takedown-ref-nerv'
+      const WITHOUT_SINCE = undefined
+      const WITH_SINCE = 'rev0'
+
+      const markRecord = async (rkey: string, ref: string | null) => {
+        await db
+          .update(stratosRecord)
+          .set({ takedownRef: ref })
+          .where(
+            eq(
+              stratosRecord.uri,
+              `at://did:plc:misato/zone.stratos.feed.post/${rkey}`,
+            ),
+          )
+      }
+
+      const markBlob = async (blobCid: string, ref: string | null) => {
+        await db
+          .insert(stratosBlob)
+          .values({
+            cid: blobCid,
+            mimeType: 'image/png',
+            size: 1,
+            tempKey: null,
+            width: null,
+            height: null,
+            createdAt: new Date().toISOString(),
+            takedownRef: ref,
+          })
+          .onConflictDoUpdate({
+            target: stratosBlob.cid,
+            set: { takedownRef: ref },
+          })
+      }
+
+      const addRecordForBlob = async (opts: {
+        rkey: string
+        blobCid: string
+        boundary: string
+      }) => {
+        const uri = `at://did:plc:misato/zone.stratos.feed.post/${opts.rkey}`
+        await db.insert(stratosRecord).values({
+          uri,
+          cid: `record-${opts.rkey}`,
+          collection: 'zone.stratos.feed.post',
+          rkey: opts.rkey,
+          repoRev: 'rev1',
+          indexedAt: new Date().toISOString(),
+          takedownRef: null,
+        })
+        await db
+          .insert(stratosRecordBlob)
+          .values({ blobCid: opts.blobCid, recordUri: uri })
+        await db
+          .insert(stratosRecordBoundary)
+          .values({ recordUri: uri, boundary: opts.boundary })
+      }
+
+      const list = (boundary: string, since: string | undefined) =>
+        reader.listBlobsForBoundary({ boundary, since, limit: 50 })
+
+      it('omits a blob whose only in-boundary record is taken down', async () => {
+        const hidden = await seedRecordBlob({
+          rkey: 'ikari',
+          repoRev: 'rev1',
+          blobSeed: 'ikari blob',
+          boundary: BOUNDARY,
+        })
+        const visible = await seedRecordBlob({
+          rkey: 'hikari',
+          repoRev: 'rev1',
+          blobSeed: 'hikari blob',
+          boundary: BOUNDARY,
+        })
+        await markRecord('ikari', TAKEDOWN_REF)
+
+        for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+          const result = await list(BOUNDARY, since)
+          expect(result).toEqual([visible])
+          expect(result).not.toContain(hidden)
+        }
+      })
+
+      it('lists a blob that still has a live in-boundary record', async () => {
+        const shared = await seedRecordBlob({
+          rkey: 'toji-a',
+          repoRev: 'rev1',
+          blobSeed: 'toji shared blob',
+          boundary: BOUNDARY,
+        })
+        await addRecordForBlob({
+          rkey: 'toji-b',
+          blobCid: shared,
+          boundary: BOUNDARY,
+        })
+        await markRecord('toji-a', TAKEDOWN_REF)
+
+        for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+          expect(await list(BOUNDARY, since)).toEqual([shared])
+        }
+      })
+
+      it('judges since and takedown on the same record', async () => {
+        const shared = await seedRecordBlob({
+          rkey: 'gendo-old',
+          repoRev: 'rev1',
+          blobSeed: 'gendo shared blob',
+          boundary: BOUNDARY,
+        })
+        await seedRecordBlob({
+          rkey: 'gendo-new',
+          repoRev: 'rev3',
+          blobSeed: 'gendo shared blob',
+          boundary: BOUNDARY,
+        })
+        await markRecord('gendo-new', TAKEDOWN_REF)
+
+        expect(await list(BOUNDARY, 'rev2')).not.toContain(shared)
+        expect(await list(BOUNDARY, 'rev0')).toEqual([shared])
+      })
+
+      it('judges a taken-down record only within its own boundary', async () => {
+        const shared = await seedRecordBlob({
+          rkey: 'misato-a',
+          repoRev: 'rev1',
+          blobSeed: 'misato shared blob',
+          boundary: BOUNDARY,
+        })
+        await addRecordForBlob({
+          rkey: 'misato-b',
+          blobCid: shared,
+          boundary: OTHER_BOUNDARY,
+        })
+        await markRecord('misato-a', TAKEDOWN_REF)
+
+        for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+          expect(await list(BOUNDARY, since)).toEqual([])
+          expect(await list(OTHER_BOUNDARY, since)).toEqual([shared])
+        }
+      })
+
+      it('omits a taken-down blob that has a live in-boundary record', async () => {
+        const hidden = await seedRecordBlob({
+          rkey: 'nagisa',
+          repoRev: 'rev1',
+          blobSeed: 'nagisa blob',
+          boundary: BOUNDARY,
+        })
+        const visible = await seedRecordBlob({
+          rkey: 'mari',
+          repoRev: 'rev1',
+          blobSeed: 'mari blob',
+          boundary: BOUNDARY,
+        })
+        await markBlob(hidden, TAKEDOWN_REF)
+
+        for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+          const result = await list(BOUNDARY, since)
+          expect(result).toEqual([visible])
+          expect(result).not.toContain(hidden)
+        }
+      })
+
+      it('lists a blob again once either marker is cleared', async () => {
+        const recordHidden = await seedRecordBlob({
+          rkey: 'maya',
+          repoRev: 'rev1',
+          blobSeed: 'maya blob',
+          boundary: BOUNDARY,
+        })
+        const blobHidden = await seedRecordBlob({
+          rkey: 'fuyutsuki',
+          repoRev: 'rev1',
+          blobSeed: 'fuyutsuki blob',
+          boundary: BOUNDARY,
+        })
+        await markRecord('maya', TAKEDOWN_REF)
+        await markBlob(blobHidden, TAKEDOWN_REF)
+        expect(await list(BOUNDARY, WITHOUT_SINCE)).toEqual([])
+
+        await markRecord('maya', null)
+        await markBlob(blobHidden, null)
+
+        for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+          expect(await list(BOUNDARY, since)).toEqual(
+            [recordHidden, blobHidden].sort(),
+          )
+        }
+      })
+
+      it('pages in full without gaps or repeats across hidden blobs', async () => {
+        const seeded: string[] = []
+        const rkeys = new Map<string, string>()
+        for (const name of [
+          'usagi',
+          'mamoru',
+          'ami',
+          'rei',
+          'makoto',
+          'minako',
+          'luna',
+          'artemis',
+        ]) {
+          const blobCid = await seedRecordBlob({
+            rkey: name,
+            repoRev: 'rev1',
+            blobSeed: `${name} blob`,
+            boundary: BOUNDARY,
+          })
+          seeded.push(blobCid)
+          rkeys.set(blobCid, name)
+        }
+        const ordered = [...seeded].sort()
+        // Hidden entries sit between and at the edges of live ones in CID
+        // order, alternating between the record marker and the blob marker.
+        await markRecord(rkeys.get(ordered[0])!, TAKEDOWN_REF)
+        await markBlob(ordered[2], TAKEDOWN_REF)
+        await markRecord(rkeys.get(ordered[3])!, TAKEDOWN_REF)
+        const expectedLive = [1, 4, 5, 6, 7].map((index) => ordered[index])
+
+        for (const since of [WITHOUT_SINCE, WITH_SINCE]) {
+          const pages: string[][] = []
+          let cursor: string | undefined
+          for (;;) {
+            const page = await reader.listBlobsForBoundary({
+              boundary: BOUNDARY,
+              since,
+              cursor,
+              limit: 2,
+            })
+            if (page.length === 0) break
+            pages.push(page)
+            cursor = page[page.length - 1]
+            if (page.length < 2) break
+          }
+
+          expect(pages.slice(0, -1).every((page) => page.length === 2)).toBe(
+            true,
+          )
+          const flattened = pages.flat()
+          expect(new Set(flattened).size).toBe(flattened.length)
+          expect(flattened).toEqual(expectedLive)
+          expect(pages).toHaveLength(Math.ceil(expectedLive.length / 2))
+        }
+      })
+    })
   })
 
   describe('getBlob', () => {
