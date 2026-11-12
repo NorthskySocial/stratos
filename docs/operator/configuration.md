@@ -1,3 +1,9 @@
+---
+audience: Operators
+type: How-to
+status: current
+---
+
 # Configuration
 
 The environment fixes the service identity, storage, and who the first admins
@@ -8,8 +14,8 @@ Stratos reads its configuration from environment variables at startup. An
 invalid value stops the service and prints the variable name. Only
 `STRATOS_SERVICE_DID` has no default.
 
-This page explains each group of settings, then lists every variable in the
-[environment variable reference](#environment-variable-reference).
+This page explains each group of settings. Every variable, with its default,
+is in [Environment variables](/reference/env).
 
 ## Service identity
 
@@ -333,20 +339,21 @@ Stratos is an OAuth client of each member's PDS. It generates and serves its
 own client metadata at `/client-metadata.json` and
 `/.well-known/oauth-client-metadata.json`. You do not host that file.
 
-| Setting                       | Effect                                                              |
-| ----------------------------- | ------------------------------------------------------------------- |
-| `STRATOS_OAUTH_CLIENT_ID`     | Overrides the client ID. Default `{publicUrl}/client-metadata.json` |
-| `STRATOS_OAUTH_CLIENT_SECRET` | A PEM private key. Makes Stratos a confidential client              |
-| `STRATOS_OAUTH_CLIENT_NAME`   | Name on the consent screen. Default `Stratos Service`               |
-| `STRATOS_OAUTH_LOGO_URI`      | Logo on the consent screen                                          |
-| `STRATOS_OAUTH_TOS_URI`       | Terms of service link                                               |
-| `STRATOS_OAUTH_POLICY_URI`    | Privacy policy link                                                 |
+Set the consent screen with
+[`STRATOS_OAUTH_CLIENT_NAME`](/reference/env#stratos_oauth_client_name),
+[`STRATOS_OAUTH_LOGO_URI`](/reference/env#stratos_oauth_logo_uri),
+[`STRATOS_OAUTH_TOS_URI`](/reference/env#stratos_oauth_tos_uri), and
+[`STRATOS_OAUTH_POLICY_URI`](/reference/env#stratos_oauth_policy_uri).
+[`STRATOS_OAUTH_CLIENT_ID`](/reference/env#stratos_oauth_client_id)
+overrides the client ID, which defaults to `{publicUrl}/client-metadata.json`.
 
 The redirect URIs are fixed: `{publicUrl}/oauth/callback` for enrollment and
 `{publicUrl}/admin/oauth/callback` for admin login.
 
-Without `STRATOS_OAUTH_CLIENT_SECRET`, the client authenticates with `none`.
-With it, the client uses `private_key_jwt` with ES256.
+[`STRATOS_OAUTH_CLIENT_SECRET`](/reference/env#stratos_oauth_client_secret)
+holds a PEM private key. Without it, the client authenticates with `none`.
+With it, Stratos is a confidential client and uses `private_key_jwt` with
+ES256.
 
 Stratos serves `{STRATOS_DATA_DIR}/assets` at `/assets`. Put a logo there and
 point `STRATOS_OAUTH_LOGO_URI` at `{publicUrl}/assets/<file>`.
@@ -378,14 +385,9 @@ Stratos answers a request without a valid nonce with `use_dpop_nonce` and a
 Stratos publishes each member's enrollment record to the member's PDS. A PDS
 can be offline, so Stratos queues that write and retries it.
 
-| Variable                              | Default   | Meaning                         |
-| ------------------------------------- | --------- | ------------------------------- |
-| `STRATOS_PDS_SYNC_TICK_MS`            | `30000`   | How often the worker runs       |
-| `STRATOS_PDS_SYNC_CLAIM_LIMIT`        | `10`      | Jobs claimed per run            |
-| `STRATOS_PDS_SYNC_ATTEMPT_TIMEOUT_MS` | `30000`   | Timeout for one attempt         |
-| `STRATOS_PDS_SYNC_BACKOFF_BASE_MS`    | `30000`   | First retry delay               |
-| `STRATOS_PDS_SYNC_BACKOFF_CAP_MS`     | `3600000` | Longest retry delay             |
-| `STRATOS_PDS_SYNC_MAX_ATTEMPTS`       | `12`      | Attempts before a job is failed |
+The worker's interval, batch size, timeout, backoff, and attempt limit are
+the `STRATOS_PDS_SYNC_*` variables. See the **PDS sync queue** category in
+[Environment variables](/reference/env).
 
 A boundary change succeeds locally before the PDS record catches up. Admins
 read the queue with `zone.stratos.admin.listPdsSyncStatus`. After a fault that
@@ -431,172 +433,11 @@ for redirects and admin requests. The value must be exactly `true` or `false`.
 
 ## October Spaces rollout
 
-The October profile is additive. Keep legacy `cnf.jkt` credentials and their
-DPoP presentation supported on Stratos. Their TTL setting remains
-`STRATOS_SPACE_CREDENTIAL_TTL_SECONDS`, default 7200 seconds.
-Use `STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS` for standard `cnf.kid`
-credentials: default 600 seconds, positive integer, maximum 3600.
-Ordinary OAuth DPoP does not change.
-
-Standard exchange signs Bearer delegation authorization with a fresh P-256
-`did:key`. Reads use `Atproto-Space` authorization and sign authorization then
-`Atproto-Space-Audience`. Use the repo owner DID for repo reads and the bare
-authority DID for membership listing. Same-audience signatures are reusable
-until expiry. They do not bind the method, URL, or body. Preserve the
-`Signature`, `Signature-Input`, and `Atproto-Space-Audience` headers through
-proxies and allow them in browser CORS preflight.
-
-1. Record the source revision and immutable image identity of each PDS.
-   Rehearse the reviewed candidate with `october-interop` and the separate
-   regression suites described in the repository's `test/spaces-alignment/README.md`.
-2. Stop ingestion during the coordinated receiver, Rust client, and PDS upgrade.
-   Do not deploy mixed halves: the Rust client has no legacy fallback, and
-   October PDS hosts do not accept legacy DPoP space credentials.
-3. Restart clients to discard cached grants. Reacquire each credential with its
-   new grant-owned key. Never pair a cached credential with another key or
-   reinterpret `cnf.jkt` as `cnf.kid`. Expiry refresh must replace both together.
-4. Verify seeded publication, feed delivery, owner-audience denial, and credential
-   renewal before resuming ingestion. Preserve OAuth nonce-retry checks.
-
-For rollback, stop ingestion and restore the previously rehearsed receiver,
-client, and compatible PDS image set together. Clear grant caches and reacquire
-credentials. Do not downgrade an October PDS alone or expect the deprecated
-TypeScript client to read it with legacy DPoP. Keep the previous deployment
-artifacts and normal data backups; this plan does not authorize production data
-migration or rollback of repository state.
-
-Member removal blocks renewal, not every outstanding foreign-host capability.
-Early revocation fanout is optional and does not happen automatically on removal.
-Plan 017 is not included or deployed by this change; no production deployment
-status is attested here. Local catalog revision invalidation does not revoke a
-foreign PDS credential. Custom `zone.stratos.space.listRepos` membership
-selection remains separate from upstream writer metadata. This is not full
-standard authority discovery or enumeration support. The independent DPoP ADR
-in PR #217 is not part of this rollout.
+The October transport upgrade has its own procedure. See
+[October spaces rollout](/operator/upgrades/october-spaces).
 
 ## Environment variable reference
 
-### Identity and network
-
-| Variable                      | Required | Default                 | Description                                                   |
-| ----------------------------- | -------- | ----------------------- | ------------------------------------------------------------- |
-| `STRATOS_SERVICE_DID`         | Yes      |                         | Service DID                                                   |
-| `STRATOS_PUBLIC_URL`          |          | `http://localhost:3100` | Public base URL. Set it in every real deployment              |
-| `STRATOS_PORT`                |          | `3100`                  | HTTP listen port                                              |
-| `STRATOS_SERVICE_FRAGMENT`    |          | `atproto_pns`           | Fragment of the service key entry in the DID document         |
-| `PLC_DIRECTORY`               |          | `https://plc.directory` | PLC directory origin                                          |
-| `PLC_DIRECTORY_PRIVATE_CIDRS` |          |                         | Comma-separated private CIDRs allowed for the PLC origin only |
-| `IDENTITY_PRIVATE_ORIGINS`    |          |                         | Comma-separated origins trusted for private identity requests |
-| `IDENTITY_PRIVATE_CIDRS`      |          |                         | Comma-separated private CIDRs allowed for those origins       |
-| `STRATOS_REPO_URL`            |          | `http://localhost:3100` | Source link shown on `/` and sent in the outbound User-Agent  |
-| `STRATOS_OPERATOR_CONTACT`    |          |                         | Contact sent in the outbound User-Agent                       |
-
-### Enrollment and boundaries
-
-| Variable                            | Required | Default     | Description                                                 |
-| ----------------------------------- | -------- | ----------- | ----------------------------------------------------------- |
-| `STRATOS_ENROLLMENT_MODE`           |          | `allowlist` | `open` or `allowlist`                                       |
-| `STRATOS_ALLOWED_DIDS`              |          |             | Comma-separated DIDs allowed to enroll                      |
-| `STRATOS_ALLOWED_PDS_ENDPOINTS`     |          |             | Comma-separated PDS URLs whose users may enroll             |
-| `STRATOS_ALLOW_LIST_URI`            |          |             | URL of an external allow list                               |
-| `STRATOS_ALLOW_LIST_BOOTSTRAP_NAME` |          |             | Bootstrap name for the external allow list                  |
-| `STRATOS_RESERVED_DOMAIN`           |          | `general`   | Bare name of the all-members boundary                       |
-| `STRATOS_ALLOWED_DOMAINS`           |          |             | Bare boundary names. Seeds the database on first start only |
-| `STRATOS_AUTO_ENROLL_DOMAINS`       |          |             | Automatic-enrollment seed. First start only                 |
-| `STRATOS_ROOM_CATALOG_FILE`         |          |             | YAML or JSON room details. First start only                 |
-| `STRATOS_SPACE_APP_ACCESS`          |          |             | JSON array of per-space application rules. First start only |
-| `STRATOS_SPACE_APP_ACCESS_FILE`     |          |             | File with the same shape, merged with the inline value      |
-| `STRATOS_SERVICE_ENROLLMENTS`       |          |             | JSON array of service identities                            |
-| `STRATOS_SERVICE_ENROLLMENTS_FILE`  |          |             | File with the same shape, merged with the inline value      |
-
-### Admin and OAuth
-
-| Variable                           | Required | Default                            | Description                                       |
-| ---------------------------------- | -------- | ---------------------------------- | ------------------------------------------------- |
-| `STRATOS_ADMIN_DIDS`               |          |                                    | Comma-separated admin DIDs that cannot be revoked |
-| `STRATOS_OAUTH_CLIENT_ID`          |          | `{publicUrl}/client-metadata.json` | OAuth client ID                                   |
-| `STRATOS_OAUTH_CLIENT_SECRET`      |          |                                    | PEM private key for a confidential client         |
-| `STRATOS_OAUTH_CLIENT_NAME`        |          | `Stratos Service`                  | Consent screen name                               |
-| `STRATOS_OAUTH_LOGO_URI`           |          |                                    | Consent screen logo                               |
-| `STRATOS_OAUTH_TOS_URI`            |          |                                    | Terms of service link                             |
-| `STRATOS_OAUTH_POLICY_URI`         |          |                                    | Privacy policy link                               |
-| `STRATOS_ALLOWED_REDIRECT_ORIGINS` |          |                                    | Comma-separated origins for enrollment redirects  |
-| `STRATOS_DEV_MODE`                 |          | `false`                            | `true` or `false`. Never `true` in production     |
-
-### Storage
-
-| Variable                     | Required  | Default   | Description                                                            |
-| ---------------------------- | --------- | --------- | ---------------------------------------------------------------------- |
-| `STRATOS_DATA_DIR`           |           | `./data`  | Data directory. Used by both backends                                  |
-| `STORAGE_BACKEND`            |           | `sqlite`  | `sqlite` or `postgres`                                                 |
-| `STRATOS_POSTGRES_URL`       |           |           | Full PostgreSQL URL. Wins over `STRATOS_PG_*`                          |
-| `STRATOS_PG_HOST`            |           |           | PostgreSQL host. Setting it builds the URL                             |
-| `STRATOS_PG_PORT`            |           | `5432`    | PostgreSQL port                                                        |
-| `STRATOS_PG_USERNAME`        |           | `stratos` | PostgreSQL user                                                        |
-| `STRATOS_PG_PASSWORD`        |           |           | PostgreSQL password                                                    |
-| `STRATOS_PG_DBNAME`          |           | `stratos` | PostgreSQL database                                                    |
-| `STRATOS_PG_SSLMODE`         |           | `require` | `disable`, `allow`, `prefer`, `require`, `verify-ca`, or `verify-full` |
-| `STRATOS_PG_ACTOR_POOL_SIZE` |           | `200`     | Connections for member transactions                                    |
-| `STRATOS_PG_ADMIN_POOL_SIZE` |           | `3`       | Connections for schema work                                            |
-| `STRATOS_BLOCK_CACHE_SIZE`   |           | `50000`   | Repository block cache entries (`postgres` backend)                    |
-| `STRATOS_BLOB_STORAGE`       |           | `local`   | `local` or `s3`                                                        |
-| `STRATOS_S3_BUCKET`          | With `s3` |           | Bucket name                                                            |
-| `STRATOS_S3_REGION`          |           |           | Bucket region                                                          |
-| `STRATOS_S3_ENDPOINT`        |           |           | Endpoint for an S3-compatible service                                  |
-| `STRATOS_S3_ACCESS_KEY`      |           |           | Static access key                                                      |
-| `STRATOS_S3_SECRET_KEY`      |           |           | Static secret key                                                      |
-| `STRATOS_VALKEY_URL`         |           |           | Valkey or Redis URL for the replay store and cache                     |
-
-### Limits and credentials
-
-| Variable                                    | Required | Default  | Description                                          |
-| ------------------------------------------- | -------- | -------- | ---------------------------------------------------- |
-| `STRATOS_WRITE_RATE_MAX_WRITES`             |          | `300`    | Writes allowed per DID in the window                 |
-| `STRATOS_WRITE_RATE_WINDOW_MS`              |          | `60000`  | Rate limit window                                    |
-| `STRATOS_WRITE_RATE_COOLDOWN_MS`            |          | `10000`  | Cooldown after the limit                             |
-| `STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS`     |          | `1000`   | Random addition to the cooldown                      |
-| `STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS` |          | `600`    | Standard space credential lifetime. Maximum 3600     |
-| `STRATOS_SPACE_CREDENTIAL_TTL_SECONDS`      |          | `7200`   | Legacy DPoP space credential lifetime                |
-| `STRATOS_CLIENT_JWKS_CACHE_TTL_MS`          |          | `300000` | Cache lifetime for client keys in client attestation |
-
-### PDS sync queue variables
-
-| Variable                              | Required | Default   | Description                     |
-| ------------------------------------- | -------- | --------- | ------------------------------- |
-| `STRATOS_PDS_SYNC_TICK_MS`            |          | `30000`   | Worker interval                 |
-| `STRATOS_PDS_SYNC_CLAIM_LIMIT`        |          | `10`      | Jobs claimed per run            |
-| `STRATOS_PDS_SYNC_ATTEMPT_TIMEOUT_MS` |          | `30000`   | Timeout for one attempt         |
-| `STRATOS_PDS_SYNC_BACKOFF_BASE_MS`    |          | `30000`   | First retry delay               |
-| `STRATOS_PDS_SYNC_BACKOFF_CAP_MS`     |          | `3600000` | Longest retry delay             |
-| `STRATOS_PDS_SYNC_MAX_ATTEMPTS`       |          | `12`      | Attempts before a job is failed |
-
-### Logging and telemetry
-
-| Variable                              | Required | Default       | Description                             |
-| ------------------------------------- | -------- | ------------- | --------------------------------------- |
-| `LOG_LEVEL`                           |          | `info`        | Log verbosity                           |
-| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` |          |               | OTLP metrics URL. Enables metric export |
-| `OTEL_METRIC_EXPORT_INTERVAL`         |          | `15000`       | Export interval in milliseconds         |
-| `OTEL_RESOURCE_ATTRIBUTES`            |          |               | Comma-separated `key=value` attributes  |
-| `SENTRY_DSN`                          |          |               | Sentry DSN. Enables error reporting     |
-| `SENTRY_ENVIRONMENT`                  |          | `development` | Sentry environment name                 |
-| `SENTRY_RELEASE`                      |          |               | Sentry release name                     |
-| `SENTRY_TRACES_SAMPLE_RATE`           |          |               | Trace sample rate from 0 to 1           |
-
-### Variables that do nothing
-
-Stratos accepts these variables but no code reads them. Setting them has no
-effect.
-
-| Variable                                     | Note                                               |
-| -------------------------------------------- | -------------------------------------------------- |
-| `STRATOS_SIGNING_KEY_HEX`                    | The service key lives in the signing identity file |
-| `STRATOS_RETENTION_DAYS`                     | No retention sweep uses it                         |
-| `STRATOS_IMPORT_MAX_BYTES`                   | The service does not register a repository import  |
-| `STRATOS_DPOP_REQUIRE_NONCE`                 | Nonce handling does not consult it                 |
-| `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Use `STRATOS_VALKEY_URL`                           |
-
-These names appear in older guides and do not exist: `STRATOS_OAUTH_REDIRECT_URI`,
-`STRATOS_ALLOWED_APPVIEWS`, `STRATOS_LOG_LEVEL`, and `STRATOS_PLC_URL`.
-`STRATOS_SYNC_TOKEN` and `BSKY_DB_POSTGRES_URL` belong to the deprecated
-standalone indexer, not to the Stratos service.
+Every variable, with its default, is in
+[Environment variables](/reference/env). Filter it by category, or show
+only the required ones.

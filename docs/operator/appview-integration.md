@@ -1,13 +1,19 @@
-# AppView Integration
+---
+audience: Developers of a custom sync consumer
+type: Reference
+status: legacy
+---
+
+# AppView integration <Badge type="warning" text="legacy" />
 
 ::: danger Legacy integration path
 No maintained AppView consumes this stream. The only consumer in this
 repository, `stratos-indexer`, is deprecated and cannot authenticate to the
 current Stratos service as shipped. See
-[Stratos Indexer Architecture](/indexer-architecture).
+[AppView indexer](/architecture/appview-indexer).
 
 The supported way to serve boundary-scoped feeds is the
-[Feed Generator](/operator/feedgen-ng). Read this page only if you build your
+[Run the feed generator](/operator/feedgen-ng). Read this page only if you build your
 own consumer of `zone.stratos.sync.subscribeRecords`.
 :::
 

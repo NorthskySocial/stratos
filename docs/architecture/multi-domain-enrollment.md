@@ -1,3 +1,9 @@
+---
+audience: Operators and maintainers
+type: Explanation
+status: current
+---
+
 # Multi-Domain Enrollment
 
 A Stratos service has several boundaries, also called domains. Every member

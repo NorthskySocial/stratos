@@ -13,7 +13,7 @@ For full documentation, including architecture deep-dives, operator guides, and 
 - [**Client Integration**](./docs/client/getting-started.md) — Add Stratos to your ATProtocol app.
 - [**Operator Guide**](./docs/operator/overview.md) — Deploy and manage a Stratos service.
 - [**Architecture**](./docs/architecture/hydration.md) — Technical details on repositories and hydration.
-- [**Glossary**](./docs/guide/glossary.md) — Key terms and concepts.
+- [**Glossary**](./docs/reference/glossary.md) — Key terms and concepts.
 
 ## What the Repository Contains
 
@@ -181,4 +181,4 @@ That separation matters when updating docs or deployment plans: query-time Strat
 - [Client Getting Started](./docs/client/getting-started.md)
 - [Hydration Architecture](./docs/architecture/hydration.md)
 - [Enrollment Signing](./docs/architecture/enrollment-signing.md)
-- [Glossary](./docs/guide/glossary.md)
+- [Glossary](./docs/reference/glossary.md)

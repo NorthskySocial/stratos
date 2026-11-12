@@ -1,3 +1,9 @@
+---
+audience: App developers and designers
+type: Guide
+status: current
+---
+
 # UI Patterns
 
 A user must always know whether a post is public or private, and which

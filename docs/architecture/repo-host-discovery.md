@@ -1,3 +1,9 @@
+---
+audience: Protocol implementers and maintainers
+type: Explanation
+status: current
+---
+
 # Repo-Host Discovery
 
 Stratos knows who belongs to a boundary. For members who keep their own

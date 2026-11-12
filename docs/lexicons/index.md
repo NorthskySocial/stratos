@@ -1,5 +1,8 @@
 ---
 title: Lexicon Reference
+audience: App developers and protocol implementers
+type: Reference
+status: current
 ---
 
 <script setup>
@@ -19,7 +22,7 @@ the JSON files at build time.
 
 A lexicon on this page is a contract, not a promise that one service serves it. The Stratos service
 serves most methods. The feed generator serves `zone.stratos.feedgen.*`. The
-[API Reference](/client/api-reference#method-index) lists what the Stratos service serves and the
+[API methods](/reference/api#method-index) lists what the Stratos service serves and the
 authentication each method accepts.
 
 The space type `zone.stratos.space.feed` is not on this page. Its lexicon lives in
