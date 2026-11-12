@@ -65,6 +65,7 @@ const response = await stratosGet(
 
 ```typescript [PDS custody]
 // The viewer's PDS forwards the call to the feed generator.
+// One page of the general feed. Pass the returned cursor for the next page.
 const params = new URLSearchParams({ feed: 'general', limit: '50' })
 const response = await session.fetchHandler(
   `/xrpc/zone.stratos.feedgen.getFeed?${params}`,

@@ -1,5 +1,11 @@
 <template>
-  <span class="term" @keydown.esc="dismiss">
+  <span
+    class="term"
+    :class="{ 'is-dismissed': dismissed }"
+    @keydown.esc="dismiss"
+    @mouseleave="dismissed = false"
+    @focusout="onFocusOut"
+  >
     <button
       ref="trigger"
       type="button"
@@ -40,8 +46,18 @@ const entry = computed(() =>
   glossary.find((e) => e.slug === props.name.toLowerCase()),
 )
 
+// Escape must win over :hover and :focus-within, and keep focus on the term.
+const dismissed = ref(false)
+
 function dismiss() {
-  trigger.value?.blur()
+  dismissed.value = true
+  trigger.value?.focus()
+}
+
+function onFocusOut(event: FocusEvent) {
+  const next = event.relatedTarget as Node | null
+  const root = event.currentTarget as HTMLElement
+  if (!next || !root.contains(next)) dismissed.value = false
 }
 
 function codeSpans(text: string): { text: string; code: boolean }[] {
@@ -99,6 +115,10 @@ function codeSpans(text: string): { text: string; code: boolean }[] {
 .term:hover .term-popover,
 .term:focus-within .term-popover {
   display: block;
+}
+
+.term.is-dismissed .term-popover {
+  display: none;
 }
 
 .term-title {

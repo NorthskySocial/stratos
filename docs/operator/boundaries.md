@@ -56,8 +56,12 @@ access, live membership, or feed readiness. Keep these apart:
 | An application allow-list entry | Permission for a client to get credentials | A membership                           |
 | Room joinability                | Permission to join                         | Permission to read existing content    |
 | Closing joins                   | A stop to new joins                        | Removal of existing members            |
-| Removing a membership           | An end to that member's access             | A ban. An authorized join can follow   |
+| Removing a membership           | An end to new credentials for that member  | A ban. An authorized join can follow   |
 | A new boundary                  | A definition                               | Access for a feed generator or service |
+
+Removing a membership does not revoke a credential that Stratos already issued.
+A member's PDS can accept that credential until it expires. See
+[the current spaces contract](/architecture/spaces-alignment#credential-transport).
 
 ### Members
 

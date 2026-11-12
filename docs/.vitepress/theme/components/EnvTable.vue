@@ -108,7 +108,9 @@ function anchorFor(name: string): string {
 }
 
 function requiredLabel(required: boolean | string): string {
-  return required === true ? 'required' : `required ${required.toLowerCase()}`
+  return typeof required === 'string'
+    ? `required ${required.toLowerCase()}`
+    : 'required'
 }
 
 function codeSpans(text: string): { text: string; code: boolean }[] {

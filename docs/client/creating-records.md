@@ -132,7 +132,7 @@ async function createSpacePost(
   session: OAuthSession,
   spaceUri: string,
   text: string,
-): Promise<void> {
+): Promise<{ uri: string; cid: string }> {
   // The session's fetch handler already targets the user's own PDS.
   const response = await session.fetchHandler(
     '/xrpc/com.atproto.space.createRecord',
@@ -155,6 +155,7 @@ async function createSpacePost(
   if (!response.ok) {
     throw new Error(`PDS write failed (${response.status})`)
   }
+  return response.json()
 }
 ```
 

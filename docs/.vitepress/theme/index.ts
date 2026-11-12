@@ -25,6 +25,12 @@ export const theme: Theme = {
     router.onBeforeRouteChange = async (href) => {
       const target = findRedirect(href)
       if (target === undefined) return true
+      // On the first load the app would mount the target from its lean chunk
+      // over the 404 page's HTML, so load the full document instead.
+      if (router.route.component === null) {
+        window.location.replace(target)
+        return false
+      }
       // Replace, not push, so Back does not land on the old URL again.
       window.history.replaceState(null, '', target)
       await router.go(target)

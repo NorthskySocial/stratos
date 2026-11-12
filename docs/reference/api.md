@@ -465,8 +465,9 @@ Authorization: Bearer <service-jwt>
 ```
 
 A WebSocket stream of Stratos-hosted record changes. Messages are `#commit`,
-`#enrollment`, and `#info`. A cursor ahead of the stream fails with
-`FutureCursor`. A user session is not accepted.
+`#enrollment`, and `#info`. A cursor ahead of the newest event resumes from
+the newest event. A cursor older than the kept events receives an
+`OutdatedCursor` info message. A user session is not accepted.
 
 ### Pull Sync: List Repo Operations
 

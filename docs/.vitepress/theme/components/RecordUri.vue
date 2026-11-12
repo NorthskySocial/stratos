@@ -33,9 +33,7 @@
       </button>
     </p>
     <figcaption class="uri-explain" aria-live="polite">
-      <span class="uri-position">
-        Segment {{ selected + 1 }} of {{ segments.length }}
-      </span>
+      <span class="uri-position">{{ positionLabel }}</span>
       <strong>{{ segments[selected].name }}</strong>
       <span>{{ segments[selected].detail }}</span>
     </figcaption>
@@ -155,6 +153,14 @@ const URIS: Record<UriKind, Segment[]> = {
 const current = ref<UriKind>(props.kind)
 const selected = ref(1)
 const segments = computed(() => URIS[current.value])
+
+// The docs count segments after the scheme: seven for a space record, three
+// for a custody record. The scheme sits at index 0, so indexes match counts.
+const positionLabel = computed(() => {
+  const segmentCount = segments.value.length - 1
+  if (selected.value === 0) return 'The scheme, before the segments'
+  return `Segment ${selected.value} of ${segmentCount}`
+})
 
 function labelOf(kind: UriKind): string {
   return KINDS.find((k) => k.kind === kind)?.label ?? kind

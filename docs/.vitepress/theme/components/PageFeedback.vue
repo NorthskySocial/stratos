@@ -29,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useData } from 'vitepress'
 
 const ISSUE_URL = 'https://github.com/NorthskySocial/stratos/issues/new'
@@ -37,6 +37,14 @@ const ISSUE_URL = 'https://github.com/NorthskySocial/stratos/issues/new'
 // Nothing is recorded or sent. "No" only opens a prefilled GitHub issue.
 const answer = ref<'yes' | 'no' | null>(null)
 const { page } = useData()
+
+// The footer survives page navigation, so an answer must not follow the reader.
+watch(
+  () => page.value.relativePath,
+  () => {
+    answer.value = null
+  },
+)
 
 const issueUrl = computed(() => {
   const params = new URLSearchParams({
