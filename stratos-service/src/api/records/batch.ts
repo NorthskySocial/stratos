@@ -13,7 +13,11 @@ import {
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context.js'
 import { signAndPersistCommit, StratosBlockStoreReader } from '../../features'
-import { validateWritableRecord, withConcurrencyRetry } from './validation.js'
+import {
+  assertCollectionInHostedSpaceType,
+  validateWritableRecord,
+  withConcurrencyRetry,
+} from './validation.js'
 import {
   type BatchWriteResult,
   type CommitResult,
@@ -378,6 +382,9 @@ export async function applyWritesBatch(
     queuedAtMs: Date.now(),
   }
   ctx.writeRateLimiter.assertWriteAllowed(callerDid, ops.length)
+  for (const op of ops) {
+    assertCollectionInHostedSpaceType(op.collection)
+  }
 
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
   assertStratosCustody(enrollment)

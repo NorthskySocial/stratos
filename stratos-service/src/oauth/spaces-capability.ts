@@ -1,7 +1,8 @@
 import { ScopePermissions } from '@atproto/oauth-scopes'
 import type { OAuthSession } from '@atproto/oauth-client-node'
 import type { Logger, SpacesCapability } from '@northskysocial/stratos-core'
-import { SPACE_COLLECTION, SPACE_TYPE } from './client.js'
+import { HOSTED_SPACE_COLLECTIONS } from '../shared/space-type-registry.js'
+import { SPACE_TYPE } from './client.js'
 
 /**
  * Enrollment always requests this authority's space scope. A missing grant
@@ -31,11 +32,9 @@ export async function detectSpacesCapability(
     // are written, so a grant that reads but cannot create is not capable of
     // the flow we would put them in.
     const canRead = permissions.allowsSpace({ ...space, action: 'read' })
-    const canCreate = permissions.allowsSpace({
-      ...space,
-      collection: SPACE_COLLECTION,
-      action: 'create',
-    })
+    const canCreate = HOSTED_SPACE_COLLECTIONS.every((collection) =>
+      permissions.allowsSpace({ ...space, collection, action: 'create' }),
+    )
     if (canRead && canCreate) return 'capable'
   } catch (err) {
     logger?.warn(

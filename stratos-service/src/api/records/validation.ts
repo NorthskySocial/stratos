@@ -13,6 +13,10 @@ import {
 } from '@northskysocial/stratos-core'
 import { MissingBlockError } from '@atcute/mst'
 import type { AppContext } from '../../context.js'
+import {
+  HOSTED_SPACE_TYPE,
+  SPACE_TYPE_REGISTRY,
+} from '../../shared/space-type-registry.js'
 
 // Cache the boundaries in case a post gets _really_ popular.
 // Exported for tests: they clear the cache and check its insertion order.
@@ -22,6 +26,15 @@ export const parentBoundaryCache = new Map<
 >()
 const PARENT_BOUNDARY_TTL_MS = 60_000
 export const PARENT_BOUNDARY_CACHE_MAX = 1000
+
+export function assertCollectionInHostedSpaceType(collection: string): void {
+  if (!SPACE_TYPE_REGISTRY.allowsCollection(HOSTED_SPACE_TYPE, collection)) {
+    throw new InvalidRequestError(
+      `Collection ${collection} is not allowed in space type ${HOSTED_SPACE_TYPE}`,
+      'InvalidCollection',
+    )
+  }
+}
 
 /**
  * Validates that the caller has permission to write domains in the given collection.

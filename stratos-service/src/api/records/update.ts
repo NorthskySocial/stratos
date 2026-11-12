@@ -9,7 +9,11 @@ import {
 } from '@northskysocial/stratos-core'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context-types.js'
-import { validateWritableRecord, withConcurrencyRetry } from './validation.js'
+import {
+  assertCollectionInHostedSpaceType,
+  validateWritableRecord,
+  withConcurrencyRetry,
+} from './validation.js'
 import { createRepoManager } from './util.js'
 import { assertStratosCustody } from './custody.js'
 import {
@@ -112,6 +116,7 @@ export async function updateRecord(
       'InvalidCollection',
     )
   }
+  assertCollectionInHostedSpaceType(collection)
 
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
   assertStratosCustody(enrollment)

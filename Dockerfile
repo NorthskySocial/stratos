@@ -76,6 +76,7 @@ COPY --from=builder /app/stratos-client/dist/ ./stratos-client/dist/
 
 # Copy lexicons (needed at runtime for validation)
 COPY lexicons/ ./lexicons/
+COPY lexicons-spaces/ ./lexicons-spaces/
 
 # Create data directory structure
 RUN mkdir -p /app/data/assets && chown -R node:node /app/data

@@ -10,7 +10,11 @@ import {
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import type { ActorSignFn } from '../../infra/signing/index.js'
-import { validateWritableRecord, withConcurrencyRetry } from './validation.js'
+import {
+  assertCollectionInHostedSpaceType,
+  validateWritableRecord,
+  withConcurrencyRetry,
+} from './validation.js'
 import { type SequenceTrace, type WritePhases } from './types.js'
 import { type Cid as CID } from '@atproto/lex-data'
 import {
@@ -193,6 +197,7 @@ async function validateCreateInput(
       'InvalidCollection',
     )
   }
+  assertCollectionInHostedSpaceType(collection)
 }
 
 /**

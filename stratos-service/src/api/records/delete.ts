@@ -9,7 +9,10 @@ import {
   type SequenceTrace,
   type WritePhases,
 } from './types.js'
-import { withConcurrencyRetry } from './validation.js'
+import {
+  assertCollectionInHostedSpaceType,
+  withConcurrencyRetry,
+} from './validation.js'
 
 export interface DeleteRecordInput {
   repo: string
@@ -54,6 +57,7 @@ export async function deleteRecord(
       'InvalidCollection',
     )
   }
+  assertCollectionInHostedSpaceType(collection)
 
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
   assertStratosCustody(enrollment)
