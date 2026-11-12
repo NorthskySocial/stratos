@@ -1,6 +1,11 @@
 # Creating Records
 
-## Record Shape
+Where the post goes depends on custody. Read
+[Custody and Routing](/client/custody) first. Most of this page describes
+`stratos` custody, where the Stratos service stores the record. The last
+section covers `pds` custody.
+
+## Record shape
 
 ```typescript
 interface StratosPost {
@@ -8,273 +13,291 @@ interface StratosPost {
   text: string
   boundary: {
     $type: 'zone.stratos.boundary.defs#Domains'
-    values: Array<{
-      $type: 'zone.stratos.boundary.defs#Domain'
-      value: string
-    }>
+    // Exactly one entry.
+    values: [{ $type: 'zone.stratos.boundary.defs#Domain'; value: string }]
   }
   createdAt: string
-  facets?: RichTextFacet[]
-  embed?: Embed
-  reply?: ReplyRef
+  facets?: unknown[]
+  embed?: unknown
+  reply?: {
+    root: { uri: string; cid: string }
+    parent: { uri: string; cid: string }
+  }
   langs?: string[]
   tags?: string[]
 }
 ```
 
-## Basic Post
+## Write rules
+
+Stratos checks every write. A failed check answers HTTP 400 with
+`{ "error": "<name>", "message": "..." }`.
+
+| Rule                                                         | Error                          |
+| ------------------------------------------------------------ | ------------------------------ |
+| The caller writes only to their own repo.                    | `AuthenticationRequired` (401) |
+| The collection starts with `zone.stratos.`.                  | `InvalidCollection`            |
+| The caller has an active enrollment.                         | `NotEnrolled`                  |
+| The caller has `stratos` custody.                            | `PdsCustodyWriteForbidden`     |
+| The caller is a user, not a service identity.                | `ServiceWriteForbidden`        |
+| The record names exactly one boundary.                       | `InvalidDomainCount`           |
+| The boundary name is a valid space key.                      | `InvalidDomain`                |
+| The boundary belongs to this Stratos service.                | `ServiceMismatch`              |
+| The caller holds the boundary.                               | `ForbiddenBoundary`            |
+| A reply points at a Stratos record.                          | `InvalidRecord`                |
+| A reply's boundary is one of the parent's boundaries.        | `InvalidRecord`                |
+| A record embed points at a Stratos record, not a public one. | `InvalidRecord`                |
+| The caller is under the write rate limit.                    | `RateLimitExceeded` (429)      |
+
+The default rate limit is 300 writes per 60 seconds per DID.
+
+The record and boundary checks run when `validate` is `true`, the default for
+`createRecord`. Leave it at the default.
+
+## A DPoP request helper
+
+Every sample below sends requests through the user's OAuth session. The
+session's fetch handler adds `Authorization: DPoP <token>` and the `DPoP`
+proof. Stratos rejects `Authorization: Bearer` from a user.
 
 ```typescript
+import type { OAuthSession } from '@atproto/oauth-client-browser'
+
+async function stratosPost(
+  session: OAuthSession,
+  stratosUrl: string,
+  method: string,
+  body: unknown,
+): Promise<unknown> {
+  const url = new URL(`/xrpc/${method}`, stratosUrl)
+  const response = await session.fetchHandler(url.href, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data: unknown = await response.json()
+  if (!response.ok) {
+    const { error, message } = data as { error?: string; message?: string }
+    throw new Error(`${error ?? response.status}: ${message ?? ''}`)
+  }
+  return data
+}
+```
+
+`stratosUrl` is the `url` of a `stratos` repository target.
+
+## Basic post
+
+```typescript
+function buildBoundary(boundary: string): StratosPost['boundary'] {
+  return {
+    $type: 'zone.stratos.boundary.defs#Domains',
+    values: [{ $type: 'zone.stratos.boundary.defs#Domain', value: boundary }],
+  }
+}
+
 async function createPrivatePost(
-  stratosEndpoint: string,
-  accessToken: string,
-  userDid: string,
+  session: OAuthSession,
+  stratosUrl: string,
   text: string,
-  domains: string[],
+  boundary: string,
 ) {
   const record: StratosPost = {
     $type: 'zone.stratos.feed.post',
     text,
-    boundary: {
-      $type: 'zone.stratos.boundary.defs#Domains',
-      values: domains.map((domain) => ({
-        $type: 'zone.stratos.boundary.defs#Domain',
-        value: domain,
-      })),
-    },
+    boundary: buildBoundary(boundary),
     createdAt: new Date().toISOString(),
   }
-
-  const response = await fetch(
-    `${stratosEndpoint}/xrpc/com.atproto.repo.createRecord`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        repo: userDid,
-        collection: 'zone.stratos.feed.post',
-        record,
-      }),
-    },
-  )
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.message || 'Failed to create post')
-  }
-
-  return response.json()
+  return stratosPost(session, stratosUrl, 'com.atproto.repo.createRecord', {
+    repo: session.sub,
+    collection: 'zone.stratos.feed.post',
+    record,
+  })
 }
 ```
 
-## Post with Rich Text
+`boundary` is the full value, such as `did:web:stratos.example.com/general`.
+The response is `{ uri, cid }`. The URI has three segments:
+`at://{userDid}/zone.stratos.feed.post/{rkey}`.
+
+## Post with rich text
 
 ```typescript
-import { RichText } from '@atproto/api'
+import { Agent, RichText } from '@atproto/api'
 
 async function createRichPost(
-  agent: Agent,
-  stratosEndpoint: string,
-  accessToken: string,
-  userDid: string,
+  publicAgent: Agent,
+  session: OAuthSession,
+  stratosUrl: string,
   text: string,
-  domains: string[],
+  boundary: string,
 ) {
   const rt = new RichText({ text })
-  await rt.detectFacets(agent)
+  await rt.detectFacets(publicAgent)
 
   const record: StratosPost = {
     $type: 'zone.stratos.feed.post',
     text: rt.text,
     facets: rt.facets,
-    boundary: {
-      $type: 'zone.stratos.boundary.defs#Domains',
-      values: domains.map((domain) => ({
-        $type: 'zone.stratos.boundary.defs#Domain',
-        value: domain,
-      })),
-    },
+    boundary: buildBoundary(boundary),
     createdAt: new Date().toISOString(),
   }
-
-  return fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.createRecord`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      repo: userDid,
-      collection: 'zone.stratos.feed.post',
-      record,
-    }),
-  }).then((r) => r.json())
+  return stratosPost(session, stratosUrl, 'com.atproto.repo.createRecord', {
+    repo: session.sub,
+    collection: 'zone.stratos.feed.post',
+    record,
+  })
 }
 ```
 
-## Post with Images
+## Post with images
 
-Creating a post with images involves two steps: uploading the blob and then referencing it in the record.
+A post with an image takes two steps: upload the blob, then reference it.
 
-### 1. Upload the Blob
+### 1. Upload the blob
 
-You can use either the standard `com.atproto.repo.uploadBlob` or the Stratos-specific `zone.stratos.repo.uploadBlob`.
+Stratos serves `com.atproto.repo.uploadBlob` and
+`zone.stratos.repo.uploadBlob`. Both run the same code.
 
 ```typescript
 async function uploadImage(
-  stratosEndpoint: string,
-  accessToken: string,
+  session: OAuthSession,
+  stratosUrl: string,
   imageData: Uint8Array,
   mimeType: string,
-) {
-  const response = await fetch(
-    `${stratosEndpoint}/xrpc/com.atproto.repo.uploadBlob`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': mimeType,
-      },
-      body: imageData,
-    },
-  )
-
-  if (!response.ok) {
-    throw new Error('Failed to upload image')
-  }
-
-  const { blob } = await response.json()
-  return blob // This is a BlobRef
+): Promise<unknown> {
+  const url = new URL('/xrpc/com.atproto.repo.uploadBlob', stratosUrl)
+  const response = await session.fetchHandler(url.href, {
+    method: 'POST',
+    headers: { 'content-type': mimeType },
+    body: imageData,
+  })
+  if (!response.ok) throw new Error(`Upload failed (${response.status})`)
+  const { blob } = (await response.json()) as { blob: unknown }
+  return blob
 }
 ```
 
-### 2. Create the Post with Embed
+### 2. Create the post with the embed
 
 ```typescript
 async function createPostWithImage(
-  stratosEndpoint: string,
-  accessToken: string,
-  userDid: string,
+  session: OAuthSession,
+  stratosUrl: string,
   text: string,
-  domains: string[],
-  blob: any, // BlobRef from uploadImage
-  altText: string = '',
+  boundary: string,
+  blob: unknown,
+  altText: string,
 ) {
   const record: StratosPost = {
     $type: 'zone.stratos.feed.post',
     text,
-    boundary: {
-      $type: 'zone.stratos.boundary.defs#Domains',
-      values: domains.map((domain) => ({
-        $type: 'zone.stratos.boundary.defs#Domain',
-        value: domain,
-      })),
-    },
+    boundary: buildBoundary(boundary),
     embed: {
-      $type: 'app.bsky.embed.images',
-      images: [
-        {
-          image: blob,
-          alt: altText,
-        },
-      ],
+      $type: 'zone.stratos.embed.images',
+      images: [{ image: blob, alt: altText }],
     },
     createdAt: new Date().toISOString(),
   }
-
-  return fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.createRecord`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      repo: userDid,
-      collection: 'zone.stratos.feed.post',
-      record,
-    }),
-  }).then((r) => r.json())
+  return stratosPost(session, stratosUrl, 'com.atproto.repo.createRecord', {
+    repo: session.sub,
+    collection: 'zone.stratos.feed.post',
+    record,
+  })
 }
 ```
 
-## Reply to a Post
+`zone.stratos.embed.images` holds up to four images. Each needs `image` and
+`alt`, and may carry `aspectRatio` (`width`, `height`). The post lexicon also
+accepts `app.bsky.embed.images`, which the demo webapp uses.
+
+## Reply to a post
 
 ```typescript
 async function createReply(
-  stratosEndpoint: string,
-  accessToken: string,
-  userDid: string,
+  session: OAuthSession,
+  stratosUrl: string,
   text: string,
-  replyTo: { uri: string; cid: string },
-  rootPost: { uri: string; cid: string },
-  domains: string[],
+  parent: { uri: string; cid: string },
+  root: { uri: string; cid: string },
+  boundary: string,
 ) {
   const record: StratosPost = {
     $type: 'zone.stratos.feed.post',
     text,
-    reply: {
-      root: { uri: rootPost.uri, cid: rootPost.cid },
-      parent: { uri: replyTo.uri, cid: replyTo.cid },
-    },
-    boundary: {
-      $type: 'zone.stratos.boundary.defs#Domains',
-      values: domains.map((domain) => ({
-        $type: 'zone.stratos.boundary.defs#Domain',
-        value: domain,
-      })),
-    },
+    reply: { root, parent },
+    boundary: buildBoundary(boundary),
     createdAt: new Date().toISOString(),
   }
-
-  return fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.createRecord`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      repo: userDid,
-      collection: 'zone.stratos.feed.post',
-      record,
-    }),
-  }).then((r) => r.json())
+  return stratosPost(session, stratosUrl, 'com.atproto.repo.createRecord', {
+    repo: session.sub,
+    collection: 'zone.stratos.feed.post',
+    record,
+  })
 }
 ```
 
-## Write Path Integration
+A reply stays in the parent's boundary. Use the same boundary value. A reply to a
+public `app.bsky.feed.post` is rejected.
 
-Record creates, updates, and deletes should route through the service client when Stratos is active:
+## Deletes, updates, and batches
+
+Stratos serves `com.atproto.repo.deleteRecord` and
+`com.atproto.repo.applyWrites`. It does not serve `com.atproto.repo.putRecord`.
+To update a record, send an `update` action through `applyWrites`:
 
 ```typescript
-import { createServiceFetchHandler } from '@northskysocial/stratos-client'
-
-const sessionAgent = new OAuthUserAgent(await getSession(repoDid))
-const rpc = enrollment
-  ? new Client({
-      handler: createServiceFetchHandler(
-        sessionAgent.handle,
-        enrollment.service,
-      ),
-    })
-  : new Client({ handler: sessionAgent })
-
-await rpc.post('com.atproto.repo.createRecord', {
-  input: {
-    repo: did,
-    collection: 'zone.stratos.feed.post',
-    record: {
-      text: 'hello',
-      createdAt: new Date().toISOString(),
-      boundary: {
-        values: [{ value: 'did:web:stratos.example.com/WestCoastBestCoast' }],
+async function updatePost(
+  session: OAuthSession,
+  stratosUrl: string,
+  rkey: string,
+  record: StratosPost,
+) {
+  return stratosPost(session, stratosUrl, 'com.atproto.repo.applyWrites', {
+    repo: session.sub,
+    writes: [
+      {
+        action: 'update',
+        collection: 'zone.stratos.feed.post',
+        rkey,
+        record,
       },
-    },
-  },
-})
+    ],
+  })
+}
 ```
 
-Batch operations (`com.atproto.repo.applyWrites`) work identically — route through the service
-client.
+`applyWrites` accepts `create`, `update`, and `delete` actions in one call.
+Each write is `{ action, collection, rkey, record }`. This differs from the
+upstream `com.atproto.repo.applyWrites` shape, which uses `$type` and `value`.
+A `create` may omit `rkey`.
+Stratos retries a conflicting write itself. If the conflict persists, it
+answers `ConcurrentModification`; send the request again.
+
+## Using an RPC client
+
+With `@atcute/client`, route the session through `createServiceFetchHandler`:
+
+```typescript
+import { Client } from '@atcute/client'
+import { createServiceFetchHandler } from '@northskysocial/stratos-client'
+import type { FetchHandler } from '@northskysocial/stratos-client'
+
+function createStratosClient(
+  authenticatedHandler: FetchHandler,
+  stratosUrl: string,
+): Client {
+  return new Client({
+    handler: createServiceFetchHandler(authenticatedHandler, stratosUrl),
+  })
+}
+```
+
+## PDS custody
+
+A `pds`-custody user does not write to Stratos. Their app calls
+`com.atproto.space.createRecord` on their own PDS, with a `space` URI in place
+of the `boundary` field. The record URI that comes back has seven segments.
+
+[Writing by custody](/client/custody#writing-by-custody) has the request and
+the scope it needs.

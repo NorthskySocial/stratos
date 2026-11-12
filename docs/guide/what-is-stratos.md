@@ -1,6 +1,8 @@
 <script setup>
 import BoundaryAccess from '../.vitepress/theme/components/BoundaryAccess.vue'
 import EnrollmentFlow from '../.vitepress/theme/components/EnrollmentFlow.vue'
+import SpaceDataResidencyAnimation from '../.vitepress/theme/components/SpaceDataResidencyAnimation.vue'
+import FeedgenRequestFlow from '../.vitepress/theme/components/FeedgenRequestFlow.vue'
 </script>
 
 # Shared Private Data — Explained Simply
@@ -28,9 +30,12 @@ network entirely.
 
 Stratos introduces boundaries — named access scopes that act like club memberships.
 
-When you write a post, you label it with a boundary, like `cooking` or `hiking`. Only people who are
-enrolled in that same boundary can read it. Everyone else sees nothing — not even a hint that the
-post exists.
+When you write a post, you choose one boundary for it, like `cooking` or `hiking`. That is the
+room the post is said in. Only people who are enrolled in that same boundary can read it. Everyone
+else sees nothing — not even a hint that the post exists.
+
+Most services also have one room that every member is in, usually called `general`. A post there
+is for the whole community.
 
 <div class="animation-card">
   <div class="animation-label">
@@ -66,36 +71,59 @@ When you enroll:
 
 ## Where private posts live
 
-Your private posts are not published as ordinary public posts. Where they are
-stored depends on your PDS:
+Back at the party, think about what happens to the things you bring. Some guests carry a bag
+with a lock, and keep their things with them. Others hand their coat to the host, who keeps it
+safe in the cloakroom. Both guests are in the same room and hear the same conversation.
 
-- If your PDS does not support protected spaces, Stratos stores the post.
-- If your PDS supports spaces, it stores the post in a protected space on your
-  PDS. Stratos still decides who belongs to that space.
-- Your public enrollment record tells apps which Stratos service to contact.
-  Apps check access before showing a private post.
+Your private posts work the same way. Where they are kept depends on your PDS:
 
-In either case, a private post is not part of the public feed.
+- If your PDS supports permissioned spaces, it keeps your posts in a space of its own.
+  Stratos still decides who belongs to that space.
+- If your PDS does not support spaces, Stratos keeps the posts for you.
+
+We call this _custody_: who holds your private posts. You do not choose it by hand. Stratos works
+it out when you enroll, and both kinds of member share the same rooms.
+
+In either case, a private post is not part of the public feed. Your public enrollment record only
+tells apps which Stratos service to ask.
 
 <div class="animation-card">
   <div class="animation-label">
     <span class="step-number">3</span>
-    <span>How apps read private posts</span>
+    <span>Where a private post is kept</span>
   </div>
-  <AppviewHydration />
+  <SpaceDataResidencyAnimation />
+</div>
+
+---
+
+## Reading the Room
+
+Posting is half of it. Someone still has to gather the posts of a room into a timeline.
+
+That is the job of the _feed generator_. It visits the members Stratos lists for each room and
+collects their posts, wherever they are kept. When you open a feed, it checks the guest list
+first, then shows you the posts of the rooms you are in. Nothing else.
+
+<div class="animation-card">
+  <div class="animation-label">
+    <span class="step-number">4</span>
+    <span>Opening a private feed</span>
+  </div>
+  <FeedgenRequestFlow />
 </div>
 
 ---
 
 ## Putting It Together
 
-| Step                    | What happens                                                               |
-| ----------------------- | -------------------------------------------------------------------------- |
-| You enroll              | Your boundaries are recorded; an enrollment record lands on your PDS       |
-| You write a post        | Stratos or a protected space on your PDS stores it                         |
-| Someone opens your feed | The app requests posts for that viewer                                     |
-| Access is checked       | Does the viewer share the post's boundary? Yes → show it. No → deny access |
-| You see your feed       | Only posts from boundaries you're in appear                                |
+| Step                 | What happens                                                           |
+| -------------------- | ---------------------------------------------------------------------- |
+| You enroll           | Your boundaries are recorded; an enrollment record lands on your PDS   |
+| You write a post     | Stratos or a protected space on your PDS stores it                     |
+| Someone opens a feed | The app asks the feed generator for posts, on that viewer's behalf     |
+| Access is checked    | Is the viewer in the post's boundary? Yes → show it. No → show nothing |
+| You see your feed    | Only posts from boundaries you're in appear                            |
 
 ---
 
@@ -103,10 +131,16 @@ In either case, a private post is not part of the public feed.
 
 - You keep your AT Protocol identity. Stratos is an extra service, not a
   separate account.
-- Access control is enforced - When your app fetches a post, Stratos validates the requester's
-  actual boundary membership before returning any content — no trust is delegated to the client.
+- Access control is enforced on the server. Membership is checked against Stratos's current
+  guest list before any content is returned. The app on your phone is never trusted to decide.
+- Leaving works. When a member is removed from a boundary, they stop receiving its posts, and
+  nobody reads their new ones.
 - The signed enrollment record helps apps confirm which Stratos service you
   joined. It does not grant access to posts; current membership decides that.
+
+One honest limit: posts are access-controlled, not end-to-end encrypted. The people who run the
+Stratos service and the feed generator can technically read them, the same way an email provider
+can. Join communities whose operators you trust.
 
 ::: info Operators choose the rules
 A community can run its own Stratos service with its own membership criteria — fully independent of

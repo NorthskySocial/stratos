@@ -1,320 +1,86 @@
 <template>
-  <div ref="containerRef" class="anim-outer">
-    <div ref="stageRef" class="stage">
-      <svg class="arsvg" viewBox="0 0 900 520">
-        <defs>
-          <marker
-            id="bc-ml"
-            markerHeight="5"
-            markerWidth="7"
-            orient="auto"
-            refX="7"
-            refY="2.5"
-          >
-            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
-          </marker>
-          <marker
-            id="bc-mg"
-            markerHeight="5"
-            markerWidth="7"
-            orient="auto"
-            refX="7"
-            refY="2.5"
-          >
-            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
-          </marker>
-        </defs>
-        <!-- Top row: Operator → Stratos → DB -->
-        <path
-          id="bc-a1"
-          class="ar"
-          d="M 170 133 L 305 133"
-          marker-end="url(#bc-ml)"
-          stroke="#9145EC"
-        />
-        <path
-          id="bc-a2"
-          class="ar"
-          d="M 505 133 L 685 133"
-          marker-end="url(#bc-ml)"
-          stroke="#9145EC"
-        />
-        <!-- DB → PDS (vertical) -->
-        <path
-          id="bc-a3"
-          class="ar"
-          d="M 762 183 L 762 320"
-          marker-end="url(#bc-ml)"
-          stroke="#7780DC"
-        />
-        <!-- PDS → AppView (← left) -->
-        <path
-          id="bc-a4"
-          class="ar"
-          d="M 685 373 L 470 373"
-          marker-end="url(#bc-mg)"
-          stroke="#24cf6e"
-        />
-      </svg>
-
-      <!-- Top row -->
-      <div id="bc-nop" class="node" style="left: 20px; top: 80px; width: 150px">
-        <div class="ni">👤</div>
-        <div class="nn">Operator</div>
-        <div class="ns">admin update</div>
-      </div>
-
-      <div
-        id="bc-nst"
-        class="node"
-        style="left: 305px; top: 80px; width: 200px"
-      >
-        <div class="ni">⚙️</div>
-        <div class="nn">Stratos Service</div>
-        <div class="ns">update · re-sign</div>
-      </div>
-
-      <div
-        id="bc-ndb"
-        class="node"
-        style="left: 685px; top: 80px; width: 155px"
-      >
-        <div class="ni">🛢️</div>
-        <div class="nn">Service DB</div>
-        <div class="ns">enrollment store</div>
-      </div>
-
-      <!-- Bottom row -->
-      <div
-        id="bc-npds"
-        class="node"
-        style="left: 685px; top: 320px; width: 155px"
-      >
-        <div class="ni">🗄️</div>
-        <div class="nn">User PDS</div>
-        <div class="ns">enrollment record</div>
-      </div>
-
-      <div
-        id="bc-nav"
-        class="node"
-        style="left: 305px; top: 320px; width: 165px"
-      >
-        <div class="ni">📡</div>
-        <div class="nn">AppView</div>
-        <div class="ns">cache invalidated</div>
-      </div>
-    </div>
-  </div>
+  <FlowDiagram
+    title="What happens when a member's boundaries change"
+    :cols="3"
+    :nodes="nodes"
+    :edges="edges"
+    :steps="steps"
+  />
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import FlowDiagram from './FlowDiagram.vue'
 
-const containerRef = ref(null)
-const stageRef = ref(null)
-
-const $ = (id) => stageRef.value?.querySelector('#' + id)
-const add = (el, ...c) => el?.classList.add(...c)
-const rm = (el, ...c) => el?.classList.remove(...c)
-
-function fit() {
-  if (!containerRef.value || !stageRef.value) return
-  const scale = containerRef.value.clientWidth / 900
-  stageRef.value.style.transform = `scale(${scale})`
-}
-
-const timeouts = []
-const later = (fn, ms) => {
-  const t = setTimeout(fn, ms)
-  timeouts.push(t)
-  return t
-}
-
-function reset() {
-  ;['bc-nop', 'bc-nst', 'bc-ndb', 'bc-npds', 'bc-nav'].forEach((id) =>
-    rm($(id), 'hl', 'ok'),
-  )
-  ;['bc-a1', 'bc-a2', 'bc-a3', 'bc-a4'].forEach((id) => rm($(id), 'show'))
-}
-
-const steps = [
+const nodes = [
   {
-    dur: 1600,
-    fn() {
-      add($('bc-nop'), 'hl')
-    },
+    id: 'op',
+    title: 'Operator',
+    sub: 'admin interface',
+    col: 0,
+    row: 0,
   },
   {
-    dur: 1800,
-    fn() {
-      rm($('bc-nop'), 'hl')
-      add($('bc-nst'), 'hl')
-      add($('bc-a1'), 'show')
-    },
+    id: 'stratos',
+    title: 'Stratos',
+    sub: 'enrollment store',
+    col: 1,
+    row: 0,
   },
   {
-    dur: 1800,
-    fn() {
-      rm($('bc-nst'), 'hl')
-      add($('bc-ndb'), 'hl')
-      add($('bc-a2'), 'show')
-    },
+    id: 'pds',
+    title: "Member's PDS",
+    sub: 'enrollment record',
+    col: 2,
+    row: 0,
   },
   {
-    dur: 1800,
-    fn() {
-      rm($('bc-ndb'), 'hl')
-      add($('bc-npds'), 'ok')
-      add($('bc-a3'), 'show')
-    },
-  },
-  {
-    dur: 2200,
-    fn() {
-      add($('bc-nav'), 'ok')
-      add($('bc-a4'), 'show')
-    },
+    id: 'feedgen',
+    title: 'Feed generator',
+    sub: 'membership cache',
+    col: 1,
+    row: 1,
   },
 ]
 
-function run(i) {
-  steps[i].fn()
-  later(() => {
-    const next = (i + 1) % steps.length
-    if (next === 0) {
-      reset()
-      later(() => run(0), 800)
-    } else run(next)
-  }, steps[i].dur)
-}
+const edges = [
+  {
+    id: 'change',
+    from: 'op',
+    to: 'stratos',
+  },
+  {
+    id: 'rewrite',
+    from: 'stratos',
+    to: 'pds',
+  },
+  {
+    id: 'event',
+    from: 'stratos',
+    to: 'feedgen',
+  },
+]
 
-let ro
-onMounted(() => {
-  ro = new ResizeObserver(fit)
-  ro.observe(containerRef.value)
-  fit()
-  reset()
-  later(() => run(0), 600)
-})
-onBeforeUnmount(() => {
-  ro?.disconnect()
-  timeouts.forEach(clearTimeout)
-})
+const steps = [
+  {
+    text: 'The operator adds or removes a boundary for a member.',
+    edges: ['change'],
+  },
+  {
+    text: 'Stratos stores the change and signs a new attestation.',
+    nodes: ['stratos'],
+  },
+  {
+    text: "Stratos rewrites the enrollment record on the member's PDS.",
+    edges: ['rewrite'],
+  },
+  {
+    text: 'Stratos announces the change on the sync stream. The feed generator drops what it remembered about that member.',
+    edges: ['event'],
+  },
+  {
+    text: "The next feed request uses the member's new boundaries.",
+    nodes: ['feedgen'],
+    tone: 'ok',
+  },
+]
 </script>
-
-<style scoped>
-.anim-outer {
-  width: 100%;
-  aspect-ratio: 900 / 520;
-  position: relative;
-  overflow: hidden;
-  background: #1f0b35;
-  border-radius: 12px;
-  margin: 1.5rem 0;
-}
-.stage {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 900px;
-  height: 520px;
-  transform-origin: top left;
-  --card: #240d45;
-  --bdr: #7780dc;
-  --txt: #cdc6ff;
-  --dim: #8878b0;
-  --blu: #9145ec;
-  --grn: #24cf6e;
-}
-.stage::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 750px;
-  height: 440px;
-  background: radial-gradient(
-    ellipse,
-    rgba(80, 20, 130, 0.22) 0%,
-    transparent 70%
-  );
-  pointer-events: none;
-}
-.node {
-  position: absolute;
-  background: var(--card);
-  border: 1.5px solid var(--bdr);
-  border-radius: 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 12px 14px;
-  transition:
-    border-color 0.4s,
-    box-shadow 0.4s;
-}
-.ni {
-  font-size: 32px;
-  line-height: 1;
-}
-.nn {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--txt);
-  text-align: center;
-  white-space: nowrap;
-}
-.ns {
-  font-size: 13px;
-  color: var(--dim);
-  text-align: center;
-  white-space: nowrap;
-}
-@keyframes bc-breathe {
-  0%,
-  100% {
-    box-shadow: 0 0 22px rgba(145, 69, 236, 0.35);
-  }
-  50% {
-    box-shadow: 0 0 42px rgba(145, 69, 236, 0.7);
-  }
-}
-@keyframes bc-march {
-  to {
-    stroke-dashoffset: -12;
-  }
-}
-.hl {
-  border-color: var(--blu) !important;
-  animation: bc-breathe 2s ease-in-out infinite;
-}
-.ok {
-  border-color: var(--grn) !important;
-  box-shadow: 0 0 24px rgba(36, 207, 110, 0.4) !important;
-}
-.arsvg {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  overflow: visible;
-}
-.ar {
-  fill: none;
-  stroke-width: 2;
-  stroke-linecap: butt;
-  stroke-dasharray: 8 4;
-  opacity: 0;
-  transition: opacity 0.4s;
-}
-.ar.show {
-  opacity: 1;
-  animation: bc-march 0.5s linear infinite;
-}
-</style>

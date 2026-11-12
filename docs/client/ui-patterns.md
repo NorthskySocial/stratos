@@ -1,11 +1,21 @@
 # UI Patterns
 
-React/TSX component patterns for common Stratos interactions.
+A user must always know whether a post is public or private, and which
+boundary will see it. These React patterns cover the common screens.
 
-## Enrollment Prompt
+The components take plain props. They call the helpers from
+[Creating Records](/client/creating-records) and
+[Custody and Routing](/client/custody); they define no new API.
+
+## Enrollment prompt
 
 ```tsx
-function StratosEnrollmentPrompt({ handle, onEnroll }) {
+interface EnrollmentPromptProps {
+  handle: string
+  onEnroll: (handle: string) => void
+}
+
+function StratosEnrollmentPrompt({ handle, onEnroll }: EnrollmentPromptProps) {
   return (
     <div className="enrollment-prompt">
       <h3>Enable Private Posts</h3>
@@ -16,23 +26,40 @@ function StratosEnrollmentPrompt({ handle, onEnroll }) {
 }
 ```
 
-## Domain Selector
+`onEnroll` starts the OAuth flow. See
+[Initiating enrollment](/client/enrollment#initiating-enrollment).
+
+## Boundary selector
+
+A post belongs to exactly one boundary, so the selector is single-select:
 
 ```tsx
-function DomainSelector({ availableDomains, selected, onChange }) {
+interface BoundarySelectorProps {
+  boundaries: string[]
+  selected: string
+  onChange: (boundary: string) => void
+}
+
+function boundaryName(boundary: string): string {
+  return boundary.slice(boundary.indexOf('/') + 1)
+}
+
+function BoundarySelector({
+  boundaries,
+  selected,
+  onChange,
+}: BoundarySelectorProps) {
   return (
-    <div className="domain-selector">
-      <label>Visible to:</label>
+    <div className="boundary-selector">
+      <label htmlFor="boundary">Visible to:</label>
       <select
-        multiple
+        id="boundary"
         value={selected}
-        onChange={(e) =>
-          onChange(Array.from(e.target.selectedOptions, (o) => o.value))
-        }
+        onChange={(event) => onChange(event.target.value)}
       >
-        {availableDomains.map((domain) => (
-          <option key={domain} value={domain}>
-            {domain}
+        {boundaries.map((boundary) => (
+          <option key={boundary} value={boundary}>
+            {boundaryName(boundary)}
           </option>
         ))}
       </select>
@@ -41,90 +68,127 @@ function DomainSelector({ availableDomains, selected, onChange }) {
 }
 ```
 
-## Post Composer with Privacy Toggle
+`boundaries` holds the full values from the user's enrollment, such as
+`did:web:stratos.example.com/general`. Show the short name. Send the full
+value.
+
+## Post composer with privacy toggle
+
+The composer does not know about custody. It hands the text and the boundary
+to a callback, and the callback routes the write:
 
 ```tsx
-function StratosComposer({ agent, stratosDomains }) {
+import { useState } from 'react'
+
+interface ComposerProps {
+  boundaries: string[]
+  onPublicPost: (text: string) => Promise<void>
+  onPrivatePost: (text: string, boundary: string) => Promise<void>
+}
+
+function StratosComposer({
+  boundaries,
+  onPublicPost,
+  onPrivatePost,
+}: ComposerProps) {
   const [text, setText] = useState('')
   const [isPrivate, setIsPrivate] = useState(false)
-  const [selectedDomains, setSelectedDomains] = useState([])
+  const [boundary, setBoundary] = useState(boundaries[0] ?? '')
+
+  const canPost = text.trim() !== '' && (!isPrivate || boundary !== '')
 
   const handleSubmit = async () => {
     if (isPrivate) {
-      await createPrivatePost(
-        STRATOS_ENDPOINT,
-        accessToken,
-        agent.session.did,
-        text,
-        selectedDomains,
-      )
+      await onPrivatePost(text, boundary)
     } else {
-      await agent.post({ text })
+      await onPublicPost(text)
     }
+    setText('')
   }
 
   return (
     <div className="composer">
       <textarea
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(event) => setText(event.target.value)}
         placeholder={
           isPrivate ? 'Write a private post...' : "What's happening?"
         }
       />
 
-      <div className="privacy-toggle">
-        <label>
-          <input
-            type="checkbox"
-            checked={isPrivate}
-            onChange={(e) => setIsPrivate(e.target.checked)}
-          />
-          Private post
-        </label>
-      </div>
+      <label>
+        <input
+          type="checkbox"
+          checked={isPrivate}
+          onChange={(event) => setIsPrivate(event.target.checked)}
+        />
+        Private post
+      </label>
 
-      {isPrivate && stratosDomains.length > 0 && (
-        <DomainSelector
-          availableDomains={stratosDomains}
-          selected={selectedDomains}
-          onChange={setSelectedDomains}
+      {isPrivate && (
+        <BoundarySelector
+          boundaries={boundaries}
+          selected={boundary}
+          onChange={setBoundary}
         />
       )}
 
-      <button
-        onClick={handleSubmit}
-        disabled={isPrivate && selectedDomains.length === 0}
-      >
-        {isPrivate ? '🔒 Post' : 'Post'}
+      <button onClick={handleSubmit} disabled={!canPost}>
+        {isPrivate ? 'Post privately' : 'Post'}
       </button>
     </div>
   )
 }
 ```
 
-## Private Post Indicator
+`onPrivatePost` branches on the repository target. For `stratos` custody it
+calls `com.atproto.repo.createRecord` on Stratos. For `pds` custody it calls
+`com.atproto.space.createRecord` on the user's PDS. The
+[Getting Started](/client/getting-started#_3-write-the-post) walk has that
+function.
+
+## Private post indicator
+
+A feed mixes two URI shapes. A Stratos-hosted post has three segments and
+starts with the author. A PDS-hosted post has seven and starts with the
+authority. Do not read the author from the first segment. Take the author and
+the boundary from the `zone.stratos.feedgen.getFeed` response instead. Each
+post has `author.did`, `author.handle`, and `boundaries`:
 
 ```tsx
-function PostCard({ post }) {
-  const isStratos = post.uri.includes('zone.stratos.')
-  const domains = post.record?.boundary?.values?.map((d) => d.value) ?? []
+interface PostCardProps {
+  text: string
+  authorHandle: string
+  // post.boundaries[0] from getFeed, or null for a public post.
+  boundary: string | null
+}
+
+function PostCard({ text, authorHandle, boundary }: PostCardProps) {
+  const isPrivate = boundary !== null
 
   return (
-    <div className={`post ${isStratos ? 'private' : ''}`}>
-      {isStratos && (
-        <div className="privacy-badge">🔒 {domains.join(', ')}</div>
+    <div className={isPrivate ? 'post private' : 'post'}>
+      <div className="author">{authorHandle}</div>
+      {isPrivate && (
+        <div className="privacy-badge">Private: {boundaryName(boundary)}</div>
       )}
-      <div className="content">{post.record.text}</div>
+      <div className="content">{text}</div>
     </div>
   )
 }
 ```
 
-## Recommended UX Checklist
+A PDS-hosted record carries no `boundary` field, and a boundary written by an
+author is only a claim. That is why the badge uses the boundary the feed
+generator reports.
 
-- Always make it visually clear when content is private (different background, lock icon, domain
-  badges).
-- Default to the user's first enrolled domain in the composer to reduce friction.
-- Disable the post button when no domain is selected for a private post.
-- Show an enrollment prompt before displaying the private post composer if the user isn't enrolled.
+## Recommended UX checklist
+
+- Make private content visually distinct: a different background, a lock
+  icon, a boundary badge.
+- Preselect the user's first boundary in the composer.
+- Disable the post button while a private post has no boundary.
+- Show the enrollment prompt in place of the private composer when the user
+  is not enrolled.
+- Offer a private post to a `pds`-custody user only when the session holds
+  the space scope. Ask them to sign in again when it is missing.

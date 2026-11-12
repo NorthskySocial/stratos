@@ -1,66 +1,90 @@
 # Deployment Examples
 
-Everything needed to stand up Stratos lives in the repository root — there are no
-per-scenario bundles to copy. Two Compose files and one environment template cover the
-supported deployments:
+Everything needed to stand up Stratos lives in the repository root. There are
+no per-scenario bundles to copy. These files cover the supported deployments:
 
-| File                                       | Purpose                                                       |
-| ------------------------------------------ | ------------------------------------------------------------- |
-| `docker-compose.yml`                       | Base Stratos stack; its bundled AppView indexer is deprecated |
-| `stratos-feedgen-ng/compose.rehearsal.yml` | Constrained feed generator rehearsal profile                  |
-| `docker-compose.feedgen.yml`               | Deprecated TypeScript feedgen overlay, retained for rollback  |
-| `.env.example`                             | Annotated service configuration template — copy to `.env`     |
+| File                                       | Purpose                                                      |
+| ------------------------------------------ | ------------------------------------------------------------ |
+| `docker-compose.yml`                       | Base Stratos stack; its bundled indexer is deprecated        |
+| `stratos-feedgen-ng/compose.rehearsal.yml` | Constrained feed generator rehearsal profile                 |
+| `docker-compose.feedgen.yml`               | Deprecated TypeScript feedgen overlay, retained for rollback |
+| `.env.example`                             | Service configuration template. Copy it to `.env`            |
 
 The current [Feed Generator](/operator/feedgen-ng) keeps its own encrypted
 database. The older TypeScript overlay below is only for rollback.
 
 ## Base Stack (`docker-compose.yml`)
 
-The root `docker-compose.yml` brings up three services:
+The root `docker-compose.yml` brings up four services:
 
-- **`stratos`** (port `3100`) — the Stratos service. Actor storage defaults to SQLite,
-  persisted in the `stratos-data` volume at `/app/data`.
-- **`indexer`** (port `3002`) — the standalone indexer that feeds an AppView. It writes
+- **`stratos`** (port `3100`): the Stratos service. Member storage defaults to
+  SQLite, persisted in the `stratos-data` volume at `/app/data`. The same
+  volume holds the service signing identity.
+- **`valkey`**: the replay store and cache. The `stratos` service waits for it
+  and reads it through `STRATOS_VALKEY_URL`. Space credentials need it.
+- **`indexer`** (port `3002`): the deprecated standalone indexer. It writes
   into the Postgres `bsky` database (`BSKY_DB_POSTGRES_URL`).
-- **`postgres`** (port `5432`) — Postgres 16 backing the indexer's AppView database.
+- **`postgres`** (port `5432`): Postgres 18, backing the indexer's database.
 
-An optional MinIO service for S3-compatible blob storage is included, commented out.
+An optional MinIO service for S3-compatible blob storage is included, commented
+out.
 
-Copy the environment template, fill in the required values, then start the stack:
+Copy the environment template, fill in the required values, then start the
+stack:
 
 ```bash
 cp .env.example .env
-# edit .env — at minimum set STRATOS_SERVICE_DID, STRATOS_PUBLIC_URL,
-# STRATOS_ALLOWED_DOMAINS, STRATOS_SYNC_TOKEN, and (for the bundled
-# indexer) BSKY_DB_POSTGRES_URL
+# edit .env: set STRATOS_SERVICE_DID, STRATOS_PUBLIC_URL, STRATOS_ADMIN_DIDS,
+# and STRATOS_ALLOWED_DOMAINS for your first boundaries
 docker compose up -d
 ```
 
+To run Stratos without the deprecated indexer, start only what the service
+needs:
+
+```bash
+docker compose up -d stratos valkey
+```
+
+The indexer needs `STRATOS_SYNC_TOKEN` in `.env`. The Stratos service does not
+read that variable.
+
+The compose file passes a fixed list of variables into the `stratos`
+container. A variable outside that list, such as `STRATOS_ADMIN_DIDS`, does not
+reach the service from `.env` alone. Add it under `environment:` in a Compose
+override file.
+
 ## Choosing a Storage Backend
 
-The Stratos service defaults to SQLite (`STORAGE_BACKEND=sqlite`), which keeps per-actor
-databases on the mounted volume — a good fit for single-node and development instances.
+The Stratos service defaults to SQLite (`STORAGE_BACKEND=sqlite`), which keeps
+per-member databases on the mounted volume. That fits single-node and
+development instances.
 
-For high-traffic or high-availability deployments, switch the service to PostgreSQL by
-setting `STORAGE_BACKEND=postgres` and either `STRATOS_POSTGRES_URL` or the individual
-`STRATOS_PG_*` variables. See the
-[Database Storage Backend](/operator/configuration#database-storage-backend) section of
-the Configuration reference for the full variable list and precedence rules.
+For production, switch the service to PostgreSQL by setting
+`STORAGE_BACKEND=postgres` and either `STRATOS_POSTGRES_URL` or the individual
+`STRATOS_PG_*` variables. See
+[Database Storage Backend](/operator/configuration#database-storage-backend)
+for the variables and precedence rules. Keep the `stratos-data` volume: the
+service signing identity stays on disk with either backend.
 
-The bundled `postgres` service provisions only the indexer's AppView database (`bsky`) —
-there is no `stratos` database by default. To reuse the same instance for Stratos actor
-storage, create a separate database first:
+The bundled `postgres` service provisions only the indexer's database (`bsky`).
+There is no `stratos` database by default. To reuse the same instance for
+Stratos storage, create a separate database first:
 
 ```bash
 docker compose exec postgres createdb -U stratos stratos
 ```
 
-then point `STRATOS_POSTGRES_URL` at it (for example
-`postgres://stratos:stratos@postgres:5432/stratos`). Do not point `STRATOS_POSTGRES_URL`
-at the `bsky` database — it is shared with the indexer's AppView.
+Then point `STRATOS_POSTGRES_URL` at it:
+
+```bash
+STRATOS_POSTGRES_URL="postgres://stratos:stratos@postgres:5432/stratos"
+```
+
+Do not point `STRATOS_POSTGRES_URL` at the `bsky` database.
 
 Blob storage is a separate choice: `local` (default) or `s3`. See
-[Blob Storage](/operator/configuration#blob-storage) for MinIO/S3 settings.
+[Blob Storage](/operator/configuration#blob-storage) for MinIO and S3 settings.
 
 ## Test the feed generator before launch
 
@@ -149,11 +173,8 @@ startup for your own deployment.
 
 ## Configuration Reference
 
-`.env.example` is the template for the common configuration — copy it to `.env` and fill
-in the required values. It is not exhaustive: the storage-backend variables
-(`STORAGE_BACKEND`, `STRATOS_POSTGRES_URL`, `STRATOS_PG_*`) are documented in the
-[Database Storage Backend](/operator/configuration#database-storage-backend) and
-[Blob Storage](/operator/configuration#blob-storage) sections linked above. The
-[Configuration](/operator/configuration) page groups every variable by concern —
-enrollment modes, domain boundaries, service enrollments, signing keys, storage, and
-blobs.
+`.env.example` is a starting template, not the reference. It still carries a
+few names the service does not read, such as `STRATOS_PLC_URL`, `USE_OAUTH`,
+and `STRATOS_SIGNING_KEY_HEX`. The
+[Configuration](/operator/configuration) page is the reference. It groups every
+variable by concern and lists the ones that do nothing.

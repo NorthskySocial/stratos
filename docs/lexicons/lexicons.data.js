@@ -22,6 +22,13 @@ function extractType(lexicon) {
   return lexicon.defs?.main?.type ?? 'defs'
 }
 
+// The entry component lists the fields of every def except `main`. An object
+// lexicon keeps its fields in `main`, so list that def under a second name.
+function exposeObjectMain(defs) {
+  if (defs.main?.type !== 'object') return defs
+  return { '#main': defs.main, ...defs }
+}
+
 function extractNamespace(id) {
   const parts = id.split('.')
   // zone.stratos.{namespace}.{name} → return namespace segment
@@ -47,7 +54,7 @@ export default {
         type: extractType(raw),
         description: raw.defs?.main?.description ?? '',
         mainDef: raw.defs?.main ?? null,
-        allDefs: raw.defs ?? {},
+        allDefs: exposeObjectMain(raw.defs ?? {}),
       })
     }
 
@@ -59,12 +66,16 @@ export default {
     const namespaceOrder = [
       'core',
       'actor',
+      'admin',
       'boundary',
+      'embed',
       'enrollment',
       'feed',
+      'feedgen',
       'identity',
       'repo',
       'server',
+      'space',
       'sync',
     ]
     const namespaces = namespaceOrder

@@ -1,14 +1,17 @@
 # Deployment
 
+This page takes you through a first deployment in order: build the service,
+give it an identity, configure it, and make yourself the first admin.
+
 ## Prerequisites
 
 - **Linux with `flock` installed** (`apk add flock` on Alpine, or `apt install util-linux` on Debian/Ubuntu). The Docker image includes it. The service identity directory must use a local filesystem supporting file locks, atomic rename, and directory fsync; see [service signing key history](/architecture/service-key-history).
-- **Node.js 20+**
-- **pnpm** (package manager)
-- **Domain with HTTPS** (for OAuth callbacks)
-- **`did:web` identifier** for the service
+- **Node.js 24** and **pnpm**. The Docker image builds and runs on Node.js 24.
+- **A domain with HTTPS.** OAuth callbacks need it.
+- **A `did:web` identifier** for the service, on that domain.
+- **Your own DID.** You need it to become the first admin.
 
-## Step 1: Clone and Build
+## Step 1: Clone and build
 
 ```bash
 git clone https://github.com/NorthskySocial/stratos.git
@@ -17,21 +20,37 @@ pnpm install
 pnpm build
 ```
 
-## Step 2: Create Service DID
+The build also produces the admin interface.
 
-Stratos serves its current key at `/.well-known/did.json`. Route that path to the service so rotations update the public document.
-The document has this shape; use the service's generated key, not the example value:
+## Step 2: Choose the service DID
+
+A `did:web` identifier is the domain name: `did:web:stratos.example.com`.
+
+You do not write the DID document. Stratos generates its signing key on the
+first start and serves the document at `/.well-known/did.json`. Route that
+path to the service so a key rotation updates the public document.
+
+The document has this shape:
 
 ```json
 {
-  "@context": ["https://www.w3.org/ns/did/v1"],
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/multikey/v1"
+  ],
   "id": "did:web:stratos.example.com",
   "verificationMethod": [
+    {
+      "id": "did:web:stratos.example.com#atproto_pns",
+      "type": "Multikey",
+      "controller": "did:web:stratos.example.com",
+      "publicKeyMultibase": "zQ3sh..."
+    },
     {
       "id": "did:web:stratos.example.com#atproto",
       "type": "Multikey",
       "controller": "did:web:stratos.example.com",
-      "publicKeyMultibase": "zQ3shXjHeiBuRCKmM36cuYnm7YEMzhGnCmCyW92sRJ9pribSF"
+      "publicKeyMultibase": "zQ3sh..."
     }
   ],
   "service": [
@@ -44,57 +63,67 @@ The document has this shape; use the service's generated key, not the example va
 }
 ```
 
-## Step 3: Configure Environment
+Both entries carry the same key. The first uses `STRATOS_SERVICE_FRAGMENT`.
+The `#atproto` entry lets a member's PDS verify the space credentials Stratos
+issues.
+
+## Step 3: Configure the environment
 
 Create a `.env` file:
 
 ```bash
-# Service Identity
+# Service identity
 STRATOS_SERVICE_DID="did:web:stratos.example.com"
-STRATOS_SERVICE_FRAGMENT="atproto_pns"
-STRATOS_PORT=3100
 STRATOS_PUBLIC_URL="https://stratos.example.com"
+STRATOS_PORT=3100
 
 # Storage
 STRATOS_DATA_DIR="/var/lib/stratos/data"
 STORAGE_BACKEND="sqlite"
-
-# Blob Storage
 STRATOS_BLOB_STORAGE="local"
 
-# Identity Resolution
-PLC_DIRECTORY="https://plc.directory"
+# Replay store and cache
+STRATOS_VALKEY_URL="redis://localhost:6379"
 
 # Enrollment
 STRATOS_ENROLLMENT_MODE="allowlist"
 STRATOS_ALLOWED_DIDS="did:plc:abc123,did:plc:def456"
 
-# OAuth
-STRATOS_OAUTH_CLIENT_ID="https://stratos.example.com/client-metadata.json"
-STRATOS_OAUTH_REDIRECT_URI="https://stratos.example.com/oauth/callback"
+# First admin
+STRATOS_ADMIN_DIDS="did:plc:abc123"
 
-# Boundaries
+# Boundaries created on the first start
 STRATOS_ALLOWED_DOMAINS="general,writers"
+STRATOS_AUTO_ENROLL_DOMAINS="general"
 
-# AppViews
-STRATOS_ALLOWED_APPVIEWS="did:web:appview.example.com"
-
-STRATOS_LOG_LEVEL="info"
+LOG_LEVEL="info"
 ```
 
-See [Configuration](/operator/configuration) for all available variables.
+Set `STRATOS_ADMIN_DIDS` before the first start. Without an admin, nobody can
+open the admin interface.
 
-## Step 4: Create OAuth Client Metadata
+`STRATOS_ALLOWED_DOMAINS` and `STRATOS_AUTO_ENROLL_DOMAINS` create your first
+boundaries. After the first start you manage boundaries in the admin interface,
+and these two settings are ignored.
 
-Host this JSON at `https://stratos.example.com/client-metadata.json`:
+See [Configuration](/operator/configuration) for every variable.
+
+## Step 4: Check the OAuth client metadata
+
+Stratos generates and serves its own OAuth client metadata. You do not host a
+file. After the service starts, the document is at
+`https://stratos.example.com/client-metadata.json`:
 
 ```json
 {
   "client_id": "https://stratos.example.com/client-metadata.json",
-  "client_name": "Stratos Private Namespace Service",
+  "client_name": "Stratos Service",
   "client_uri": "https://stratos.example.com",
-  "redirect_uris": ["https://stratos.example.com/oauth/callback"],
-  "scope": "atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post rpc:zone.stratos.feedgen.getFeed?aud=*",
+  "redirect_uris": [
+    "https://stratos.example.com/oauth/callback",
+    "https://stratos.example.com/admin/oauth/callback"
+  ],
+  "scope": "atproto repo:zone.stratos.actor.enrollment space:zone.stratos.space.feed?authority=did%3Aweb%3Astratos.example.com&collection=zone.stratos.feed.post&action=create&action=read",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",
@@ -103,32 +132,44 @@ Host this JSON at `https://stratos.example.com/client-metadata.json`:
 }
 ```
 
-## Step 5: Run the Service
+The scope asks for two things. `repo:zone.stratos.actor.enrollment` lets
+Stratos publish the enrollment record. The `space:` scope lets a spaces PDS
+keep the member's posts. A PDS without spaces support ignores that scope.
+
+Both redirect URIs come from `STRATOS_PUBLIC_URL`. Your proxy must route
+`/oauth/*` and `/admin/*` to the service.
+
+## Step 5: Run the service
+
+Run the service from the `stratos-service` directory:
 
 ```bash
-# Direct
+cd stratos-service
 node dist/bin/stratos.js
-
-# With PM2
-pm2 start dist/bin/stratos.js --name stratos
-
-# With systemd
-sudo systemctl start stratos
 ```
 
-## Step 6: Verify Deployment
+Use your process manager of choice to keep it running. Run one Stratos process
+for each service DID. See [Scaling](/operator/operations#scaling).
+
+To run with Docker instead, see [Deployment Examples](/operator/examples/).
+
+## Step 6: Verify the deployment
 
 ```bash
 # Health check
 curl https://stratos.example.com/health
-# {"status":"ok","version":"0.1.0"}
+# {"status":"ok","components":{"db":"ok","blobstore":"ok"},"version":"0.3.1"}
 
 # DID document
 curl https://stratos.example.com/.well-known/did.json
 
-# Check enrollment status
+# Enrollment status for one DID
 curl "https://stratos.example.com/xrpc/zone.stratos.enrollment.status?did=did:plc:abc123"
 ```
+
+Then open `https://stratos.example.com/admin/` and sign in with the account you
+listed in `STRATOS_ADMIN_DIDS`. Check the **Boundaries** tab for the boundaries
+you configured.
 
 ## Add the Feed Generator
 

@@ -4,68 +4,121 @@
 import EnrollmentFlow from '../.vitepress/theme/components/EnrollmentFlow.vue'
 import VerificationFlowAnimation from '../.vitepress/theme/components/VerificationFlowAnimation.vue'
 import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimation.vue'
+import BoundaryChangeAnimation from '../.vitepress/theme/components/BoundaryChangeAnimation.vue'
 </script>
 
-During enrollment, Stratos establishes a trust chain for public verification of enrollment. This
-lets apps confirm that a user is enrolled with a specific Stratos service — and verify the user's
-authorship of individual records — without querying the live service on every request.
+A membership card is useful because someone other than the member signed it.
+Anyone can read the card and check the signature without phoning the club.
 
-Access control itself is always enforced internally by Stratos. When a client requests content,
-Stratos validates the caller's current boundary membership before returning anything.
+The enrollment record is that card. Stratos signs a statement about a member
+and publishes it to the member's own PDS. An app reads the record and verifies
+that this Stratos service enrolled this member, with these boundaries and this
+signing key.
 
-## What Gets Signed
+The card is not the lock. Stratos checks the caller's current boundary
+membership on every request, whatever a published record says.
 
-At enrollment time Stratos generates:
+## What gets signed
 
-- A per-user P-256 keypair — private key stored on the service, public key is embedded in the
-  enrollment record.
-- A service attestation — a DAG-CBOR signature binding the user's DID, boundaries, and signing key
-  together.
+At enrollment Stratos settles two things:
+
+- **The member's signing key.** For a member whose records Stratos hosts,
+  Stratos creates a P-256 key and keeps the private half. For a member whose
+  own PDS hosts their records, the key is the member's existing AT Protocol
+  signing key. See
+  [custody](/architecture/permissioned-spaces#who-keeps-the-records-custody).
+- **A service attestation.** Stratos signs a payload that binds the member's
+  DID, boundaries, and signing key, with the time of signing.
 
 The attestation payload is:
 
 ```typescript
 {
-  boundaries: ['fanart', 'writers'],
-  did: 'did:plc:alice',               // users DID
-  signingKey: 'did:key:zDna...'       // user's P-256 public key
+  boundaries: [
+    'did:web:stratos.example.com/fanart',
+    'did:web:stratos.example.com/general',
+  ],                                  // sorted
+  did: 'did:plc:alice',               // the member
+  signingKey: 'did:key:zDna...',      // the member's signing key
+  issuedAt: '2026-03-12T00:00:00.000Z',
 }
 ```
 
-Payload is serialised as DAG-CBOR and signed with the service's Secp256k1 key.
+Stratos encodes the payload as DAG-CBOR and signs it with the service's
+secp256k1 key. Boundaries are full identifiers, not bare names.
 
-## Enrollment Record Shape
+## Enrollment record shape
 
 ```json
 {
   "service": "https://stratos.example.com",
-  "boundaries": [{ "value": "fanart" }, { "value": "writers" }],
+  "boundaries": [
+    { "value": "did:web:stratos.example.com/fanart" },
+    { "value": "did:web:stratos.example.com/general" }
+  ],
   "signingKey": "did:key:zDna...",
   "attestation": {
     "sig": { "$bytes": "..." },
-    "signingKey": "did:key:zQ3s..."
+    "signingKey": "did:key:zQ3s...",
+    "issuedAt": "2026-03-12T00:00:00.000Z"
   },
+  "custody": "stratos",
   "createdAt": "2026-03-12T00:00:00.000Z"
 }
 ```
 
-One record is written per Stratos service, keyed at the service DID as the rkey.
+| Field                    | Meaning                                             |
+| ------------------------ | --------------------------------------------------- |
+| `service`                | URL of the Stratos service                          |
+| `boundaries`             | The member's boundaries when the record was written |
+| `signingKey`             | The member's signing key                            |
+| `attestation.sig`        | Service signature over the payload                  |
+| `attestation.signingKey` | The service key that signed                         |
+| `attestation.issuedAt`   | Signed time of issue                                |
+| `custody`                | `stratos` or `pds`: who hosts the member's records  |
+| `repoHost`               | The member's PDS. Present only with `pds` custody   |
+| `createdAt`              | Unsigned record timestamp                           |
 
-## Enrollment Flow
+A member has one enrollment record for each Stratos service.
+
+Records written before `issuedAt` existed omit it from both the record and the
+signed payload. They verify only while the signing service key is still the
+current key.
+
+## Enrollment flow
 
 <EnrollmentFlow />
 
-## Verification Flow
+## Verification flow
 
 <VerificationFlowAnimation />
 
-Verification steps:
+Use the client library. It handles key history and both payload forms:
 
-1. Read `zone.stratos.actor.enrollment` record from user's PDS.
-2. Build the attestation payload from `{ did, sorted(boundaries), signingKey }`.
-3. Resolve the service public key from `attestation.signingKey` or service DID document.
-4. Verify `attestation.sig` bytes over the DAG-CBOR payload.
-5. Confirm the record is for the expected user and service.
+```typescript
+import { verifyEnrollmentAttestation } from '@northskysocial/stratos-client'
+
+const result = await verifyEnrollmentAttestation(enrollment, userDid, {
+  serviceDid: 'did:web:stratos.example.com',
+})
+if (!result.valid)
+  throw new Error(result.error ?? 'Invalid enrollment attestation')
+```
+
+The steps behind that call:
+
+1. Read the `zone.stratos.actor.enrollment` record from the member's PDS.
+2. Take the expected service DID from your own configuration.
+3. Resolve that service's DID document and its current key.
+4. When `attestation.signingKey` is an older key, verify it against the
+   service's signed key history.
+5. Rebuild the payload and verify `attestation.sig` over its DAG-CBOR bytes.
+
+Do not trust `attestation.signingKey` because the record contains it. Anyone
+can write a record that names their own key. Trust starts from the service DID
+you expect. See [Service signing key history](/architecture/service-key-history).
+
+The payload is rebuilt like this:
 
 ```typescript
 import { encode as cborEncode } from '@atcute/cbor'
@@ -74,40 +127,59 @@ function buildAttestationPayload(options: {
   did: string
   boundaries: Array<{ value: string }>
   signingKey: string
+  issuedAt?: string
 }) {
-  return cborEncode({
+  const payload: Record<string, unknown> = {
     boundaries: options.boundaries.map((entry) => entry.value).sort(),
     did: options.did,
     signingKey: options.signingKey,
-  })
+  }
+  if (options.issuedAt !== undefined) payload.issuedAt = options.issuedAt
+  return cborEncode(payload)
 }
 ```
 
-## Trust Model
+## Trust model
 
 <TrustChainAnimation />
 
-A verifier can chain trust: enrollment record → verify service attestation → extract user
-`signingKey` → verify commit signature. This proves both service endorsement and user authorship.
+A verifier chains trust in this order: expected service DID, service key,
+attestation, member signing key. With the member's key in hand, a verifier can
+check a signed repository commit.
 
-## What the Attestation Does Not Prove
+## What the attestation does not prove
 
-- That the user is currently enrolled (boundaries may have changed since the record was written).
-- That the boundaries haven't changed after the record was written.
+- That the member is still enrolled.
+- That the member's boundaries are unchanged since the record was written.
+- That a published boundary grants access. Stratos decides access from its own
+  enrollment state.
 
-For freshness guarantees, query the live status endpoint:
+For a current answer, ask the service:
 
 ```bash
 GET /xrpc/zone.stratos.enrollment.status?did=<did>
 ```
 
-Authenticated callers receive current boundaries, signing key, and a fresh attestation.
-Unauthenticated will receive details confirming if they are enrolled, their time of enrollment, and
-the DIDs signing key.
+| Caller        | Response                                                               |
+| ------------- | ---------------------------------------------------------------------- |
+| Anonymous     | `enrolled`, `enrolledAt`, `active`, `signingKey`, `enrollmentRkey`     |
+| Authenticated | The same, plus current `boundaries` and a freshly signed `attestation` |
 
-## Boundary Changes
+For a DID that is not enrolled, the response is `enrolled: false`, with
+`eligible` when Stratos could decide whether the DID may enroll.
 
-When a user's boundaries change, the service re-signs a new attestation and rewrites the PDS record.
-AppViews learn of the change via the sync stream and must invalidate their cache.
+## Boundary changes
 
 <BoundaryChangeAnimation />
+
+When a member's boundaries change, Stratos stores the change, signs a new
+attestation, and queues an update of the PDS record. The local change applies
+at once. The PDS record follows through the
+[PDS sync queue](/operator/operations#pds-sync-queue).
+
+Stratos also announces the change on the sync stream as an enrollment event
+that carries the member's boundaries after the change. A consumer such as the
+feed generator drops what it held for any boundary the member left.
+
+Every stored membership change is also written to a signed history. See
+[Boundary membership history](/operator/boundary-history).

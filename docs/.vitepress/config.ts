@@ -7,8 +7,6 @@ export default defineConfig({
   description: 'Private permissioned data layer for ATprotocol',
   base,
 
-  srcExclude: ['multi-domain-enrollment.md', 'architecture-diagram.md'],
-
   head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/icon.svg' }]],
 
   themeConfig: {
@@ -29,7 +27,7 @@ export default defineConfig({
       },
       {
         text: 'Architecture',
-        link: '/architecture/hydration',
+        link: '/architecture/permissioned-spaces',
         activeMatch: '/architecture/',
       },
       { text: 'Lexicons', link: '/lexicons/', activeMatch: '/lexicons/' },
@@ -58,6 +56,7 @@ export default defineConfig({
           text: 'Client Integration',
           items: [
             { text: 'Getting Started', link: '/client/getting-started' },
+            { text: 'Custody & Routing', link: '/client/custody' },
             { text: 'User Enrollment', link: '/client/enrollment' },
             { text: 'Creating Records', link: '/client/creating-records' },
             { text: 'Reading Records', link: '/client/reading-records' },
@@ -89,7 +88,7 @@ export default defineConfig({
               link: '/operator/feedgen-ng',
             },
             {
-              text: 'AppView Integration',
+              text: 'AppView Integration (Legacy)',
               link: '/operator/appview-integration',
             },
             { text: 'Operations', link: '/operator/operations' },
@@ -104,8 +103,19 @@ export default defineConfig({
         {
           text: 'Architecture',
           items: [
+            {
+              text: 'Permissioned Spaces',
+              link: '/architecture/permissioned-spaces',
+            },
+            {
+              text: 'Spaces: Current Contract',
+              link: '/architecture/spaces-alignment',
+            },
+            {
+              text: 'Feed Generator',
+              link: '/architecture/feed-generator',
+            },
             { text: 'Hydration Architecture', link: '/architecture/hydration' },
-            { text: 'Indexer Architecture', link: '/indexer-architecture' },
             {
               text: 'Enrollment Signing',
               link: '/architecture/enrollment-signing',
@@ -132,6 +142,11 @@ export default defineConfig({
             },
             { text: 'System Diagrams', link: '/architecture/diagrams' },
           ],
+        },
+        {
+          text: 'Deprecated',
+          collapsed: true,
+          items: [{ text: 'AppView Indexer', link: '/indexer-architecture' }],
         },
       ],
       '/lexicons/': [

@@ -1,52 +1,74 @@
-# Stratos Indexer Architecture
+# Stratos Indexer Architecture (deprecated)
 
-> Historical architecture of the deprecated `stratos-indexer`. The current
-> boundary-scoped feed design is [Feed Generator](/operator/feedgen-ng), which does
-> not use this indexer or its AppView PostgreSQL projection.
+::: danger Deprecated, and it does not run against the current service
+`stratos-indexer` is deprecated. As shipped, it cannot authenticate to the
+current Stratos service. It opens its sync WebSockets with a `syncToken`
+query parameter and no `Authorization` header. The Stratos service accepts
+only a service-auth JWT in `Authorization: Bearer` on
+`zone.stratos.sync.subscribeRecords`, so it rejects the connection.
 
-The `stratos-indexer` is a standalone service that consumes the ATProtocol PDS firehose and Stratos
-sync streams to index private domain-scoped records for downstream consumption by AppViews.
+The base `docker-compose.yml` still defines an `indexer` service with
+`STRATOS_SYNC_TOKEN`. That service does not receive Stratos records.
 
-## High-Level Pipeline
+The current way to serve boundary-scoped feeds is the
+[Feed Generator](/operator/feedgen-ng). It does not use this indexer or the
+AppView PostgreSQL projection.
+:::
 
-1. **PDS Firehose (`pds/pds-firehose.ts`)**: Connects to the PDS firehose (
-   `com.atproto.sync.subscribeRepos`) to discover `zone.stratos.actor.enrollment` records. These
-   records indicate that a user has enrolled in a Stratos service.
-2. **Stratos Enrollment Stream (`sync/stratos-sync.ts`)**: Connects to a Stratos service's
-   service-level enrollment stream to receive real-time notifications about user enrollments and
+This page records how the indexer was designed. Use it to read the code in
+`stratos-indexer/`, not to plan a deployment.
+
+## What it was for
+
+The indexer was a standalone service. It consumed the ATProtocol PDS firehose
+and the Stratos sync streams. It wrote private boundary-scoped records into
+the AppView's PostgreSQL database, where the AppView served them.
+
+## Pipeline as designed
+
+1. **PDS firehose (`pds/pds-firehose.ts`)**: connected to
+   `com.atproto.sync.subscribeRepos` to discover `zone.stratos.actor.enrollment`
+   records. Each record showed that a user had enrolled in a Stratos service.
+2. **Stratos enrollment stream (`sync/stratos-sync.ts`)**: connected to the
+   service-level stream of a Stratos service to learn about enrollments and
    unenrollments.
-3. **Actor Synchronization (`sync/stratos-sync.ts`, `sync/actor-syncer.ts`)**: For each enrolled
-   user, the indexer maintains a WebSocket connection to the Stratos service via the
-   `zone.stratos.sync.subscribeRecords` endpoint. This stream provides actor-scoped Stratos-backed
-   records (e.g., `zone.stratos.feed.post`).
-4. **Indexing (`storage/db.ts`, `sync/actor-syncer.ts`)**: Records discovered from the actor sync
-   streams are indexed into a PostgreSQL database. Stratos-specific metadata (like boundaries) is
-   extracted and stored to support boundary-aware hydration.
+3. **Actor sync (`sync/stratos-sync.ts`, `sync/actor-syncer.ts`)**: for each
+   enrolled user, opened a WebSocket to `zone.stratos.sync.subscribeRecords`
+   for that user's records, such as `zone.stratos.feed.post`.
+4. **Indexing (`storage/db.ts`, `sync/actor-syncer.ts`)**: wrote the records
+   into PostgreSQL and stored each record's boundaries beside it.
 
-## Key Components
+Steps 2 and 3 are the ones that fail today, for the reason in the notice
+above.
 
-- **`Indexer`**: The main entry point that manages the lifecycle of all other components.
-- **`WorkerPool`**: Manages a pool of concurrent workers to process PDS firehose messages. Provides
-  backpressure to prevent the indexer from being overwhelmed.
-- **`StratosActorSync`**: Manages a pool of WebSocket connections to various Stratos services.
-  Handles connection pooling, idle eviction, and exponential backoff for reconnections.
-- **`CursorManager`**: Tracks the processing position (sequence numbers) for both the PDS firehose
-  and each individual actor sync stream. Periodically flushes these cursors to the database.
-- **`Backfill`**: On startup, the indexer can backfill existing repositories from the PDS to ensure
-  all previously enrolled users are captured.
+## Components
 
-## Reliability and Performance
+- **`Indexer`**: the entry point. It managed the lifecycle of the other
+  components.
+- **`WorkerPool`**: a pool of workers for PDS firehose messages, with
+  backpressure.
+- **`StratosActorSync`**: a pool of WebSocket connections to Stratos, with
+  idle eviction and exponential backoff on reconnect.
+- **`CursorManager`**: tracked the sequence position of the PDS firehose and
+  of each actor stream, and flushed the cursors to the database on a timer.
+- **Backfill (`backfill.ts`)**: on startup, read existing repositories from
+  the PDS so that earlier enrollments were captured.
 
-- **Health Checks**: The indexer provides `/health` and `/ready` endpoints to monitor database
-  connectivity and stream connection status.
-- **Traceability**: Trace IDs are propagated through the firehose processing pipeline and included
-  in structured logs.
-- **Backpressure**: Multiple levels of backpressure are implemented (WorkerPool, ActorSync queues)
-  to ensure stable performance under high load.
-- **Graceful Shutdown**: All components are shut down in a specific sequence to ensure no data loss
-  and proper flushing of state.
+## Operations
+
+- **Health checks**: the indexer serves `/health` and `/ready`.
+- **Trace IDs**: firehose processing attaches a trace ID to its structured
+  logs.
+- **Shutdown**: components stop in a fixed order so that cursors flush.
 
 ## Configuration
 
-The indexer is configured via environment variables, validated using Zod. See `src/config.ts` for a
-full list of available options and their defaults.
+The indexer reads environment variables and validates them with Zod. The
+list is in `stratos-indexer/src/config.ts`.
+
+## See also
+
+- [Shared Stratos sync-client library](/design/sync-client-library): the
+  design note that first recorded why the indexer's sync path does not run.
+- [AppView Integration](/operator/appview-integration): the stream contract
+  the indexer was written against.

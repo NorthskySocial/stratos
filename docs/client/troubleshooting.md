@@ -1,21 +1,59 @@
 # Troubleshooting
 
-## "NotEnrolled" After Completing OAuth
+## Every request answers 401
 
-The Stratos service may have an allowlist. Contact the service operator to request access. You can
-verify the current enrollment status directly:
+Stratos accepts a user's request only with DPoP. Send
+`Authorization: DPoP <access_token>` and a `DPoP` proof header. A request with
+`Authorization: Bearer <access_token>` answers `401 AuthenticationRequired`.
+
+Use the fetch handler of your OAuth session and pass it the absolute Stratos
+URL. See
+[DPoP-aware transport](/client/getting-started#dpop-aware-transport).
+
+## "NotEnrolled" after completing OAuth
+
+The service may have an allowlist. Check the live status:
 
 ```bash
 curl "https://stratos.example.com/xrpc/zone.stratos.enrollment.status?did=<your-did>"
 ```
 
-## Posts Not Appearing in Feed
+`enrolled: false` with `eligible: false` means the operator must grant
+access.
 
-1. Check that the post's boundary domains match at least one of the viewer's enrolled domains.
-2. Verify the AppView has indexed the Stratos content — indexing can lag by a few seconds.
-3. Confirm the post was created successfully by checking the returned AT-URI.
+## Writes fail with PdsCustodyWriteForbidden
 
-## Enrollment Redirect Fails
+The user has `pds` custody. Their records live on their own PDS, and Stratos
+refuses repo writes for them. Resolve the repository target and call
+`com.atproto.space.createRecord` on the PDS. See
+[Custody and Routing](/client/custody).
+
+## Writes fail with a boundary error
+
+| Error                | Fix                                                                  |
+| -------------------- | -------------------------------------------------------------------- |
+| `InvalidDomainCount` | Put exactly one entry in `boundary.values`.                          |
+| `ServiceMismatch`    | Use a boundary of this Stratos service, with its service DID prefix. |
+| `ForbiddenBoundary`  | Use a boundary from the user's enrollment.                           |
+| `InvalidDomain`      | The boundary name is not a valid space key.                          |
+
+## A PDS-custody write fails
+
+1. Confirm the session holds the space scope. See
+   [Space scope](/client/custody#space-scope).
+2. If the scope is missing, ask the user to sign in again.
+3. Confirm the `space` URI starts with the Stratos service DID and uses the
+   type `zone.stratos.space.feed`.
+
+## Posts not appearing in the feed
+
+1. Check that the viewer holds the post's boundary.
+2. Check the write response. A Stratos write returns the record URI.
+3. Allow the feed generator a moment to collect the post.
+4. For a PDS-hosted post, confirm the author is still a member. The feed
+   generator reads only the repos of current members.
+
+## Enrollment redirect fails
 
 After enrollment, Stratos returns the browser to the `redirect_uri` you sent to
 `/oauth/authorize`. You do not register that URL with the operator. You prove it is yours the same
@@ -39,104 +77,103 @@ If your app publishes no client metadata document, ask the operator to add your 
 `STRATOS_ALLOWED_REDIRECT_ORIGINS`. Publishing the document is preferred, because it needs no
 operator action.
 
-## Requests Go to PDS Instead of Stratos
+## The browser stops on a JSON error after enrollment
 
-You're likely using `new Agent(session)` and then trying to override `serviceUrl`. Use the fetch
-handler wrapper instead — see [Getting Started](/client/getting-started#_3-create-a-stratos-agent).
+Stratos does not redirect a failed enrollment back to your app. The browser
+stays on the Stratos origin and shows a JSON body such as
+`{ "error": "EnrollmentDenied" }`. Your app receives no `error` query
+parameter. See [Handling the result](/client/enrollment#handling-the-result).
 
-## Rate Limiting (429 errors)
+## Requests go to the PDS instead of Stratos
 
-Implement exponential backoff. The default rate limit is 300 writes per 60-second window per DID. If
-you're building a bulk import tool, use `zone.stratos.repo.importRepo` instead of individual
-`createRecord` calls.
+You are likely using `new Agent(session)` and then setting `serviceUrl`. Use
+the fetch handler wrapper instead. See
+[Write the post](/client/getting-started#_3-write-the-post).
 
-## DPoP Nonce Errors
+## Rate limiting (429 errors)
 
-If you receive `use_dpop_nonce` errors, extract the nonce from the `DPoP-Nonce` response header and
-include it in the next request's DPoP proof. Ensure `DPoP-Nonce` is listed in your nginx/proxy
-`Access-Control-Expose-Headers`.
+Use exponential backoff. The default limit is 300 writes per 60-second window
+per DID. An `applyWrites` call counts each write in the batch.
 
-## Record Returns 404 for Enrolled User
+## DPoP nonce errors
 
-The viewer may not share a boundary with the record. Stratos returns 404 (not 403) for boundary
-access failures to avoid leaking record existence.
+On a `use_dpop_nonce` error, read the nonce from the `DPoP-Nonce` response
+header and include it in the next proof. If a proxy sits in front of Stratos,
+confirm it passes `DPoP-Nonce` through `Access-Control-Expose-Headers`.
 
-## CORS and Header Requirements
+## A record reads as RecordNotFound for an enrolled user
 
-Browser clients making cross-origin requests to a Stratos service depend on correct CORS
-configuration. This is critical because the Stratos service is a different origin from the user's
-PDS.
+The viewer may not hold the record's boundary. Stratos answers HTTP 400 with
+`error: "RecordNotFound"` for a missing record and for a denied one. The
+status is not 404 and not 403.
 
-### Required CORS headers
+Also check custody. Stratos read methods serve only Stratos-hosted records.
+A `pds`-custody author's posts are on their PDS; read them through the feed
+generator.
 
-Stratos services using `@atcute/xrpc-server` get correct CORS behavior from the built-in middleware.
-If using another framework, configure these:
+## fetchAndVerifyRecord fails
 
-**Exposed response headers** (via `Access-Control-Expose-Headers`):
+`fetchAndVerifyRecord` calls `com.atproto.sync.getRecord`, which the Stratos
+service does not serve. Use `verifyRecordCid` on a `getRecord` response. See
+[Verifying what you read](/client/reading-records#verifying-what-you-read).
 
-- `dpop-nonce` — required for DPoP nonce rotation
-- `www-authenticate` — required for DPoP error recovery (e.g., `use_dpop_nonce`)
-- `ratelimit-limit`, `ratelimit-policy`, `ratelimit-remaining`, `ratelimit-reset`
+## importRepo fails
 
-**Allowed request headers** (via `Access-Control-Allow-Headers`):
+The `zone.stratos.repo.importRepo` lexicon exists, but the service registers
+no handler for it. Write records with `com.atproto.repo.applyWrites` instead.
 
-- `authorization` — carries the DPoP-bound access token
-- `dpop` — carries the DPoP proof JWT
-- `content-type`
-- `atproto-accept-labelers`, `atproto-proxy`
+## CORS and header requirements
+
+A browser client calls Stratos across origins. The Stratos service sets these
+headers itself. Check them when a proxy or gateway sits in front of it.
+
+Stratos reflects the request origin in `Access-Control-Allow-Origin`.
+
+**Allowed request headers** (`Access-Control-Allow-Headers`):
+
+- `Authorization`: carries the DPoP-bound access token
+- `DPoP`: carries the DPoP proof JWT
+- `DPoP-Nonce`
+- `Content-Type`
+- `Signature`, `Signature-Input`, `Atproto-Space-Audience`: space credential
+  requests
+- `atproto-accept-labelers`, `atproto-proxy-type`
+- `x-trace-id`
+
+**Exposed response headers** (`Access-Control-Expose-Headers`):
+
+- `DPoP-Nonce`: required for DPoP nonce rotation
+- `WWW-Authenticate`: required for DPoP error recovery
+- `x-trace-id`
 
 ### CORS flow
 
-When a browser client sends a DPoP-authenticated request to a Stratos service at a different origin:
-
-1. The browser performs a CORS preflight (`OPTIONS`) request
-2. The Stratos service must respond with `Access-Control-Allow-Headers` including `authorization`
-   and `dpop`
-3. On the actual response, `Access-Control-Expose-Headers` must include `dpop-nonce` so the client
-   can read the server's nonce for subsequent requests
-4. If `www-authenticate` is not exposed, the client cannot parse DPoP error details (like
-   `use_dpop_nonce`) from 401 responses
-
-### Custom CORS configuration
-
-If not using `@atcute/xrpc-server`:
-
-```typescript
-app.use((req, res, next) => {
-  const origin = req.headers.origin || '*'
-  res.header('Access-Control-Allow-Origin', origin)
-  res.header(
-    'Access-Control-Allow-Headers',
-    'authorization, dpop, content-type, atproto-accept-labelers, atproto-proxy',
-  )
-  res.header('Access-Control-Expose-Headers', 'dpop-nonce, www-authenticate')
-  if (req.method === 'OPTIONS') {
-    res.header('Access-Control-Max-Age', '86400')
-    return res.sendStatus(204)
-  }
-  next()
-})
-```
+1. The browser sends a preflight `OPTIONS` request.
+2. Stratos answers 204 and lists `Authorization` and `DPoP` as allowed
+   headers.
+3. On the real response, `DPoP-Nonce` is exposed, so the client can read the
+   server's nonce.
 
 ### CORS failure symptoms
 
 | Missing header                         | Symptom                                                                     |
 | -------------------------------------- | --------------------------------------------------------------------------- |
-| `dpop` not in allowed headers          | Preflight fails; all authenticated requests return CORS errors              |
-| `dpop-nonce` not exposed               | Client cannot read nonce; subsequent DPoP proofs use stale nonce → 401 loop |
-| `www-authenticate` not exposed         | Client cannot parse `use_dpop_nonce` error; falls into generic auth failure |
-| `authorization` not in allowed headers | Access token never sent; all requests return 401                            |
+| `DPoP` not in allowed headers          | Preflight fails. Every authenticated request shows a CORS error.            |
+| `DPoP-Nonce` not exposed               | The client cannot read the nonce. Proofs use a stale nonce and loop on 401. |
+| `WWW-Authenticate` not exposed         | The client cannot parse `use_dpop_nonce`.                                   |
+| `Authorization` not in allowed headers | The access token is never sent. Every request answers 401.                  |
 
-## Known Pitfalls
+## Known pitfalls
 
 ### Async discovery race condition
 
-If enrollment discovery is fire-and-forget, account switches can cause stale enrollment data:
+If enrollment discovery is fire-and-forget, an account switch can leave stale
+enrollment data:
 
 ```typescript
-// Problem: if user switches accounts before discovery completes,
-// setEnrollment updates state for the wrong account
-getEnrollmentByServiceDid(did, pds, serviceDid)
+// Problem: if the user switches accounts before discovery completes,
+// setEnrollment updates state for the wrong account.
+getEnrollmentByServiceDid(did, pdsUrl, serviceDid)
   .then(setEnrollment)
   .catch(() => setEnrollment(null))
 ```
@@ -147,49 +184,43 @@ Key discovery to the active session and cancel on account change:
 // React pattern
 useEffect(() => {
   let cancelled = false
-  getEnrollmentByServiceDid(did, pds, serviceDid).then((enrollment) => {
+  getEnrollmentByServiceDid(did, pdsUrl, serviceDid).then((enrollment) => {
     if (!cancelled) setEnrollment(enrollment)
   })
   return () => {
     cancelled = true
   }
-}, [did])
+}, [did, pdsUrl, serviceDid])
 ```
 
-### Global mode state leakage
+Both fragments assume `getEnrollmentByServiceDid` from
+`@northskysocial/stratos-client`, React's `useEffect`, and a `setEnrollment`
+state setter in your component.
 
-If Stratos active/inactive is stored as app-global state, unrelated views can inadvertently route to
-the wrong service. Prefer scoping the mode to a specific context or view rather than making it
-global — or guard every routing decision with an explicit mode check.
+### Reading the author from a space URI
+
+A space record URI starts with the authority DID, not the author. The author
+is the fifth segment. Code that splits a URI and takes the first part shows
+the Stratos service as the author of every PDS-hosted post.
 
 ### Verification level ambiguity
 
-Stratos may fall back from full MST verification to CID-only verification. This should be clearly
-communicated to users — "CID verified" means data integrity is confirmed but the commit chain and
-signature are not verified. Don't label CID-only verification as "verified" without qualification.
+A record read from Stratos can be checked for CID integrity only. That
+confirms the content matches its CID. It does not confirm a signature. Do not
+label it "verified" without a qualifier.
 
-### Empty repo vs. error masking
+### Empty repo versus missing repo
 
-Stratos initializes a signed empty commit at enrollment time, so every enrolled user has a valid
-repository from the start. `RepoNotFound` for an enrolled user is always an error — it no longer
-indicates "no records yet." Possible causes:
+For `stratos` custody, enrollment creates a repo with an empty signed commit.
+An empty `collections` list from `describeRepo` is the normal state before the
+first post.
 
-- The Stratos service is unreachable or misconfigured
-- Authentication failed silently
-- The actor store was not properly initialized during enrollment
-
-An empty `collections` list from `describeRepo` is the normal state for a user who hasn't created
-records yet. Differentiate by checking HTTP status codes explicitly rather than catching all errors
-as "empty."
+`RepoNotFound` means Stratos hosts no repo for that DID. That is expected for
+a `pds`-custody user. For a `stratos`-custody user it is an error. Check
+custody before you decide.
 
 ### DPoP `htu` claim accuracy
 
-The DPoP proof's `htu` claim must match the actual request URL. When routing through a service fetch
-handler, ensure the absolute URL is passed to the agent's `handle()` method — not a relative path —
-so the DPoP proof targets the correct origin. The `@atcute/oauth-browser-client` agent derives `htu`
-from the URL it receives.
-
-### Blob operations
-
-Stratos serves blob content via `com.atproto.sync.getBlob` and space-scoped blob listing via
-`zone.stratos.space.listBlobs`.
+The DPoP proof's `htu` claim must match the request URL. Pass the absolute
+target URL to the session's fetch handler, not a relative path. A relative
+path resolves against the session's PDS.

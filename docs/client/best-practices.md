@@ -1,126 +1,170 @@
 # Best Practices
 
-## 1. Use `stratos-client` Helpers
+## 1. Use the `stratos-client` helpers
 
-The `@northskysocial/stratos-client` package provides tested, composable helpers for discovery,
-routing, verification, and OAuth scopes. Prefer these over hand-rolling the same logic:
+`@northskysocial/stratos-client` has tested helpers for discovery, routing,
+verification, and scopes. Prefer them to hand-written versions:
 
 ```typescript
 import {
   getEnrollmentByServiceDid,
+  resolveRepositoryTarget,
   createServiceFetchHandler,
-  resolveServiceUrl,
-  fetchAndVerifyRecord,
+  verifyEnrollmentAttestation,
+  verifyRecordCid,
   buildStratosScopes,
 } from '@northskysocial/stratos-client'
 ```
 
-See the [Getting Started](/client/getting-started) guide for how each helper maps to an integration
-step.
+[Getting Started](/client/getting-started) shows where each one fits.
 
-## 2. Always Check Enrollment First
+## 2. Check enrollment first
 
-Before showing Stratos UI, verify the user is enrolled:
+Show Stratos UI only to an enrolled user:
 
 ```typescript
 import { getEnrollmentByServiceDid } from '@northskysocial/stratos-client'
 
-const enrollment = await getEnrollmentByServiceDid(did, pdsUrl, serviceDid)
-if (!enrollment) {
-  showEnrollmentPrompt()
+async function isEnrolled(
+  userDid: string,
+  pdsUrl: string,
+  serviceDid: string,
+): Promise<boolean> {
+  const enrollment = await getEnrollmentByServiceDid(
+    userDid,
+    pdsUrl,
+    serviceDid,
+  )
+  return enrollment !== null
 }
 ```
 
-## 3. Handle Access Errors Gracefully
+## 3. Route by custody, from trusted hosts
 
-Stratos returns 404 for both genuinely missing records and records the viewer can't access. Don't
-expose the distinction to users:
+Resolve the repository target before every write path. Take the Stratos URL
+from your configuration and the PDS URL from the signed-in session. Do not
+send credentials to `enrollment.service` or `enrollment.repoHost`; the
+attestation does not cover them.
 
 ```typescript
-try {
-  const post = await getRecord(...)
-} catch (err) {
-  if (err.status === 404) {
-    showMessage("This post isn't available")
+import { resolveRepositoryTarget } from '@northskysocial/stratos-client'
+import type { StratosEnrollment } from '@northskysocial/stratos-client'
+
+function canWrite(
+  enrollment: StratosEnrollment | null,
+  stratosUrl: string,
+  sessionPdsUrl: string,
+): boolean {
+  const target = resolveRepositoryTarget(enrollment, {
+    authorityServiceUrl: stratosUrl,
+    sessionPdsUrl,
+  })
+  return target.kind !== 'unresolved'
+}
+```
+
+See [Custody and Routing](/client/custody).
+
+## 4. Handle access errors gracefully
+
+Stratos answers `400 RecordNotFound` for a missing record and for a record
+the viewer may not read. Show one message for both:
+
+```typescript
+interface XrpcError {
+  error: string
+  message?: string
+}
+
+function describeReadError(status: number, body: XrpcError): string {
+  if (status === 400 && body.error === 'RecordNotFound') {
+    return "This post isn't available"
+  }
+  return 'Something went wrong'
+}
+```
+
+## 5. One boundary per post
+
+A post belongs to exactly one boundary. Preselect the user's first boundary
+and let them change it:
+
+```typescript
+function defaultBoundary(userBoundaries: string[]): string | null {
+  return userBoundaries[0] ?? null
+}
+```
+
+Check the selection before you submit. Stratos rejects a boundary the user
+does not hold with `ForbiddenBoundary`:
+
+```typescript
+function assertUserHolds(boundary: string, userBoundaries: string[]): void {
+  if (!userBoundaries.includes(boundary)) {
+    throw new Error('Select one of your boundaries')
   }
 }
 ```
 
-## 4. Default to the User's Primary Domain
+## 6. Make private content look private
 
-Reduce friction in the composer by pre-selecting the first enrolled domain:
+- A different background color or border
+- A lock icon on private posts
+- A badge with the boundary name
+- A different composer placeholder
 
-```typescript
-const defaultDomains = userDomains.length > 0 ? [userDomains[0]] : []
-```
+## 7. Retry with backoff on 429
 
-## 5. Validate Domains Before Posting
-
-Ensure selected domains are actually available to the user before submitting:
-
-```typescript
-const validDomains = selectedDomains.filter((d) => userDomains.includes(d))
-if (validDomains.length === 0) {
-  throw new Error('Select at least one valid domain')
-}
-```
-
-## 6. Clear Visual Distinction
-
-Always make it visually clear when content is private:
-
-- Different background color or border
-- Lock icon (🔒) on private posts
-- Domain badges showing which communities can see the post
-- Different composer placeholder text
-
-## 7. Implement Retry with Backoff
-
-Handle 429 rate-limit responses:
+Stratos limits writes per DID. The default is 300 writes per 60 seconds. A
+limited request answers `429 RateLimitExceeded`:
 
 ```typescript
-async function createWithRetry(fn: () => Promise<unknown>, maxRetries = 3) {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn()
-    } catch (err) {
-      if (err.status === 429 && i < maxRetries - 1) {
-        await new Promise((r) => setTimeout(r, Math.pow(2, i) * 1000))
-        continue
-      }
-      throw err
+async function withRetry<T>(
+  send: () => Promise<Response>,
+  parse: (response: Response) => Promise<T>,
+  maxAttempts = 3,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    const response = await send()
+    if (response.status !== 429 || attempt >= maxAttempts - 1) {
+      return parse(response)
     }
+    await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 1000))
   }
 }
 ```
 
-## 8. Use the Stratos Agent Wrapper
+## 8. Pass absolute URLs to the session fetch handler
 
-Never override `agent.serviceUrl` after constructing an `OAuthSession` agent. Always use the
-`fetchHandler` wrapper:
+Never override `agent.serviceUrl` on an agent built from an OAuth session. The
+request still goes to the session's PDS. Pass the absolute target URL
+instead, so the DPoP proof names the right origin:
 
 ```typescript
-// Correct — using stratos-client
-import { createServiceFetchHandler } from '@northskysocial/stratos-client'
-const handler = createServiceFetchHandler(
-  authenticatedHandler,
-  STRATOS_ENDPOINT,
-)
+import { Agent } from '@atproto/api'
+import type { OAuthSession } from '@atproto/oauth-client-browser'
 
-// Correct — using @atproto/api
-const stratosAgent = new Agent((url, init) => {
-  return session.fetchHandler(new URL(url, STRATOS_ENDPOINT).href, init)
-})
+// Correct
+function createStratosAgent(session: OAuthSession, stratosUrl: string): Agent {
+  return new Agent((url: string, init: RequestInit) =>
+    session.fetchHandler(new URL(url, stratosUrl).href, init),
+  )
+}
 
-// Wrong — silently sends to PDS
-const stratosAgent = new Agent(session)
-stratosAgent.serviceUrl = new URL(STRATOS_ENDPOINT)
+// Wrong: requests still go to the PDS
+function createBrokenAgent(session: OAuthSession, stratosUrl: string): Agent {
+  const agent = new Agent(session)
+  agent.serviceUrl = new URL(stratosUrl)
+  return agent
+}
 ```
 
-## 9. Cache Signing Keys
+Use this agent for `stratos` custody only.
 
-Both `resolveServiceSigningKey()` and `resolveUserSigningKey()` make network calls to resolve DID
-documents and enrollment records. Cache the results:
+## 9. Cache signing keys
+
+`resolveServiceSigningKey` fetches a DID document. `resolveUserSigningKey`
+fetches an enrollment record. Cache both:
 
 ```typescript
 import {
@@ -128,13 +172,21 @@ import {
   resolveUserSigningKey,
 } from '@northskysocial/stratos-client'
 
-// Cache per service DID — only changes on key rotation
-const serviceKey = await resolveServiceSigningKey('did:web:stratos.example.com')
+const serviceKeyCache = new Map()
 
-// Cache per (did, serviceDid) pair
-const userKey = await resolveUserSigningKey(
-  pdsUrl,
-  did,
-  'did:web:stratos.example.com',
-)
+async function loadKeys(pdsUrl: string, userDid: string, serviceDid: string) {
+  // The cache map keeps one key per service DID.
+  const serviceKey = await resolveServiceSigningKey(serviceDid, {
+    cache: serviceKeyCache,
+  })
+  // Cache this yourself, per user and service.
+  const userKey = await resolveUserSigningKey(pdsUrl, userDid, serviceDid)
+  return { serviceKey, userKey }
+}
 ```
+
+## 10. Never trust a boundary on a PDS-hosted record
+
+A PDS accepts any write its owner makes. A record in a Stratos space on a
+user's PDS proves nothing about membership. Read private feeds through the
+feed generator, which checks membership with Stratos.
