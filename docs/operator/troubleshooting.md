@@ -95,7 +95,7 @@ When the stream is open but silent:
   token exchange.
 - Check that the proxy routes `/oauth/*` and `/admin/*` to the service.
 
-### `invalid_scope` from a spaces PDS
+### `invalid_scope` from a spaces PDS {#invalid-scope-from-a-spaces-pds}
 
 The PDS could not resolve the `zone.stratos.space.feed` space type. Nothing in
 the Stratos logs shows this. Check that the lexicon record is still published.
@@ -127,7 +127,7 @@ A browser can read the header only when it is exposed. Stratos exposes it
 already. Check that your proxy does not replace the CORS headers. See
 [CORS](/operator/security#cors).
 
-## A member's PDS record is out of date
+## A member's PDS record is out of date {#a-member-s-pds-record-is-out-of-date}
 
 Stratos applies a boundary change locally first and publishes the enrollment
 record through a queue. See
