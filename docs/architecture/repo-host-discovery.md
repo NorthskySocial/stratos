@@ -1,7 +1,7 @@
 # Repo-Host Discovery
 
-Stratos knows who is in a room. For members who keep their own records, it
-also has to know where they live. Before anyone can read or sync a
+Stratos knows who belongs to a boundary. For members who keep their own
+records, it also has to know where those records are hosted. Before anyone can read or sync a
 PDS-custody member's posts, something must answer one question: which host
 holds this member's repository?
 

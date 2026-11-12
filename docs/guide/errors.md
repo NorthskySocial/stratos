@@ -1,13 +1,8 @@
 # Error Reference
 
-When Stratos turns a request away, it says why in two words: a status code
-and an error name. This page lists the names you will meet and what to do
-about each one.
+## Error Structure
 
-## The shape of an error
-
-Stratos returns standard XRPC errors. The body has an `error` name and a
-human-readable `message`:
+Stratos returns standard XRPC errors.
 
 ```json
 {
@@ -15,8 +10,6 @@ human-readable `message`:
   "message": "Boundary 'did:web:stratos.example.com/writers' not allowed"
 }
 ```
-
-Match on `error`. Do not parse `message`; its wording can change.
 
 Most rejections use HTTP 400 with a specific `error` name. The exceptions
 are authentication (401) and rate limiting (429).
@@ -53,7 +46,7 @@ the proof. OAuth client libraries do this for you.
 `PdsCustodyWriteForbidden` is not a failure of your user. It means your app
 sent the write to the wrong place. Resolve the repository target from the
 enrollment's custody first; see
-[Your First Post](/guide/first-post#_3-find-the-right-door).
+[Your First Post](/guide/first-post#_3-choose-the-repository-host).
 
 ## Reading records
 

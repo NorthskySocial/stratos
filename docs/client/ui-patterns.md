@@ -1,8 +1,7 @@
 # UI Patterns
 
-A good host makes it obvious which room you are standing in. The same holds
-for an app: a user must always know whether a post is public or private, and
-which boundary will see it. These React patterns cover the common screens.
+A user must always know whether a post is public or private, and which
+boundary will see it. These React patterns cover the common screens.
 
 The components take plain props. They call the helpers from
 [Creating Records](/client/creating-records) and

@@ -1,16 +1,15 @@
 # Introduction
 
-On the AT Protocol, everything you post is public. That is the point of it:
-one open room, and anyone may listen.
+On AT Protocol, everything you post is public by design.
 
-Some conversations need a door. A writing group shares drafts. A community
+Some conversations need privacy. A writing group shares drafts. A community
 plans an event. A team talks shop. Today those conversations leave the
 network and move to a group chat somewhere else.
 
-Stratos adds the door. A community runs a Stratos service, decides who is a
+Stratos provides this privacy. A community runs a Stratos service, decides who is a
 member, and its members share posts that only other members can read. Nobody
-needs a new account. People keep their AT Protocol identity, their handle,
-and their PDS.
+needs a new account. People keep their AT Protocol identity, handle,
+and PDS.
 
 If you want the idea without the vocabulary, read
 [Shared Private Data, Explained Simply](/guide/what-is-stratos) first.

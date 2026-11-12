@@ -1,9 +1,8 @@
 # Configuration
 
-Think of the environment as the lease on a building. It fixes the address, the
-utilities, and who holds the master key. It does not list the rooms. The rooms
-are boundaries, and you manage them in the admin interface after the service
-starts.
+The environment fixes the service identity, storage, and who the first admins
+are. It does not define boundaries. You manage those in the admin interface
+after the service starts.
 
 Stratos reads its configuration from environment variables at startup. An
 invalid value stops the service and prints the variable name. Only

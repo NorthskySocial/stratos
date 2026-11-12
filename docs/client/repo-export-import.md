@@ -1,8 +1,7 @@
 # Repo Export & Import
 
-A guest can ask the host for everything in their cupboard, packed in one box.
-That box is a repo export: a CAR file with every record, the tree that
-indexes them, and a signed commit on top.
+A user can export their whole Stratos repository as one CAR file. It holds
+every record, the tree that indexes them, and a signed commit on top.
 
 This page applies to `stratos` custody, where Stratos hosts the repo. A
 `pds`-custody user's repo is on their own PDS.

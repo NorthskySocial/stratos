@@ -1,13 +1,10 @@
 # Feed Generator
 
-Stratos runs the rooms. The feed generator keeps a scrapbook for each room.
-It copies every new post into the right scrapbook as the post arrives. When
-someone asks to read a scrapbook, it checks the guest list first. No name on
-the list, no page.
+The feed generator turns boundaries into feeds. It copies each new post into
+a local projection as the post arrives. When a viewer asks for a feed, it
+checks the viewer's enrollment first.
 
-In Stratos terms, the room is a boundary, the scrapbook is a local
-projection, and the guest list is enrollment. The feed generator is a
-separate service. It follows one Stratos service, keeps a bounded copy of
+The feed generator is a separate service. It follows one Stratos service, keeps a bounded copy of
 recent posts, and serves that copy as feeds.
 
 The current implementation is the Rust `stratos-feedgen-ng` package. The

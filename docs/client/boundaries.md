@@ -1,8 +1,7 @@
 # Domain Boundaries
 
-A boundary is a room in the house. A post is pinned up in one room, and only
-the guests of that room can read it. A post cannot hang in two rooms at once.
-To say the same thing in two rooms, write two posts.
+A boundary is a named group. A post belongs to one boundary, and only the
+members of that boundary can read it.
 
 ## Boundary values
 

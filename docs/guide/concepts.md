@@ -4,13 +4,9 @@
 import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimation.vue'
 </script>
 
-Stratos is a house with many rooms. This page names the parts of the house:
-the rooms, the guest list, who keeps your things, and how anyone knows the
-guest list is real. Each part has a precise meaning in the protocol.
-
 ## Boundary
 
-A **boundary** is a room: a named group whose members can read each other's
+A **boundary** is a named group whose members can read each other's
 posts.
 
 Each boundary has a full identifier, made from the Stratos service DID and a
@@ -28,14 +24,14 @@ Three rules hold everywhere.
 - **Apps use the full identifier** when they create a record. A bare name
   such as `writers` is not accepted.
 - **Every member is in the reserved boundary.** It is named `general` by
-  default, and it is the room for the whole community.
+  default, and it is the boundary for the whole community.
 
 Operators create and retire boundaries in the admin interface. See
 [Manage Boundaries](/operator/boundaries).
 
 ## Enrollment
 
-**Enrollment** is getting on the guest list. A user signs in to a Stratos
+**Enrollment** is how a user joins a Stratos service. A user signs in to a Stratos
 service with their AT Protocol account, through OAuth. Stratos records the
 boundaries they hold and publishes a `zone.stratos.actor.enrollment` record
 to their PDS.
@@ -81,7 +77,7 @@ It never changes who decides membership. That is always Stratos.
 ## Space
 
 The AT Protocol has a proposal for private data, called _permissioned
-spaces_. A **space** is the protocol's name for a room, and the service that
+spaces_. A **space** is the protocol's name for a boundary, and the service that
 controls its membership is the space **authority**.
 
 Every Stratos boundary is a space, and Stratos is its authority:

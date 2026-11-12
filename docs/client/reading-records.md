@@ -1,8 +1,8 @@
 # Reading Records
 
-Reading is the other side of the door. A guest who is on the list for a room
-sees what is posted there. Anyone else sees an empty wall, with no sign that
-a note was ever pinned to it. Stratos applies that rule on every read.
+A member of a boundary can read the records in it. Anyone else gets the same
+answer as for a record that does not exist. Stratos applies that rule on
+every read.
 
 There are three ways to read. Pick by what you need:
 

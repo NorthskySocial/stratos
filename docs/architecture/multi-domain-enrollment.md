@@ -1,11 +1,9 @@
 # Multi-Domain Enrollment
 
-A community centre has a lobby and several rooms. Everyone who joins gets into
-the lobby. Some rooms open for every new member. Others open only when a
-member asks or an organiser adds them.
-
-In Stratos the rooms are boundaries, also called domains. The lobby is the
-reserved boundary. This page explains which boundaries a new member receives
+A Stratos service has several boundaries, also called domains. Every member
+holds the reserved boundary. Some boundaries are granted to every new member.
+Others are granted only when a member asks or an operator adds them. This
+page explains which boundaries a new member receives
 and how that changes later.
 
 ## Concepts

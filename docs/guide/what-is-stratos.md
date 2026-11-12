@@ -77,7 +77,7 @@ safe in the cloakroom. Both guests are in the same room and hear the same conver
 
 Your private posts work the same way. Where they are kept depends on your PDS:
 
-- If your PDS supports protected spaces, it keeps your posts in a protected space of its own.
+- If your PDS supports permissioned spaces, it keeps your posts in a space of its own.
   Stratos still decides who belongs to that space.
 - If your PDS does not support spaces, Stratos keeps the posts for you.
 

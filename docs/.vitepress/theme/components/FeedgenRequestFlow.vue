@@ -36,7 +36,7 @@ const nodes = [
   {
     id: 'stratos',
     title: 'Stratos',
-    sub: 'keeps the guest list',
+    sub: 'knows the members',
     col: 2,
     row: 1,
   },

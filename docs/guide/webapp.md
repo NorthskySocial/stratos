@@ -1,8 +1,7 @@
 # Stratos WebApp (Demo Client)
 
-The fastest way to understand Stratos is to walk through the house once.
-The Stratos WebApp is a small demo client that lets you do exactly that:
-sign in, join a Stratos service, post into a boundary, and watch the post
+The fastest way to understand Stratos is to use it once. The Stratos WebApp
+is a small demo client that lets you do exactly that: sign in, join a Stratos service, post into a boundary, and watch the post
 show up in a private feed.
 
 It is a single-page application built with Svelte 5 and Vite. It is a

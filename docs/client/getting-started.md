@@ -1,13 +1,11 @@
 # Getting Started
 
-A guest arrives at the house. Your app is the friend who walks them in. You
-check the guest list, find out where they keep their things, and carry each
-new post to the right place. This page follows that walk from sign-in to the
-first private post.
+This page takes an app from sign-in to its first private post. You find the
+user's enrollment, learn who holds their records, and send each new post to
+the right place.
 
-The house metaphor comes from
-[What Is Shared Private Data?](/guide/what-is-stratos). A boundary is a room.
-Enrollment is the guest list. Custody is who keeps the guest's records.
+New to the ideas? Read
+[What Is Shared Private Data?](/guide/what-is-stratos) first.
 
 ## What you are integrating
 

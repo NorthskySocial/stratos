@@ -1,6 +1,6 @@
 # Glossary
 
-Short definitions of the words used across the Stratos documentation.
+Short definitions of the terminology used across the Stratos documentation.
 [Core Concepts](/guide/concepts) explains how they fit together.
 
 ## Core concepts

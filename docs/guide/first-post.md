@@ -1,10 +1,10 @@
 # Tutorial: Your First Private Post
 
-In this tutorial you say one sentence in one room. You will find a user's
+In this tutorial you write one private post. You will find a user's
 enrollment, work out where their private posts are kept, and write a post
 that only members of one boundary can read.
 
-It takes four steps: look up the guest list entry, find the right door,
+It takes four steps: look up the enrollment, choose the repository host,
 write the post, and read it back.
 
 ## Prerequisites
@@ -50,7 +50,7 @@ console.log(enrollment.custody) // 'stratos' or 'pds'
 console.log(enrollment.boundaries) // the boundaries the user holds
 ```
 
-## 3. Find the right door
+## 3. Choose the repository host
 
 The post goes to one of two places, depending on **custody**:
 
@@ -84,7 +84,7 @@ Pick one boundary the user holds. A post belongs to exactly one.
 
 ```typescript
 const boundary = `${STRATOS_DID}/engineering`
-const text = 'Hello from the engineering room!'
+const text = 'Hello from the engineering boundary!'
 const createdAt = new Date().toISOString()
 ```
 

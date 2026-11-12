@@ -1,9 +1,8 @@
 # Security
 
-A boundary is a locked room. Stratos stands at every door and checks the
-caller on every request. It never trusts a note the caller wrote about
-themselves. This page lists which door asks for which proof, and what you must
-protect as the operator.
+Stratos checks the caller on every request. It never trusts what a caller
+claims about itself. This page lists which endpoint asks for which proof, and
+what you must protect as the operator.
 
 ## Authentication reference
 

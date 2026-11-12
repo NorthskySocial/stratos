@@ -5,16 +5,12 @@ import FeedgenRequestFlow from '../.vitepress/theme/components/FeedgenRequestFlo
 import FeedgenIndexingFlow from '../.vitepress/theme/components/FeedgenIndexingFlow.vue'
 </script>
 
-Picture a house with many rooms and a guest list on every door. People post
-notes inside the rooms. Some notes are pinned to the wall of the house. Others
-stay in the notebook of the person who wrote them, at their own home.
+A member asks a simple question: "What is new in the cooking boundary?"
 
-Now a guest asks a simple question: "What is new in the cooking room?"
-
-Someone has to walk the rooms, collect the notes from the wall and from every
-member's notebook, and read them back in order. That someone must also check
-the guest list first, every time. In Stratos, that someone is the feed
-generator.
+The posts that answer it are spread out. Stratos keeps some of them. The
+rest sit on the PDS of each member who keeps their own. Something has to
+collect them, put them in order, and check the asker's membership first,
+every time. That is the feed generator.
 
 `stratos-feedgen-ng` is a standalone Rust service. It follows one Stratos
 service, keeps a local, encrypted copy of recent posts, and serves that copy
@@ -69,7 +65,7 @@ The feed generator never handles user credentials. It takes four steps.
    feed generator resolves that DID and checks the signature against the
    `#atproto` key in the DID document. The `aud` claim must be the feed
    generator's own DID, and `lxm` must name the method.
-2. **Which rooms may they enter?** The feed generator asks Stratos for the
+2. **Which boundaries do they hold?** The feed generator asks Stratos for the
    viewer's current boundaries. It keeps the answer for five minutes, and
    drops it at once when Stratos reports an enrollment change for that
    viewer.

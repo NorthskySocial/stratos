@@ -6,11 +6,7 @@ import EnrollmentFlow from '../.vitepress/theme/components/EnrollmentFlow.vue'
 import RecordCreationAnimation from '../.vitepress/theme/components/RecordCreationAnimation.vue'
 </script>
 
-Picture a members' club. The front desk keeps the member list and decides who
-enters which room. Most members leave their notebooks in the club's lockers. A
-few keep their notebooks at home and bring the pages when asked.
-
-Stratos is the front desk and the lockers. It always decides who belongs to a
+Stratos always decides who belongs to a
 boundary. It stores the records for most members, and it lets a member with a
 capable PDS keep their records there. This page shows each part.
 

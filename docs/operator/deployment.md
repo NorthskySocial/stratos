@@ -1,8 +1,7 @@
 # Deployment
 
-Standing up Stratos is like opening a venue. You need an address people can
-find, a door that locks, and one person with the keys before anyone arrives.
-This page takes you through those steps in order.
+This page takes you through a first deployment in order: build the service,
+give it an identity, configure it, and make yourself the first admin.
 
 ## Prerequisites
 

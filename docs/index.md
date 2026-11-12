@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Stratos
   text: Private permissioned data for ATprotocol
-  tagline: Rooms with a guest list, for communities on the open network. Share posts with members only, using the identity you already have.
+  tagline: Share private posts with approved members, using the AT Protocol identity you already have.
   actions:
     - theme: brand
       text: Get Started

@@ -4,13 +4,8 @@
 import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimation.vue'
 </script>
 
-The note on a guest's door says "I am a guest at this house." Anyone could
-write such a note. So the host signs it. The signature is the attestation: a
-passer-by can check it against the host's known signature without knocking.
-
-The enrollment record on a user's PDS is that note. The attestation inside it
-is the Stratos service's signature. It lets any app confirm an enrollment
-without a call to Stratos.
+Each enrolled user's enrollment record includes a service attestation signed by the Stratos service's secp256k1 key. This enables AppViews to verify a user's enrollment and boundaries offline without querying the enrollment status endpoint on every request.
+It lets any app confirm an enrollment without a call to Stratos.
 
 ## What the attestation covers
 

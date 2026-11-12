@@ -1,9 +1,5 @@
 # Creating Records
 
-A private post is a note left in one room. The author picks the room, writes
-the note, and hands it to whoever keeps their things. This page covers the
-note itself: its shape, its rules, and how to hand it over.
-
 Where the post goes depends on custody. Read
 [Custody and Routing](/client/custody) first. Most of this page describes
 `stratos` custody, where the Stratos service stores the record. The last
@@ -241,7 +237,7 @@ async function createReply(
 }
 ```
 
-A reply stays in the parent's room. Use the parent's boundary. A reply to a
+A reply stays in the parent's boundary. Use the same boundary value. A reply to a
 public `app.bsky.feed.post` is rejected.
 
 ## Deletes, updates, and batches

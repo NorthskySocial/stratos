@@ -1,10 +1,8 @@
 # User Enrollment
 
-Nobody walks into a room unannounced. A guest first asks the host, the host
-checks the list, and a note goes up on the guest's own door: "I am a guest at
-this house." Enrollment is that exchange. The user signs in through OAuth,
-Stratos records their boundaries, and Stratos writes an enrollment record to
-the user's PDS.
+Enrollment is how a user joins a Stratos service. The user signs in through
+OAuth, Stratos records their boundaries, and Stratos writes an enrollment
+record to the user's PDS.
 
 Your app does two things with enrollment. It reads the record to find out
 where the user stands. It starts the OAuth flow when the user has no record.

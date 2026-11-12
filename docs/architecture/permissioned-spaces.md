@@ -5,12 +5,12 @@ import SpaceCredentialFlowAnimation from '../.vitepress/theme/components/SpaceCr
 import SpaceDataResidencyAnimation from '../.vitepress/theme/components/SpaceDataResidencyAnimation.vue'
 </script>
 
-Stratos started with a simple idea: a _boundary_ is a room, and only the
-people let into the room can read what is posted there. While Stratos was
-building rooms, the AT Protocol community was drawing up its own floor plan.
-The permissioned data proposal
+Stratos started with a simple idea: a _boundary_ is a named group, and only
+its members can read what is posted in it. While Stratos was building
+boundaries, the AT Protocol community was designing its own model. The
+permissioned data proposal
 ([proposal 0016](https://github.com/bluesky-social/proposals/blob/main/0016-permissioned-data/README.md))
-calls the room a _space_: a named, membership-gated container of records,
+calls the group a _space_: a named, membership-gated container of records,
 addressed by an `at://` URI and governed by a _space authority_ that decides
 who may read from it.
 

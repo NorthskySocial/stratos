@@ -1,14 +1,10 @@
 # Custody and Routing
 
-Picture the house again. A boundary is a room, and enrollment puts a guest on
-the list for it. Custody answers one more question: who keeps the things a
-guest brings? Some guests leave their things in the host's cupboard. Others
-keep them in their own bag and only show them inside the room. The guest list
-is the same for both. Only the storage differs.
+Custody says who holds a user's private records: the Stratos service, or the
+user's own PDS. Membership works the same for both. Only the storage differs.
 
-In Stratos terms, the host is the Stratos service and the bag is the user's
-own PDS. Your app must know which one holds a user's records before it reads
-or writes.
+Your app must know which one holds a user's records before it reads or
+writes.
 
 ## The two custody classes
 
