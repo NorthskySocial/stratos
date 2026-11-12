@@ -1,4 +1,10 @@
-# API Reference
+---
+audience: App developers and service developers
+type: Reference
+status: current
+---
+
+# API methods
 
 This page lists the XRPC methods that the Stratos service serves, the
 authentication each accepts, and the errors each returns.
@@ -29,7 +35,7 @@ Every XRPC error has this body:
 ```
 
 Match on `error`. Most errors answer HTTP 400, including `RecordNotFound`.
-The [error table](#error-codes) lists the exceptions.
+[Error codes](/reference/errors) lists every error and its status.
 
 ## Method index
 
@@ -365,7 +371,7 @@ renew both together. Ordinary OAuth DPoP remains unchanged.
 This does not add an upstream `com.atproto.space.*` authority endpoint.
 Member removal prevents renewal but does not automatically revoke credentials
 already accepted by a foreign PDS. See the
-[compatibility and rollout limits](../operator/configuration.md#october-spaces-rollout).
+[compatibility and rollout limits](/operator/upgrades/october-spaces).
 
 ## Export
 
@@ -546,52 +552,7 @@ interface Image {
 }
 ```
 
-## Error Codes
+## Error codes
 
-Errors answer HTTP 400 unless the table says otherwise.
-
-### Authentication and limits
-
-| Error                    | Status | Description                                                       |
-| ------------------------ | ------ | ----------------------------------------------------------------- |
-| `AuthenticationRequired` | 401    | Missing or invalid credentials, or a write to another user's repo |
-| `RateLimitExceeded`      | 429    | The DID exceeded the write rate limit                             |
-
-### Writes
-
-| Error                      | Description                                                |
-| -------------------------- | ---------------------------------------------------------- |
-| `NotEnrolled`              | The caller has no active enrollment on this service        |
-| `PdsCustodyWriteForbidden` | The caller has `pds` custody and writes to their own PDS   |
-| `ServiceWriteForbidden`    | A service identity tried to write a record                 |
-| `InvalidCollection`        | The collection does not start with `zone.stratos.`         |
-| `InvalidRecord`            | The record failed validation                               |
-| `InvalidDomainCount`       | The record does not name exactly one boundary              |
-| `InvalidDomain`            | The boundary name is not a valid space key                 |
-| `ServiceMismatch`          | The boundary belongs to another Stratos service            |
-| `ForbiddenBoundary`        | The caller does not hold the boundary                      |
-| `InvalidSwap`              | The record does not match the swap condition               |
-| `ConcurrentModification`   | The repo changed during the write. Send the request again. |
-
-### Reads
-
-| Error            | Description                                                           |
-| ---------------- | --------------------------------------------------------------------- |
-| `RecordNotFound` | The record does not exist, or the viewer may not read it              |
-| `RecordBlocked`  | The viewer may not read the record (`hydrateRecord` only)             |
-| `TooManyUris`    | More than 100 URIs in `hydrateRecords`                                |
-| `RepoNotFound`   | Stratos hosts no such repo, or the caller does not own it (`getRepo`) |
-| `BlobBlocked`    | The viewer may not read the blob                                      |
-| `BlobNotFound`   | The repo has no such blob                                             |
-
-### Sync and spaces
-
-| Error                 | Description                                                       |
-| --------------------- | ----------------------------------------------------------------- |
-| `OplogTruncated`      | `since` predates retained oplog history (use full-state recovery) |
-| `FutureCursor`        | The `subscribeRecords` cursor is ahead of the stream              |
-| `InvalidToken`        | Delegation token failed verification or space mismatch            |
-| `UnknownSpace`        | Space URI malformed or space DID not this service                 |
-| `ProofRequired`       | No key is available to bind the space credential                  |
-| `AttestationRequired` | Space gates on app identity; no valid client attestation supplied |
-| `ClientNotAllowed`    | Attested `client_id` not in the space's allow-list                |
+Every error name, with its status and meaning, is in
+[Error codes](/reference/errors).

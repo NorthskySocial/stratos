@@ -1,3 +1,9 @@
+---
+audience: App developers and maintainers
+type: Explanation
+status: current
+---
+
 # Enrollment Signing
 
 <script setup>

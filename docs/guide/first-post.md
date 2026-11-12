@@ -1,3 +1,10 @@
+---
+audience: App developers
+type: Tutorial
+prerequisites: An enrolled account, the Stratos service DID and URL, and an OAuth session
+status: current
+---
+
 # Tutorial: Your First Private Post
 
 In this tutorial you write one private post. You will find a user's
@@ -88,16 +95,17 @@ const text = 'Hello from the engineering boundary!'
 const createdAt = new Date().toISOString()
 ```
 
-### If Stratos keeps the posts
+Choose the tab for the user's custody. The two tabs are the two branches
+of one function.
 
-Send a normal `createRecord` to the Stratos service. Wrap the session's
-`fetchHandler` so the request goes to `target.url` and still carries the
-session's DPoP proof.
+::: code-group
 
-```typescript
+```typescript [Stratos custody]
 import { Agent } from '@atproto/api'
 
 if (target.kind === 'stratos') {
+  // Wrap the session's fetchHandler so the request goes to target.url and
+  // still carries the session's DPoP proof.
   const stratos = new Agent((url, init) =>
     session.fetchHandler(new URL(url, target.url).href, init),
   )
@@ -123,16 +131,9 @@ if (target.kind === 'stratos') {
 }
 ```
 
-The boundary must be the full identifier, it must belong to this Stratos
-service, and the user must hold it. Otherwise Stratos rejects the write.
-
-### If the user's PDS keeps the posts
-
-Write into the boundary's _space_ on the PDS. The space URI is the boundary,
-spelled the protocol's way.
-
-```typescript
+```typescript [PDS custody]
 if (target.kind === 'pds') {
+  // The space URI is the boundary, spelled the protocol's way.
   const space = `at://${STRATOS_DID}/space/zone.stratos.space.feed/engineering`
 
   const res = await session.fetchHandler(
@@ -154,9 +155,16 @@ if (target.kind === 'pds') {
 }
 ```
 
-The record carries no `boundary` field here. The space it is written into is
-its boundary. The address of the new record has seven segments and starts
-with the Stratos DID, not the author:
+:::
+
+**Stratos custody.** Send a normal `createRecord` to the Stratos service. The
+boundary must be the full identifier, it must belong to this Stratos
+service, and the user must hold it. Otherwise Stratos rejects the write.
+
+**PDS custody.** Write into the boundary's _space_ on the PDS. The record
+carries no `boundary` field. The space it is written into is its boundary.
+The address of the new record has seven segments and starts with the
+Stratos DID, not the author:
 
 ```text
 at://did:web:stratos.example.com/space/zone.stratos.space.feed/engineering/did:plc:…/zone.stratos.feed.post/3k…
@@ -199,5 +207,5 @@ Other members see the post in the boundary's feed, served by the
 ## Next steps
 
 - [Client Integration](/client/getting-started): the full client guide.
-- [Domain Boundaries](/client/boundaries): how boundaries restrict access.
+- [Boundaries](/client/boundaries): how boundaries restrict access.
 - [Core Concepts](/guide/concepts): custody, spaces, and the trust model.

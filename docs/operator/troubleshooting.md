@@ -1,8 +1,29 @@
-# Troubleshooting
+---
+audience: Operators
+type: Troubleshooting
+status: current
+---
+
+# Troubleshoot the service
 
 Most Stratos problems come from one of three places: the caller is not who the
 service expects, the caller is not in the boundary, or a setting names
-something that no longer exists. Find your symptom below.
+something that no longer exists. Find your symptom below. Every error name is
+listed in [Error codes](/reference/errors).
+
+| Symptom                                                                         | Likely cause                                                       | Fix                                                        |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------- |
+| [The service does not start](#the-service-does-not-start)                       | An invalid variable, an inactive reserved boundary, or a held lock | Read the error line. Each one names its cause              |
+| [`NotEnrolled` on create](#notenrolled-when-creating-records)                   | The person did not finish enrollment, or was denied                | Check the enrollment mode and allow lists                  |
+| [A write is rejected](#a-write-is-rejected)                                     | The record's boundary, the caller, or the rate limit               | Match the error name in the table                          |
+| [The sync stream closes or stays empty](#the-sync-stream-closes-or-stays-empty) | The service identity lacks an enrollment or a boundary             | Grant the service identity a boundary in **Enrollments**   |
+| [OAuth callback fails](#oauth-callback-fails)                                   | `STRATOS_PUBLIC_URL` or the proxy routes are wrong                 | Check the public URL, client metadata, and proxy           |
+| [`invalid_scope` from a spaces PDS](#invalid-scope-from-a-spaces-pds)           | The space type record is not published                             | Check that `zone.stratos.space.feed` is still published    |
+| [Admin login fails](#admin-login-fails)                                         | The DID is not an admin, or the session expired                    | Add the DID, or sign in again on the service's own host    |
+| [Space credential requests fail](#space-credential-requests-fail)               | No replay store                                                    | Set `STRATOS_VALKEY_URL`                                   |
+| [DPoP nonce errors](#dpop-nonce-errors)                                         | A proxy replaces the CORS headers                                  | Let the service's CORS headers through                     |
+| [A member's PDS record is out of date](#a-member-s-pds-record-is-out-of-date)   | The PDS sync queue has not caught up                               | Inspect and requeue jobs                                   |
+| [High latency under load](#high-latency-under-load)                             | Connection pool exhaustion                                         | Raise `STRATOS_PG_ACTOR_POOL_SIZE` below `max_connections` |
 
 ## The service does not start
 

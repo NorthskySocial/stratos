@@ -1,4 +1,10 @@
-# System Diagrams
+---
+audience: Anyone
+type: Overview
+status: current
+---
+
+# System at a glance
 
 <script setup>
 import SystemOverviewAnimation from '../.vitepress/theme/components/SystemOverviewAnimation.vue'
@@ -16,7 +22,7 @@ explains it in full.
 
 Stratos sits between a member's PDS and the feed generator. It keeps
 enrollments and boundaries, and it stores records for members without a
-spaces-capable PDS. See [Architecture](/operator/architecture).
+spaces-capable PDS. See [System architecture](/operator/architecture).
 
 ## Record hydration sequence
 
@@ -41,4 +47,4 @@ allow lists, stores the enrollment, and publishes the enrollment record. See
 The feed generator has two sources. It subscribes to the Stratos sync stream
 for records Stratos hosts. It polls the PDS of each member whose own PDS hosts
 their records. It keeps what it may read in its own encrypted store and serves
-feeds from there. See [Feed Generator](/architecture/feed-generator).
+feeds from there. See [Feed generator design](/architecture/feed-generator).

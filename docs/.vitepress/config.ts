@@ -2,10 +2,32 @@ import { defineConfig } from 'vitepress'
 
 const base = '/'
 
+// Sidebar text is rendered as HTML, not Vue, so the Badge component cannot be
+// used there. These classes match the default theme's Badge output.
+function badge(label: string, type: 'info' | 'tip' | 'warning' | 'danger') {
+  return `<span class="VPBadge ${type}">${label}</span>`
+}
+
+const referenceSidebar = [
+  {
+    text: 'Reference',
+    items: [
+      { text: 'API methods', link: '/reference/api' },
+      { text: 'Lexicons', link: '/lexicons/' },
+      { text: 'Error codes', link: '/reference/errors' },
+      { text: 'Environment variables', link: '/reference/env' },
+      { text: 'Glossary', link: '/reference/glossary' },
+    ],
+  },
+]
+
 export default defineConfig({
   title: 'Stratos',
   description: 'Private permissioned data layer for ATprotocol',
   base,
+  lastUpdated: true,
+  // Contributor and design notes stay in the repository but not on the site.
+  srcExclude: ['design/**', 'SCREENSHOTS.md'],
 
   head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/icon.svg' }]],
 
@@ -14,147 +36,198 @@ export default defineConfig({
     siteTitle: 'Stratos',
 
     nav: [
-      { text: 'Guide', link: '/guide/introduction', activeMatch: '/guide/' },
+      { text: 'Learn', link: '/guide/what-is-stratos', activeMatch: '/guide/' },
       {
-        text: 'Client Integration',
+        text: 'Build',
         link: '/client/getting-started',
         activeMatch: '/client/',
       },
       {
-        text: 'Operator Guide',
+        text: 'Operate',
         link: '/operator/overview',
         activeMatch: '/operator/',
       },
       {
-        text: 'Architecture',
-        link: '/architecture/permissioned-spaces',
+        text: 'How it works',
+        link: '/architecture/diagrams',
         activeMatch: '/architecture/',
       },
-      { text: 'Lexicons', link: '/lexicons/', activeMatch: '/lexicons/' },
+      {
+        text: 'Reference',
+        link: '/reference/api',
+        activeMatch: '/(reference|lexicons)/',
+      },
     ],
 
     sidebar: {
       '/guide/': [
         {
-          text: 'Getting Started',
+          text: 'Learn',
           items: [
-            { text: 'Introduction', link: '/guide/introduction' },
             {
-              text: 'What Is Shared Private Data?',
+              text: 'What is Stratos? (explained simply)',
               link: '/guide/what-is-stratos',
             },
-            { text: 'Core Concepts', link: '/guide/concepts' },
-            { text: 'Stratos WebApp', link: '/guide/webapp' },
-            { text: 'Your First Post', link: '/guide/first-post' },
-            { text: 'Glossary', link: '/guide/glossary' },
-            { text: 'Error Codes', link: '/guide/errors' },
+            { text: 'Introduction', link: '/guide/introduction' },
+            { text: 'Core concepts', link: '/guide/concepts' },
+            { text: 'Tutorial: your first post', link: '/guide/first-post' },
+            { text: 'Demo web app', link: '/guide/webapp' },
           ],
         },
       ],
       '/client/': [
         {
-          text: 'Client Integration',
+          text: 'Start',
           items: [
-            { text: 'Getting Started', link: '/client/getting-started' },
-            { text: 'Custody & Routing', link: '/client/custody' },
-            { text: 'User Enrollment', link: '/client/enrollment' },
-            { text: 'Creating Records', link: '/client/creating-records' },
-            { text: 'Reading Records', link: '/client/reading-records' },
-            { text: 'Private Feed Attachments', link: '/client/feedgen-blobs' },
-            { text: 'Domain Boundaries', link: '/client/boundaries' },
+            { text: 'Getting started', link: '/client/getting-started' },
+            { text: 'Custody and routing', link: '/client/custody' },
+          ],
+        },
+        {
+          text: 'Write and read',
+          items: [
+            { text: 'User enrollment', link: '/client/enrollment' },
+            { text: 'Creating records', link: '/client/creating-records' },
+            { text: 'Reading records', link: '/client/reading-records' },
+            { text: 'Private feed attachments', link: '/client/feedgen-blobs' },
+            { text: 'Boundaries', link: '/client/boundaries' },
+          ],
+        },
+        {
+          text: 'Advanced',
+          items: [
+            { text: 'Attestation verification', link: '/client/attestation' },
             {
-              text: 'Repo Export & Import',
+              text: 'Repo export and import',
               link: '/client/repo-export-import',
             },
-            { text: 'UI Patterns', link: '/client/ui-patterns' },
-            { text: 'Attestation Verification', link: '/client/attestation' },
-            { text: 'API Reference', link: '/client/api-reference' },
-            { text: 'Best Practices', link: '/client/best-practices' },
-            { text: 'Troubleshooting', link: '/client/troubleshooting' },
+          ],
+        },
+        {
+          text: 'Help',
+          items: [
+            { text: 'UI patterns', link: '/client/ui-patterns' },
+            { text: 'Best practices', link: '/client/best-practices' },
+            { text: 'Troubleshoot your app', link: '/client/troubleshooting' },
           ],
         },
       ],
       '/operator/': [
         {
-          text: 'Operator Guide',
+          text: 'Plan',
           items: [
             { text: 'Overview', link: '/operator/overview' },
-            { text: 'Architecture', link: '/operator/architecture' },
+            { text: 'System architecture', link: '/operator/architecture' },
+            { text: 'Security', link: '/operator/security' },
+          ],
+        },
+        {
+          text: 'Deploy',
+          items: [
             { text: 'Deployment', link: '/operator/deployment' },
-            { text: 'Deployment Examples', link: '/operator/examples/' },
+            { text: 'Deployment examples', link: '/operator/examples/' },
             { text: 'Configuration', link: '/operator/configuration' },
+            { text: 'Run the feed generator', link: '/operator/feedgen-ng' },
+          ],
+        },
+        {
+          text: 'Run',
+          items: [
+            { text: 'Operations', link: '/operator/operations' },
+            { text: 'Manage boundaries', link: '/operator/boundaries' },
+            { text: 'Boundary history', link: '/operator/boundary-history' },
             {
-              text: 'Feed Generator',
-              link: '/operator/feedgen-ng',
+              text: 'Troubleshoot the service',
+              link: '/operator/troubleshooting',
             },
+          ],
+        },
+        {
+          text: 'Upgrades',
+          items: [
             {
-              text: 'AppView Integration (Legacy)',
+              text: 'October spaces rollout',
+              link: '/operator/upgrades/october-spaces',
+            },
+          ],
+        },
+        {
+          text: 'Legacy',
+          collapsed: true,
+          items: [
+            {
+              text: `AppView integration ${badge('legacy', 'warning')}`,
               link: '/operator/appview-integration',
             },
-            { text: 'Operations', link: '/operator/operations' },
-            { text: 'Security', link: '/operator/security' },
-            { text: 'Boundary History', link: '/operator/boundary-history' },
-            { text: 'Manage Boundaries', link: '/operator/boundaries' },
-            { text: 'Troubleshooting', link: '/operator/troubleshooting' },
+            {
+              text: `Feedgen boundary catalogue ${badge('legacy', 'warning')}`,
+              link: '/operator/feedgen-boundary-catalog',
+            },
           ],
         },
       ],
       '/architecture/': [
         {
-          text: 'Architecture',
+          text: 'Explainers',
           items: [
+            { text: 'System at a glance', link: '/architecture/diagrams' },
             {
-              text: 'Permissioned Spaces',
+              text: 'Permissioned spaces',
               link: '/architecture/permissioned-spaces',
             },
             {
-              text: 'Spaces: Current Contract',
-              link: '/architecture/spaces-alignment',
-            },
-            {
-              text: 'Feed Generator',
+              text: 'Feed generator design',
               link: '/architecture/feed-generator',
             },
-            { text: 'Hydration Architecture', link: '/architecture/hydration' },
+            { text: 'Hydration', link: '/architecture/hydration' },
             {
-              text: 'Enrollment Signing',
+              text: 'Enrollment signing',
               link: '/architecture/enrollment-signing',
             },
             {
-              text: 'Multi-Domain Enrollment',
+              text: 'Multi-domain enrollment',
               link: '/architecture/multi-domain-enrollment',
             },
             {
-              text: 'Repo-Host Discovery',
+              text: 'Repo-host discovery',
               link: '/architecture/repo-host-discovery',
             },
-            {
-              text: 'Service Key History',
-              link: '/architecture/service-key-history',
-            },
-            {
-              text: 'Credential Revocation Contract',
-              link: '/architecture/credential-revocation-contract',
-            },
-            {
-              text: 'October Writer Sync',
-              link: '/architecture/october-writer-sync-contract',
-            },
-            { text: 'System Diagrams', link: '/architecture/diagrams' },
           ],
         },
         {
-          text: 'Deprecated',
-          collapsed: true,
-          items: [{ text: 'AppView Indexer', link: '/indexer-architecture' }],
+          text: 'Decisions',
+          items: [
+            {
+              text: `Spaces: current contract ${badge('partial', 'warning')}`,
+              link: '/architecture/spaces-alignment',
+            },
+            {
+              text: `Credential revocation contract ${badge('accepted', 'tip')}`,
+              link: '/architecture/credential-revocation-contract',
+            },
+            {
+              text: `October writer sync contract ${badge('proposed', 'info')}`,
+              link: '/architecture/october-writer-sync-contract',
+            },
+            {
+              text: 'Service key history',
+              link: '/architecture/service-key-history',
+            },
+          ],
         },
-      ],
-      '/lexicons/': [
         {
-          text: 'Lexicon Reference',
-          items: [{ text: 'All Lexicons', link: '/lexicons/' }],
+          text: 'Legacy',
+          collapsed: true,
+          items: [
+            {
+              text: `AppView indexer ${badge('legacy', 'warning')}`,
+              link: '/architecture/appview-indexer',
+            },
+          ],
         },
       ],
+      '/reference/': referenceSidebar,
+      '/lexicons/': referenceSidebar,
     },
 
     socialLinks: [
@@ -163,7 +236,7 @@ export default defineConfig({
 
     footer: {
       message:
-        'Built on ATprotocol, designed by <a href="https://northskysocial.com" target="_blank">Northsky Social</a>',
+        'Built on ATprotocol, designed by <a href="https://northskysocial.com" target="_blank">Northsky Social</a> · <a href="https://github.com/NorthskySocial/stratos/tree/main/docs/design" target="_blank">Contributing docs</a>',
       copyright: `<center><img src="${base}northsky.png" alt="Northsky Social" width="48" height="48" /></center>`,
     },
 

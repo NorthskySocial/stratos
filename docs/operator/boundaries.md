@@ -1,3 +1,23 @@
+---
+audience: Operators and admins
+type: How-to
+prerequisites: An admin DID and a running Stratos service
+status: current
+---
+
+<script setup>
+const lifecycleStates = [
+  { id: 'active', title: 'Active', sub: 'grants allowed', tone: 'ok' },
+  { id: 'deactivating', title: 'Deactivating', sub: 'no new grants' },
+  { id: 'inactive', title: 'Inactive', sub: 'name and history kept', tone: 'deny' },
+]
+const lifecycleMoves = [
+  { from: 'active', to: 'deactivating', label: 'Deactivate' },
+  { from: 'deactivating', to: 'inactive', label: 'All removals done' },
+  { from: 'inactive', to: 'active', label: 'Reactivate, with no members restored' },
+]
+</script>
+
 # Manage boundaries in Stratos
 
 The **Boundaries** tab owns boundary definitions, room metadata, and enrollment
@@ -28,10 +48,16 @@ so you can move between them without searching again.
 ### Overview
 
 Overview shows the stored policy for the boundary. It does not show effective
-access, live membership, or feed readiness. These are separate:
+access, live membership, or feed readiness. Keep these apart:
 
-- A public room listing is not public content access.
-- An application allow-list entry is not a membership.
+| This                            | Is                                         | Is not                                 |
+| ------------------------------- | ------------------------------------------ | -------------------------------------- |
+| A public room listing           | Public discovery of the room               | Public access to its content           |
+| An application allow-list entry | Permission for a client to get credentials | A membership                           |
+| Room joinability                | Permission to join                         | Permission to read existing content    |
+| Closing joins                   | A stop to new joins                        | Removal of existing members            |
+| Removing a membership           | An end to that member's access             | A ban. An authorized join can follow   |
+| A new boundary                  | A definition                               | Access for a feed generator or service |
 
 ### Members
 
@@ -94,6 +120,12 @@ memory only and are lost on reload or when the document closes.
 ## Deactivate and reactivate
 
 The web interface cannot delete a boundary.
+
+<StateDiagram
+  title="Boundary lifecycle"
+  :states="lifecycleStates"
+  :transitions="lifecycleMoves"
+/>
 
 **Deactivate** does three things in order:
 

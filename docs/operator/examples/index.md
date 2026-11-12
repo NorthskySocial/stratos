@@ -1,3 +1,9 @@
+---
+audience: Operators
+type: Examples
+status: current
+---
+
 # Deployment Examples
 
 Everything needed to stand up Stratos lives in the repository root. There are
@@ -10,7 +16,7 @@ no per-scenario bundles to copy. These files cover the supported deployments:
 | `docker-compose.feedgen.yml`               | Deprecated TypeScript feedgen overlay, retained for rollback |
 | `.env.example`                             | Service configuration template. Copy it to `.env`            |
 
-The current [Feed Generator](/operator/feedgen-ng) keeps its own encrypted
+The current [Run the feed generator](/operator/feedgen-ng) keeps its own encrypted
 database. The older TypeScript overlay below is only for rollback.
 
 ## Base Stack (`docker-compose.yml`)
@@ -105,14 +111,14 @@ docker compose --env-file stratos-feedgen-ng/rehearsal.env \
 The env file contains operator-specific paths and is not checked in. The
 profile applies 1 vCPU and 512 MiB limits; confirm them inside the cgroup and
 run an authenticated feed probe before routing traffic. See
-[Feed Generator](/operator/feedgen-ng) for the data flow and privacy controls.
+[Run the feed generator](/operator/feedgen-ng) for the data flow and privacy controls.
 
 ## Legacy TypeScript Feed Generator Overlay (`docker-compose.feedgen.yml`)
 
 This section describes the deprecated TypeScript rollback path only. Its
 temporary tunnel DID does not meet the current feed DID domain requirement;
 do not use this overlay for a new production deployment. Follow
-[Feed Generator](/operator/feedgen-ng) and its
+[Run the feed generator](/operator/feedgen-ng) and its
 `stratos-feedgen-ng/compose.rehearsal.yml` rehearsal profile instead.
 
 To run the boundary-scoped feed generator alongside the service, layer the feedgen

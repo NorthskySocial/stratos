@@ -1,3 +1,9 @@
+---
+audience: Operators
+type: How-to
+status: current
+---
+
 # Operations
 
 A quiet Stratos is a healthy Stratos. Most days you only watch three things:

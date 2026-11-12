@@ -1,4 +1,10 @@
-# Stratos Indexer Architecture (deprecated)
+---
+audience: Maintainers
+type: Explanation
+status: legacy
+---
+
+# AppView indexer <Badge type="warning" text="legacy" />
 
 ::: danger Deprecated, and it does not run against the current service
 `stratos-indexer` is deprecated. As shipped, it cannot authenticate to the
@@ -11,7 +17,7 @@ The base `docker-compose.yml` still defines an `indexer` service with
 `STRATOS_SYNC_TOKEN`. That service does not receive Stratos records.
 
 The current way to serve boundary-scoped feeds is the
-[Feed Generator](/operator/feedgen-ng). It does not use this indexer or the
+[Run the feed generator](/operator/feedgen-ng). It does not use this indexer or the
 AppView PostgreSQL projection.
 :::
 
@@ -68,7 +74,7 @@ list is in `stratos-indexer/src/config.ts`.
 
 ## See also
 
-- [Shared Stratos sync-client library](/design/sync-client-library): the
+- [Shared Stratos sync-client library](https://github.com/NorthskySocial/stratos/blob/main/docs/design/sync-client-library.md): the
   design note that first recorded why the indexer's sync path does not run.
 - [AppView Integration](/operator/appview-integration): the stream contract
   the indexer was written against.

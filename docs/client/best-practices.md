@@ -1,3 +1,9 @@
+---
+audience: App developers
+type: Guide
+status: current
+---
+
 # Best Practices
 
 ## 1. Use the `stratos-client` helpers

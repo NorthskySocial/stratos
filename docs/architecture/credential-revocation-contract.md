@@ -1,4 +1,21 @@
-# Credential revocation contract
+---
+audience: Maintainers and protocol implementers
+type: Decision record
+status: accepted
+---
+
+# Credential revocation contract <Badge type="tip" text="accepted" />
+
+::: info At a glance
+
+| Question         | Answer                                                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Status           | Accepted. The hosting policy is accepted. The receiver implementation is deferred.                                                   |
+| Scope            | Stratos as a receiver of `com.atproto.space.notifyCredentialRevoked`, and the hosting responsibility behind it.                      |
+| What it decides  | Hosting responsibility lives in a durable hosting registry, independent of enrollment. Departure removes access. It is not deletion. |
+| What it does not | It adds no endpoint, migration, revocation enforcement, fanout, or discovery entry. The registry schema stays open.                  |
+
+:::
 
 ## Problem and decision
 
@@ -6,10 +23,12 @@ Community membership can end while Stratos still hosts the repo. Using enrollmen
 precisely when retained data still needs protection. Maintainers need a hosting contract that survives departure; operators need to distinguish
 that contract from access rights and deletion.
 
-Accepted design: retain hosting responsibility independently of enrollment, using a durable hosting registry.
-Hosting “ownership” means the service's responsibility for a retained repo, not a claim of legal ownership.
-Community departure removes access without implicitly deleting retained data. A return requires fresh authorization;
-it must not revive old credentials or automatically restore former permissions.
+Accepted design:
+
+- Retain hosting responsibility independently of enrollment, using a durable hosting registry.
+- Hosting “ownership” means the service's responsibility for a retained repo, not a claim of legal ownership.
+- Community departure removes access without implicitly deleting retained data.
+- A return requires fresh authorization; it must not revive old credentials or automatically restore former permissions.
 
 The standard receiver remains unimplemented. This decision settles the hosting principle, not production delivery or the complete standard role.
 Departure removing access is the intended authorization policy, not a claim of immediate revocation in the current service.
@@ -122,8 +141,13 @@ Rejected input or auth must leave no revocation rows.
 
 ### Durable storage and enforcement
 
-Use a service-level table named `revoked_space_credential`, with non-null `space`, `jti`, and `expiresAt` fields.
-The primary key is `(space, jti)`. Add an expiry index for cleanup. Do not key by `jti` alone or by account.
+| Table property | Requirement                                         |
+| -------------- | --------------------------------------------------- |
+| Name           | `revoked_space_credential`, at service level        |
+| Fields         | Non-null `space`, `jti`, and `expiresAt`            |
+| Primary key    | `(space, jti)`. Never `jti` alone, never by account |
+| Index          | An expiry index for cleanup                         |
+
 Use the validated space string consistently; do not normalize different spaces into the same key.
 Do not store credential JWTs, proof keys, or member content.
 
@@ -151,9 +175,12 @@ Restart must preserve acknowledged revocations. Startup migration or storage fai
 Cleanup failure can retain rows longer; it must not grant access or erase live revocations.
 Operational clock rollback and multi-instance clock discipline need verification before rollout; monotonic conflict updates alone do not solve clock faults.
 
-On every credential use, first validate the token, signature, subject, local issuer, lifetime, and presentation binding.
-Then query `(validated space, validated jti)` before admitting access. Preserve active boundary and revision checks.
-Return the protocol error `CredentialRevoked` for a live row. A lookup failure must deny access, not become “not revoked”.
+On every credential use:
+
+1. Validate the token, signature, subject, local issuer, lifetime, and presentation binding.
+2. Query `(validated space, validated jti)` before admitting access. Preserve active boundary and revision checks.
+3. Return the protocol error `CredentialRevoked` for a live row. A lookup failure must deny access, not become “not revoked”.
+
 Keep that error mapping explicit: the current verifier catch block hides credential validation errors behind generic authorization failure.
 Do not query using unverified claims or cache a negative result that could hide a later revocation.
 A successful read must never consume the credential ID. Revoking A must not deny B in the same space.
@@ -251,7 +278,7 @@ New files are marked “new”. The selected hosting registry needs a separate s
 | Lexicon                             | `lexicons/com/atproto/space/notifyCredentialRevoked.json` (new); `stratos-core/src/lexicons/index.ts`                                                                                                                                         | Pin the standard wire schema; retain runtime space validation                                                                                               |
 | Generated bindings                  | `stratos-client/scripts/gen-lexicons.mjs`; `stratos-client/src/lexicons.gen.ts`                                                                                                                                                               | The current generator selects only `zone/stratos` roots; explicitly approve standard schema inclusion before regeneration; do not hand-edit generated files |
 | Tests                               | `stratos-core/tests/credential-revocation.test.ts` (new); `stratos-service/tests/credential-revocation.test.ts` (new); `stratos-service/tests/space-credential-acceptance.test.ts`; `stratos-service/tests/space-credential-verifier.test.ts` | Auth matrix, real SQLite/PostgreSQL upgrades, concurrent updates, cleanup, restart, credential A/B isolation, legacy transition                             |
-| Public contract                     | `stratos-client/README.md`; `docs/client/api-reference.md`; `docs/architecture/spaces-alignment.md`                                                                                                                                           | Document shipped endpoint and limitations only when implemented                                                                                             |
+| Public contract                     | `stratos-client/README.md`; `docs/reference/api.md`; `docs/architecture/spaces-alignment.md`                                                                                                                                                  | Document shipped endpoint and limitations only when implemented                                                                                             |
 
 The inspected service does not use a numbered migration journal for these service tables.
 `createStorageContext` calls `migrateServicePgDb(pgDb)` or `migrateServiceDb(db)` before constructing stores.

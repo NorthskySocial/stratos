@@ -1,3 +1,9 @@
+---
+audience: App developers
+type: How-to
+status: current
+---
+
 # Reading Records
 
 A member of a boundary can read the records in it. Anyone else gets the same
@@ -32,12 +38,47 @@ record exists. Send the user's DPoP session to read private records.
 
 The feed generator collects posts from Stratos and from member PDS spaces. It
 checks the viewer's current membership on every request. Your app calls
-`zone.stratos.feedgen.getFeed` with a service auth JWT that the user's PDS
-mints.
+`zone.stratos.feedgen.getFeed` through the user's PDS. The PDS forwards the
+call with a service auth JWT it mints.
 
 - [Private Feed Attachments](/client/feedgen-blobs) shows the feed response
   and how to download images.
-- [Feed Generator](/operator/feedgen-ng) describes the service.
+- [Run the feed generator](/operator/feedgen-ng) describes the service.
+
+## Read by custody
+
+Choose the tab for the author's custody. A Stratos-hosted post can be read
+from Stratos directly. A PDS-hosted post reaches your app through the feed.
+
+::: code-group
+
+```typescript [Stratos custody]
+// One record, read from Stratos with the viewer's DPoP session.
+// stratosGet is defined in the next section.
+const response = await stratosGet(
+  session,
+  target.url,
+  'com.atproto.repo.getRecord',
+  { repo: authorDid, collection: 'zone.stratos.feed.post', rkey },
+)
+```
+
+```typescript [PDS custody]
+// The viewer's PDS forwards the call to the feed generator.
+const params = new URLSearchParams({ feed: 'general', limit: '50' })
+const response = await session.fetchHandler(
+  `/xrpc/zone.stratos.feedgen.getFeed?${params}`,
+  {
+    method: 'GET',
+    headers: { 'atproto-proxy': `${feedgenDid}#stratos_feedgen` },
+  },
+)
+```
+
+:::
+
+The feed generator serves both custody classes in one feed. Use the feed for
+timelines, whatever the custody.
 
 ## A DPoP request helper
 
@@ -210,7 +251,7 @@ space. It takes `space`, `repo`, `collection`, and `rkey`. A member calls it
 with their DPoP session. A syncing service calls it with a space credential.
 
 The record must belong to the requested space. Any other record answers
-`RecordNotFound`. See the [API Reference](/client/api-reference#get-space-record).
+`RecordNotFound`. See the [API methods](/reference/api#get-space-record).
 
 ## Blobs
 

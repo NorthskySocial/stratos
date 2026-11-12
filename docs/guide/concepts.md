@@ -1,3 +1,9 @@
+---
+audience: App developers, operators, and members
+type: Explanation
+status: current
+---
+
 # Core Concepts
 
 <script setup>
@@ -88,17 +94,11 @@ space     at://did:web:stratos.example.com/space/zone.stratos.space.feed/writers
 ```
 
 A record kept on a user's PDS has a space record address. It has seven
-segments, and it starts with the authority, not the author:
+segments, and it starts with the authority, not the author. A record kept by
+Stratos has the familiar three-segment address. Select a segment to see what
+it holds:
 
-```text
-at://{authorityDid}/space/{type}/{name}/{authorDid}/{collection}/{rkey}
-```
-
-A record kept by Stratos has the familiar three-segment address:
-
-```text
-at://{authorDid}/{collection}/{rkey}
-```
+<RecordUri kind="space" />
 
 [Permissioned Spaces](/architecture/permissioned-spaces) tells the full
 story.
@@ -119,7 +119,7 @@ members Stratos lists, collects their posts from Stratos and from their
 PDSs, and keeps a bounded, encrypted copy. When a viewer opens a feed, it
 checks the viewer's current membership and returns only what they may read.
 
-See [Feed Generator](/architecture/feed-generator).
+See [Feed generator design](/architecture/feed-generator).
 
 ## Sync stream
 
@@ -158,6 +158,9 @@ the members are.
 
 **Removing a member stops reading, not writing.** A removed member can still
 write on their own PDS. Nobody collects it.
+
+The [three custody rules](/operator/architecture#three-rules) state both
+points exactly.
 
 **The attestation proves enrollment, not access.** The enrollment record
 carries a signature from the Stratos service key over the user's DID,
