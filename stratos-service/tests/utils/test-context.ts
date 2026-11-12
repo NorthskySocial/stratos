@@ -73,6 +73,7 @@ export function createTestConfig(dataDir: string): StratosServiceConfig {
       level: 'info',
     },
     adminDids: [],
+    moderationServiceDids: [],
     allowedRedirectOrigins: [],
     pdsSync: {
       tickMs: 30_000,

@@ -168,6 +168,31 @@ The interface has four tabs: **Health**, **Boundaries**, **Enrollments**, and
 **Admins**. It is built with the service (`pnpm build`) and served from the
 same process.
 
+## Moderation services
+
+`STRATOS_MODERATION_SERVICE_DIDS` is a comma-separated list of service DIDs.
+Stratos treats these services as moderation services.
+
+```bash
+STRATOS_MODERATION_SERVICE_DIDS="did:plc:nervmoderation"
+```
+
+The default is empty. With an empty list, Stratos accepts no moderation service.
+
+A moderation service authenticates with an AT Protocol service-auth JWT.
+Stratos checks these items:
+
+- The audience is the DID of this service.
+- The `lxm` claim names the exact method being called. Stratos rejects a token
+  with no `lxm` claim.
+- The token has not expired.
+- The signature verifies against the DID document of the issuer.
+- The issuer is on the list.
+
+The moderation check returns the same message for every rejection. A caller
+cannot tell an unknown issuer from a wrong `lxm` claim. Stratos does not tell
+the caller why it rejected the request.
+
 ## Write rate limiter
 
 Stratos throttles writes per DID to protect commit performance under bursts:
@@ -514,6 +539,7 @@ in PR #217 is not part of this rollout.
 | Variable                           | Required | Default                            | Description                                       |
 | ---------------------------------- | -------- | ---------------------------------- | ------------------------------------------------- |
 | `STRATOS_ADMIN_DIDS`               |          |                                    | Comma-separated admin DIDs that cannot be revoked |
+| `STRATOS_MODERATION_SERVICE_DIDS`  |          |                                    | Comma-separated moderation service DIDs           |
 | `STRATOS_OAUTH_CLIENT_ID`          |          | `{publicUrl}/client-metadata.json` | OAuth client ID                                   |
 | `STRATOS_OAUTH_CLIENT_SECRET`      |          |                                    | PEM private key for a confidential client         |
 | `STRATOS_OAUTH_CLIENT_NAME`        |          | `Stratos Service`                  | Consent screen name                               |
