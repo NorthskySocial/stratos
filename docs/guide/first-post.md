@@ -1,93 +1,203 @@
 # Tutorial: Your First Private Post
 
-This tutorial walks you through the process of setting up the Stratos client, discovering an enrollment, and creating your first private post with a domain boundary.
+In this tutorial you say one sentence in one room. You will find a user's
+enrollment, work out where their private posts are kept, and write a post
+that only members of one boundary can read.
+
+It takes four steps: look up the guest list entry, find the right door,
+write the post, and read it back.
 
 ## Prerequisites
 
-- An AT Protocol account (e.g., on `bsky.social`).
-- A Stratos service you want to use (e.g., `https://stratos.actor`).
-- Basic knowledge of TypeScript/JavaScript.
+- An AT Protocol account that is enrolled with a Stratos service. If it is
+  not enrolled yet, see [User Enrollment](/client/enrollment), or sign in
+  once with the [demo webapp](/guide/webapp).
+- The DID and URL of that Stratos service. This tutorial uses
+  `did:web:stratos.example.com` and `https://stratos.example.com`.
+- An OAuth session for the user, from `@atproto/oauth-client-browser` or
+  `@atproto/oauth-client-node`. Stratos accepts DPoP-bound OAuth sessions
+  only; an app password does not work.
+- Basic TypeScript.
 
-## 1. Install the Client
-
-First, install the Stratos client library along with the standard AT Protocol API:
+## 1. Install the client
 
 ```bash
 pnpm add @northskysocial/stratos-client @atproto/api
 ```
 
-## 2. Discover an Enrollment
+## 2. Look up the enrollment
 
-Before you can post to Stratos, you need to find the user's enrollment record on their PDS. This record tells the client which Stratos service the user is registered with.
+Every enrolled user has a public `zone.stratos.actor.enrollment` record on
+their PDS. It says which Stratos service they joined, which boundaries they
+hold, and who keeps their private posts.
 
 ```typescript
-import {
-  getEnrollmentByServiceDid,
-  resolveServiceUrl,
-} from '@northskysocial/stratos-client'
+import { getEnrollmentByServiceDid } from '@northskysocial/stratos-client'
 
-const userDid = 'did:plc:your-user-did'
-const pdsUrl = 'https://bsky.social' // Or your custom PDS
-const serviceDid = 'did:web:stratos.example.com'
+const STRATOS_DID = 'did:web:stratos.example.com'
+const STRATOS_URL = 'https://stratos.example.com'
 
-// Discover the enrollment record
-const enrollment = await getEnrollmentByServiceDid(userDid, pdsUrl, serviceDid)
+const userDid = session.sub // the signed-in user's DID
+const pdsUrl = 'https://pds.example.com' // the user's PDS
+
+const enrollment = await getEnrollmentByServiceDid(userDid, pdsUrl, STRATOS_DID)
 
 if (!enrollment) {
-  throw new Error('User is not enrolled with any Stratos service.')
+  throw new Error('This user is not enrolled with this Stratos service.')
 }
 
-// Resolve the service URL
-const serviceUrl = resolveServiceUrl(enrollment, pdsUrl)
-console.log(`Stratos service found at: ${serviceUrl}`)
+console.log(enrollment.custody) // 'stratos' or 'pds'
+console.log(enrollment.boundaries) // the boundaries the user holds
 ```
 
-## 3. Create a Private Post
+## 3. Find the right door
 
-Now that you have the service URL, you can create a private post. You'll need an authenticated session from your OAuth flow or a temporary session for testing.
+The post goes to one of two places, depending on **custody**:
+
+- `stratos` custody: the Stratos service keeps the user's posts.
+- `pds` custody: the user's own PDS keeps them, in a protected space.
+
+`resolveRepositoryTarget` makes the choice. You give it the hosts you
+already trust: the Stratos URL from your app's configuration, and the PDS
+your session is bound to. It does not follow URLs published in the
+enrollment record, because anyone can write those.
+
+```typescript
+import { resolveRepositoryTarget } from '@northskysocial/stratos-client'
+
+const target = resolveRepositoryTarget(enrollment, {
+  authorityServiceUrl: STRATOS_URL,
+  sessionPdsUrl: pdsUrl,
+})
+
+if (target.kind === 'unresolved') {
+  throw new Error(`Cannot route this user: ${target.reason}`)
+}
+```
+
+`target.kind` is now `'stratos'` or `'pds'`, and `target.url` is where the
+post goes.
+
+## 4. Write the post
+
+Pick one boundary the user holds. A post belongs to exactly one.
+
+```typescript
+const boundary = `${STRATOS_DID}/engineering`
+const text = 'Hello from the engineering room!'
+const createdAt = new Date().toISOString()
+```
+
+### If Stratos keeps the posts
+
+Send a normal `createRecord` to the Stratos service. Wrap the session's
+`fetchHandler` so the request goes to `target.url` and still carries the
+session's DPoP proof.
 
 ```typescript
 import { Agent } from '@atproto/api'
-import { createServiceFetchHandler } from '@northskysocial/stratos-client'
 
-// Assume 'session' is your existing AT Protocol session
-const stratosAgent = new Agent((url, init) => {
-  const fullUrl = new URL(url, serviceUrl)
-  return session.fetchHandler(fullUrl.href, init)
-})
+if (target.kind === 'stratos') {
+  const stratos = new Agent((url, init) =>
+    session.fetchHandler(new URL(url, target.url).href, init),
+  )
 
-// Create a post restricted to the 'engineering' boundary
-await stratosAgent.com.atproto.repo.createRecord({
-  repo: userDid,
-  collection: 'zone.stratos.feed.post',
-  record: {
-    $type: 'zone.stratos.feed.post',
-    text: 'Hello from the private engineering channel!',
-    boundary: {
-      $type: 'zone.stratos.boundary.defs#Domains',
-      values: [
-        {
-          $type: 'zone.stratos.boundary.defs#Domain',
-          value: 'did:web:stratos.actor/engineering',
-        },
-      ],
+  const res = await stratos.com.atproto.repo.createRecord({
+    repo: userDid,
+    collection: 'zone.stratos.feed.post',
+    record: {
+      $type: 'zone.stratos.feed.post',
+      text,
+      boundary: {
+        $type: 'zone.stratos.boundary.defs#Domains',
+        values: [
+          { $type: 'zone.stratos.boundary.defs#Domain', value: boundary },
+        ],
+      },
+      createdAt,
     },
-    createdAt: new Date().toISOString(),
-  },
-})
+  })
 
-console.log('Private post created successfully!')
+  console.log(res.data.uri)
+  // at://did:plc:…/zone.stratos.feed.post/3k…
+}
 ```
 
-## Summary
+The boundary must be the full identifier, it must belong to this Stratos
+service, and the user must hold it. Otherwise Stratos rejects the write.
 
-You've successfully:
+### If the user's PDS keeps the posts
 
-1. Located a Stratos enrollment via the PDS.
-2. Routed an XRPC request to the correct Stratos instance.
-3. Created a record with a domain-scoped boundary.
+Write into the boundary's _space_ on the PDS. The space URI is the boundary,
+spelled the protocol's way.
 
-## Next Steps
+```typescript
+if (target.kind === 'pds') {
+  const space = `at://${STRATOS_DID}/space/zone.stratos.space.feed/engineering`
 
-- Explore [Boundary Visibility](../client/boundaries.md) to learn how access is restricted.
-- See [Feed Generator](/operator/feedgen-ng) to learn how private posts appear in feeds.
+  const res = await session.fetchHandler(
+    new URL('/xrpc/com.atproto.space.createRecord', target.url).href,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        space,
+        repo: userDid,
+        collection: 'zone.stratos.feed.post',
+        validate: false,
+        record: { $type: 'zone.stratos.feed.post', text, createdAt },
+      }),
+    },
+  )
+
+  if (!res.ok) throw new Error(`PDS write failed (${res.status})`)
+}
+```
+
+The record carries no `boundary` field here. The space it is written into is
+its boundary. The address of the new record has seven segments and starts
+with the Stratos DID, not the author:
+
+```text
+at://did:web:stratos.example.com/space/zone.stratos.space.feed/engineering/did:plc:…/zone.stratos.feed.post/3k…
+```
+
+Your OAuth session needs the space scope for this write. See
+[User Enrollment](/client/enrollment) for the scopes to request.
+
+## 5. Read it back
+
+For a Stratos-kept post, read it from Stratos with the same agent. This
+continues inside the `stratos` branch of step 4:
+
+```typescript
+const rkey = res.data.uri.split('/').pop()!
+
+const { data } = await stratos.com.atproto.repo.getRecord({
+  repo: userDid,
+  collection: 'zone.stratos.feed.post',
+  rkey,
+})
+
+console.log(data.value)
+```
+
+Try the same call from an account that does not hold the `engineering`
+boundary. The answer is `RecordNotFound`. Stratos gives the same answer for
+a post that does not exist, so nobody can probe for hidden posts.
+
+Other members see the post in the boundary's feed, served by the
+[feed generator](/architecture/feed-generator).
+
+## What you did
+
+1. Found a user's enrollment on their PDS.
+2. Chose the repository host from custody, using only hosts you trust.
+3. Wrote a post into exactly one boundary.
+4. Saw that a non-member cannot tell the post exists.
+
+## Next steps
+
+- [Client Integration](/client/getting-started): the full client guide.
+- [Domain Boundaries](/client/boundaries): how boundaries restrict access.
+- [Core Concepts](/guide/concepts): custody, spaces, and the trust model.

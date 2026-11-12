@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Stratos
   text: Private permissioned data for ATprotocol
-  tagline: Share private posts with approved members using your AT Protocol identity.
+  tagline: Rooms with a guest list, for communities on the open network. Share posts with members only, using the identity you already have.
   actions:
     - theme: brand
       text: Get Started
@@ -18,12 +18,15 @@ hero:
 
 features:
   - icon: 🔐
-    title: Boundary Access Control
-    details: Posts belong to access groups called boundaries. Only members of a matching group can read them.
+    title: Boundaries
+    details: Every private post belongs to one boundary, a named group. Only current members of that group can read it.
   - icon: 🪪
-    title: OAuth Enrollment
-    details: Users enroll via standard ATprotocol OAuth. An enrollment record is published to their PDS for endpoint discovery.
-  - icon: 🔗
-    title: Private Record Reads
-    details: Apps find the right service through enrollment records and receive full posts only after an access check.
+    title: Your identity, your PDS
+    details: Members enroll with their existing AT Protocol account. If their PDS supports permissioned spaces, their posts stay there.
+  - icon: 🧭
+    title: Aligned with spaces
+    details: Each boundary is a permissioned space. Stratos is the authority that decides who belongs and issues key-bound credentials.
+  - icon: 📰
+    title: Private feeds
+    details: The feed generator collects members' posts and serves each viewer only the boundaries they hold.
 ---

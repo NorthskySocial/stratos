@@ -1,323 +1,321 @@
 # Getting Started
 
-This guide explains how to integrate Stratos private namespace functionality into ATprotocol client
-applications. It is based on how Stratos was integrated with [pdsls](https://pdsls.dev)
-and maps patterns to the Bluesky [social-app](https://github.com/bluesky-social/social-app) codebase
-as a reference architecture.
+A guest arrives at the house. Your app is the friend who walks them in. You
+check the guest list, find out where they keep their things, and carry each
+new post to the right place. This page follows that walk from sign-in to the
+first private post.
 
-## What is Stratos?
+The house metaphor comes from
+[What Is Shared Private Data?](/guide/what-is-stratos). A boundary is a room.
+Enrollment is the guest list. Custody is who keeps the guest's records.
 
-Stratos enables private, domain-scoped content within ATprotocol. Users can create posts visible
-only to members of specific groups or communities.
+## What you are integrating
 
-| Concept         | Description                                                                                                                                   |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stratos Service | A server that stores private records (separate from PDS)                                                                                      |
-| Enrollment      | User must enroll with a Stratos service to create private content                                                                             |
-| Domain Boundary | Specifies which community can view a record. Values are fully qualified as `{serviceDid}/{name}` (e.g. `did:web:stratos.example.com/general`) |
-| Private Post    | A `zone.stratos.feed.post` record with boundary restrictions                                                                                  |
+| Concept         | Description                                                                                         |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| Stratos service | The space authority. It decides who belongs to each boundary.                                       |
+| Enrollment      | A user joins a Stratos service through OAuth. A record on their PDS announces it.                   |
+| Boundary        | A named access group, written `{serviceDid}/{name}`, such as `did:web:stratos.example.com/general`. |
+| Custody         | Who hosts the user's private records: `stratos` or `pds`.                                           |
+| Private post    | A `zone.stratos.feed.post` record in exactly one boundary.                                          |
 
-## The `stratos-client` Helper Library
+## The packages
 
-The `@northskysocial/stratos-client` package provides the building blocks for enrollment discovery,
-service routing, record verification, and OAuth scope management:
+`@northskysocial/stratos-client` has the framework-neutral building blocks:
 
-| Module       | What it provides                                                                                                                           |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| discovery    | `getEnrollmentByServiceDid()` — find enrollment for a specific service                                                                     |
-| routing      | `resolveRepositoryTarget()`, `createServiceFetchHandler()`, `findEnrollmentByService()` — select custody-aware XRPC targets                |
-| verification | `fetchAndVerifyRecord()`, `verifyCidIntegrity()`, `resolveServiceSigningKey()`, `resolveUserSigningKey()` — three-tier record verification |
-| scopes       | `buildStratosScopes()`, `STRATOS_SCOPES` — build OAuth scope strings for Stratos collections                                               |
-
-Install it alongside your AT Protocol client library:
+| Module       | What it provides                                                                                                           |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| discovery    | `getEnrollmentByServiceDid`, `discoverEnrollments`, `parseEnrollmentRecord`                                                |
+| routing      | `resolveRepositoryTarget`, `createServiceFetchHandler`, `findEnrollmentByService`, `resolveServiceUrl`, `serviceDIDToRkey` |
+| verification | `verifyRecordCid`, `verifyStratosRecord`, `verifyCidIntegrity`, `resolveServiceSigningKey`, `resolveUserSigningKey`        |
+| attestation  | `verifyEnrollmentAttestation`                                                                                              |
+| scopes       | `buildStratosScopes`, `buildCollectionScope`, `buildRpcScope`, `STRATOS_SCOPES`                                            |
 
 ```bash
 npm install @northskysocial/stratos-client
 ```
 
-::: tip When to use stratos-client vs. raw XRPC
-The code examples in this guide show both approaches. Use `stratos-client` when you want concise,
-tested helpers — use raw XRPC when you need full control or are using a framework that doesn't fit
-the helper signatures.
-:::
+`@northskysocial/stratos-browser` adds browser OAuth and DPoP helpers. The
+demo webapp uses it. See
+[Browser helpers](/client/custody#browser-helpers-stratos-browser).
 
-## Quick Start
+## Authentication in one paragraph
 
-### 1. Check for Stratos Support
+Stratos accepts the user's AT Protocol OAuth session. Every authenticated user
+request carries two headers: `Authorization: DPoP <access_token>` and
+`DPoP: <proof>`. Stratos does not accept `Authorization: Bearer` from a user.
+Your OAuth library builds both headers when you pass it the absolute Stratos
+URL. See [DPoP-aware transport](#dpop-aware-transport).
 
-Determine if the user's AppView knows about their Stratos access:
+## The walk
+
+### 1. Discover the enrollment
+
+The enrollment record lives on the user's PDS. Its record key is the Stratos
+service DID, so one `getRecord` call finds it:
 
 ```typescript
-import { Agent } from '@atproto/api'
+import { getEnrollmentByServiceDid } from '@northskysocial/stratos-client'
 
-const agent = new Agent('https://appview.example.com')
+// Both values come from your app configuration.
+const STRATOS_URL = 'https://stratos.example.com'
+const STRATOS_DID = 'did:web:stratos.example.com'
 
-const profile = await agent.getProfile({ actor: agent.session.did })
-const stratosDomains = profile.data.associated?.stratosDomains ?? []
-
-if (stratosDomains.length > 0) {
-  console.log('User has stratos access for:', stratosDomains)
+async function findEnrollment(userDid: string, sessionPdsUrl: string) {
+  return getEnrollmentByServiceDid(userDid, sessionPdsUrl, STRATOS_DID)
 }
 ```
 
-### 2. Discover Enrollment
+A `null` result means the user is not enrolled. Send them through
+[enrollment](/client/enrollment#initiating-enrollment).
 
-Discover enrollment records from the user's PDS:
+`STRATOS_URL` and `STRATOS_DID` are trusted values from your configuration.
+The record's own `service` and `repoHost` fields are hints. Do not route
+credentials by them.
+
+### 2. Read custody and resolve the target
+
+The enrollment says who keeps the user's records. `resolveRepositoryTarget`
+turns that into a host you can trust:
 
 ```typescript
-import {
-  getEnrollmentByServiceDid,
-  resolveRepositoryTarget,
+import { resolveRepositoryTarget } from '@northskysocial/stratos-client'
+import type {
+  RepositoryTarget,
+  StratosEnrollment,
 } from '@northskysocial/stratos-client'
 
-const enrollment = await getEnrollmentByServiceDid(did, pdsUrl, serviceDid)
-const STRATOS_ENDPOINT = 'https://stratos.example.com'
+const STRATOS_URL = 'https://stratos.example.com'
+
+function resolveTarget(
+  enrollment: StratosEnrollment | null,
+  sessionPdsUrl: string,
+): RepositoryTarget {
+  return resolveRepositoryTarget(enrollment, {
+    authorityServiceUrl: STRATOS_URL,
+    sessionPdsUrl,
+  })
+}
 ```
 
-`STRATOS_ENDPOINT` is a trusted authority endpoint from app configuration. The published
-`enrollment.service` and `repoHost` are hints, not trusted repository hosts. Bind the PDS URL to
-the authenticated session, then resolve the repository target before forwarding credentials.
+The result has a `kind`:
 
-See [User Enrollment](/client/enrollment) for the full enrollment record schema and all discovery
-variants.
+- `stratos`: Stratos hosts the repo. Use `com.atproto.repo.*` on `target.url`.
+- `pds`: the user's PDS hosts the repo. Use `com.atproto.space.*` there.
+- `unresolved`: stop. `target.reason` names the cause.
 
-### 3. Create a Routed Agent
+[Custody and Routing](/client/custody) lists every reason and the rules for
+trusted hosts.
 
-When using `@atproto/api` with an OAuth session, you **must** wrap the session's `fetchHandler` to
-route requests to the selected repository target URL.
+### 3. Write the post
 
-::: warning Common mistake
-`new Agent(session)` followed by `agent.serviceUrl = new URL(target.url)` can still resolve
-requests against the OAuth token's audience instead of the selected target. Use the wrapper below
-to pass the target's absolute URL to the authenticated handler.
-:::
-
-Using `stratos-client` (with `@atcute/client`):
-
-```typescript
-import { Client } from '@atcute/client'
-import { createServiceFetchHandler } from '@northskysocial/stratos-client'
-
-const target = resolveRepositoryTarget(enrollment, {
-  authorityServiceUrl: STRATOS_ENDPOINT,
-  sessionPdsUrl: pdsUrl,
-})
-if (target.kind === 'unresolved') throw new Error(target.reason)
-const handler = createServiceFetchHandler(authenticatedHandler, target.url)
-const rpc = new Client({ handler })
-```
-
-Use repo methods only when `target.kind === 'stratos'`; use space methods when it is `pds`.
-
-Using `@atproto/api` directly:
+Branch on `target.kind`. The Stratos branch writes a three-segment record. The
+PDS branch writes into a space.
 
 ```typescript
 import { Agent } from '@atproto/api'
 import type { OAuthSession } from '@atproto/oauth-client-browser'
+import type { RepositoryTarget } from '@northskysocial/stratos-client'
 
-function createRepositoryAgent(
-  session: OAuthSession,
-  targetUrl: string,
-): Agent {
+function createRoutedAgent(session: OAuthSession, targetUrl: string): Agent {
   return new Agent((url: string, init: RequestInit) => {
     const fullUrl = new URL(url, targetUrl)
     return session.fetchHandler(fullUrl.href, init)
   })
 }
-```
 
-### 4. Create a Private Post
+async function createPrivatePost(
+  session: OAuthSession,
+  target: RepositoryTarget,
+  boundary: string,
+  spaceUri: string,
+  text: string,
+): Promise<void> {
+  const createdAt = new Date().toISOString()
 
-```typescript
-const repositoryAgent = createRepositoryAgent(session, target.url)
-
-if (target.kind === 'stratos')
-  await repositoryAgent.com.atproto.repo.createRecord({
-    repo: userDid,
-    collection: 'zone.stratos.feed.post',
-    record: {
-      $type: 'zone.stratos.feed.post',
-      text: 'This is a private post for my community!',
-      boundary: {
-        $type: 'zone.stratos.boundary.defs#Domains',
-        values: [
-          {
-            $type: 'zone.stratos.boundary.defs#Domain',
-            value: 'did:web:stratos.example.com/general',
-          },
-        ],
+  if (target.kind === 'stratos') {
+    const agent = createRoutedAgent(session, target.url)
+    await agent.com.atproto.repo.createRecord({
+      repo: session.sub,
+      collection: 'zone.stratos.feed.post',
+      record: {
+        $type: 'zone.stratos.feed.post',
+        text,
+        boundary: {
+          $type: 'zone.stratos.boundary.defs#Domains',
+          values: [
+            { $type: 'zone.stratos.boundary.defs#Domain', value: boundary },
+          ],
+        },
+        createdAt,
       },
-      createdAt: new Date().toISOString(),
-    },
-  })
+    })
+    return
+  }
+
+  if (target.kind === 'pds') {
+    const response = await session.fetchHandler(
+      '/xrpc/com.atproto.space.createRecord',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          space: spaceUri,
+          repo: session.sub,
+          collection: 'zone.stratos.feed.post',
+          validate: false,
+          record: { $type: 'zone.stratos.feed.post', text, createdAt },
+        }),
+      },
+    )
+    if (!response.ok) {
+      throw new Error(`PDS write failed (${response.status})`)
+    }
+    return
+  }
+
+  throw new Error(`Cannot route the write: ${target.reason}`)
+}
 ```
 
-For PDS custody, use `com.atproto.space.createRecord` on the trusted PDS endpoint.
-Pass `space: at://{authorityDid}/space/zone.stratos.space.feed/{spaceKey}`
-alongside `repo`, `collection`, and `record`. The returned record URI has seven
-segments and starts with the authority DID. A legacy repo write to the PDS
-origin does not create a space record.
+`boundary` is one of the user's boundaries, such as
+`did:web:stratos.example.com/general`. `spaceUri` is the same boundary as a
+space: `at://did:web:stratos.example.com/space/zone.stratos.space.feed/general`.
 
-## Service Routing
+Three rules apply to the Stratos branch:
 
-Repository routing depends on custody. Stratos custody uses authority repo methods.
-PDS custody uses space methods on the user's PDS.
+- `values` holds exactly one boundary. Zero or two fail with
+  `InvalidDomainCount`.
+- The boundary must belong to this service and to the user.
+- Stratos answers `PdsCustodyWriteForbidden` if the user has `pds` custody.
 
-When a user has multiple enrollments, select the target enrollment first (see
-`findEnrollmentByService` in [User Enrollment](/client/enrollment)), then select the repository
-target from its custody and trusted host information.
+The PDS branch needs the space scope on the session. See
+[Space scope](/client/custody#space-scope).
 
-### Routing logic
+::: warning Common mistake
+`new Agent(session)` followed by `agent.serviceUrl = new URL(target.url)`
+still sends requests to the session's PDS. Pass the absolute target URL to the
+session's fetch handler, as `createRoutedAgent` does.
+:::
 
-```typescript
-import { resolveRepositoryTarget } from '@northskysocial/stratos-client'
+### 4. Read
 
-const target = resolveRepositoryTarget(enrollment, {
-  authorityServiceUrl,
-  authoritativeRepoHost,
-  sessionPdsUrl,
-})
-if (target.kind === 'unresolved') throw new Error(target.reason)
-```
+For a single Stratos-hosted record, call `com.atproto.repo.getRecord` on
+Stratos. For a feed, call the feed generator. It serves posts from both
+custody classes. See [Reading Records](/client/reading-records).
 
-Use `target.url` with repo methods for `stratos` custody or space methods for `pds` custody, as
-shown in [Create a Private Post](#4-create-a-private-post). `resolveServiceUrl` returns the
-authority URL; it does not select a repository host.
+## Which operations go where
 
-### Which operations route to Stratos
+| Operation                                        | Host                       | Auth                            |
+| ------------------------------------------------ | -------------------------- | ------------------------------- |
+| `com.atproto.repo.createRecord`                  | Stratos, `stratos` custody | DPoP                            |
+| `com.atproto.repo.deleteRecord`                  | Stratos, `stratos` custody | DPoP                            |
+| `com.atproto.repo.applyWrites`                   | Stratos, `stratos` custody | DPoP                            |
+| `com.atproto.repo.uploadBlob`                    | Stratos, `stratos` custody | DPoP                            |
+| `com.atproto.repo.getRecord`, `listRecords`      | Stratos, `stratos` custody | Optional DPoP                   |
+| `com.atproto.repo.describeRepo`                  | Stratos, `stratos` custody | None                            |
+| `com.atproto.sync.getBlob`                       | Stratos, `stratos` custody | Optional DPoP                   |
+| `zone.stratos.sync.getRepo`                      | Stratos, `stratos` custody | DPoP, repo owner only           |
+| `zone.stratos.enrollment.status`                 | Stratos                    | Optional DPoP                   |
+| `com.atproto.space.createRecord`, `deleteRecord` | User's PDS, `pds` custody  | The PDS session and space scope |
+| `zone.stratos.feedgen.getFeed`                   | Feed generator             | Service auth JWT                |
 
-| Operation                            | Routes to Stratos?               |
-| ------------------------------------ | -------------------------------- |
-| `com.atproto.repo.getRecord`         | Stratos custody only             |
-| `com.atproto.repo.listRecords`       | Stratos custody only             |
-| `com.atproto.repo.describeRepo`      | Stratos custody only             |
-| `com.atproto.repo.createRecord`      | Stratos custody only             |
-| `com.atproto.repo.deleteRecord`      | Stratos custody only             |
-| `com.atproto.repo.applyWrites`       | Stratos custody only             |
-| `com.atproto.sync.getRecord`         | Stratos custody only             |
-| `zone.stratos.space.listBlobs`       | Yes (lists blob CIDs in a space) |
-| `zone.stratos.sync.getRepo`          | Yes (full repo export as CAR)    |
-| `zone.stratos.repo.importRepo`       | Yes (import repo from CAR)       |
-| `zone.stratos.sync.subscribeRecords` | Yes (WebSocket firehose)         |
-| `com.atproto.sync.getBlob`           | No (not yet implemented)         |
+Stratos does not serve `com.atproto.repo.putRecord`,
+`com.atproto.sync.getRecord`, or `zone.stratos.repo.importRepo`. The
+[API Reference](/client/api-reference) has the full list.
 
-## DPoP-Aware Transport
+## DPoP-aware transport
 
-Stratos endpoints require authenticated requests using the same DPoP credentials as the user's PDS
-session. The key insight: _pass an absolute URL to the OAuth agent's fetch handler to redirect
-requests to a different origin while keeping DPoP proof generation valid._
+A DPoP proof names the URL it was made for, in its `htu` claim. The OAuth
+client derives `htu` from the request URL. So one rule covers everything:
+pass an absolute URL on the target origin to the session's fetch handler. The
+proof then matches the Stratos origin instead of the PDS.
 
-The underlying DPoP implementation derives `htu` (the HTTP URI claim in the DPoP proof JWT) from the
-actual request URL. By passing an absolute URL with the Stratos origin, the proof is generated for
-that origin rather than the PDS.
-
-### Transport wrapper
-
-This authority transport applies to `stratos` custody only. For `pds` custody, route to the
-authenticated PDS host with space methods; see [Create a Private Post](#4-create-a-private-post).
+`createServiceFetchHandler` does this for `@atcute/client`:
 
 ```typescript
+import { Client } from '@atcute/client'
 import { createServiceFetchHandler } from '@northskysocial/stratos-client'
+import type { FetchHandler } from '@northskysocial/stratos-client'
 
-// agent.handle is the FetchHandler from your OAuth session
-if (enrollment.custody !== 'stratos')
-  throw new Error('Expected Stratos custody')
-const handler = createServiceFetchHandler(agent.handle, authorityServiceUrl)
+function createStratosClient(
+  authenticatedHandler: FetchHandler,
+  stratosUrl: string,
+): Client {
+  return new Client({
+    handler: createServiceFetchHandler(authenticatedHandler, stratosUrl),
+  })
+}
 ```
 
-`createServiceFetchHandler` accepts any `FetchHandler` from `@atcute/client` (a function
-`(pathname, init) => Promise<Response>`) and returns a `FetchHandlerObject` that resolves relative
-pathnames against the target service URL.
+`authenticatedHandler` is any function `(pathname, init) => Promise<Response>`
+that attaches the access token and the proof. The returned object resolves
+each pathname against `stratosUrl`. A third argument, `{ headers }`, sets extra
+headers on every request.
 
-### Client construction
+Use this transport for `stratos` custody only.
 
-Construct the RPC client from the resolved target in [Create a Private Post](#4-create-a-private-post).
-The enrollment's authority `service` URL is not the PDS repository host.
+## Adoption path
 
-## Minimum Viable Adoption Path
+Add Stratos support in steps:
 
-For apps that want to add basic Stratos support incrementally:
+### Step 1: Read
 
-### Step 1: Read-only hydration
+1. Discover the enrollment when a session starts. Cache it for the session.
+2. Resolve the repository target.
+3. Show a feed from the feed generator.
+4. Render an empty state for a `stratos`-custody repo that has no records yet.
 
-1. Add enrollment discovery to session establishment
-2. Store enrollment state
-3. Add a Stratos mode toggle (settings or UI chrome)
-4. For Stratos-custody records, route `getRecord` / `listRecords` through the authority client;
-   for PDS-custody space records, use the trusted PDS target
-5. Handle empty Stratos-custody collections gracefully (the enrolled repo may have no records yet)
+### Step 2: Write
 
-### Step 2: Write routing
+1. Add the Stratos scopes to your OAuth client metadata. See
+   [OAuth Scopes](/client/enrollment#oauth-scopes).
+2. Branch the composer on `target.kind`.
+3. Let the user pick one boundary per post.
 
-1. For `stratos` custody, route repo `createRecord` / `deleteRecord` / `applyWrites` through the
-   authority client; for `pds` custody, use the corresponding space methods on the authenticated
-   PDS target shown in [Create a Private Post](#4-create-a-private-post)
-2. Add scope declarations to OAuth metadata
-3. Add scope selector UI with dependency gating
+### Step 3: Verify
 
-### Step 3: Verification
-
-1. Implement two-tier verification for Stratos records
-2. Surface verification level in UI
+1. Verify the enrollment attestation.
+2. Verify record CIDs with `verifyRecordCid`.
+3. Show the verification level honestly. See
+   [Attestation Verification](/client/attestation).
 
 ### Step 4: Rich features
 
-1. Boundary-aware UI (show boundary chips, filter by boundary)
-2. AppView-side hydration for feed integration
-3. Blob support when available
+1. Boundary chips and filters.
+2. Images. See [Creating Records](/client/creating-records#post-with-images).
+3. Feed attachments. See [Private Feed Attachments](/client/feedgen-blobs).
 
-## social-app Integration Mapping
+## social-app integration mapping
 
-For a React Native/Expo app like Bluesky's social-app:
+For a React Native app shaped like Bluesky's
+[social-app](https://github.com/bluesky-social/social-app):
 
 ### State layer
 
-| Concept            | social-app location           | Pattern                                                             |
-| ------------------ | ----------------------------- | ------------------------------------------------------------------- |
-| Enrollment state   | `src/state/stratos.tsx` (new) | React Context with `StratosEnrollment \| null \| undefined`         |
-| Active mode toggle | `src/state/stratos.tsx` (new) | Boolean state with setter                                           |
-| Discovery trigger  | `src/state/session/index.tsx` | Call `getEnrollmentByServiceDid` in `resumeSession` / `login` flows |
-| Cleanup on logout  | `src/state/session/index.tsx` | Reset enrollment and active state in logout handler                 |
-
-### Query hooks
-
-| Hook                     | Location                             | Implementation                                  |
-| ------------------------ | ------------------------------------ | ----------------------------------------------- |
-| `useStratosEnrollment()` | `src/state/stratos.tsx`              | Context consumer returning enrollment state     |
-| `useStratosActive()`     | `src/state/stratos.tsx`              | Context consumer returning active boolean       |
-| `useStratosClient()`     | `src/state/queries/stratos.ts` (new) | Returns correctly-routed `Client` based on mode |
-
-### Agent/transport
-
-In `src/state/session/agent.ts`, the `BskyAppAgent` wraps transport. In a query hook, resolve the
-repository target before constructing a client. Use authority repo methods for `stratos` custody;
-use authenticated PDS space methods for `pds` custody. See
-[Create a Private Post](#4-create-a-private-post) for the write route.
+| Concept           | social-app location           | Pattern                                                             |
+| ----------------- | ----------------------------- | ------------------------------------------------------------------- |
+| Enrollment state  | `src/state/stratos.tsx` (new) | React Context with `StratosEnrollment \| null \| undefined`         |
+| Repository target | `src/state/stratos.tsx` (new) | Derived from the enrollment with `resolveRepositoryTarget`          |
+| Discovery trigger | `src/state/session/index.tsx` | Call `getEnrollmentByServiceDid` in `resumeSession` / `login` flows |
+| Cleanup on logout | `src/state/session/index.tsx` | Reset enrollment state in the logout handler                        |
 
 ### View integration
 
-| View            | Integration point                  | What changes                                            |
-| --------------- | ---------------------------------- | ------------------------------------------------------- |
-| Post thread     | `src/screens/PostThread/index.tsx` | Hydrate from Stratos when viewing boundary-scoped posts |
-| Feed            | `src/state/queries/post-feed.ts`   | Include Stratos records in feed via hydration           |
-| Settings        | `src/screens/Settings/`            | Stratos enrollment status, mode toggle                  |
-| Record creation | Post composer                      | Select repo or space `createRecord` by custody          |
+| View            | Integration point                | What changes                                   |
+| --------------- | -------------------------------- | ---------------------------------------------- |
+| Feed            | `src/state/queries/post-feed.ts` | Add a feed generator query for private posts   |
+| Settings        | `src/screens/Settings/`          | Enrollment status and boundaries               |
+| Record creation | Post composer                    | Select repo or space `createRecord` by custody |
 
-### Key differences from pdsls
+## Next steps
 
-| Aspect              | pdsls (SolidJS)        | social-app (React)                   |
-| ------------------- | ---------------------- | ------------------------------------ |
-| State               | `createSignal()`       | React Context / `useState`           |
-| Reactivity          | Signal auto-tracking   | Query key invalidation / `useEffect` |
-| Refetch trigger     | Resource source signal | Query key includes `stratosActive`   |
-| Client construction | Per-call               | `useMemo` with deps or query hook    |
-
-## Next Steps
-
-- [User Enrollment](/client/enrollment) — enrollment record schema, discovery functions, attestation
-  verification, OAuth scopes
-- [Creating Records](/client/creating-records) — posts with images, replies, rich text
-- [Reading Records](/client/reading-records) — direct access, read path integration, and verified
-  reads
-- [Domain Boundaries](/client/boundaries) — understand visibility rules
-- [Attestation Verification](/client/attestation) — trust model, chained verification, signing keys
+- [Custody and Routing](/client/custody): the two custody classes, record
+  addresses, and trusted hosts.
+- [User Enrollment](/client/enrollment): the enrollment record, the OAuth
+  flow, and scopes.
+- [Creating Records](/client/creating-records): posts, replies, and images.
+- [Reading Records](/client/reading-records): single records, feeds, and
+  verification.
+- [Domain Boundaries](/client/boundaries): visibility rules.
+- [Attestation Verification](/client/attestation): the trust model.

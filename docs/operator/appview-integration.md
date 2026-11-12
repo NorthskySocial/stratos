@@ -1,7 +1,24 @@
 # AppView Integration
 
-AppViews index Stratos content by subscribing to the `zone.stratos.sync.subscribeRecords` WebSocket
-endpoint — similar to how AppViews subscribe to PDS firehoses, but scoped per-user.
+::: danger Legacy integration path
+No maintained AppView consumes this stream. The only consumer in this
+repository, `stratos-indexer`, is deprecated and cannot authenticate to the
+current Stratos service as shipped. See
+[Stratos Indexer Architecture](/indexer-architecture).
+
+The supported way to serve boundary-scoped feeds is the
+[Feed Generator](/operator/feedgen-ng). Read this page only if you build your
+own consumer of `zone.stratos.sync.subscribeRecords`.
+:::
+
+This page was written for AppViews that index Stratos content. The Stratos
+service still implements the stream as Steps 1 and 2 describe. The indexing,
+query, and hydration code in the later steps is an illustration. It is not
+taken from a running system.
+
+An AppView indexed Stratos content by subscribing to the
+`zone.stratos.sync.subscribeRecords` WebSocket endpoint. This is similar to a
+PDS firehose subscription, but scoped to one user per connection.
 
 ## Step 1: Service Authentication
 
@@ -91,6 +108,8 @@ async function subscribeToUser(
   })
 
   ws.on('message', async (data) => {
+    // A frame is two CBOR values: a header whose `t` names the type, such as
+    // `#commit`, then the body. `decodeFrame` stands for that step.
     const frame = decodeFrame(data)
 
     if (frame.$type === 'zone.stratos.sync.subscribeRecords#commit') {
@@ -229,31 +248,38 @@ async function hydrateRecord(stub: RecordStub, viewerDomains: string[]) {
 }
 ```
 
-## Step 5: Determine Viewer's Domains
+## Step 6: Determine the Viewer's Boundaries
 
-The AppView needs to know what domains a viewer belongs to.
+The AppView must know which boundaries the viewer holds. Ask the Stratos
+service. It is the authority for enrollment.
 
-**Option A — Index from Stratos posts:**
+Do not derive the viewer's boundaries from posts the viewer wrote. A boundary
+on a post is a claim made by its author. It does not prove current
+enrollment, and it misses every member who has not posted.
 
 ```typescript
-async function getViewerDomains(viewerDid: string): Promise<string[]> {
-  const result = await db
-    .selectFrom('stratos_posts')
-    .select('boundary_domains')
-    .where('did', '=', viewerDid)
-    .execute()
+async function getViewerBoundaries(viewerDid: string): Promise<string[]> {
+  const url = new URL(
+    '/xrpc/zone.stratos.identity.resolveEnrollments',
+    stratosEndpoint,
+  )
+  url.searchParams.set('did', viewerDid)
 
-  const domains = new Set<string>()
-  for (const row of result) {
-    for (const domain of JSON.parse(row.boundary_domains)) {
-      domains.add(domain)
-    }
+  const response = await fetch(url)
+  if (!response.ok) throw new Error('Enrollment lookup failed')
+
+  const { enrolled, boundaries } = (await response.json()) as {
+    did: string
+    enrolled: boolean
+    boundaries: string[]
   }
-  return [...domains]
+  return enrolled ? boundaries : []
 }
 ```
 
-**Option B — Community registry lookup:** Query a community service for verified domain membership.
+Treat a failed lookup as "no access". Cache the answer for a short time only,
+so that a removed member loses access soon. The feed generator keeps it for
+300 seconds.
 
 ## Complete Indexer Example
 

@@ -1,55 +1,86 @@
 # Introduction
 
-Stratos lets AT Protocol communities share posts with approved members. People
-keep their existing identities. A small enrollment record on each user's PDS
-helps apps find the service; private posts are not published in the public feed.
+On the AT Protocol, everything you post is public. That is the point of it:
+one open room, and anyone may listen.
 
-## How It Works
+Some conversations need a door. A writing group shares drafts. A community
+plans an event. A team talks shop. Today those conversations leave the
+network and move to a group chat somewhere else.
 
-<script setup>
-</script>
+Stratos adds the door. A community runs a Stratos service, decides who is a
+member, and its members share posts that only other members can read. Nobody
+needs a new account. People keep their AT Protocol identity, their handle,
+and their PDS.
 
-<DataFlowAnimation />
+If you want the idea without the vocabulary, read
+[Shared Private Data, Explained Simply](/guide/what-is-stratos) first.
 
-1. _A user enrolls_ with a Stratos service via OAuth. The service writes a
-   `zone.stratos.actor.enrollment` record to the user's PDS.
-2. _The user creates a private post_ for a boundary. Stratos stores it for
-   users whose PDS does not support spaces. Otherwise, the user's PDS stores it
-   in a protected space, with Stratos managing membership.
-3. _The feed generator collects posts_ from Stratos and from PDS users whom
-   Stratos lists as members. It verifies PDS updates before saving posts in its
-   encrypted local database.
-4. _A viewer requests a feed_ with a signed service token. The feed generator
-   checks the viewer's current Stratos membership and returns only posts they
-   are allowed to read.
+## How it works
 
-## Repository Packages
+Follow one post from the keyboard to a friend's screen.
+
+1. **A user enrolls.** They sign in to a Stratos service with their existing
+   account, through OAuth. Stratos records which _boundaries_ they belong to
+   and writes one small public record, `zone.stratos.actor.enrollment`, to
+   their PDS. That record tells apps where to look.
+2. **The user writes a private post** for one boundary. Where the post is
+   kept depends on the user's PDS. If the PDS supports permissioned spaces,
+   the post stays there, in a protected space. If not, Stratos keeps it.
+   Either way, Stratos decides who belongs.
+3. **The feed generator collects posts.** It follows the members Stratos
+   lists, and no one else. It verifies what it reads and keeps a bounded,
+   encrypted copy.
+4. **A viewer asks for a feed.** The request carries a signed token that
+   says who is asking. The feed generator checks the viewer's current
+   membership with Stratos and returns only posts they may read.
+
+A private post never reaches the public firehose.
+
+## Three words to know
+
+| Word           | Meaning                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------------ |
+| **Boundary**   | A named group. A post belongs to exactly one boundary, and only members of it can read the post. |
+| **Enrollment** | A user's membership of a Stratos service, and the list of boundaries they hold.                  |
+| **Custody**    | Who keeps a user's private posts: Stratos, or the user's own PDS.                                |
+
+[Core Concepts](/guide/concepts) explains each one. The
+[Glossary](/guide/glossary) is the quick reference.
+
+## What is in the repository
 
 | Package              | Description                                                              |
 | -------------------- | ------------------------------------------------------------------------ |
 | `stratos-core`       | Domain logic, storage interfaces, schema, validation, MST commit builder |
-| `stratos-service`    | HTTP/XRPC service, OAuth enrollment, repo CRUD, sync export, adapters    |
-| `stratos-client`     | Discovery, routing, verification, and OAuth scope helpers                |
+| `stratos-service`    | The Stratos service: OAuth enrollment, record storage, credentials, sync |
+| `stratos-client`     | Client library: discovery, routing, verification, OAuth scope helpers    |
+| `stratos-browser`    | Browser OAuth and DPoP helpers for web apps                              |
 | `stratos-feedgen-ng` | Feed generator with encrypted local storage and membership-checked feeds |
 | `webapp`             | [Svelte demo client](/guide/webapp) for enrollment and private posting   |
-| `lexicons`           | JSON-based lexicon definitions                                           |
+| `lexicons`           | Lexicon definitions for every `zone.stratos.*` method and record         |
 
-The TypeScript feedgen and AppView indexer remain in the repository for
-rollback or historical reference but are deprecated.
+The TypeScript feed generator (`stratos-feedgen`) and the AppView indexer
+(`stratos-indexer`) are deprecated. They stay in the repository for rollback
+and reference.
 
-## Architecture
+## Where to go next
 
-For a deeper dive into the technical details of Stratos, see the following documentation:
+**To understand it:**
 
-- [**Reading Private Records**](/architecture/hydration) — How apps fetch full private records after an access check.
-- [**Feed Generator**](/operator/feedgen-ng) — How posts enter the encrypted local database and how access is checked.
-- [**Enrollment Signing**](/architecture/enrollment-signing) — How user keys and boundary attestations are managed.
-- [**Multi-Domain Enrollment**](/architecture/multi-domain-enrollment) — How users can enroll in multiple boundaries across different services.
+- [Shared Private Data, Explained Simply](/guide/what-is-stratos): the idea,
+  in plain words.
+- [Core Concepts](/guide/concepts): boundaries, enrollment, custody, and
+  trust.
+- [Permissioned Spaces](/architecture/permissioned-spaces): how Stratos
+  aligns with the AT Protocol spaces proposal.
 
-## Next Steps
+**To build with it:**
 
-- Read the [Glossary](/guide/glossary) for key terms and concepts.
-- Follow the [First Post Tutorial](/guide/first-post) to get started as a user.
-- Follow the [Client Integration Guide](/client/getting-started) to add Stratos to your app.
-- See the [Operator Guide](/operator/overview) to deploy a Stratos service.
-- Explore the [Architecture](/architecture/hydration) for deep technical detail.
+- [Your First Post](/guide/first-post): a short tutorial.
+- [Client Integration](/client/getting-started): add Stratos to your app.
+- [Lexicons](/lexicons/): every method and record.
+
+**To run it:**
+
+- [Operator Guide](/operator/overview): deploy and manage a Stratos service.
+- [Feed Generator](/operator/feedgen-ng): run the feed generator beside it.

@@ -1,8 +1,12 @@
 # Design Document: Shared Stratos Sync-Client Library
 
 > Historical design note for the older TypeScript feed generator and indexer.
-> The current [Feed Generator](/operator/feedgen-ng) uses Rust sync code and
-> does not use the library proposed here.
+> It is a proposal that was never built: no `stratos-sync-client` package
+> exists in the repository. The current [Feed Generator](/operator/feedgen-ng)
+> uses Rust sync code and does not use the library proposed here. Line
+> references to `stratos-feedgen` and to code inside `stratos-indexer` other
+> than the ones in section 2.5(a) are as written at the time and may have
+> drifted.
 
 ---
 
@@ -142,14 +146,14 @@ Three independent breaks, any one of which is sufficient:
 **(a) The upgrade is rejected — no `Authorization` header.**
 `createSubscribeAuthVerifier` requires an inter-service JWT and documents that
 "the master sync token, query-parameter tokens, and anonymous access have been
-removed" (`stratos-service/src/infra/auth/verifiers.ts:619-620`); it throws
+removed" (`stratos-service/src/infra/auth/verifiers.ts:823-824`); it throws
 `AuthRequiredError` unless `authorization` starts with `'Bearer '`
-(`:632-634`). The indexer sends `syncToken` as a query parameter and constructs
+(`:837-839`). The indexer sends `syncToken` as a query parameter and constructs
 a bare `new WebSocket(wsUrl)` with no headers, for both the actor stream
-(`stratos-indexer/src/sync/actor-syncer.ts:156-162`) and the service stream
-(`stratos-indexer/src/sync/stratos-sync.ts:120-124`). The fix is not a
+(`stratos-indexer/src/sync/actor-syncer.ts:169-175`) and the service stream
+(`stratos-indexer/src/sync/stratos-sync.ts:122-126`). The fix is not a
 one-line header addition: the indexer constructs the socket with the global
-`WebSocket` (`stratos-indexer/src/sync/actor-syncer.ts:162`), whose standard
+`WebSocket` (`stratos-indexer/src/sync/actor-syncer.ts:175`), whose standard
 constructor accepts no headers option, so sending `Authorization: Bearer`
 requires swapping the WebSocket implementation — as the feedgen already does
 via its injectable `wsCtor` defaulting to `ws`
@@ -758,7 +762,7 @@ surface — section 2.6, fact 2 — has no consumer;
 `com.atproto.repo.listRecords`, not Stratos, and `sync-manager.ts:64-71`
 constructs it with `repoProvider: ''`). **But the code path is unreachable at
 `52da35b`**: the stream neither authenticates
-(`stratos-service/src/infra/auth/verifiers.ts:632-634` requires a `Bearer`
+(`stratos-service/src/infra/auth/verifiers.ts:837-839` requires a `Bearer`
 header; `actor-syncer.ts:156-162` sends a query parameter and no headers) nor
 decodes (`actor-syncer.ts:448` reads `.t` off the `[value, remainder]` tuple
 returned by `decodeFirst`, per
@@ -774,7 +778,7 @@ Arguing from Step 1b's four facts:
 | Cursor advances past a skip      | Yes                       | `actor-syncer.ts:346-355` + `:417`                                                                                                                                                                                                                               |
 | A heal path exists               | **Server-side only**      | `listRepoOps`/`listRecordPaths` exist (`stratos-service/src/features/pull-sync/`) with no consumer; `backfill.ts:152-169` pages the PDS, not Stratos; `sync-manager.ts:65` passes `repoProvider: ''`; no pull-sync/`getRepo`/resync call anywhere in the package |
 | Indexed rows are source of truth | Yes by design, moot today | `atproto-stratos/packages/bsky/src/stratos/store.ts:77-135` reads indexed rows with no re-hydration — but of `stratos_post`, which this indexer never writes (`actor-syncer.ts:493-565`, `storage/db.ts:95-120`)                                                 |
-| The path is live                 | **No**                    | `verifiers.ts:632-634` vs `actor-syncer.ts:156-162`; `actor-syncer.ts:448` vs `@atcute/cbor` `decode.d.ts:1`                                                                                                                                                     |
+| The path is live                 | **No**                    | `verifiers.ts:837-839` vs `actor-syncer.ts:169-175`; `actor-syncer.ts:448` vs `@atcute/cbor` `decode.d.ts:1`                                                                                                                                                     |
 
 **The fact that drove the rating is the absence of a heal client**, exactly as
 on the feedgen side. A lost commit cannot be recovered by the consumers as they

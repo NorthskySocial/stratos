@@ -1,40 +1,66 @@
 # Stratos WebApp (Demo Client)
 
-The Stratos WebApp is a simple, single-page application (SPA) that demonstrates how to interact with the Stratos private namespace service. It is built with Svelte 5 and Vite.
+The fastest way to understand Stratos is to walk through the house once.
+The Stratos WebApp is a small demo client that lets you do exactly that:
+sign in, join a Stratos service, post into a boundary, and watch the post
+show up in a private feed.
 
-## Purpose
+It is a single-page application built with Svelte 5 and Vite. It is a
+reference for client developers, not a product.
 
-The WebApp serves several roles in the Stratos ecosystem:
+## What you can do with it
 
-1. **Reference Implementation**: Shows how to use `@atproto/oauth-client-browser` with Stratos.
-2. **User Interface**: Provides a way for users to enroll in a Stratos service and manage their private posts.
-3. **Developer Demo**: Demonstrates how to fetch and merge public and private feeds client-side.
+- **Sign in** with your AT Protocol handle, through OAuth.
+- **Enroll** with a Stratos service and see your enrollment status and
+  boundaries.
+- **Write a private post** into one boundary, from the same composer you use
+  for public posts.
+- **Read one feed** that mixes your public posts with private posts from the
+  boundaries you hold.
+- **Inspect a record**: its URI, CID, and raw content, for public and private
+  posts alike.
 
-## Key Features
+## What it demonstrates
 
-- **AT Protocol OAuth**: Sign in using your ATProtocol handle.
-- **Enrollment Management**: Check your enrollment status and trigger enrollment with a Stratos service.
-- **Unified Feed**: Displays a combined view of your public posts (from your PDS) and private posts (from Stratos).
-- **Private Posting**: Create posts with boundary-based access control directly from the composer.
-- **Record Inspector**: View the raw CID and metadata for both public and private records.
+The webapp is worth reading because it handles both custody classes.
+
+When you post privately, it looks at your enrollment's `custody`:
+
+- `stratos` custody: it sends `com.atproto.repo.createRecord` to the Stratos
+  service.
+- `pds` custody: it sends `com.atproto.space.createRecord` to your own PDS,
+  into the boundary's space.
+
+Private feeds come from the feed generator. The webapp calls
+`zone.stratos.feedgen.getFeed` through your PDS, with an `atproto-proxy`
+header that names the feed generator. Attachments load the same way, through
+`zone.stratos.feedgen.getBlob`.
 
 ## Architecture
 
-The WebApp is structured as a standard Vite-based Svelte project. It uses the following libraries:
+The webapp is a standard Vite + Svelte project. It builds on these
+libraries:
 
-- `atproto-api`: For interacting with standard ATProtocol endpoints.
-- `@atproto/oauth-client-browser`: For managing the OAuth flow.
-- `@northskysocial/stratos-client`: For Stratos-specific discovery, routing, and record verification.
+| Library                                   | Used for                                      |
+| ----------------------------------------- | --------------------------------------------- |
+| `@atproto/api`                            | Standard AT Protocol calls                    |
+| `@atproto/oauth-client-browser`           | The OAuth flow and DPoP-bound sessions        |
+| `@northskysocial/stratos-browser`         | Browser OAuth setup and service-routed agents |
+| `@northskysocial/stratos-client`          | The OAuth scopes a Stratos app requests       |
+| `@northskysocial/stratos-core` (`spaces`) | Mapping a boundary to its space URI           |
 
-### Core Modules
+### Core modules
 
-- `src/lib/auth.ts`: A wrapper around the ATProtocol OAuth client.
-- `src/lib/stratos-agent.ts`: An agent that routes requests to the correct Stratos service based on the user's enrollment.
-- `src/lib/feed.ts`: Logic for fetching posts from both the AppView (public) and Stratos (private) and merging them.
+| Module                     | Role                                                             |
+| -------------------------- | ---------------------------------------------------------------- |
+| `src/lib/auth.ts`          | OAuth client setup and session restore                           |
+| `src/lib/stratos.ts`       | Enrollment discovery, the enroll redirect, and the boundary list |
+| `src/lib/stratos-agent.ts` | An agent that routes requests to the Stratos service             |
+| `src/lib/feed.ts`          | Fetches public and private posts and merges them into one feed   |
+| `src/lib/Composer.svelte`  | The composer, including the custody-aware private write          |
+| `src/lib/post-deletion.ts` | Custody-aware delete                                             |
 
-## Local Development
-
-To run the WebApp locally for development:
+## Local development
 
 ```bash
 cd webapp
@@ -42,18 +68,26 @@ pnpm install
 pnpm dev
 ```
 
-The WebApp will be available at `http://localhost:5173`.
+The webapp is then available at `http://localhost:5173`.
 
-### Connecting to Remote Services
+### Connecting to remote services
 
-You can point the local WebApp at remote Stratos and AppView instances using environment variables:
+The webapp reads its endpoints from `VITE_*` environment variables, such as
+`VITE_STRATOS_URL`, `VITE_STRATOS_SERVICE_DID`, `VITE_FEEDGEN_DID`, and
+`VITE_APPVIEW_URL`.
+
+To point a local webapp at a deployed Stratos service, use the `northsky`
+mode:
 
 ```bash
 pnpm dev:northsky
 ```
 
-This uses the `northsky` profile which pulls configuration from a root `.env.northsky` file.
+Vite loads the matching `.env.northsky` file. The webapp looks for env files
+two directories above `webapp/`, which is the directory that contains the
+`stratos` checkout.
 
 ## Deployment
 
-The WebApp can be deployed as a static site. The repository includes a `Dockerfile` that builds the app and serves it via Nginx, which is suitable for containerized environments like Docker or Kubernetes.
+The webapp builds to a static site. The repository includes a `Dockerfile`
+that builds it and serves it with Nginx.

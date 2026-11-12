@@ -1,12 +1,109 @@
 # API Reference
 
-## Endpoints
+This page lists the XRPC methods that the Stratos service serves, the
+authentication each accepts, and the errors each returns.
+
+## Authentication
+
+| Name             | Headers                                                                                    | Who uses it                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| DPoP             | `Authorization: DPoP <access_token>` and `DPoP: <proof>`                                   | A user's AT Protocol OAuth session                                   |
+| Optional DPoP    | The same, or no `Authorization` header                                                     | Anonymous callers are allowed, and see no private data               |
+| Service JWT      | `Authorization: Bearer <service-jwt>`                                                      | Another service, such as the feed generator                          |
+| Space credential | `Authorization: Atproto-Space <credential>` with HTTP signature, or the legacy `DPoP` form | A syncing service or app with a credential from `getSpaceCredential` |
+| Admin            | A server-side session cookie                                                               | Operators                                                            |
+
+Stratos does not accept `Authorization: Bearer <access_token>` from a user.
+A user request without a DPoP proof answers `401 AuthenticationRequired`.
+
+When Stratos needs a fresh DPoP nonce, it answers 401 with a `DPoP-Nonce`
+header. Repeat the request with that nonce. OAuth client libraries do this
+for you.
+
+## Error format
+
+Every XRPC error has this body:
+
+```json
+{ "error": "RecordNotFound", "message": "Record not found" }
+```
+
+Match on `error`. Most errors answer HTTP 400, including `RecordNotFound`.
+The [error table](#error-codes) lists the exceptions.
+
+## Method index
+
+### Repo methods
+
+These serve `stratos` custody. Stratos hosts the repo.
+
+| Method                             | Type      | Auth                               |
+| ---------------------------------- | --------- | ---------------------------------- |
+| `com.atproto.repo.createRecord`    | procedure | DPoP                               |
+| `com.atproto.repo.deleteRecord`    | procedure | DPoP                               |
+| `com.atproto.repo.applyWrites`     | procedure | DPoP                               |
+| `com.atproto.repo.uploadBlob`      | procedure | DPoP                               |
+| `zone.stratos.repo.uploadBlob`     | procedure | DPoP                               |
+| `com.atproto.repo.getRecord`       | query     | Optional DPoP                      |
+| `com.atproto.repo.listRecords`     | query     | Optional DPoP                      |
+| `com.atproto.repo.describeRepo`    | query     | None                               |
+| `zone.stratos.repo.hydrateRecord`  | query     | Optional DPoP, or space credential |
+| `zone.stratos.repo.hydrateRecords` | procedure | Optional DPoP, or space credential |
+
+### Sync methods
+
+| Method                               | Type         | Auth                                 |
+| ------------------------------------ | ------------ | ------------------------------------ |
+| `zone.stratos.sync.getRepo`          | query        | DPoP, repo owner only                |
+| `com.atproto.sync.getBlob`           | query        | Optional DPoP                        |
+| `zone.stratos.sync.getBlob`          | query        | Optional DPoP                        |
+| `zone.stratos.sync.listRepoOps`      | query        | Service JWT, or space credential     |
+| `zone.stratos.sync.listRecordPaths`  | query        | Service JWT, or space credential     |
+| `zone.stratos.sync.listBoundaries`   | query        | Service JWT from an enrolled service |
+| `zone.stratos.sync.subscribeRecords` | subscription | Service JWT                          |
+
+### Space methods
+
+| Method                                  | Type      | Auth                                                    |
+| --------------------------------------- | --------- | ------------------------------------------------------- |
+| `zone.stratos.space.getSpaceCredential` | procedure | DPoP, or a delegation token                             |
+| `zone.stratos.space.getRecord`          | query     | DPoP (space member), or space credential                |
+| `zone.stratos.space.listBlobs`          | query     | DPoP (space member), or space credential                |
+| `zone.stratos.space.listRepos`          | query     | Service JWT, or space credential. Never a user session. |
+
+### Enrollment, identity, and server methods
+
+| Method                                     | Type      | Auth          |
+| ------------------------------------------ | --------- | ------------- |
+| `zone.stratos.enrollment.status`           | query     | Optional DPoP |
+| `zone.stratos.enrollment.unenroll`         | procedure | DPoP          |
+| `zone.stratos.identity.resolveEnrollments` | query     | None          |
+| `zone.stratos.identity.getKeyHistory`      | query     | None          |
+| `zone.stratos.server.listDomains`          | query     | None          |
+| `zone.stratos.server.listRooms`            | query     | None          |
+
+`zone.stratos.admin.*` methods need an admin session. The
+[Operator Guide](/operator/overview) covers them.
+
+### Not served by Stratos
+
+| Method                         | Note                                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------ |
+| `com.atproto.repo.putRecord`   | Use an `update` action in `applyWrites`.                                             |
+| `com.atproto.sync.getRecord`   | Removed. Stratos serves no single-record proof.                                      |
+| `zone.stratos.repo.importRepo` | A lexicon exists. No handler is registered.                                          |
+| `zone.stratos.feedgen.*`       | Served by the feed generator. See [Private Feed Attachments](/client/feedgen-blobs). |
+| `com.atproto.space.*`          | Served by a spaces-capable PDS, for `pds` custody.                                   |
+
+## Records
 
 ### Create Record
 
 ```http
 POST /xrpc/com.atproto.repo.createRecord
-Authorization: Bearer <access_token>
+Authorization: DPoP <access_token>
+DPoP: <proof>
+Content-Type: application/json
 
 {
   "repo": "<user-did>",
@@ -15,34 +112,112 @@ Authorization: Bearer <access_token>
 }
 ```
 
+Returns `{ "uri": "...", "cid": "..." }`. Optional body fields: `rkey` and
+`validate`. `repo` must equal the caller's DID. The collection must start
+with `zone.stratos.`.
+
+### Delete Record
+
+```http
+POST /xrpc/com.atproto.repo.deleteRecord
+Authorization: DPoP <access_token>
+DPoP: <proof>
+Content-Type: application/json
+
+{
+  "repo": "<user-did>",
+  "collection": "zone.stratos.feed.post",
+  "rkey": "<record-key>"
+}
+```
+
+### Apply Writes
+
+```http
+POST /xrpc/com.atproto.repo.applyWrites
+Authorization: DPoP <access_token>
+DPoP: <proof>
+Content-Type: application/json
+
+{
+  "repo": "<user-did>",
+  "writes": [
+    {
+      "action": "create",
+      "collection": "zone.stratos.feed.post",
+      "record": { ... }
+    },
+    {
+      "action": "update",
+      "collection": "zone.stratos.feed.post",
+      "rkey": "<tid>",
+      "record": { ... }
+    },
+    {
+      "action": "delete",
+      "collection": "zone.stratos.feed.post",
+      "rkey": "<tid>"
+    }
+  ]
+}
+```
+
+Each write is `{ action, collection, rkey, record }`. This is not the
+upstream `$type` and `value` shape.
+
 ### Get Record
 
 ```http
-GET /xrpc/com.atproto.repo.getRecord?repo=<did>&collection=<collection>&rkey=<rkey>
-Authorization: Bearer <access_token>
+GET /xrpc/com.atproto.repo.getRecord?repo=<did>&collection=<collection>&rkey=<rkey>[&cid=<cid>]
+Authorization: DPoP <access_token>
+DPoP: <proof>
 ```
+
+Returns `{ "uri": "...", "cid": "...", "value": { ... } }`. A missing record
+and a record the viewer may not read both answer `400 RecordNotFound`.
+
+### List Records
+
+```http
+GET /xrpc/com.atproto.repo.listRecords?repo=<did>&collection=<collection>[&limit=<n>][&cursor=<c>][&reverse=true]
+Authorization: DPoP <access_token>
+DPoP: <proof>
+```
+
+Returns `{ "records": [...], "cursor": "..." }`. The default `limit` is 50.
+Stratos filters by boundary after paging, so a page can be shorter than
+`limit`.
+
+### Describe Repo
+
+```http
+GET /xrpc/com.atproto.repo.describeRepo?repo=<did>
+```
+
+No authentication. Answers `RepoNotFound` when Stratos hosts no repo for the
+DID.
 
 ### Hydrate Record
 
-A single record hydration endpoint that applies boundary-aware filtering.
-
 ```http
 GET /xrpc/zone.stratos.repo.hydrateRecord?uri=<at-uri>[&cid=<cid>]
-Authorization: Bearer <access_token>
+Authorization: DPoP <access_token>
+DPoP: <proof>
 ```
 
-Returns the record if the viewer is authorized, otherwise throws `RecordNotFound` (404) or `RecordBlocked` (400).
+Returns `{ uri, cid, value }`. Answers `400 RecordNotFound` or
+`400 RecordBlocked`.
 
 ### Hydrate Records (Batch)
 
-Batch hydration for up to 100 records.
-
 ```http
 POST /xrpc/zone.stratos.repo.hydrateRecords
-Authorization: Bearer <access_token>
+Authorization: DPoP <access_token>
+DPoP: <proof>
+Content-Type: application/json
 
 {
-  "uris": ["at://did:plc:user1/collection/tid1", "at://did:plc:user1/collection/tid2"]
+  "uris": ["at://did:plc:user1/zone.stratos.feed.post/tid1"]
 }
 ```
 
@@ -56,99 +231,44 @@ Returns:
 }
 ```
 
-### Apply Writes (Batch)
+At most 100 URIs. `value` is the stored record. Stratos adds no `source`
+field.
 
-Batch create/update/delete operations.
-
-```http
-POST /xrpc/com.atproto.repo.applyWrites
-Authorization: Bearer <access_token>
-
-{
-  "repo": "<user-did>",
-  "writes": [
-    {
-      "action": "create",
-      "collection": "zone.stratos.feed.post",
-      "record": { ... }
-    },
-    {
-      "action": "delete",
-      "collection": "zone.stratos.feed.post",
-      "rkey": "<tid>"
-    }
-  ]
-}
-```
-
-### List Records
-
-```http
-GET /xrpc/com.atproto.repo.listRecords?repo=<did>&collection=<collection>&limit=50
-Authorization: Bearer <access_token>
-```
+## Blobs
 
 ### Upload Blob
 
-Upload a blob to the repository.
-
 ```http
 POST /xrpc/com.atproto.repo.uploadBlob
-Authorization: Bearer <access_token>
-Content-Type: * /* (binary)
+Authorization: DPoP <access_token>
+DPoP: <proof>
+Content-Type: <mime-type>
 
 <blob-data>
 ```
 
-Returns: `{ blob: BlobRef }`
-
-Stratos-specific alias (preferred for boundary filtering on some implementations):
-
-```http
-POST /xrpc/zone.stratos.repo.uploadBlob
-Authorization: Bearer <access_token>
-Content-Type: * /* (binary)
-
-<blob-data>
-```
+Returns `{ "blob": BlobRef }`. `zone.stratos.repo.uploadBlob` is the same
+handler under a Stratos name.
 
 ### Get Blob
 
-Fetch a blob from an actor's repository. Requires the viewer to have access to at least one record referencing this blob.
-
 ```http
 GET /xrpc/com.atproto.sync.getBlob?did=<did>&cid=<cid>
-Authorization: Bearer <access_token>
+Authorization: DPoP <access_token>
+DPoP: <proof>
 ```
 
-Returns: `* /*` (binary content)
+Returns the blob bytes. `zone.stratos.sync.getBlob` is the same handler.
+Errors: `BlobBlocked`, `RepoNotFound`, `BlobNotFound`.
 
-Stratos-specific alias (guarantees boundary-aware access control):
-
-```http
-GET /xrpc/zone.stratos.sync.getBlob?did=<did>&cid=<cid>
-Authorization: Bearer <access_token>
-```
-
-### Delete Record
-
-```http
-POST /xrpc/com.atproto.repo.deleteRecord
-Authorization: Bearer <access_token>
-
-{
-  "repo": "<user-did>",
-  "collection": "zone.stratos.feed.post",
-  "rkey": "<record-key>"
-}
-```
+## Spaces
 
 ### Get Space Record
 
 ```http
 GET /xrpc/zone.stratos.space.getRecord?space=<at-uri>&repo=<did>&collection=<nsid>&rkey=<rkey>
-Authorization: Bearer <access_token> | DPoP <space-credential>
-DPoP: <proof>   (legacy cnf.jkt credentials only)
+Authorization: DPoP <access_token> | Atproto-Space <space-credential> | DPoP <space-credential>
+DPoP: <proof>   (user sessions and legacy cnf.jkt credentials)
 Response: { "uri": "...", "cid": "...", "value": { ... } }
 ```
 
@@ -163,12 +283,15 @@ hash-bound to the credential (`ath`). The record must belong to the requested
 space; records outside it (including records with no space) resolve to
 `RecordNotFound`.
 
+This method reads records that Stratos hosts. It does not read a
+`pds`-custody user's PDS.
+
 ### List Space Blobs
 
 ```http
 GET /xrpc/zone.stratos.space.listBlobs?space=<at-uri>&repo=<did>[&since=<rev>][&limit=<n>][&cursor=<cursor>]
-Authorization: Bearer <access_token> | DPoP <space-credential>
-DPoP: <proof>   (legacy cnf.jkt credentials only)
+Authorization: DPoP <access_token> | Atproto-Space <space-credential> | DPoP <space-credential>
+DPoP: <proof>   (user sessions and legacy cnf.jkt credentials)
 Response: { "cids": ["..."], "cursor": "..." }
 ```
 
@@ -178,76 +301,19 @@ rules as Get Space Record apply: standard user auth requires space membership, o
 a space credential for that space. `limit` is 1-1000 (default 500); a `cursor`
 is returned when a page is full.
 
-### Export Repository
+### List Space Repos
 
 ```http
-GET /xrpc/zone.stratos.sync.getRepo?did=<did>[&since=<rev>]
-Authorization: Bearer <access_token>
-Response: application/vnd.ipld.car
+GET /xrpc/zone.stratos.space.listRepos?space=<at-uri>[&limit=<n>][&cursor=<cursor>]
+Authorization: Bearer <service-jwt> | Atproto-Space <space-credential>
+Response: { "repos": [{ "did": "...", "custody": "...", "rev": "...", "host": "...", "hostSource": "..." }], "cursor": "..." }
 ```
 
-Returns a full CAR of the repo: all record blocks, MST nodes, and the signed commit.
-
-### Import Repository
-
-```http
-POST /xrpc/zone.stratos.repo.importRepo
-Authorization: Bearer <access_token>
-Content-Type: application/vnd.ipld.car
-Response: { "imported": <count> }
-```
-
-### Check Enrollment
-
-```http
-GET /xrpc/zone.stratos.enrollment.status?did=<user-did>
-```
-
-Unauthenticated, enrolled DID: returns `{ did, enrolled: true, active, enrolledAt, signingKey, enrollmentRkey }`.  
-Unauthenticated, not-enrolled DID: returns `{ did, enrolled: false, eligible }` — `eligible: true`
-means the DID may enroll but has not yet done so (no enrollment row, record writes are denied).
-`eligible` is omitted when the eligibility check cannot complete (for example, DID resolution
-fails); do not treat an absent `eligible` as a denial.  
-Authenticated: also returns boundaries for enrolled DIDs, plus a fresh attestation when the DID
-has at least one boundary.
-
-### Pull Sync: List Repo Operations
-
-```http
-GET /xrpc/zone.stratos.sync.listRepoOps?did=<did>[&since=<rev>][&limit=<n>][&cursor=<c>][&excludeValues=true]
-Authorization: Bearer <service-jwt>
-```
-
-Incremental pull sync of a repo's operation log, mirroring `com.atproto.space.listRepoOps`
-semantics. Returns record operations after the `since` revision, boundary-gated to the
-caller's enrolled boundaries, with current record values inlined by default. Each op carries
-required-nullable `cid` and `prev` fields: `cid` null means delete, `prev` null means create
-(or that the superseded value predates the returned window). The response reaches the head
-of the oplog when `cursor` is absent; the repo's current signed commit is then included
-(unless the repo has no commits yet), consistent with the ops returned. If a concurrent
-write is detected, the response instead carries a cursor with no commit. Such a response can
-carry no ops and repeat the cursor you sent, so poll again while a cursor is present, and do
-not read an unchanged cursor as a stall. Under continuous writes the head may never be
-reached. A write that commits after the head probe is not detected; it falls outside this
-snapshot and arrives on a later poll. `cursor` takes precedence over `since` when both are
-supplied. The `OplogTruncated` error (stricter than upstream, which silently restarts) means
-the oplog cannot serve your position truthfully - fall back to full-state recovery below. It
-is returned when the cursor is malformed, predates retained history (compaction passed it),
-or names a seq beyond retained history (e.g. after a log reset); when `since` falls outside
-the retained `[oldest, newest]` rev window or that window cannot be verified; and when a
-retained op cannot be emitted truthfully (a non-delete op without a cid, or a record key
-that fails the record-key format).
-
-### Pull Sync: List Record Paths (Full-State Recovery)
-
-```http
-GET /xrpc/zone.stratos.sync.listRecordPaths?did=<did>[&collection=<nsid>][&limit=<n>][&cursor=<c>][&excludeValues=true]
-Authorization: Bearer <service-jwt>
-```
-
-Enumerates a repo's record paths with their current CIDs (values inlined by default),
-boundary-gated. Use this as the fallback when `listRepoOps` returns `OplogTruncated`:
-enumerate paths, diff locally, and fetch misses.
+Lists the members of a space. `limit` is 1-1000 (default 100). `custody` is
+`stratos` or `pds`. `host` is the resolved repo host and `hostSource` is
+`authority-override` or `did-document`; both are absent when resolution
+fails. `rev` is present for `stratos` custody. A user session is never
+accepted.
 
 ### Get Space Credential
 
@@ -301,19 +367,152 @@ Member removal prevents renewal but does not automatically revoke credentials
 already accepted by a foreign PDS. See the
 [compatibility and rollout limits](../operator/configuration.md#october-spaces-rollout).
 
+## Export
+
+### Export Repository
+
+```http
+GET /xrpc/zone.stratos.sync.getRepo?did=<did>[&since=<rev>]
+Authorization: DPoP <access_token>
+DPoP: <proof>
+Response: application/vnd.ipld.car
+```
+
+Returns a full CAR of the repo: all record blocks, MST nodes, and the signed
+commit. `did` must equal the caller's DID. Any other DID answers
+`400 RepoNotFound`.
+
+## Enrollment and discovery
+
+### Check Enrollment
+
+```http
+GET /xrpc/zone.stratos.enrollment.status?did=<user-did>
+```
+
+Unauthenticated, enrolled DID: returns `{ did, enrolled: true, active, enrolledAt, signingKey, enrollmentRkey }`.  
+Unauthenticated, not-enrolled DID: returns `{ did, enrolled: false, eligible }` — `eligible: true`
+means the DID may enroll but has not yet done so (no enrollment row, record writes are denied).
+`eligible` is omitted when the eligibility check cannot complete (for example, DID resolution
+fails); do not treat an absent `eligible` as a denial.  
+Authenticated: also returns boundaries for enrolled DIDs, plus a fresh attestation when the DID
+has at least one boundary.
+
+### Unenroll
+
+```http
+POST /xrpc/zone.stratos.enrollment.unenroll
+Authorization: DPoP <access_token>
+DPoP: <proof>
+Content-Type: application/json
+
+{}
+```
+
+Returns `{ "success": true }`. Deletes the enrollment, the Stratos-hosted
+records, the signing key, and the enrollment record on the user's PDS.
+
+### Resolve Enrollments
+
+```http
+GET /xrpc/zone.stratos.identity.resolveEnrollments?did=<did>
+Response: { "did": "...", "enrolled": true, "boundaries": ["did:web:stratos.example.com/general"] }
+```
+
+No authentication. `boundaries` is empty when the DID is not enrolled.
+
+### List Domains
+
+```http
+GET /xrpc/zone.stratos.server.listDomains
+Response: { "domains": ["did:web:stratos.example.com/general"] }
+```
+
+No authentication. Returns every boundary on the service.
+
+### List Rooms
+
+```http
+GET /xrpc/zone.stratos.server.listRooms
+Response: { "rooms": [{ "id": "...", "boundary": "...", "displayName": "...", "description": "...", "available": true }] }
+```
+
+No authentication. Returns the boundaries that the operator lists publicly.
+
+### Get Key History
+
+```http
+GET /xrpc/zone.stratos.identity.getKeyHistory
+```
+
+No authentication. Returns the signed history of the service's signing keys.
+`verifyEnrollmentAttestation` reads it to check an attestation from a retired
+key.
+
+## Sync for services
+
+### Subscribe Records
+
+```http
+GET /xrpc/zone.stratos.sync.subscribeRecords[?did=<did>][&cursor=<seq>][&domain=<boundary>]
+Authorization: Bearer <service-jwt>
+```
+
+A WebSocket stream of Stratos-hosted record changes. Messages are `#commit`,
+`#enrollment`, and `#info`. A cursor ahead of the stream fails with
+`FutureCursor`. A user session is not accepted.
+
+### Pull Sync: List Repo Operations
+
+```http
+GET /xrpc/zone.stratos.sync.listRepoOps?did=<did>[&since=<rev>][&limit=<n>][&cursor=<c>][&excludeValues=true]
+Authorization: Bearer <service-jwt> | Atproto-Space <space-credential>
+```
+
+Incremental pull sync of a repo's operation log, mirroring `com.atproto.space.listRepoOps`
+semantics. Returns record operations after the `since` revision, boundary-gated to the
+caller's enrolled boundaries, with current record values inlined by default. Each op carries
+required-nullable `cid` and `prev` fields: `cid` null means delete, `prev` null means create
+(or that the superseded value predates the returned window). The response reaches the head
+of the oplog when `cursor` is absent; the repo's current signed commit is then included
+(unless the repo has no commits yet), consistent with the ops returned. If a concurrent
+write is detected, the response instead carries a cursor with no commit. Such a response can
+carry no ops and repeat the cursor you sent, so poll again while a cursor is present, and do
+not read an unchanged cursor as a stall. Under continuous writes the head may never be
+reached. A write that commits after the head probe is not detected; it falls outside this
+snapshot and arrives on a later poll. `cursor` takes precedence over `since` when both are
+supplied. The `OplogTruncated` error (stricter than upstream, which silently restarts) means
+the oplog cannot serve your position truthfully - fall back to full-state recovery below. It
+is returned when the cursor is malformed, predates retained history (compaction passed it),
+or names a seq beyond retained history (e.g. after a log reset); when `since` falls outside
+the retained `[oldest, newest]` rev window or that window cannot be verified; and when a
+retained op cannot be emitted truthfully (a non-delete op without a cid, or a record key
+that fails the record-key format).
+
+### Pull Sync: List Record Paths (Full-State Recovery)
+
+```http
+GET /xrpc/zone.stratos.sync.listRecordPaths?did=<did>[&collection=<nsid>][&limit=<n>][&cursor=<c>][&excludeValues=true]
+Authorization: Bearer <service-jwt> | Atproto-Space <space-credential>
+```
+
+Enumerates a repo's record paths with their current CIDs (values inlined by default),
+boundary-gated. Use this as the fallback when `listRepoOps` returns `OplogTruncated`:
+enumerate paths, diff locally, and fetch misses.
+
 ## Record Types
 
 ### zone.stratos.feed.post
 
 ```typescript
-interface AppStratosFeedPost {
+interface StratosFeedPost {
   $type: 'zone.stratos.feed.post'
-  text: string // Required, max 300 chars
-  boundary: Boundary // Required
+  text: string // Max 300 graphemes
+  boundary: Boundary // Required for Stratos-hosted records
   createdAt: string // Required, ISO datetime
   facets?: Facet[] // Rich text annotations
-  reply?: ReplyRef // If this is a reply
-  embed?: Embed // Images, video, external links
+  reply?: ReplyRef // Root and parent must be Stratos posts
+  embed?: Embed // zone.stratos.embed.images, or an app.bsky.embed type
   langs?: string[] // Language tags, max 3
   labels?: SelfLabels // Content warnings
   tags?: string[] // Additional hashtags, max 8
@@ -321,31 +520,78 @@ interface AppStratosFeedPost {
 
 interface Boundary {
   $type: 'zone.stratos.boundary.defs#Domains'
-  values: Domain[] // Max 10 domains
+  values: [Domain] // Exactly one
 }
 
 interface Domain {
   $type: 'zone.stratos.boundary.defs#Domain'
-  value: string // Qualified boundary: '{serviceDid}/{name}', max 253 chars
+  value: string // '{serviceDid}/{name}', max 253 chars
+}
+```
+
+A record in a space on a user's PDS carries no `boundary`. The space names it.
+
+### zone.stratos.embed.images
+
+```typescript
+interface StratosEmbedImages {
+  $type: 'zone.stratos.embed.images'
+  images: Image[] // Max 4
+}
+
+interface Image {
+  image: BlobRef
+  alt: string
+  aspectRatio?: { width: number; height: number }
 }
 ```
 
 ## Error Codes
 
+Errors answer HTTP 400 unless the table says otherwise.
+
+### Authentication and limits
+
+| Error                    | Status | Description                                                       |
+| ------------------------ | ------ | ----------------------------------------------------------------- |
+| `AuthenticationRequired` | 401    | Missing or invalid credentials, or a write to another user's repo |
+| `RateLimitExceeded`      | 429    | The DID exceeded the write rate limit                             |
+
+### Writes
+
+| Error                      | Description                                                |
+| -------------------------- | ---------------------------------------------------------- |
+| `NotEnrolled`              | The caller has no active enrollment on this service        |
+| `PdsCustodyWriteForbidden` | The caller has `pds` custody and writes to their own PDS   |
+| `ServiceWriteForbidden`    | A service identity tried to write a record                 |
+| `InvalidCollection`        | The collection does not start with `zone.stratos.`         |
+| `InvalidRecord`            | The record failed validation                               |
+| `InvalidDomainCount`       | The record does not name exactly one boundary              |
+| `InvalidDomain`            | The boundary name is not a valid space key                 |
+| `ServiceMismatch`          | The boundary belongs to another Stratos service            |
+| `ForbiddenBoundary`        | The caller does not hold the boundary                      |
+| `InvalidSwap`              | The record does not match the swap condition               |
+| `ConcurrentModification`   | The repo changed during the write. Send the request again. |
+
+### Reads
+
+| Error            | Description                                                           |
+| ---------------- | --------------------------------------------------------------------- |
+| `RecordNotFound` | The record does not exist, or the viewer may not read it              |
+| `RecordBlocked`  | The viewer may not read the record (`hydrateRecord` only)             |
+| `TooManyUris`    | More than 100 URIs in `hydrateRecords`                                |
+| `RepoNotFound`   | Stratos hosts no such repo, or the caller does not own it (`getRepo`) |
+| `BlobBlocked`    | The viewer may not read the blob                                      |
+| `BlobNotFound`   | The repo has no such blob                                             |
+
+### Sync and spaces
+
 | Error                 | Description                                                       |
 | --------------------- | ----------------------------------------------------------------- |
-| `NotEnrolled`         | User hasn't enrolled with this Stratos service                    |
-| `InvalidCollection`   | Collection is not a valid stratos namespace                       |
-| `InvalidRecord`       | Record failed validation (e.g., missing boundary)                 |
-| `RecordNotFound`      | Record doesn't exist or user doesn't have access                  |
-| `RecordBlocked`       | Viewer blocked by boundary (for `hydrateRecord`)                  |
-| `AuthRequired`        | Endpoint requires authentication                                  |
-| `InvalidCar`          | CAR file is malformed or fails CID integrity                      |
-| `RepoAlreadyExists`   | Target repo already has a commit (import blocked)                 |
-| `TooManyUris`         | Too many URIs in batch request (max 100)                          |
 | `OplogTruncated`      | `since` predates retained oplog history (use full-state recovery) |
-| `RepoNotFound`        | Requested repo does not exist (sync endpoints)                    |
+| `FutureCursor`        | The `subscribeRecords` cursor is ahead of the stream              |
 | `InvalidToken`        | Delegation token failed verification or space mismatch            |
 | `UnknownSpace`        | Space URI malformed or space DID not this service                 |
+| `ProofRequired`       | No key is available to bind the space credential                  |
 | `AttestationRequired` | Space gates on app identity; no valid client attestation supplied |
 | `ClientNotAllowed`    | Attested `client_id` not in the space's allow-list                |

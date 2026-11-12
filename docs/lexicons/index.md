@@ -13,14 +13,25 @@ function ns(name) {
 
 # Lexicon Reference
 
-All AT Protocol lexicons defined by the Stratos service. Lexicons describe every XRPC method, record
-type, and shared definition available in this namespace (`zone.stratos.*`).
+Every lexicon under `lexicons/zone/stratos/` in the repository. A lexicon describes an XRPC method,
+a record type, or a shared definition in the `zone.stratos.*` namespace. The page is generated from
+the JSON files at build time.
+
+A lexicon on this page is a contract, not a promise that one service serves it. The Stratos service
+serves most methods. The feed generator serves `zone.stratos.feedgen.*`. The
+[API Reference](/client/api-reference#method-index) lists what the Stratos service serves and the
+authentication each method accepts.
+
+The space type `zone.stratos.space.feed` is not on this page. Its lexicon lives in
+`lexicons-spaces/zone/stratos/space/feed.json`. Stratos publishes it as a
+`com.atproto.lexicon.schema` record, and a PDS resolves it before it grants a space scope.
 
 <div class="lex-badge-legend">
   <span class="badge-item"><span class="lb badge-query">GET</span> Query — read-only XRPC call</span>
   <span class="badge-item"><span class="lb badge-procedure">POST</span> Procedure — write XRPC call</span>
   <span class="badge-item"><span class="lb badge-subscription">WS</span> Subscription — WebSocket stream</span>
   <span class="badge-item"><span class="lb badge-record">RECORD</span> Record type stored in repos</span>
+  <span class="badge-item"><span class="lb badge-object">OBJECT</span> Object type used inside records</span>
   <span class="badge-item"><span class="lb badge-defs">DEFS</span> Shared type definitions</span>
 </div>
 
@@ -40,6 +51,10 @@ type, and shared definition available in this namespace (`zone.stratos.*`).
 
 <LexiconGroup :lexicons="ns('boundary')" />
 
+## Embed
+
+<LexiconGroup :lexicons="ns('embed')" />
+
 ## Enrollment
 
 <LexiconGroup :lexicons="ns('enrollment')" />
@@ -47,6 +62,10 @@ type, and shared definition available in this namespace (`zone.stratos.*`).
 ## Feed
 
 <LexiconGroup :lexicons="ns('feed')" />
+
+## Feed Generator
+
+<LexiconGroup :lexicons="ns('feedgen')" />
 
 ## Identity
 
@@ -59,6 +78,10 @@ type, and shared definition available in this namespace (`zone.stratos.*`).
 ## Server
 
 <LexiconGroup :lexicons="ns('server')" />
+
+## Space
+
+<LexiconGroup :lexicons="ns('space')" />
 
 ## Sync
 
@@ -90,4 +113,9 @@ type, and shared definition available in this namespace (`zone.stratos.*`).
 .badge-subscription{ background: #7780DC; color: #fff; }
 .badge-record      { background: #2AFFBA; color: #0d2420; }
 .badge-defs        { background: #59B2CF; color: #0d1f2d; }
+</style>
+
+<style>
+/* Not scoped: the entry component renders this badge and has no color for it. */
+.badge-object { background: #E0B45C; color: #2d2108; }
 </style>

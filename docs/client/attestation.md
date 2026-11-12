@@ -1,162 +1,168 @@
 # Attestation Verification
 
-## Overview
+<script setup>
+import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimation.vue'
+</script>
 
-Each enrolled user's enrollment record includes a _service attestation_ — a DAG-CBOR payload signed
-by the Stratos service's secp256k1 key. This enables AppViews to verify a user's enrollment and
-boundaries offline without querying the enrollment status endpoint on every request.
+The note on a guest's door says "I am a guest at this house." Anyone could
+write such a note. So the host signs it. The signature is the attestation: a
+passer-by can check it against the host's known signature without knocking.
 
-## Enrollment Record Fields
+The enrollment record on a user's PDS is that note. The attestation inside it
+is the Stratos service's signature. It lets any app confirm an enrollment
+without a call to Stratos.
 
-The `zone.stratos.actor.enrollment` record on the user's PDS includes:
+## What the attestation covers
 
-| Field         | Type             | Description                       |
-| ------------- | ---------------- | --------------------------------- |
-| `service`     | string           | Stratos service endpoint URL      |
-| `boundaries`  | `Domain[]`       | User's boundary assignments       |
-| `signingKey`  | string (did:key) | User's P-256 public key           |
-| `attestation` | object           | Service attestation of enrollment |
-| `createdAt`   | string           | ISO 8601 enrollment timestamp     |
+The service signs the DAG-CBOR encoding of four values:
 
-The `attestation` object:
+| Value        | Source                                          |
+| ------------ | ----------------------------------------------- |
+| `boundaries` | The user's boundary values, sorted              |
+| `did`        | The user's DID                                  |
+| `signingKey` | The `signingKey` field of the enrollment record |
+| `issuedAt`   | The `attestation.issuedAt` field                |
+
+Older attestations have no `issuedAt`, in the record or in the payload.
+
+The attestation does not cover `service`, `custody`, `repoHost`, or
+`createdAt`. Treat those fields as hints. See
+[Custody and Routing](/client/custody#reading-custody-from-the-enrollment).
+
+The `attestation` object in the record:
 
 | Field        | Type              | Description                                      |
 | ------------ | ----------------- | ------------------------------------------------ |
-| `sig`        | bytes             | secp256k1 signature over the CBOR payload        |
-| `signingKey` | string (did:key)  | Service public key that created the signature    |
-| `issuedAt`   | string (datetime) | Signed issue time, absent on legacy attestations |
+| `sig`        | bytes             | The signature over the payload                   |
+| `signingKey` | string (did:key)  | The service key that made the signature          |
+| `issuedAt`   | string (datetime) | Signed issue time. Absent on older attestations. |
 
-## Using `stratos-client` for Key Resolution
+## Verifying an attestation
 
-The `stratos-client` package provides helpers to resolve the signing keys needed for verification.
-Results should be cached — keys don't change unless the service rotates them.
+```typescript
+import { verifyEnrollmentAttestation } from '@northskysocial/stratos-client'
+import type {
+  AttestationResult,
+  StratosEnrollment,
+} from '@northskysocial/stratos-client'
 
-### Resolving the service signing key
+async function checkEnrollment(
+  enrollment: StratosEnrollment,
+  userDid: string,
+): Promise<AttestationResult> {
+  return verifyEnrollmentAttestation(enrollment, userDid, {
+    serviceDid: 'did:web:stratos.example.com',
+  })
+}
+```
 
-Stratos services publish their signing public key in the `did:web` DID document as a Multikey
-`verificationMethod` with the standard `#atproto` fragment. Resolve it once and cache:
+`serviceDid` is required. Take it from your configuration, never from the
+record. The key embedded in the attestation proves only that some key signed
+the payload. The verifier ties that key to the service identity in two ways:
+
+- It matches the key in the service's current DID document.
+- Or the key is retired. The verifier then fetches
+  `zone.stratos.identity.getKeyHistory`, checks the signed history, and
+  confirms that `issuedAt` falls inside that key's validity window.
+
+An attestation without `issuedAt` passes only against the current key.
+
+The function never throws. The result has `valid`, `serviceKey`,
+`userSigningKey`, `boundaries`, and an `error` string when `valid` is `false`.
+
+The options also accept `fetchFn` and `cache`.
+[Service Key History](/architecture/service-key-history) describes rotation
+and its trust limits.
+
+## Resolving keys
+
+### The service signing key
+
+A Stratos service publishes its public key in its `did:web` document, as a
+Multikey verification method with the `#atproto` fragment.
 
 ```typescript
 import { resolveServiceSigningKey } from '@northskysocial/stratos-client'
 
-// serviceDid is the service's did:web, e.g. 'did:web:stratos.example.com'
-const signingKey = await resolveServiceSigningKey(serviceDid)
+const keyCache = new Map()
 
-// With a custom fetch function
-const signingKey2 = await resolveServiceSigningKey(serviceDid, {
-  fetchFn: customFetch,
-})
+async function getServiceKey(serviceDid: string) {
+  return resolveServiceSigningKey(serviceDid, { cache: keyCache })
+}
 ```
 
-### Resolving user signing keys
+With a `cache` map, the function reads the map before it fetches and writes
+to it after a successful fetch. It accepts only `did:web` DIDs.
+
+### The user signing key
 
 ```typescript
 import { resolveUserSigningKey } from '@northskysocial/stratos-client'
 
-// Resolve a user's per-actor signing key from their enrollment record
-const userKey = await resolveUserSigningKey(
-  pdsUrl,
-  did,
-  'did:web:stratos.example.com',
-)
+async function getUserKey(pdsUrl: string, userDid: string) {
+  return resolveUserSigningKey(pdsUrl, userDid, 'did:web:stratos.example.com')
+}
 ```
 
-## Verifying an Attestation
+The function reads the enrollment record and decodes its `signingKey`. It
+returns `null` when the user has no enrollment for that service. Cache the
+result per user and service.
 
-Use the client verifier with the expected service DID from trusted application configuration:
+What that key is depends on custody:
 
-```typescript
-import { verifyEnrollmentAttestation } from '@northskysocial/stratos-client'
+| Custody   | `signingKey`                                                  |
+| --------- | ------------------------------------------------------------- |
+| `stratos` | A P-256 key. Stratos generates it at enrollment and holds it. |
+| `pds`     | The user's own `#atproto` key from their DID document.        |
 
-const result = await verifyEnrollmentAttestation(enrollmentRecord, userDid, {
-  serviceDid: 'did:web:stratos.example.com',
-})
-```
+## Record verification
 
-An embedded `did:key` proves a signature only. It does not establish the service's identity.
-The verifier checks that identity against the current DID key or authenticated service key history.
-New attestations include a signed `issuedAt`; legacy attestations without it require the current key.
-See [Service Key History](/architecture/service-key-history) for the hash chain, both rotation proofs, timestamp windows, and trust limits.
+Stratos-hosted commits are signed with the user's P-256 key, not with the
+service key. Standard AT Protocol verification against the user's DID
+document fails for these repos. The key to check is the enrollment
+`signingKey`.
 
-## Record-Level Verification
+What a client can check today:
 
-Stratos supports `com.atproto.sync.getRecord` which returns a CAR file containing an inclusion proof
-for a single record. Stratos maintains independent repositories per user. Record commits are signed
-with the user's per-enrollment P-256 key when available, falling back to the service's Secp256k1
-key. This means standard ATproto verification against the user's PDS DID document will fail —
-clients must verify against either the user's enrollment `signingKey` or the Stratos service's
-signing key.
+| Source of the record                        | Check                                            | Level           |
+| ------------------------------------------- | ------------------------------------------------ | --------------- |
+| `com.atproto.repo.getRecord` on Stratos     | `verifyRecordCid(value, cid)`                    | `cid-integrity` |
+| The owner's `zone.stratos.sync.getRepo` CAR | `verifyCidIntegrity(car, collection, rkey, did)` | `cid-integrity` |
 
-### Fetch and verify in one step
+`cid-integrity` proves the content matches its CID. It does not prove
+authorship. Say so in your UI. Do not label it "verified" without a
+qualifier.
 
-```typescript
-import {
-  fetchAndVerifyRecord,
-  resolveUserSigningKey,
-  resolveServiceSigningKey,
-} from '@northskysocial/stratos-client'
+The library defines two more levels, `user-signature` and
+`service-signature`. `fetchAndVerifyRecord` returns them, but it depends on
+`com.atproto.sync.getRecord`, which the Stratos service no longer serves. The
+call fails against a current service. See
+[Reading Records](/client/reading-records#verifying-what-you-read).
 
-// User-signature verification (strongest — proves authorship)
-const userKey = await resolveUserSigningKey(pdsUrl, did, serviceDid)
-const verified = await fetchAndVerifyRecord(serviceUrl, did, collection, rkey, {
-  userSigningKey: userKey ?? undefined,
-})
+## Trust model
 
-// Service-signature verification (proves service inclusion)
-const serviceKey = await resolveServiceSigningKey(serviceDid)
-const verified2 = await fetchAndVerifyRecord(
-  serviceUrl,
-  did,
-  collection,
-  rkey,
-  {
-    serviceSigningKey: serviceKey,
-  },
-)
+The attestation proves that the service vouched for the enrollment and the
+boundaries at signing time. It does not prove:
 
-// CID integrity only (no signature check)
-const verified3 = await fetchAndVerifyRecord(serviceUrl, did, collection, rkey)
-```
+- that the user is still enrolled now
+- that the boundaries are unchanged
 
-### Verification levels
+It is a statement of enrollment, not a permission to read. Stratos and the
+feed generator check current membership on every request.
 
-Record commits are signed with the user's per-enrollment P-256 key. Clients can verify a record was
-authored by a specific user by checking the commit signature against the `signingKey` published in
-the user's enrollment record. The enrollment attestation (signed by the service's Secp256k1 key)
-binds the user's DID, boundaries, and signing key — establishing the service as the root of trust
-for that binding.
-
-| Level               | What it proves                                                            |
-| ------------------- | ------------------------------------------------------------------------- |
-| `user-signature`    | Record was signed by the user's P-256 key (strongest — proves authorship) |
-| `service-signature` | Record was signed by the Stratos service key (proves service inclusion)   |
-| `cid-integrity`     | Record CID matches the commit tree (no signature check)                   |
-
-`fetchAndVerifyRecord` prefers the user signing key when provided and falls back to the service key.
-
-## Trust Model
-
-The attestation proves the Stratos service vouched for the user's enrollment and boundaries _at
-signing time_. It does not prove:
-
-- The user is still enrolled right now.
-- The boundaries haven't changed since signing.
-
-For high-stakes operations, also call the live status endpoint:
+For a decision that matters, ask the service:
 
 ```http
 GET /xrpc/zone.stratos.enrollment.status?did=<did>
 ```
 
-Authenticated callers receive boundaries, signing key, enrollment rkey, and a fresh attestation.
+An authenticated call returns the current boundaries. It also returns a fresh
+attestation when the DID holds at least one boundary.
 
-## Chained Verification
+## Chained verification
 
-Because record commits are signed with the user's P-256 key, a verifier can chain trust:
-
-<script setup>
-</script>
+For `stratos` custody the checks chain together. The service DID document
+names the service key. The service key signs the attestation. The attestation
+binds the user's DID to their signing key. That key signs the user's commits.
 
 <TrustChainAnimation />
-
-This proves both service endorsement of the enrollment and user authorship of each record.

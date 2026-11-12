@@ -1,5 +1,39 @@
 # Design Document: ATProtocol Blob Support for Stratos
 
+::: warning Historical design note
+This page is the original proposal. It is kept for the reasoning, not as a
+description of the service. The section below says what the implementation
+does. Where the two disagree, the implementation section is correct.
+:::
+
+## What the implementation does
+
+- **Endpoints.** `com.atproto.sync.getBlob` and `zone.stratos.sync.getBlob`
+  run the same handler. It lives in
+  `stratos-service/src/api/handlers/blob-handlers.ts` and is registered in
+  `stratos-service/src/features/sync/handler.ts`. Authentication is optional.
+- **Port and adapter.** The `BlobAuthService` port is in
+  `stratos-core/src/blob/auth-service.ts`. `BlobAuthServiceImpl` is in
+  `stratos-service/src/features/blob/adapter.ts`.
+- **Owner.** The repository owner always reads their own blobs.
+- **Anonymous callers.** Always denied. There are no public blobs.
+- **Unattached blobs.** A blob that no record references is denied to everyone
+  except the owner.
+- **Other viewers.** Access is granted when the viewer shares a boundary with
+  at least one record that references the blob.
+- **Caching.** None. Every check reads the viewer's boundaries and the record
+  associations from storage. The caches described below were not built.
+- **Errors.** All three are HTTP 400: `BlobBlocked` for a denied read,
+  `RepoNotFound` for an unknown member, and `BlobNotFound` for a missing blob.
+  The service does not return 403 or 404 here.
+- **Boundary table.** `stratos_record_boundary` exists and holds each record's
+  boundary.
+- **Client.** `stratos-client` has no `getBlob` method. It declares the OAuth
+  scope for the call.
+
+For blobs served by the feed generator, see
+[Private Feed Attachments](/client/feedgen-blobs).
+
 ## Overview
 
 This document outlines the design for enabling ATProtocol blob support in Stratos, specifically focusing on the `com.atproto.sync.getBlob` endpoint with boundary-based access control.
@@ -36,7 +70,7 @@ In ATProtocol, blobs are typically referenced by records. In Stratos, records ar
   4. For those records, extract their boundaries.
   5. Check if the viewer shares at least one boundary with any of these records.
   6. If authorized, stream the blob from the `BlobContentStore`.
-  7. If not authorized or not found, return appropriate error (404 or 403).
+  7. If not authorized or not found, return an error. (As built: HTTP 400 `BlobBlocked`, `RepoNotFound`, or `BlobNotFound`.)
 
 #### 2. Blob Authorization Service
 
@@ -125,7 +159,7 @@ _Note: If boundary extraction from record values is too slow, we may consider de
    - Add `BlobAuthService` interface and implementation.
    - Update `BlobMetadataReader` if needed for batch boundary lookups.
 2. **Stratos-Service**:
-   - Implement `com.atproto.sync.getBlob` handler in `src/api/handlers/`.
+   - Implement `com.atproto.sync.getBlob` handler in `src/api/handlers/` (as built: `blob-handlers.ts`).
    - Integrate `BlobAuthService` into the XRPC handler.
    - Add caching layer for boundaries.
 3. **Stratos-Client**:

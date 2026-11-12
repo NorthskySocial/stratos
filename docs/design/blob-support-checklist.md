@@ -1,6 +1,12 @@
 # Implementation Checklist: ATProtocol Blob Support for Stratos
 
-This checklist tracks the implementation of ATProtocol blob support as outlined in `docs/design/blob-support.md`.
+::: warning Historical checklist
+This checklist tracked the original [blob support design](./blob-support.md).
+Blob reads shipped, but several ticked items were never built or were built
+differently. Each such item carries a correction. The
+[implementation summary](./blob-support.md#what-the-implementation-does) is
+the current description.
+:::
 
 ## 1. Stratos-Core: Port & Domain Logic
 
@@ -16,12 +22,12 @@ This checklist tracks the implementation of ATProtocol blob support as outlined 
 ## 2. Stratos-Service: Adapter & Infrastructure
 
 - [x] **BlobAuthService Implementation**
-  - [x] Implement `BlobAuthServiceImpl` in `stratos-service/src/features/blob/auth-service-adapter.ts`.
+  - [x] Implement `BlobAuthServiceImpl` in `stratos-service/src/features/blob/adapter.ts`.
   - [x] Integrate `BoundaryResolver` for viewer identity resolution.
   - [x] Implement logic to join `stratos_record_blob` with `stratos_record` for boundary checking.
 - [x] **Caching Layer**
-  - [x] Implement `ViewerBoundaryCache` (TTL-based).
-  - [x] Implement `BlobAuthCache` for positive/negative result persistence.
+  - [ ] Implement `ViewerBoundaryCache` (TTL-based). Not built: no such cache exists.
+  - [ ] Implement `BlobAuthCache` for positive/negative result persistence. Not built: every check reads storage.
 - [x] **Database Optimizations**
   - [x] (Optional) Implement `stratos_record_boundary` denormalized table if performance requires it.
   - [x] Add the necessary indexes to `stratos_record_blob`.
@@ -29,18 +35,18 @@ This checklist tracks the implementation of ATProtocol blob support as outlined 
 ## 3. Stratos-Service: XRPC Handlers
 
 - [x] **com.atproto.sync.getBlob**
-  - [x] Create handler in `stratos-service/src/api/handlers/sync.ts` (or new file).
-  - [x] Implement authentication check (DPoP/OAuth).
+  - [x] Create handler in `stratos-service/src/api/handlers/blob-handlers.ts`, registered in `stratos-service/src/features/sync/handler.ts`.
+  - [x] Implement authentication check (DPoP/OAuth). Authentication is optional; anonymous callers are denied.
   - [x] Integrate `BlobAuthService` for permission check.
   - [x] Stream blob content from `BlobContentStore` (Disk/S3) on success.
-  - [x] Return `403 Forbidden` on boundary mismatch.
-  - [x] Return `404 Not Found` if blob or actor does not exist.
+  - [x] Reject a boundary mismatch. As built: HTTP 400 `BlobBlocked`.
+  - [x] Reject a missing blob or member. As built: HTTP 400 `BlobNotFound` or `RepoNotFound`.
 
 ## 4. Stratos-Client & Documentation
 
 - [x] **Client Library**
-  - [x] Add `getBlob` method to `StratosClient`.
-  - [x] Handle binary stream response.
+  - [ ] Add `getBlob` method to `StratosClient`. Not built: the client only declares the OAuth scope.
+  - [ ] Handle binary stream response. Not built.
 - [x] **Documentation Updates**
   - [x] Update `stratos-client/README.md` to mark `com.atproto.sync.getBlob` as supported.
   - [x] Update `docs/client/api-reference.md`.
@@ -59,5 +65,5 @@ This checklist tracks the implementation of ATProtocol blob support as outlined 
 
 ## 6. Open Questions / Policies
 
-- [ ] **Orphaned Blobs Policy**: Decide on access rules for unattached blobs.
-- [ ] **Public Blobs Policy**: Define behavior for records with no boundaries.
+- [x] **Orphaned Blobs Policy**: decided in code. Only the owner reads an unattached blob.
+- [x] **Public Blobs Policy**: decided in code. Anonymous callers are always denied.

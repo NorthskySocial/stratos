@@ -1,50 +1,127 @@
 # Glossary
 
-This glossary defines key terms and concepts used across the Stratos project.
+Short definitions of the words used across the Stratos documentation.
+[Core Concepts](/guide/concepts) explains how they fit together.
 
-## Core Concepts
+## Core concepts
 
 ### Boundary
 
-A service-qualified identifier in `{serviceDid}/{name}` format (e.g., `did:web:stratos.example.com/engineering`). Records in Stratos have boundaries, and a viewer must be enrolled in at least one of those boundaries to access the record.
+A named group whose members can read each other's posts. Its full identifier
+is `{serviceDid}/{name}`, for example
+`did:web:stratos.example.com/engineering`. A record belongs to exactly one
+boundary.
+
+### Reserved boundary
+
+The boundary every member of a service holds. It is named `general` by
+default. Use it for posts meant for the whole community.
 
 ### Enrollment
 
-The process by which a user registers with a Stratos service via OAuth. This results in an enrollment record being published to the user's PDS, which downstream services use for discovery and verification.
+A user's membership of a Stratos service, established through OAuth. Stratos
+stores the user's boundaries and publishes an enrollment record to the user's
+PDS.
+
+### Enrollment record
+
+The public `zone.stratos.actor.enrollment` record on a user's PDS. Apps read
+it to find the user's Stratos service, custody, and boundaries. It carries a
+service attestation.
+
+### Attestation
+
+The Stratos service's signature inside the enrollment record. It binds the
+user's DID, boundaries, and signing key. It proves enrollment; it does not
+grant access.
+
+### Custody
+
+Which party keeps a user's private records. `stratos` custody: Stratos hosts
+the repository and signs with a per-user key. `pds` custody: the user's own
+spaces-capable PDS hosts the repository and signs with the account key.
+
+### Space
+
+The AT Protocol's name for a membership-gated container of records. Every
+Stratos boundary is a space. See
+[Permissioned Spaces](/architecture/permissioned-spaces).
+
+### Space authority
+
+The service that decides who belongs to a space. For a Stratos boundary, the
+authority is always the Stratos service.
+
+### Repo host
+
+The service that stores a member's records for a space: Stratos, or the
+member's PDS, depending on custody.
+
+### Space credential
+
+A short-lived, key-bound token that Stratos issues to a current member, or
+to a service acting for one. It grants read access to one space.
+
+### Feed generator
+
+The service that collects posts from the members of a boundary and serves
+them as a timeline to viewers who hold that boundary.
 
 ### Hydration
 
-Fetching the full content of a private record after checking access. For
-Stratos-hosted records, the response includes a `source` field identifying
-the service that supplied it.
+Fetching the full content of Stratos-hosted records in a batch
+(`zone.stratos.repo.hydrateRecords`). Stratos returns only the records the
+caller may read.
 
-### Source Field
+## Technical terms
 
-A field on a fetched Stratos-hosted record that identifies its record URI,
-content ID (`cid`), and Stratos service DID. Apps use it to verify where the
-record came from. It is added when the record is fetched, not published as a
-separate public post.
+### Actor store
 
-## Technical Terms
-
-### Actor Store
-
-Stratos storage for one user. Users whose PDS supports protected spaces keep
-their private record repository on their PDS instead.
+Stratos storage for one `stratos`-custody user: their repository, records,
+and blobs. A `pds`-custody user has no actor store on Stratos.
 
 ### MST (Merkle Search Tree)
 
-A data structure used by AT Protocol to represent a repository's state. Stratos uses MSTs to maintain per-actor repositories that are compatible with AT Protocol's sync primitives.
+The data structure the AT Protocol uses for a repository. Stratos keeps one
+signed MST repository per `stratos`-custody user.
+
+### Record URI
+
+The `at://` address of a record. A Stratos-hosted record has three segments:
+`at://{authorDid}/{collection}/{rkey}`. A space record on a PDS has seven,
+starting with the authority:
+`at://{authorityDid}/space/{type}/{name}/{authorDid}/{collection}/{rkey}`.
 
 ### Service DID
 
-The decentralized identifier for the Stratos service itself (e.g., `did:web:stratos.actor`). It is used to sign enrollment attestations and as the `source.service` reference on hydrated records.
+The identifier of the Stratos service itself, for example
+`did:web:stratos.example.com`. It prefixes every boundary identifier, and
+its key signs attestations and space credentials.
+
+### Service enrollment
+
+An operator-configured identity for another service, such as the feed
+generator. It lets that service read the boundaries the operator grants it.
+A service enrollment cannot write records.
 
 ### subscribeRecords
 
-A WebSocket stream that sends Stratos record changes to authorized services
-such as the feed generator.
+`zone.stratos.sync.subscribeRecords`: a per-user WebSocket stream of
+Stratos-hosted record changes, for enrolled services such as the feed
+generator.
+
+### Pull sync
+
+`zone.stratos.sync.listRepoOps` and `listRecordPaths`: the request/response
+way to follow a repository, for services that do not hold a stream open.
+
+### DPoP
+
+Demonstrating Proof of Possession. Every user request to Stratos carries an
+access token and a fresh proof signed by the session key. A plain `Bearer`
+token is not accepted.
 
 ### XRPC
 
-The AT Protocol's remote procedure call mechanism used for communication between clients, PDSs, and services like Stratos.
+The AT Protocol's remote procedure call mechanism, used between clients,
+PDSs, and services like Stratos.

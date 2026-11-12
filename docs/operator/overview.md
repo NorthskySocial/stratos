@@ -1,43 +1,56 @@
 # Overview
 
-Stratos lets AT Protocol communities share posts with approved members. A
-**boundary** is an access group: a viewer must belong to one of a post's
-boundaries to read it. People keep their existing AT Protocol accounts.
+<script setup>
+import DataFlowAnimation from '../.vitepress/theme/components/DataFlowAnimation.vue'
+</script>
 
-## Key Concepts
+Stratos lets AT Protocol communities share posts with approved members. A
+**boundary** is an access group: a viewer must belong to a post's boundary to
+read it. People keep their existing AT Protocol accounts.
+
+As the operator, you run the service that keeps the member list. You decide
+which boundaries exist and who may join them.
+
+## Key concepts
 
 | Concept              | Description                                                                                                                                  |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Domain Boundary**  | A service-qualified boundary identifier in `{serviceDid}/{name}` format. Records are visible only to enrolled users who share that boundary. |
-| **Enrollment**       | The process of a user registering with a Stratos service via OAuth.                                                                          |
-| **Service DID**      | The decentralized identifier for the Stratos service itself.                                                                                 |
-| **subscribeRecords** | WebSocket updates that keep the feed generator current.                                                                                      |
+| **Boundary**         | A service-qualified identifier in `{serviceDid}/{name}` format. A record carries exactly one boundary.                                       |
+| **Enrollment**       | A person's registration with a Stratos service through OAuth. It holds their boundaries.                                                     |
+| **Service DID**      | The decentralized identifier of the Stratos service itself.                                                                                  |
+| **Custody**          | Which party holds a member's records: Stratos, or the member's own PDS. See [Mixed-mode custody](/operator/architecture#mixed-mode-custody). |
+| **Space**            | The AT Protocol name for a boundary. Stratos is the authority for each one.                                                                  |
+| **subscribeRecords** | The WebSocket sync stream that keeps the feed generator current.                                                                             |
 
-## Use Cases
+## Use cases
 
-- **Community-private feeds** — Fandom and community social feeds.
-- **Gated communities** — Content visible only to verified domain members.
-- **Multi-community platforms** — Apps with per-community data isolation.
+- **Community-private feeds.** Fandom and community social feeds.
+- **Gated communities.** Content visible only to approved members.
+- **Multi-community platforms.** Apps with separate data for each community.
 
-## Service Components
+## Service components
 
-| Component            | Description                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------- |
-| `stratos-service`    | XRPC/HTTP service — enrollment, record CRUD, sync export                                          |
-| `stratos-feedgen-ng` | Rust feed service — stores private posts locally and serves feeds according to current membership |
+| Component            | Description                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| `stratos-service`    | XRPC and HTTP service: enrollment, boundaries, record storage, sync stream, admin interface |
+| `stratos-feedgen-ng` | Rust feed generator: stores private posts locally and serves feeds by current membership    |
 
-The TypeScript feedgen and standalone indexer are deprecated. See
+The TypeScript feed generator and the standalone indexer are deprecated. See
 [Feed Generator](/operator/feedgen-ng) for the current feed architecture.
 
-## Request Flow
-
-<script setup>
-</script>
+## Request flow
 
 <DataFlowAnimation />
 
-## Next Steps
+A member enrolls with Stratos, and Stratos publishes their enrollment record to
+their PDS. The member writes posts. The feed generator collects the posts it
+may read, from Stratos and from members' own PDS hosts. A client app asks the
+feed generator for a feed and receives only the posts its viewer may read.
 
-- [Architecture](/operator/architecture) — system components, MST repos, storage layout
-- [Deployment](/operator/deployment) — step-by-step production setup
-- [Configuration](/operator/configuration) — all environment variables explained
+## Next steps
+
+- [Architecture](/operator/architecture): components, custody, storage layout
+- [Deployment](/operator/deployment): step-by-step production setup
+- [Configuration](/operator/configuration): every environment variable
+- [Manage boundaries](/operator/boundaries): the admin interface
+- [Operations](/operator/operations): monitoring, backup, scaling

@@ -1,11 +1,19 @@
 # Core Concepts
 
+<script setup>
+import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimation.vue'
+</script>
+
+Stratos is a house with many rooms. This page names the parts of the house:
+the rooms, the guest list, who keeps your things, and how anyone knows the
+guest list is real. Each part has a precise meaning in the protocol.
+
 ## Boundary
 
-A **boundary** is a named access group. A viewer must belong to at least one
-group named on a post to read it.
+A **boundary** is a room: a named group whose members can read each other's
+posts.
 
-Each boundary has a full identifier made from the Stratos service DID and a
+Each boundary has a full identifier, made from the Stratos service DID and a
 short name (`{serviceDid}/{name}`):
 
 ```text
@@ -13,93 +21,159 @@ did:web:stratos.example.com/general
 did:web:stratos.example.com/writers
 ```
 
-Operators configure short names such as `general` in
-`STRATOS_ALLOWED_DOMAINS`. Stratos adds its DID. Apps must use the full
-identifier when creating records.
+Three rules hold everywhere.
+
+- **A post belongs to exactly one boundary.** A post for two groups is two
+  posts.
+- **Apps use the full identifier** when they create a record. A bare name
+  such as `writers` is not accepted.
+- **Every member is in the reserved boundary.** It is named `general` by
+  default, and it is the room for the whole community.
+
+Operators create and retire boundaries in the admin interface. See
+[Manage Boundaries](/operator/boundaries).
 
 ## Enrollment
 
-Enrollment is how a user joins a Stratos service with their AT Protocol account
-through OAuth. Stratos records the user's boundaries and publishes a
-`zone.stratos.actor.enrollment` record to their PDS. Apps can read that record
-to find the Stratos service and verify the enrollment. Depending on whether
-the PDS supports protected spaces, private posts are stored by Stratos or in
-a protected space on the user's PDS.
+**Enrollment** is getting on the guest list. A user signs in to a Stratos
+service with their AT Protocol account, through OAuth. Stratos records the
+boundaries they hold and publishes a `zone.stratos.actor.enrollment` record
+to their PDS.
 
-## Source Field
+The enrollment record is public. It is how an app finds the right Stratos
+service for a user, and it lists the boundaries the user belongs to. Boundary
+names are therefore public. Post content is not.
 
-For Stratos-hosted posts, Stratos does **not** write a separate public record
-for each private post to the user's PDS. The public enrollment record lets
-apps find the service.
+| Field         | Description                                                    |
+| ------------- | -------------------------------------------------------------- |
+| `service`     | The Stratos service endpoint                                   |
+| `boundaries`  | The boundaries the user holds                                  |
+| `custody`     | Who keeps the user's private posts: `stratos` or `pds`         |
+| `repoHost`    | For `pds` custody, a hint to where the posts are kept          |
+| `signingKey`  | The public key that signs the user's private posts             |
+| `attestation` | The service's signature over the fields above, with `issuedAt` |
+| `createdAt`   | Enrollment timestamp                                           |
 
-When a client fetches the full content of a Stratos-hosted record through
-`zone.stratos.repo.hydrateRecords`, the returned record carries a `source`
-field identifying where it came from:
+The record is a signpost, not a key. Reading it grants nothing. Access
+depends on the user's current membership, which only Stratos knows.
 
-```json
-{
-  "$type": "zone.stratos.feed.post",
-  "source": {
-    "vary": "authenticated",
-    "subject": {
-      "uri": "at://did:plc:abc/zone.stratos.feed.post/tid123",
-      "cid": "bafyre..."
-    },
-    "service": "did:web:stratos.example.com#atproto_pns"
-  },
-  "createdAt": "2024-01-15T12:00:00.000Z"
-}
+## Custody
+
+**Custody** answers one question: who keeps this user's private posts?
+
+| The user's PDS          | Custody   | Posts are kept         | Posts are signed by                       |
+| ----------------------- | --------- | ---------------------- | ----------------------------------------- |
+| does not support spaces | `stratos` | on the Stratos service | a key Stratos holds for that user (P-256) |
+| supports spaces         | `pds`     | on the user's own PDS  | the user's account key                    |
+
+Stratos decides custody once, at enrollment, from what the user's PDS can
+do. Both kinds of member share the same boundaries and the same feeds.
+
+Custody changes two things an app must handle.
+
+- **Where to write.** A `stratos`-custody user writes to the Stratos service.
+  A `pds`-custody user writes to their own PDS.
+- **What a record address looks like.** The two custody classes use
+  different `at://` URI shapes. See [Space](#space) below.
+
+It never changes who decides membership. That is always Stratos.
+
+## Space
+
+The AT Protocol has a proposal for private data, called _permissioned
+spaces_. A **space** is the protocol's name for a room, and the service that
+controls its membership is the space **authority**.
+
+Every Stratos boundary is a space, and Stratos is its authority:
+
+```text
+boundary  did:web:stratos.example.com/writers
+space     at://did:web:stratos.example.com/space/zone.stratos.space.feed/writers
 ```
 
-The `source` field lets an app check which service supplied the record and
-fetch it again, subject to access checks. The app finds that service through
-the user's enrollment record.
+A record kept on a user's PDS has a space record address. It has seven
+segments, and it starts with the authority, not the author:
 
-## Sync Stream
+```text
+at://{authorityDid}/space/{type}/{name}/{authorDid}/{collection}/{rkey}
+```
 
-The `zone.stratos.sync.subscribeRecords` WebSocket endpoint sends updates for
-Stratos-hosted records. The feed generator uses it to stay current and saves
-its place so it can resume after a disconnect. For posts hosted in protected
-PDS spaces, it checks Stratos membership before reading from the member's PDS.
+A record kept by Stratos has the familiar three-segment address:
 
-## Profile Record
+```text
+at://{authorDid}/{collection}/{rkey}
+```
 
-The `zone.stratos.actor.enrollment` record on the user's PDS is the **profile record**. It contains:
+[Permissioned Spaces](/architecture/permissioned-spaces) tells the full
+story.
 
-| Field         | Description                              |
-| ------------- | ---------------------------------------- |
-| `service`     | Stratos service endpoint URL             |
-| `boundaries`  | User's boundary assignments              |
-| `signingKey`  | User's P-256 public key (did:key)        |
-| `attestation` | Service attestation (DAG-CBOR signature) |
-| `createdAt`   | Enrollment timestamp                     |
+## Space credential
 
-## MST Repo
+A **space credential** is a short-lived pass for one space. Stratos issues
+it to a current member, or to a service acting for one. The holder shows it
+to whoever keeps the records: Stratos, or a member's PDS.
 
-Private records use an AT Protocol-compatible repository hosted by Stratos or,
-for users with spaces support, by their PDS. For Stratos-hosted repositories,
-these endpoints allow:
+A credential is bound to a key. Every request must prove possession of that
+key, so a copied credential is useless by itself.
 
-- Inclusion proofs: `com.atproto.sync.getRecord` returns a CAR with the signed commit, MST path, and
-  record block.
-- Full export: `zone.stratos.sync.getRepo` exports the complete repo as a CAR file.
-- Import: `zone.stratos.repo.importRepo` imports a CAR into a fresh actor repo.
+## Feed generator
 
-## Trust Model
+The **feed generator** turns boundaries into timelines. It follows the
+members Stratos lists, collects their posts from Stratos and from their
+PDSs, and keeps a bounded, encrypted copy. When a viewer opens a feed, it
+checks the viewer's current membership and returns only what they may read.
 
-Before returning private content, Stratos checks the caller's current
-membership. The feed generator also checks membership before serving a feed.
-Apps must not treat a boundary written inside a PDS-hosted post as permission.
+See [Feed Generator](/architecture/feed-generator).
 
-The attestation serves a separate, complementary purpose: it is a public declaration written to the
-user's PDS repo that lets any app verify independently that the user is enrolled with a specific
-Stratos service. It binds the user's DID, assigned boundaries, and signing key into a signature from
-the service's secp256k1 key.
+## Sync stream
 
-<script setup>
-</script>
+`zone.stratos.sync.subscribeRecords` is a WebSocket that carries changes to
+Stratos-hosted records. It is for services, not for end-user apps: the
+caller must be a service the operator has enrolled. Each stream covers one
+user, and Stratos filters it to the boundaries the calling service holds.
+
+There is no service-wide firehose. A single stream of everything would leak
+activity across boundaries.
+
+## Repository
+
+Private posts are stored the way public posts are: in an AT Protocol
+repository, a Merkle Search Tree (MST) of records with a signed commit on
+top.
+
+For a `stratos`-custody user, Stratos hosts that repository. The owner can
+export all of it as a CAR file with `zone.stratos.sync.getRepo` and verify
+it against the `signingKey` in their enrollment record.
+
+For a `pds`-custody user, the repository is a space on their own PDS.
+
+## Trust model
+
+Who has to trust whom?
+
+**Readers trust Stratos for membership.** Before any private content is
+returned, the caller's current membership is checked. Stratos does it for
+its own endpoints. The feed generator does it before it serves a feed.
+
+**Nobody trusts a boundary written inside a PDS-hosted post.** A PDS does
+not ask Stratos before it accepts a write. Anyone can write a record that
+claims to belong to a boundary. Readers ignore the claim and ask Stratos who
+the members are.
+
+**Removing a member stops reading, not writing.** A removed member can still
+write on their own PDS. Nobody collects it.
+
+**The attestation proves enrollment, not access.** The enrollment record
+carries a signature from the Stratos service key over the user's DID,
+boundaries, and signing key. Any app can check it and confirm that this
+Stratos service enrolled this user.
 
 <TrustChainAnimation />
 
-The attestation shows that Stratos approved the enrollment; it is not a grant
-to read posts. Access to feeds and records depends on current membership.
+The attestation shows that Stratos approved the enrollment at the time it
+was signed. It is not a grant to read posts. Access to feeds and records
+depends on current membership.
+
+**Posts are access-controlled, not end-to-end encrypted.** The Stratos
+service and the feed generator handle plaintext. Members trust their
+operator the way they trust a PDS host.
