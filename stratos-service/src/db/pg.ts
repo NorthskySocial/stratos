@@ -334,6 +334,33 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
   )
 
   await migratePdsSyncTables(db)
+
+  await executeMigrationStep(
+    db,
+    'moderation_label',
+    sql`
+      CREATE TABLE IF NOT EXISTS "moderation_label" (
+        "seq" BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        "subjectKey" TEXT NOT NULL,
+        "subjectKind" TEXT NOT NULL,
+        "cid" TEXT,
+        "val" TEXT NOT NULL,
+        "neg" BOOLEAN NOT NULL,
+        "ref" TEXT,
+        "boundaries" TEXT NOT NULL,
+        "createdBy" TEXT NOT NULL,
+        "createdAt" TEXT NOT NULL
+      )
+    `,
+  )
+
+  await executeMigrationStep(
+    db,
+    'moderation_label_subject_seq_idx',
+    sql`
+      CREATE INDEX IF NOT EXISTS "moderation_label_subject_seq_idx" ON "moderation_label"("subjectKey", "seq")
+    `,
+  )
 }
 
 /**

@@ -103,6 +103,29 @@ export const enrollmentPdsSync = sqliteTable(
   ],
 )
 
+/**
+ * Append-only moderation labels. `seq` is the cursor for label readers and is
+ * never reused.
+ */
+export const moderationLabel = sqliteTable(
+  'moderation_label',
+  {
+    seq: integer('seq').primaryKey({ autoIncrement: true }),
+    subjectKey: text('subjectKey').notNull(),
+    subjectKind: text('subjectKind').notNull(),
+    cid: text('cid'),
+    val: text('val').notNull(),
+    neg: integer('neg', { mode: 'boolean' }).notNull(),
+    ref: text('ref'),
+    boundaries: text('boundaries').notNull(),
+    createdBy: text('createdBy').notNull(),
+    createdAt: text('createdAt').notNull(),
+  },
+  (table) => [
+    index('moderation_label_subject_seq_idx').on(table.subjectKey, table.seq),
+  ],
+)
+
 export type OAuthSession = typeof oauthSession.$inferSelect
 export type NewOAuthSession = typeof oauthSession.$inferInsert
 export type OAuthState = typeof oauthState.$inferSelect
@@ -115,3 +138,5 @@ export type EnrollmentBoundary = typeof enrollmentBoundary.$inferSelect
 export type NewEnrollmentBoundary = typeof enrollmentBoundary.$inferInsert
 export type EnrollmentPdsSync = typeof enrollmentPdsSync.$inferSelect
 export type NewEnrollmentPdsSync = typeof enrollmentPdsSync.$inferInsert
+export type ModerationLabelRow = typeof moderationLabel.$inferSelect
+export type NewModerationLabelRow = typeof moderationLabel.$inferInsert

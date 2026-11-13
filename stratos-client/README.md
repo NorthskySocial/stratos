@@ -932,3 +932,37 @@ checkpoint for recovery after `BoundaryHistoryTruncated`. These are authority
 operations, separate from user-signed repository commits, and work with both
 Stratos and PDS custody. See [Boundary History](../docs/operator/boundary-history.md)
 for signature verification, replay, retention, and trust requirements.
+
+### Moderation takedown labels
+
+`zone.stratos.moderation.createLabel` is for an allowlisted moderation service,
+not for ordinary clients. The service calls it with an inter-service JWT whose
+`iss` is on the host's `STRATOS_MODERATION_SERVICE_DIDS` list and whose `lxm` is
+`zone.stratos.moderation.createLabel`. User, admin, plain service and
+space-credential callers get a 401.
+
+The procedure takes `subject`, `val`, and optional `neg` and `ref`. `val` must
+be `!takedown`. Set `neg: true` to lift a takedown.
+
+- **Hosted record:** use the repo-form URI, `at://{did}/{collection}/{rkey}`.
+  Stratos hides the record at once. `SubjectNotFound` means the hosted record
+  does not exist. If the call fails after Stratos has hidden the record, it
+  stays hidden. Repeat the same request to finish it. A negation records its
+  label first and lifts the hiding after, so a failed negation also leaves the
+  record hidden.
+- **Member's PDS record:** use the seven-segment space-form URI. Stratos records
+  the label. Stratos cannot hide a record that it does not host.
+- **Space-form URI for a hosted author:** Stratos accepts and records the label,
+  but it writes no marker. Use the repo-form URI to hide a hosted record.
+- **Account subject:** not accepted yet.
+
+Stratos rejects a space-form subject when:
+
+- its authority is another service;
+- its boundary is unknown;
+- the author is not an active member of the boundary.
+
+A negation of a takedown in force skips the membership check.
+
+The response `label` is absent when the request changed nothing and the subject
+has no label. A repeat of the label in force returns that label.

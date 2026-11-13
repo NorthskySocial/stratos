@@ -1,0 +1,62 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.moderation.createLabel",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Apply or negate a moderation label on a record or an account. Only for allowlisted moderation services. The service derives the affected boundary itself.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["subject", "val"],
+          "properties": {
+            "subject": {
+              "type": "union",
+              "refs": [
+                "zone.stratos.moderation.defs#recordSubject",
+                "zone.stratos.moderation.defs#accountSubject"
+              ],
+              "closed": true,
+              "description": "What to label."
+            },
+            "val": {
+              "type": "string",
+              "maxLength": 128,
+              "knownValues": ["!takedown"],
+              "description": "The label value."
+            },
+            "neg": {
+              "type": "boolean",
+              "description": "If true, negate a prior label with the same subject and value. Absent means false."
+            },
+            "ref": {
+              "type": "string",
+              "maxLength": 512,
+              "description": "Optional moderation-service reference for this action, such as a report or case identifier."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "ref",
+              "ref": "zone.stratos.moderation.defs#label",
+              "description": "The resulting label. Absent only when the request changed nothing and the subject has no label."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "SubjectNotFound",
+          "description": "The subject record or account does not exist on this service."
+        }
+      ]
+    }
+  }
+}

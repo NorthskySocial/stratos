@@ -21,6 +21,7 @@ import {
   StratosDbOrTx,
   StratosRecord,
   stratosRecord,
+  stratosRecordBoundary,
   stratosRepoBlock,
 } from '../db'
 import { Logger, StatusAttr } from '../types.js'
@@ -303,6 +304,15 @@ export class StratosRecordReader {
     return res[0].takedownRef
       ? { applied: true, ref: res[0].takedownRef }
       : { applied: false }
+  }
+
+  async getRecordBoundaries(uri: string | AtUri): Promise<string[]> {
+    const rows = await this.db
+      .select({ boundary: stratosRecordBoundary.boundary })
+      .from(stratosRecordBoundary)
+      .where(eq(stratosRecordBoundary.recordUri, uri.toString()))
+      .orderBy(asc(stratosRecordBoundary.boundary))
+    return rows.map((row) => row.boundary)
   }
 
   /**

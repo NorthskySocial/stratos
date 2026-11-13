@@ -612,3 +612,120 @@ describe('Record backlinks and takedown', () => {
     expect(rows.map((row) => row.uri)).not.toContain(otherCollectionUri)
   })
 })
+
+describe('getRecordBoundaries', () => {
+  let db: StratosDb
+  let reader: StratosRecordReader
+  let transactor: StratosRecordTransactor
+  let testDir: string
+
+  const EVA = 'did:web:nerv.tokyo.jp/eva'
+  const ANGEL = 'did:web:nerv.tokyo.jp/angel'
+  const SEELE = 'did:web:nerv.tokyo.jp/seele'
+
+  const uriOf = (rkey: string) =>
+    new AtUri(`at://did:plc:misato/zone.stratos.feed.post/${rkey}`)
+
+  const bodyWith = (...boundaries: string[]) => ({
+    $type: 'zone.stratos.feed.post',
+    text: 'sync ratio',
+    boundary: {
+      $type: 'zone.stratos.boundary.defs#Domains',
+      values: boundaries.map((value) => ({ value })),
+    },
+  })
+
+  const index = async (rkey: string, ...boundaries: string[]) => {
+    const record = bodyWith(...boundaries)
+    await transactor.indexRecord(
+      uriOf(rkey),
+      await createCid(record),
+      record,
+      'create',
+      'rev1',
+    )
+  }
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `stratos-boundaries-test-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(testDir, { recursive: true })
+    db = createStratosDb(join(testDir, 'test.db'))
+    await migrateStratosDb(db)
+    reader = new StratosRecordReader(db, decodeRecord)
+    transactor = new StratosRecordTransactor(db, decodeRecord)
+  })
+
+  afterEach(async () => {
+    await closeStratosDb(db)
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('returns rows inserted out of order, sorted ascending', async () => {
+    const uri = uriOf('rei')
+    await db.insert(stratosRecordBoundary).values([
+      { recordUri: uri.toString(), boundary: SEELE },
+      { recordUri: uri.toString(), boundary: ANGEL },
+      { recordUri: uri.toString(), boundary: EVA },
+    ])
+
+    expect(await reader.getRecordBoundaries(uri)).toEqual([ANGEL, EVA, SEELE])
+  })
+
+  it('cannot store a boundary twice, so a record lists each once', async () => {
+    const uri = uriOf('asuka')
+    await db
+      .insert(stratosRecordBoundary)
+      .values({ recordUri: uri.toString(), boundary: EVA })
+
+    await expect(
+      db
+        .insert(stratosRecordBoundary)
+        .values({ recordUri: uri.toString(), boundary: EVA }),
+    ).rejects.toThrow()
+    expect(await reader.getRecordBoundaries(uri)).toEqual([EVA])
+  })
+
+  it('returns [] for a record without rows', async () => {
+    await index('shinji')
+
+    expect(await reader.getRecordBoundaries(uriOf('shinji'))).toEqual([])
+  })
+
+  it('returns [] for an unknown uri', async () => {
+    expect(await reader.getRecordBoundaries(uriOf('kaworu'))).toEqual([])
+  })
+
+  it('does not return rows of another record', async () => {
+    await index('ritsuko', EVA)
+    await index('maya', SEELE)
+
+    expect(await reader.getRecordBoundaries(uriOf('ritsuko'))).toEqual([EVA])
+    expect(await reader.getRecordBoundaries(uriOf('maya').toString())).toEqual([
+      SEELE,
+    ])
+  })
+
+  it('still returns boundaries of a taken-down record', async () => {
+    await index('gendo', EVA, ANGEL)
+    await transactor.updateRecordTakedown(uriOf('gendo').toString(), {
+      applied: true,
+      ref: 'TD-GENDO',
+    })
+
+    expect(await reader.getRecordBoundaries(uriOf('gendo'))).toEqual([
+      ANGEL,
+      EVA,
+    ])
+  })
+
+  it('returns stored rows, not the boundary claimed by the record body', async () => {
+    const uri = uriOf('kaji')
+    await index('kaji', EVA)
+    await transactor.replaceRecordBoundaries(uri, bodyWith(SEELE))
+
+    expect(await reader.getRecordBoundaries(uri)).toEqual([SEELE])
+  })
+})

@@ -11,6 +11,7 @@ export {
   enrollment,
   enrollmentBoundary,
   enrollmentPdsSync,
+  moderationLabel,
 } from './schema.js'
 export type {
   OAuthSession,
@@ -25,6 +26,8 @@ export type {
   NewEnrollmentBoundary,
   EnrollmentPdsSync,
   NewEnrollmentPdsSync,
+  ModerationLabelRow,
+  NewModerationLabelRow,
 } from './schema.js'
 
 export type ServiceDb = LibSQLDatabase<typeof schema> & {
@@ -79,6 +82,27 @@ function isDuplicateColumn(err: unknown): boolean {
     current = current.cause
   }
   return false
+}
+
+async function migrateModerationLabelTable(db: ServiceDb): Promise<void> {
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS moderation_label (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      subjectKey TEXT NOT NULL,
+      subjectKind TEXT NOT NULL,
+      cid TEXT,
+      val TEXT NOT NULL,
+      neg INTEGER NOT NULL,
+      ref TEXT,
+      boundaries TEXT NOT NULL,
+      createdBy TEXT NOT NULL,
+      createdAt TEXT NOT NULL
+    )
+  `)
+
+  await db.run(sql`
+    CREATE INDEX IF NOT EXISTS moderation_label_subject_seq_idx ON moderation_label(subjectKey, seq)
+  `)
 }
 
 export async function migrateServiceDb(db: ServiceDb): Promise<void> {
@@ -196,6 +220,8 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
   await db.run(sql`
     CREATE INDEX IF NOT EXISTS enrollment_boundary_boundary_idx ON enrollment_boundary(boundary)
   `)
+
+  await migrateModerationLabelTable(db)
 }
 
 /**

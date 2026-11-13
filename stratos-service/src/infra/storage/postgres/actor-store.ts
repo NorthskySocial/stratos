@@ -287,6 +287,15 @@ export class PgActorRecordReader {
       : { applied: false }
   }
 
+  async getRecordBoundaries(uri: string | AtUri): Promise<string[]> {
+    const rows = await this.db
+      .select({ boundary: pgStratosRecordBoundary.boundary })
+      .from(pgStratosRecordBoundary)
+      .where(eq(pgStratosRecordBoundary.recordUri, uri.toString()))
+      .orderBy(asc(pgStratosRecordBoundary.boundary))
+    return rows.map((row) => row.boundary)
+  }
+
   /**
    * Retrieve the current CID of a record by URI.
    *

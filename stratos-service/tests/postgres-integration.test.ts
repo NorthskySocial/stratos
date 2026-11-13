@@ -23,6 +23,7 @@ import {
   stopPostgresContainer,
 } from './helpers/test-env.js'
 import {
+  closeServicePgDb,
   createServicePgDb,
   migrateServicePgDb,
   type ServicePgDb,
@@ -34,6 +35,8 @@ import {
   PostgresActorStore,
 } from '../src/infra/storage/postgres/index.js'
 import { PgPdsSyncQueueStore } from '../src/features/enrollment/internal/pds-sync-store.js'
+import { PgLabelStore } from '../src/features/moderation/index.js'
+import type { NewLabel } from '@northskysocial/stratos-core'
 
 describe('PostgreSQL Backend Integration', () => {
   let pgUrl: string
@@ -620,6 +623,112 @@ describe('PostgreSQL Backend Integration', () => {
       const rows = await query()
 
       expect(rows.map((row) => row.uri)).not.toContain(otherCollectionUri)
+    })
+  })
+
+  describe('getRecordBoundaries', () => {
+    const EVA = 'did:web:nerv.tokyo.jp/eva'
+    const ANGEL = 'did:web:nerv.tokyo.jp/angel'
+    const SEELE = 'did:web:nerv.tokyo.jp/seele'
+
+    const uriOf = (rkey: string) =>
+      `at://${testDid}/zone.stratos.feed.post/${rkey}`
+
+    const bodyWith = (...boundaries: string[]) => ({
+      $type: 'zone.stratos.feed.post',
+      text: 'sync ratio',
+      boundary: {
+        $type: 'zone.stratos.boundary.defs#Domains',
+        values: boundaries.map((value) => ({ value })),
+      },
+    })
+
+    const index = (rkey: string, ...boundaries: string[]) =>
+      actorStore.transact(testDid, async (store) => {
+        await store.record.indexRecord(
+          uriOf(rkey),
+          await createCid(`record ${rkey}`),
+          bodyWith(...boundaries),
+          'create',
+          'rev1',
+        )
+      })
+
+    const read = (rkey: string) =>
+      actorStore.read(testDid, (store) =>
+        store.record.getRecordBoundaries(uriOf(rkey)),
+      )
+
+    const boundaryTable = async () => {
+      const [found] = await cleanupClient<{ schemaname: string }[]>`
+        SELECT schemaname FROM pg_tables
+        WHERE tablename = 'stratos_record_boundary'
+          AND schemaname LIKE 'actor_%'`
+      return `"${found.schemaname}".stratos_record_boundary`
+    }
+
+    const insertBoundaryRow = async (rkey: string, boundary: string) =>
+      cleanupClient.unsafe(
+        `INSERT INTO ${await boundaryTable()} ("recordUri", "boundary") VALUES ($1, $2)`,
+        [uriOf(rkey), boundary],
+      )
+
+    beforeEach(async () => {
+      await actorStore.create(testDid)
+    })
+
+    it('returns every row of a record, sorted ascending', async () => {
+      await index('rei', SEELE, ANGEL, EVA)
+
+      expect(await read('rei')).toEqual([ANGEL, EVA, SEELE])
+    })
+
+    it('cannot store a boundary twice, so a record lists each once', async () => {
+      await index('asuka', EVA)
+
+      await expect(insertBoundaryRow('asuka', EVA)).rejects.toThrow()
+      expect(await read('asuka')).toEqual([EVA])
+    })
+
+    it('returns [] for a record without rows', async () => {
+      await index('shinji')
+
+      expect(await read('shinji')).toEqual([])
+    })
+
+    it('returns [] for an unknown uri', async () => {
+      expect(await read('kaworu')).toEqual([])
+    })
+
+    it('does not return rows of another record', async () => {
+      await index('ritsuko', EVA)
+      await index('maya', SEELE)
+
+      expect(await read('ritsuko')).toEqual([EVA])
+      expect(await read('maya')).toEqual([SEELE])
+    })
+
+    it('still returns boundaries of a taken-down record', async () => {
+      await index('gendo', EVA, ANGEL)
+      await actorStore.transact(testDid, (store) =>
+        store.record.updateRecordTakedown(uriOf('gendo'), {
+          applied: true,
+          ref: 'TD-GENDO',
+        }),
+      )
+
+      expect(await read('gendo')).toEqual([ANGEL, EVA])
+    })
+
+    it('returns stored rows, not the boundary claimed by the record body', async () => {
+      await index('kaji', EVA)
+      await cleanupClient.unsafe(
+        `DELETE FROM ${await boundaryTable()} WHERE "recordUri" = $1`,
+        [uriOf('kaji')],
+      )
+      await insertBoundaryRow('kaji', SEELE)
+
+      expect(await read('kaji')).toEqual([SEELE])
     })
   })
 
@@ -1377,6 +1486,268 @@ describe('PostgreSQL Backend Integration', () => {
         did: first[0].did,
       })
       expect(second.map((j) => j.did)).toEqual([testDid2])
+    })
+  })
+
+  describe('PgLabelStore', () => {
+    const nerv = 'did:plc:nerv-moderation'
+    const rei = 'did:plc:rei'
+    let store: PgLabelStore
+
+    function recordLabel(
+      rkey: string,
+      overrides: Partial<NewLabel> = {},
+    ): NewLabel {
+      return {
+        subjectKey: `at://${rei}/zone.stratos.feed.post/${rkey}`,
+        subjectKind: 'record',
+        val: '!takedown',
+        neg: false,
+        boundaries: ['eva-pilots'],
+        createdBy: nerv,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        ...overrides,
+      }
+    }
+
+    beforeEach(async () => {
+      await cleanupClient`TRUNCATE "moderation_label" RESTART IDENTITY`
+      store = new PgLabelStore(serviceDb)
+    })
+
+    afterEach(async () => {
+      await cleanupClient`TRUNCATE "moderation_label" RESTART IDENTITY`
+    })
+
+    it('assigns increasing seq values starting from an empty table', async () => {
+      const first = await store.appendIfLatest(null, recordLabel('a'))
+      const second = await store.appendIfLatest(null, recordLabel('b'))
+      const third = await store.appendIfLatest(null, recordLabel('c'))
+      if (
+        first.kind !== 'appended' ||
+        second.kind !== 'appended' ||
+        third.kind !== 'appended'
+      ) {
+        throw new Error('expected every append to succeed')
+      }
+      expect(first.label.seq).toBe(1)
+      expect(second.label.seq).toBe(2)
+      expect(third.label.seq).toBe(3)
+    })
+
+    it('round trips a record label with every optional field present', async () => {
+      const input = recordLabel('full', {
+        cid: 'bafyreigendou',
+        neg: true,
+        ref: 'ticket-0042',
+        boundaries: ['zeta', 'alpha', 'zeta', 'mid', 'alpha'],
+      })
+      const result = await store.appendIfLatest(null, input)
+      if (result.kind !== 'appended') throw new Error('expected append')
+
+      const expected = {
+        ...input,
+        seq: result.label.seq,
+        boundaries: ['alpha', 'mid', 'zeta'],
+      }
+      expect(result.label).toEqual(expected)
+      expect(await store.latestForSubject(input.subjectKey)).toEqual(expected)
+    })
+
+    it('round trips a record label with optional fields absent', async () => {
+      const input = recordLabel('bare')
+      const result = await store.appendIfLatest(null, input)
+      if (result.kind !== 'appended') throw new Error('expected append')
+
+      const stored = await store.latestForSubject(input.subjectKey)
+      expect(stored).toEqual({ ...input, seq: result.label.seq })
+      expect(stored?.cid).toBeUndefined()
+      expect(stored?.ref).toBeUndefined()
+      expect(stored?.neg).toBe(false)
+    })
+
+    it('round trips an account label with an empty boundary list', async () => {
+      const input: NewLabel = {
+        subjectKey: rei,
+        subjectKind: 'account',
+        val: '!takedown',
+        neg: false,
+        boundaries: [],
+        createdBy: nerv,
+        createdAt: '2026-01-02T00:00:00.000Z',
+      }
+      const result = await store.appendIfLatest(null, input)
+      if (result.kind !== 'appended') throw new Error('expected append')
+      expect(await store.latestForSubject(rei)).toEqual({
+        ...input,
+        seq: result.label.seq,
+      })
+    })
+
+    it('latestForSubject returns the highest seq and ignores other keys', async () => {
+      const target = recordLabel('target')
+      const first = await store.appendIfLatest(null, target)
+      if (first.kind !== 'appended') throw new Error('expected append')
+      await store.appendIfLatest(null, recordLabel('other'))
+      const retraction = await store.appendIfLatest(
+        first.label.seq,
+        recordLabel('target', { neg: true }),
+      )
+      if (retraction.kind !== 'appended') throw new Error('expected append')
+      await store.appendIfLatest(null, recordLabel('another'))
+
+      const latest = await store.latestForSubject(target.subjectKey)
+      expect(latest?.seq).toBe(retraction.label.seq)
+      expect(latest?.neg).toBe(true)
+      expect(latest?.subjectKey).toBe(target.subjectKey)
+    })
+
+    it('latestForSubject returns undefined for an unknown key', async () => {
+      await store.appendIfLatest(null, recordLabel('known'))
+      expect(
+        await store.latestForSubject(`at://${rei}/zone.stratos.feed.post/nope`),
+      ).toBeUndefined()
+    })
+
+    async function seedLabels(count: number): Promise<number[]> {
+      const seqs: number[] = []
+      for (let index = 0; index < count; index++) {
+        const result = await store.appendIfLatest(
+          null,
+          recordLabel(`row-${index}`),
+        )
+        if (result.kind !== 'appended') throw new Error('expected append')
+        seqs.push(result.label.seq)
+      }
+      return seqs
+    }
+
+    it('listFrom treats the cursor as exclusive and returns ascending rows', async () => {
+      const seqs = await seedLabels(5)
+      const rows = await store.listFrom({ cursor: seqs[1], limit: 100 })
+      expect(rows.map((row) => row.seq)).toEqual(seqs.slice(2))
+    })
+
+    it('listFrom respects limit', async () => {
+      const seqs = await seedLabels(5)
+      const rows = await store.listFrom({ limit: 2 })
+      expect(rows.map((row) => row.seq)).toEqual(seqs.slice(0, 2))
+    })
+
+    it('listFrom starts from the beginning without a cursor', async () => {
+      const seqs = await seedLabels(3)
+      const rows = await store.listFrom({ limit: 100 })
+      expect(rows.map((row) => row.seq)).toEqual(seqs)
+    })
+
+    it('listFrom pages to the end returning every label exactly once', async () => {
+      const seqs = await seedLabels(7)
+      const seen: number[] = []
+      let cursor: number | undefined
+      for (let pageCount = 0; pageCount < 20; pageCount++) {
+        const page = await store.listFrom({ cursor, limit: 3 })
+        if (page.length === 0) break
+        seen.push(...page.map((row) => row.seq))
+        cursor = page[page.length - 1].seq
+      }
+      expect(seen).toEqual(seqs)
+    })
+
+    it('appendIfLatest returns stale with the current latest and writes nothing', async () => {
+      const first = await store.appendIfLatest(null, recordLabel('ikari'))
+      if (first.kind !== 'appended') throw new Error('expected append')
+
+      const outcome = await store.appendIfLatest(
+        first.label.seq + 99,
+        recordLabel('ikari', { neg: true }),
+      )
+      expect(outcome).toEqual({ kind: 'stale', latest: first.label })
+      expect(await store.listFrom({ limit: 100 })).toEqual([first.label])
+    })
+
+    it('appendIfLatest treats null as right for a new subject and stale once a label exists', async () => {
+      const label = recordLabel('asuka')
+      const first = await store.appendIfLatest(null, label)
+      expect(first.kind).toBe('appended')
+
+      const second = await store.appendIfLatest(null, label)
+      expect(second.kind).toBe('stale')
+      if (second.kind === 'stale') {
+        expect(second.latest?.subjectKey).toBe(label.subjectKey)
+      }
+      expect(await store.listFrom({ limit: 100 })).toHaveLength(1)
+    })
+
+    it('appendIfLatest returns stale with no latest when a label is expected but none exists', async () => {
+      const outcome = await store.appendIfLatest(5, recordLabel('ghost'))
+      expect(outcome).toEqual({ kind: 'stale', latest: undefined })
+      expect(await store.listFrom({ limit: 100 })).toEqual([])
+    })
+
+    describe('across separate connections', () => {
+      const connectionCount = 20
+      let connections: ServicePgDb[]
+      let stores: PgLabelStore[]
+
+      beforeEach(() => {
+        connections = Array.from({ length: connectionCount }, () =>
+          createServicePgDb(pgUrl),
+        )
+        stores = connections.map((connection) => new PgLabelStore(connection))
+      })
+
+      afterEach(async () => {
+        await Promise.all(connections.map((c) => closeServicePgDb(c)))
+      })
+
+      it('appends identical concurrent requests once, over 10 rounds', async () => {
+        for (let round = 0; round < 10; round++) {
+          const label = recordLabel(`same-${round}`)
+          const outcomes = await Promise.all(
+            stores.map((s) => s.appendIfLatest(null, label)),
+          )
+          expect(outcomes.filter((o) => o.kind === 'appended')).toHaveLength(1)
+          expect(outcomes.filter((o) => o.kind === 'stale')).toHaveLength(19)
+
+          const rows = (await store.listFrom({ limit: 1000 })).filter(
+            (row) => row.subjectKey === label.subjectKey,
+          )
+          expect(rows).toHaveLength(1)
+        }
+      })
+
+      it('assigns unique ascending seq values to 50 distinct subjects', async () => {
+        const outcomes = await Promise.all(
+          Array.from({ length: 50 }, (_, index) =>
+            stores[index % connectionCount].appendIfLatest(
+              null,
+              recordLabel(`distinct-${index}`),
+            ),
+          ),
+        )
+        const seqs = outcomes.map((outcome) => {
+          if (outcome.kind !== 'appended') throw new Error('expected append')
+          return outcome.label.seq
+        })
+        expect(new Set(seqs).size).toBe(50)
+
+        const listedSeqs = (await store.listFrom({ limit: 1000 })).map(
+          (row) => row.seq,
+        )
+        expect(listedSeqs).toHaveLength(50)
+        expect(listedSeqs).toEqual([...listedSeqs].sort((a, b) => a - b))
+        expect(new Set(listedSeqs)).toEqual(new Set(seqs))
+      })
+    })
+
+    it('migration is idempotent and keeps rows', async () => {
+      const first = await store.appendIfLatest(null, recordLabel('keep'))
+      if (first.kind !== 'appended') throw new Error('expected append')
+
+      await migrateServicePgDb(serviceDb)
+      await migrateServicePgDb(serviceDb)
+
+      expect(await store.listFrom({ limit: 100 })).toEqual([first.label])
     })
   })
 })
