@@ -5,7 +5,12 @@ import {
   decideLabelAction,
   formatRecordUri,
   labelSubjectKey,
+  labelVisibleToService,
+  logQueryCursor,
+  parseLabelCursor,
   parseLabelSubject,
+  parseSubjectFilter,
+  subjectQueryCursor,
   takedownMarker,
 } from '../src'
 import type { ExistingLabel, LabelRequest, ParsedLabelSubject } from '../src'
@@ -298,6 +303,172 @@ describe('labelSubjectKey properties', () => {
           labelSubjectKey({ kind: 'account', did }),
         )
       }),
+    )
+  })
+})
+
+const boundaryArb = fc.constantFrom(
+  'nerv',
+  'seele',
+  'gehirn',
+  'wille',
+  'tokyo3',
+)
+const boundariesArb = fc.array(boundaryArb, { maxLength: 5 })
+const kindArb = fc.constantFrom('record' as const, 'account' as const)
+const memberArb = fc.option(boundariesArb, { nil: undefined })
+
+describe('label visibility properties', () => {
+  it('never hides a label when the caller gains boundaries', () => {
+    fc.assert(
+      fc.property(
+        kindArb,
+        boundariesArb,
+        boundariesArb,
+        boundariesArb,
+        memberArb,
+        (subjectKind, boundaries, caller, extra, member) => {
+          const label = { subjectKind, boundaries }
+          fc.pre(labelVisibleToService(label, caller, member))
+          expect(
+            labelVisibleToService(label, [...caller, ...extra], member),
+          ).toBe(true)
+        },
+      ),
+    )
+  })
+
+  it('never shows a record label with no boundaries', () => {
+    fc.assert(
+      fc.property(boundariesArb, memberArb, (caller, member) => {
+        const label = { subjectKind: 'record' as const, boundaries: [] }
+        expect(labelVisibleToService(label, caller, member)).toBe(false)
+      }),
+    )
+  })
+
+  it('never shows an account label when the member has no boundaries known', () => {
+    fc.assert(
+      fc.property(boundariesArb, boundariesArb, (labelBoundaries, caller) => {
+        const label = {
+          subjectKind: 'account' as const,
+          boundaries: labelBoundaries,
+        }
+        expect(labelVisibleToService(label, caller, undefined)).toBe(false)
+      }),
+    )
+  })
+})
+
+describe('label cursor properties', () => {
+  it('round-trips every canonical safe integer', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }), (n) => {
+        expect(parseLabelCursor(String(n))).toEqual({ ok: true, value: n })
+      }),
+    )
+  })
+
+  it('rejects non-canonical spellings of a number', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }),
+        fc.constantFrom('+', '-', '0', ' ', '00'),
+        (n, junk) => {
+          fc.pre(junk !== '0' || n !== 0)
+          const spelled =
+            junk === ' ' ? ` ${n}` : junk === '00' ? `00${n}` : `${junk}${n}`
+          fc.pre(spelled !== String(n))
+          expect(parseLabelCursor(spelled).ok).toBe(false)
+        },
+      ),
+    )
+  })
+
+  it('never returns a cursor below the input cursor', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 10_000 }),
+        fc.option(fc.integer({ min: 0, max: 20_000 }), { nil: undefined }),
+        fc.integer({ min: 0, max: 20_000 }),
+        (inputCursor, scanned, head) => {
+          const lastScanned =
+            scanned === undefined ? undefined : Math.max(scanned, inputCursor)
+          expect(
+            Number(logQueryCursor(inputCursor, lastScanned)),
+          ).toBeGreaterThanOrEqual(inputCursor)
+          expect(
+            Number(subjectQueryCursor(inputCursor, head)),
+          ).toBeGreaterThanOrEqual(inputCursor)
+        },
+      ),
+    )
+  })
+
+  it('ignores invisible sequences in a subjects query cursor', () => {
+    const LIMIT = 3
+    const seqSetArb = fc.uniqueArray(fc.integer({ min: 1, max: 200 }), {
+      maxLength: 10,
+    })
+    const subjectsQuery = (
+      log: number[],
+      visible: Set<number>,
+      inputCursor: number,
+      head: number,
+    ) => {
+      const inRange = log
+        .filter((seq) => visible.has(seq) && seq > inputCursor && seq <= head)
+        .sort((a, b) => a - b)
+      return inRange.length > LIMIT
+        ? String(inRange[LIMIT - 1])
+        : subjectQueryCursor(inputCursor, head)
+    }
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 50 }),
+        seqSetArb,
+        seqSetArb,
+        seqSetArb,
+        (inputCursor, visibleSeqs, invisibleA, invisibleB) => {
+          const visible = new Set(visibleSeqs)
+          const head = 200
+          const logA = [
+            ...visibleSeqs,
+            ...invisibleA.filter((s) => !visible.has(s)),
+          ]
+          const logB = [
+            ...visibleSeqs,
+            ...invisibleB.filter((s) => !visible.has(s)),
+          ]
+          expect(subjectsQuery(logA, visible, inputCursor, head)).toBe(
+            subjectsQuery(logB, visible, inputCursor, head),
+          )
+        },
+      ),
+    )
+  })
+})
+
+describe('subject filter properties', () => {
+  const filterItemArb = fc.oneof(
+    didArb,
+    fc
+      .tuple(didArb, nsidArb, rkeyArb)
+      .map(([did, collection, rkey]) => `at://${did}/${collection}/${rkey}`),
+  )
+
+  it('keeps first-seen order and is idempotent', () => {
+    fc.assert(
+      fc.property(
+        fc.array(filterItemArb, { minLength: 1, maxLength: 8 }),
+        (items) => {
+          const once = parseSubjectFilter(items)
+          expect(once.ok).toBe(true)
+          if (!once.ok || once.value === undefined) return
+          expect(once.value).toEqual([...new Set(items)])
+          expect(parseSubjectFilter(once.value)).toEqual(once)
+        },
+      ),
     )
   })
 })

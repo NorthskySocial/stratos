@@ -3,6 +3,7 @@ import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
+import { sql } from 'drizzle-orm'
 import { createClient, LibsqlError, type Client } from '@libsql/client'
 import type { NewLabel } from '@northskysocial/stratos-core'
 import {
@@ -211,6 +212,126 @@ describe('SqliteLabelStore', () => {
         cursor = page[page.length - 1].seq
       }
       expect(seen).toEqual(seqs)
+    })
+  })
+
+  describe('listFrom filters and headSeq', () => {
+    const EVA_01 = recordLabel('eva-01').subjectKey
+    const EVA_02 = recordLabel('eva-02').subjectKey
+    const EVA_03 = recordLabel('eva-03').subjectKey
+
+    async function appendAll(rkeys: string[]): Promise<number[]> {
+      const seqs: number[] = []
+      for (const rkey of rkeys) {
+        const result = await store.appendIfLatest(null, recordLabel(rkey))
+        if (result.kind !== 'appended') throw new Error('expected append')
+        seqs.push(result.label.seq)
+      }
+      return seqs
+    }
+
+    it('returns only labels of the listed subjects, in seq order', async () => {
+      const seqs = await appendAll(['eva-01', 'eva-02', 'eva-03', 'eva-04'])
+      const rows = await store.listFrom({
+        limit: 100,
+        subjects: [EVA_03, EVA_01],
+      })
+      expect(rows.map((row) => row.subjectKey)).toEqual([EVA_01, EVA_03])
+      expect(rows.map((row) => row.seq)).toEqual([seqs[0], seqs[2]])
+    })
+
+    it('treats upTo as inclusive and cursor as exclusive', async () => {
+      const seqs = await appendAll(['eva-01', 'eva-02', 'eva-03', 'eva-04'])
+      const rows = await store.listFrom({
+        cursor: seqs[0],
+        upTo: seqs[2],
+        limit: 100,
+      })
+      expect(rows.map((row) => row.seq)).toEqual([seqs[1], seqs[2]])
+    })
+
+    it('combines cursor, upTo, subjects and limit', async () => {
+      const seqs = await appendAll(['eva-01', 'eva-02', 'eva-01-b', 'eva-02-b'])
+      const rows = await store.listFrom({
+        cursor: seqs[0],
+        upTo: seqs[3],
+        subjects: [EVA_02, recordLabel('eva-02-b').subjectKey],
+        limit: 1,
+      })
+      expect(rows.map((row) => row.seq)).toEqual([seqs[1]])
+    })
+
+    it('returns nothing for an empty subjects list', async () => {
+      await appendAll(['eva-01', 'eva-02'])
+      expect(await store.listFrom({ limit: 100, subjects: [] })).toEqual([])
+    })
+
+    it('returns nothing for subjects that have no label', async () => {
+      await appendAll(['eva-01'])
+      expect(await store.listFrom({ limit: 100, subjects: [EVA_02] })).toEqual(
+        [],
+      )
+    })
+
+    it('reports 0 as the head of an empty log and the last seq afterwards', async () => {
+      expect(await store.headSeq()).toBe(0)
+      const seqs = await appendAll(['eva-01', 'eva-02', 'eva-03'])
+      expect(await store.headSeq()).toBe(seqs[2])
+    })
+
+    it('reports the highest seq, not the row count, when seqs have gaps', async () => {
+      const [first] = await appendAll(['eva-01'])
+      const second = await store.appendIfLatest(first, {
+        ...recordLabel('eva-01'),
+        neg: true,
+      })
+      if (second.kind !== 'appended') throw new Error('expected append')
+      await db.run(sql`DELETE FROM moderation_label WHERE seq = ${first}`)
+      expect(await store.headSeq()).toBe(second.label.seq)
+    })
+
+    it('lets a cursor reader see every label while appends run, over 5 runs', async () => {
+      for (let run = 0; run < 5; run++) {
+        const subjectCount = 10
+        const writers = Promise.all(
+          Array.from({ length: subjectCount }, async (_, index) => {
+            let expected: number | null = null
+            for (let step = 0; step < 3; step++) {
+              const result = await store.appendIfLatest(
+                expected,
+                recordLabel(`run-${run}-pilot-${index}`, { neg: step === 1 }),
+              )
+              if (result.kind !== 'appended') throw new Error('expected append')
+              expected = result.label.seq
+            }
+          }),
+        )
+
+        const seen: number[] = []
+        let cursor = 0
+        const readPage = async (): Promise<number> => {
+          const page = await store.listFrom({ cursor, limit: 5 })
+          seen.push(...page.map((row) => row.seq))
+          if (page.length > 0) cursor = page[page.length - 1].seq
+          return page.length
+        }
+        let writersDone = false
+        void writers.then(() => {
+          writersDone = true
+        })
+        while (!writersDone) {
+          if ((await readPage()) === 0) await new Promise(setImmediate)
+        }
+        await writers
+        const head = await store.headSeq()
+        while (cursor < head) await readPage()
+
+        const everySeq = (await store.listFrom({ limit: 1000 })).map(
+          (row) => row.seq,
+        )
+        expect(everySeq).toHaveLength(subjectCount * 3 * (run + 1))
+        expect(seen).toEqual(everySeq)
+      }
     })
   })
 

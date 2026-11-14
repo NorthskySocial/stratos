@@ -4,7 +4,6 @@ import {
   spaceSubjectBoundary,
   labelSubjectKey,
   parseLabelSubject,
-  RECORD_SUBJECT_TYPE,
   takedownMarker,
   TAKEDOWN_VALUE,
   validateLabelValue,
@@ -16,6 +15,8 @@ import {
 import type { AppContext } from '../../context-types.js'
 import type { XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
+import { registerQueryLabelsHandler } from './query-handler.js'
+import { toWireLabel } from './wire-label.js'
 
 export const CREATE_LABEL_METHOD = 'zone.stratos.moderation.createLabel'
 
@@ -51,7 +52,7 @@ interface LabelRequestContext {
   beforeAppend?: () => Promise<void>
 }
 
-/** Auth binding is `moderationService` only; no other credential type is admitted. */
+/** createLabel binds `moderationService` only; no other credential type is admitted. */
 export function registerModerationHandlers(
   server: XrpcServer,
   ctx: AppContext,
@@ -67,6 +68,8 @@ export function registerModerationHandlers(
         handleCreateLabel(ctx, input, did as string),
     }),
   })
+
+  registerQueryLabelsHandler(xrpc, ctx)
 }
 
 async function handleCreateLabel(
@@ -139,8 +142,26 @@ async function handleSpaceLabel(
   const subjectKey = labelSubjectKey(subject)
   const latest = await ctx.labelStore.latestForSubject(subjectKey)
   const takedownInForce = latest !== undefined && !latest.neg
+  const authorEnrollment = await ctx.enrollmentStore.getEnrollment(
+    subject.record.authorDid,
+  )
+  // Only the repo-form URI writes the marker that hides a hosted record, so a
+  // space-form label would record a takedown that hides nothing.
+  if (
+    authorEnrollment &&
+    (authorEnrollment.custody ?? 'stratos') === 'stratos'
+  ) {
+    throw new InvalidRequestError(
+      'records of this author are hosted by Stratos; use the repo-form URI',
+    )
+  }
   if (!(neg && takedownInForce)) {
-    await assertAuthorHoldsBoundary(ctx, subject.record.authorDid, boundary)
+    await assertAuthorHoldsBoundary(
+      ctx,
+      subject.record.authorDid,
+      authorEnrollment,
+      boundary,
+    )
   }
 
   const label = await writeLabel({
@@ -159,11 +180,11 @@ async function handleSpaceLabel(
 async function assertAuthorHoldsBoundary(
   ctx: AppContext,
   authorDid: string,
+  enrollment: { active: boolean } | null | undefined,
   boundary: string,
 ): Promise<void> {
   // The reserved all-members domain is added for any DID, so it proves nothing
   // without an active enrollment. Same check as space-credential.
-  const enrollment = await ctx.enrollmentStore.getEnrollment(authorDid)
   const held = enrollment?.active
     ? await ctx.enrollmentStore.getBoundaries(authorDid)
     : []
@@ -294,20 +315,5 @@ async function setMarker(
     )
   } finally {
     unlock()
-  }
-}
-
-function toWireLabel(label: StoredLabel): Record<string, unknown> {
-  return {
-    seq: label.seq,
-    subject: {
-      $type: RECORD_SUBJECT_TYPE,
-      uri: label.subjectKey,
-      ...(label.cid === undefined ? {} : { cid: label.cid }),
-    },
-    val: label.val,
-    neg: label.neg,
-    ...(label.ref === undefined ? {} : { ref: label.ref }),
-    createdAt: label.createdAt,
   }
 }

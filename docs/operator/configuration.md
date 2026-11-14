@@ -193,6 +193,34 @@ The moderation check returns the same message for every rejection. A caller
 cannot tell an unknown issuer from a wrong `lxm` claim. Stratos does not tell
 the caller why it rejected the request.
 
+### Reading labels with `queryLabels`
+
+`zone.stratos.moderation.queryLabels` accepts a moderation service. It also
+accepts an enrolled service.
+
+On `queryLabels`, service auth runs first. A moderation service with a wrong
+audience, an expired token, or a bad signature gets the ordinary service-auth
+message. It does not get the moderation message. Stratos applies the moderation
+check only to a token whose issuer is on the list. An issuer that is not on the
+list is an ordinary service, and it must be enrolled.
+
+Stratos shows each caller these labels:
+
+- A moderation service reads every label.
+- A service reads a record label only if it shares a boundary with the label.
+- A service reads an account label if it shares a boundary with the member's
+  enrollment. The enrollment can be active or not.
+- A service never reads an account label when the member has no enrollment.
+- A record label with no boundaries is visible only to moderation services.
+- The reserved all-members boundary gives every enrolled service the account
+  label of every enrolled member. It also gives every record label that
+  carries that boundary.
+
+Reads stop serving the record at once. Stratos cannot stop a member's own PDS
+from serving a record to a holder of a space credential. Consumers must apply
+labels. The reserved-boundary statements hold while the reserved boundary is an
+active catalog entry.
+
 ## Write rate limiter
 
 Stratos throttles writes per DID to protect commit performance under bursts:

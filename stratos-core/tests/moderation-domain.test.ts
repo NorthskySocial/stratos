@@ -4,9 +4,14 @@ import {
   RECORD_SUBJECT_TYPE,
   decideLabelAction,
   labelSubjectKey,
+  labelVisibleToService,
+  logQueryCursor,
+  parseLabelCursor,
   parseLabelSubject,
   parseRecordUri,
+  parseSubjectFilter,
   spaceSubjectBoundary,
+  subjectQueryCursor,
   takedownMarker,
   validateLabelValue,
 } from '../src'
@@ -286,5 +291,152 @@ describe('labelSubjectKey', () => {
       },
     ]
     expect(subjects.map(labelSubjectKey)).toEqual([SPIKE_DID, REPO_URI])
+  })
+})
+
+describe('labelVisibleToService', () => {
+  it('shows a record label that shares a boundary with the caller', () => {
+    const label = {
+      subjectKind: 'record' as const,
+      boundaries: ['nerv', 'seele'],
+    }
+    expect(labelVisibleToService(label, ['seele', 'gehirn'], undefined)).toBe(
+      true,
+    )
+  })
+
+  it('hides a record label that shares no boundary', () => {
+    const label = { subjectKind: 'record' as const, boundaries: ['nerv'] }
+    expect(labelVisibleToService(label, ['seele'], ['nerv'])).toBe(false)
+  })
+
+  it('ignores member boundaries for a record label', () => {
+    const label = { subjectKind: 'record' as const, boundaries: ['nerv'] }
+    expect(labelVisibleToService(label, ['seele'], ['seele'])).toBe(false)
+  })
+
+  it('shows an account label when the member shares a boundary', () => {
+    const label = { subjectKind: 'account' as const, boundaries: [] }
+    expect(labelVisibleToService(label, ['nerv'], ['nerv', 'wille'])).toBe(true)
+  })
+
+  it('hides an account label when the member shares no boundary', () => {
+    const label = { subjectKind: 'account' as const, boundaries: ['nerv'] }
+    expect(labelVisibleToService(label, ['nerv'], ['wille'])).toBe(false)
+  })
+
+  it('hides an account label for a member with no enrollment', () => {
+    const label = { subjectKind: 'account' as const, boundaries: ['nerv'] }
+    expect(labelVisibleToService(label, ['nerv'], undefined)).toBe(false)
+  })
+
+  it('hides every label from a caller with no boundaries', () => {
+    const record = { subjectKind: 'record' as const, boundaries: ['nerv'] }
+    const account = { subjectKind: 'account' as const, boundaries: ['nerv'] }
+    expect(labelVisibleToService(record, [], ['nerv'])).toBe(false)
+    expect(labelVisibleToService(account, [], ['nerv'])).toBe(false)
+  })
+
+  it('hides a record label that has no boundaries', () => {
+    const label = { subjectKind: 'record' as const, boundaries: [] }
+    expect(labelVisibleToService(label, ['nerv'], ['nerv'])).toBe(false)
+  })
+})
+
+describe('parseLabelCursor', () => {
+  it('gives zero when the cursor is absent', () => {
+    expect(parseLabelCursor(undefined)).toEqual({ ok: true, value: 0 })
+  })
+
+  it.each([
+    ['0', 0],
+    ['7', 7],
+    ['1200', 1200],
+    [String(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER],
+  ])('accepts %s', (cursor, expected) => {
+    expect(parseLabelCursor(cursor)).toEqual({ ok: true, value: expected })
+  })
+
+  it.each([
+    '',
+    '01',
+    '00',
+    '+5',
+    '-1',
+    '1.5',
+    '1e3',
+    '0x10',
+    ' 5',
+    '5 ',
+    'faye',
+    String(Number.MAX_SAFE_INTEGER + 1),
+    '99999999999999999999',
+  ])('rejects %j', (cursor) => {
+    const result = parseLabelCursor(cursor)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('invalid-cursor')
+  })
+})
+
+describe('parseSubjectFilter', () => {
+  it('gives undefined when the field is omitted', () => {
+    expect(parseSubjectFilter(undefined)).toEqual({
+      ok: true,
+      value: undefined,
+    })
+  })
+
+  it('rejects an empty array', () => {
+    const result = parseSubjectFilter([])
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('invalid-subject')
+  })
+
+  it('accepts DIDs and both record URI forms', () => {
+    expect(parseSubjectFilter([SPIKE_DID, REPO_URI, SPACE_URI])).toEqual({
+      ok: true,
+      value: [SPIKE_DID, REPO_URI, SPACE_URI],
+    })
+  })
+
+  it('removes duplicates and keeps first-seen order', () => {
+    expect(
+      parseSubjectFilter([REPO_URI, SPIKE_DID, REPO_URI, SPIKE_DID]),
+    ).toEqual({
+      ok: true,
+      value: [REPO_URI, SPIKE_DID],
+    })
+  })
+
+  it.each([
+    '',
+    'faye-valentine',
+    'did:',
+    `at://${SPIKE_DID}/${POST}`,
+    'at://x/y/z',
+  ])('rejects %j', (item) => {
+    const result = parseSubjectFilter([SPIKE_DID, item])
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('invalid-subject')
+  })
+})
+
+describe('logQueryCursor', () => {
+  it('resumes after the last scanned label', () => {
+    expect(logQueryCursor(3, 20)).toBe('20')
+  })
+
+  it('keeps the input cursor when nothing was scanned', () => {
+    expect(logQueryCursor(3, undefined)).toBe('3')
+  })
+})
+
+describe('subjectQueryCursor', () => {
+  it('moves to the log head', () => {
+    expect(subjectQueryCursor(3, 40)).toBe('40')
+  })
+
+  it('never moves behind the input cursor', () => {
+    expect(subjectQueryCursor(50, 40)).toBe('50')
   })
 })

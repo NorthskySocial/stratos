@@ -10,8 +10,20 @@ export type AppendLabelResult =
 export interface LabelStore {
   latestForSubject: (subjectKey: string) => Promise<StoredLabel | undefined>
 
-  /** Labels with `seq` greater than `cursor`, ascending, at most `limit`. */
-  listFrom: (opts: { cursor?: number; limit: number }) => Promise<StoredLabel[]>
+  /**
+   * Labels with `seq` greater than `cursor` and, when given, at most `upTo`,
+   * ascending, at most `limit`. `subjects` keeps only labels whose subject key
+   * is listed; an empty list matches nothing.
+   */
+  listFrom: (opts: {
+    cursor?: number
+    limit: number
+    upTo?: number
+    subjects?: string[]
+  }) => Promise<StoredLabel[]>
+
+  /** Highest `seq` in the log, or `0` when it is empty. */
+  headSeq: () => Promise<number>
 
   /**
    * Appends `label` only if the subject's latest `seq` is still

@@ -9,15 +9,17 @@ const MODERATION_DIR = new URL(
 )
 
 function loadLexicons(): Lexicons {
-  const docs = ['defs.json', 'createLabel.json'].map((name) =>
-    JSON.parse(
-      readFileSync(fileURLToPath(new URL(name, MODERATION_DIR)), 'utf8'),
-    ),
+  const docs = ['defs.json', 'createLabel.json', 'queryLabels.json'].map(
+    (name) =>
+      JSON.parse(
+        readFileSync(fileURLToPath(new URL(name, MODERATION_DIR)), 'utf8'),
+      ),
   )
   return new Lexicons(docs)
 }
 
 const CREATE_LABEL = 'zone.stratos.moderation.createLabel'
+const QUERY_LABELS = 'zone.stratos.moderation.queryLabels'
 const RECORD_SUBJECT = 'zone.stratos.moderation.defs#recordSubject'
 const ACCOUNT_SUBJECT = 'zone.stratos.moderation.defs#accountSubject'
 
@@ -135,5 +137,78 @@ describe('zone.stratos.moderation lexicons', () => {
 
   it('accepts an empty response when nothing changed and no label exists', () => {
     expect(() => lex.assertValidXrpcOutput(CREATE_LABEL, {})).not.toThrow()
+  })
+})
+
+describe('zone.stratos.moderation.queryLabels', () => {
+  let lex: Lexicons
+
+  beforeAll(() => {
+    lex = loadLexicons()
+  })
+
+  const validateParams = (params: Record<string, unknown>) =>
+    lex.assertValidXrpcParams(QUERY_LABELS, params)
+  const validateOutput = (body: unknown) =>
+    lex.assertValidXrpcOutput(QUERY_LABELS, body)
+
+  const createdAt = '2026-11-12T00:00:00.000Z'
+  const recordLabel = {
+    seq: 1,
+    subject: { $type: RECORD_SUBJECT, uri: REPO_URI },
+    val: '!takedown',
+    createdAt,
+  }
+  const accountLabel = {
+    seq: 2,
+    subject: { $type: ACCOUNT_SUBJECT, did: SPIKE_DID },
+    val: '!takedown',
+    createdAt,
+  }
+
+  it('accepts params with cursor, limit, and subjects', () => {
+    expect(() =>
+      validateParams({
+        cursor: '41',
+        limit: 250,
+        subjects: [REPO_URI, SPACE_URI, SPIKE_DID],
+      }),
+    ).not.toThrow()
+  })
+
+  it('accepts no params', () => {
+    expect(() => validateParams({})).not.toThrow()
+  })
+
+  it.each([0, 251])('rejects limit %i', (limit) => {
+    expect(() => validateParams({ limit })).toThrow(/limit/)
+  })
+
+  it('rejects more than 100 subjects', () => {
+    expect(() =>
+      validateParams({
+        subjects: Array.from({ length: 101 }, () => SPIKE_DID),
+      }),
+    ).toThrow(/subjects/)
+  })
+
+  it('rejects a subjects item over 2048 characters', () => {
+    expect(() => validateParams({ subjects: ['x'.repeat(2049)] })).toThrow(
+      /subjects/,
+    )
+  })
+
+  it('accepts a page with a record label and an account label', () => {
+    expect(() =>
+      validateOutput({ cursor: '2', labels: [recordLabel, accountLabel] }),
+    ).not.toThrow()
+  })
+
+  it('rejects an output without a cursor', () => {
+    expect(() => validateOutput({ labels: [recordLabel] })).toThrow(/cursor/)
+  })
+
+  it('accepts an empty page with a cursor', () => {
+    expect(() => validateOutput({ cursor: '0', labels: [] })).not.toThrow()
   })
 })

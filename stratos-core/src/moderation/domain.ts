@@ -15,6 +15,7 @@ import type {
   LabelDecision,
   LabelRequest,
   LabelSubjectInput,
+  LabelSubjectKind,
   ModerationError,
   ModerationErrorCode,
   ModerationResult,
@@ -190,4 +191,87 @@ export function spaceSubjectBoundary(
 /** Record URIs start with "at://" and DIDs with "did:", so keys never collide. */
 export function labelSubjectKey(subject: ParsedLabelSubject): string {
   return subject.kind === 'account' ? subject.did : subject.uri
+}
+
+function sharesBoundary(left: string[], right: string[]): boolean {
+  const rightSet = new Set(right)
+  return left.some((boundary) => rightSet.has(boundary))
+}
+
+/**
+ * Moderation callers see every label and never reach this check. An account
+ * label carries no boundaries of its own, so it follows the member's current
+ * enrollment; a record label follows the boundaries it was stamped with.
+ */
+export function labelVisibleToService(
+  label: { subjectKind: LabelSubjectKind; boundaries: string[] },
+  callerBoundaries: string[],
+  memberBoundaries: string[] | undefined,
+): boolean {
+  const scope =
+    label.subjectKind === 'account' ? memberBoundaries : label.boundaries
+  if (scope === undefined) return false
+  return sharesBoundary(scope, callerBoundaries)
+}
+
+const CANONICAL_CURSOR = /^(0|[1-9][0-9]*)$/
+
+export function parseLabelCursor(
+  cursor: string | undefined,
+): ModerationResult<number> {
+  if (cursor === undefined) return { ok: true, value: 0 }
+  const value = Number(cursor)
+  if (!CANONICAL_CURSOR.test(cursor) || !Number.isSafeInteger(value)) {
+    return fail('invalid-cursor', `cursor is not a label sequence: "${cursor}"`)
+  }
+  return { ok: true, value }
+}
+
+function parseSubjectFilterItem(item: string): ModerationResult<string> {
+  if (isSyntacticDid(item)) return { ok: true, value: item }
+  const parsed = parseLabelSubject({ $type: RECORD_SUBJECT_TYPE, uri: item })
+  if (!parsed.ok) return parsed
+  return { ok: true, value: labelSubjectKey(parsed.value) }
+}
+
+export function parseSubjectFilter(
+  subjects: string[] | undefined,
+): ModerationResult<string[] | undefined> {
+  if (subjects === undefined) return { ok: true, value: undefined }
+  if (subjects.length === 0) {
+    return invalidSubject(
+      'subjects must not be empty; omit the field to read the whole log',
+    )
+  }
+  const keys = new Set<string>()
+  for (const item of subjects) {
+    const key = parseSubjectFilterItem(item)
+    if (!key.ok) return key
+    keys.add(key.value)
+  }
+  return { ok: true, value: [...keys] }
+}
+
+/**
+ * The scan stops where it last looked, which may be a label the caller cannot
+ * see. A log query may reveal that such labels exist; that is accepted for
+ * scoped readers.
+ */
+export function logQueryCursor(
+  inputCursor: number,
+  lastScannedSeq: number | undefined,
+): string {
+  return String(lastScannedSeq ?? inputCursor)
+}
+
+/**
+ * A page that is not full resumes at the log head read at the start of the
+ * request. A subject outside the caller's scope and a subject that was never
+ * labelled therefore get identical responses.
+ */
+export function subjectQueryCursor(
+  inputCursor: number,
+  headSeq: number,
+): string {
+  return String(Math.max(headSeq, inputCursor))
 }

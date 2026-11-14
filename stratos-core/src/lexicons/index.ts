@@ -39,6 +39,7 @@ import zoneStratosRepoImportRepo from '../../../lexicons/zone/stratos/repo/impor
 import zoneStratosRepoUploadBlob from '../../../lexicons/zone/stratos/sync/uploadBlob.json' with { type: 'json' }
 import zoneStratosModerationCreateLabel from '../../../lexicons/zone/stratos/moderation/createLabel.json' with { type: 'json' }
 import zoneStratosModerationDefs from '../../../lexicons/zone/stratos/moderation/defs.json' with { type: 'json' }
+import zoneStratosModerationQueryLabels from '../../../lexicons/zone/stratos/moderation/queryLabels.json' with { type: 'json' }
 import zoneStratosServerListDomains from '../../../lexicons/zone/stratos/server/listDomains.json' with { type: 'json' }
 import zoneStratosSpaceGetRecord from '../../../lexicons/zone/stratos/space/getRecord.json' with { type: 'json' }
 import zoneStratosSpaceGetSpaceCredential from '../../../lexicons/zone/stratos/space/getSpaceCredential.json' with { type: 'json' }
@@ -92,6 +93,7 @@ export const stratosLexicons: LexiconDoc[] = [
   zoneStratosRepoUploadBlob as LexiconDoc,
   zoneStratosModerationCreateLabel as LexiconDoc,
   zoneStratosModerationDefs as LexiconDoc,
+  zoneStratosModerationQueryLabels as LexiconDoc,
   zoneStratosServerListDomains as LexiconDoc,
   zoneStratosSpaceGetRecord as LexiconDoc,
   zoneStratosSpaceGetSpaceCredential as LexiconDoc,

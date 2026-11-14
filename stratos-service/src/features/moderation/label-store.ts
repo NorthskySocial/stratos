@@ -1,5 +1,5 @@
 import { createClient } from '@libsql/client'
-import { asc, desc, eq, gt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, lte, max, sql } from 'drizzle-orm'
 import type {
   AppendLabelResult,
   LabelStore,
@@ -66,6 +66,8 @@ function toInsertValues(label: NewLabel) {
   }
 }
 
+type ListFromOptions = Parameters<LabelStore['listFrom']>[0]
+
 function currentSeq(latest: StoredLabel | undefined): number | null {
   return latest === undefined ? null : latest.seq
 }
@@ -89,17 +91,32 @@ export class SqliteLabelStore implements LabelStore {
     return row ? toStoredLabel(row) : undefined
   }
 
-  async listFrom(opts: {
-    cursor?: number
-    limit: number
-  }): Promise<StoredLabel[]> {
+  async listFrom(opts: ListFromOptions): Promise<StoredLabel[]> {
+    if (opts.subjects?.length === 0) return []
     const rows = await this.db
       .select()
       .from(moderationLabel)
-      .where(gt(moderationLabel.seq, opts.cursor ?? 0))
+      .where(
+        and(
+          gt(moderationLabel.seq, opts.cursor ?? 0),
+          opts.upTo === undefined
+            ? undefined
+            : lte(moderationLabel.seq, opts.upTo),
+          opts.subjects === undefined
+            ? undefined
+            : inArray(moderationLabel.subjectKey, opts.subjects),
+        ),
+      )
       .orderBy(asc(moderationLabel.seq))
       .limit(opts.limit)
     return rows.map(toStoredLabel)
+  }
+
+  async headSeq(): Promise<number> {
+    const [row] = await this.db
+      .select({ head: max(moderationLabel.seq) })
+      .from(moderationLabel)
+    return row?.head ?? 0
   }
 
   async appendIfLatest(
@@ -231,17 +248,32 @@ export class PgLabelStore implements LabelStore {
     return row ? toStoredLabel(row) : undefined
   }
 
-  async listFrom(opts: {
-    cursor?: number
-    limit: number
-  }): Promise<StoredLabel[]> {
+  async listFrom(opts: ListFromOptions): Promise<StoredLabel[]> {
+    if (opts.subjects?.length === 0) return []
     const rows = await this.db
       .select()
       .from(pgModerationLabel)
-      .where(gt(pgModerationLabel.seq, opts.cursor ?? 0))
+      .where(
+        and(
+          gt(pgModerationLabel.seq, opts.cursor ?? 0),
+          opts.upTo === undefined
+            ? undefined
+            : lte(pgModerationLabel.seq, opts.upTo),
+          opts.subjects === undefined
+            ? undefined
+            : inArray(pgModerationLabel.subjectKey, opts.subjects),
+        ),
+      )
       .orderBy(asc(pgModerationLabel.seq))
       .limit(opts.limit)
     return rows.map(toStoredLabel)
+  }
+
+  async headSeq(): Promise<number> {
+    const [row] = await this.db
+      .select({ head: max(pgModerationLabel.seq) })
+      .from(pgModerationLabel)
+    return row?.head ?? 0
   }
 
   async appendIfLatest(

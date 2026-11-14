@@ -945,24 +945,69 @@ The procedure takes `subject`, `val`, and optional `neg` and `ref`. `val` must
 be `!takedown`. Set `neg: true` to lift a takedown.
 
 - **Hosted record:** use the repo-form URI, `at://{did}/{collection}/{rkey}`.
-  Stratos hides the record at once. `SubjectNotFound` means the hosted record
+  Reads stop serving the record at once. `SubjectNotFound` means the hosted record
   does not exist. If the call fails after Stratos has hidden the record, it
   stays hidden. Repeat the same request to finish it. A negation records its
   label first and lifts the hiding after, so a failed negation also leaves the
   record hidden.
 - **Member's PDS record:** use the seven-segment space-form URI. Stratos records
   the label. Stratos cannot hide a record that it does not host.
-- **Space-form URI for a hosted author:** Stratos accepts and records the label,
-  but it writes no marker. Use the repo-form URI to hide a hosted record.
 - **Account subject:** not accepted yet.
 
 Stratos rejects a space-form subject when:
 
 - its authority is another service;
 - its boundary is unknown;
-- the author is not an active member of the boundary.
+- the author is not an active member of the boundary;
+- the author's records are hosted by Stratos; use the repo-form URI.
 
-A negation of a takedown in force skips the membership check.
+A negation of a takedown in force skips the membership check. It does not skip the custody check.
 
 The response `label` is absent when the request changed nothing and the subject
 has no label. A repeat of the label in force returns that label.
+
+To read labels back, see `queryLabels` below.
+
+#### Reading labels with `queryLabels`
+
+`zone.stratos.moderation.queryLabels` pages the label log in `seq` order. `createLabel`
+writes the labels that this method returns.
+
+Parameters:
+
+- `cursor`: a label `seq` as a decimal string. Omit it to start at the
+  beginning.
+- `limit`: 1 to 250. The default is 50.
+- `subjects`: up to 100 record URIs or account DIDs. Stratos returns labels on
+  these subjects only. An empty list sent as repeated empty params is
+  rejected. A single empty `subjects=` or an omitted field reads the caller's
+  whole scoped log.
+
+The response always carries a `cursor`. Poll again from it. A page can hold
+fewer labels than `limit`, or none, while more remain.
+
+A subject matches the exact URI. A space-form subject must use the real URI of
+the record, including its space type. A subject that is out of scope looks the
+same as a subject with no labels.
+
+Moderation services must bind `lxm` to `zone.stratos.moderation.queryLabels`.
+Other services authenticate with ordinary service auth.
+
+A moderation service reads every label. An enrolled service reads a record label
+only if it shares a boundary with the label. A record label with no boundaries
+is visible only to moderation services.
+
+An enrolled service reads an account label if it shares a boundary with the
+member's enrollment. The enrollment can be active or not. It never reads an
+account label when the member has no enrollment. The reserved all-members
+boundary makes the account label of every enrolled member visible to every
+enrolled service. It also makes every record label that carries it visible.
+
+Errors:
+
+- `InvalidRequest`: the `cursor` or `subjects` is malformed. An empty
+  `subjects` list is malformed.
+- Auth errors: a service with no active enrollment, a service with no
+  boundaries, and every user, admin and space-credential caller, get a 401. A moderation service with a wrong
+  audience, an expired token, or a bad signature gets the ordinary service-auth
+  message.

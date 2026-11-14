@@ -4,6 +4,7 @@ export type ModerationErrorCode =
   | 'invalid-subject'
   | 'invalid-value'
   | 'foreign-authority'
+  | 'invalid-cursor'
 
 export interface ModerationError {
   code: ModerationErrorCode

@@ -30,6 +30,7 @@ import {
   type BoundaryCatalogStore,
   type BoundaryDefinition,
   type LabelStore,
+  type NewLabel,
   type StoredLabel,
 } from '@northskysocial/stratos-core'
 
@@ -271,13 +272,18 @@ describe('zone.stratos.moderation.createLabel on Postgres', () => {
     })
   }
 
-  async function enrollMember(did: string, boundaries: string[]) {
+  async function enrollMember(
+    did: string,
+    boundaries: string[],
+    custody: 'stratos' | 'pds' = 'pds',
+  ) {
     await enrollmentStore.enroll({
       did,
       enrolledAt: new Date().toISOString(),
       active: true,
       signingKeyDid: 'did:key:zTest',
       boundaries,
+      custody,
     })
   }
 
@@ -445,6 +451,7 @@ describe('zone.stratos.moderation.createLabel on Postgres', () => {
         ctx.labelStore = {
           latestForSubject: (key) => real.latestForSubject(key),
           listFrom: (opts) => real.listFrom(opts),
+          headSeq: () => real.headSeq(),
           appendIfLatest: async (expected, label) => {
             if (!failed) {
               failed = true
@@ -523,6 +530,7 @@ describe('zone.stratos.moderation.createLabel on Postgres', () => {
         ctx.labelStore = {
           latestForSubject: (key) => real.latestForSubject(key),
           listFrom: (opts) => real.listFrom(opts),
+          headSeq: () => real.headSeq(),
           appendIfLatest: async (expected, label) => {
             markersAtAppend.push(await marker('h6'))
             return real.appendIfLatest(expected, label)
@@ -556,6 +564,7 @@ describe('zone.stratos.moderation.createLabel on Postgres', () => {
             return latest
           },
           listFrom: (opts) => real.listFrom(opts),
+          headSeq: () => real.headSeq(),
           appendIfLatest: (expected, label) =>
             real.appendIfLatest(expected, label),
         } satisfies LabelStore
@@ -576,6 +585,140 @@ describe('zone.stratos.moderation.createLabel on Postgres', () => {
         expect(await allLabels()).toHaveLength(1)
       })
     })
+  })
+
+  describe('label store reads', () => {
+    const subjectOf = (rkey: string) => recordUri(rkey, ASUKA_DID)
+
+    function labelFor(
+      rkey: string,
+      overrides: Partial<NewLabel> = {},
+    ): NewLabel {
+      return {
+        subjectKey: subjectOf(rkey),
+        subjectKind: 'record',
+        val: '!takedown',
+        neg: false,
+        boundaries: [PILOTS],
+        createdBy: 'did:plc:nerv-moderation',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        ...overrides,
+      }
+    }
+
+    async function appendAll(rkeys: string[]): Promise<number[]> {
+      const seqs: number[] = []
+      for (const rkey of rkeys) {
+        const result = await labelStore.appendIfLatest(null, labelFor(rkey))
+        if (result.kind !== 'appended') throw new Error('expected append')
+        seqs.push(result.label.seq)
+      }
+      return seqs
+    }
+
+    it('returns only labels of the listed subjects, in seq order', async () => {
+      const seqs = await appendAll(['eva-01', 'eva-02', 'eva-03', 'eva-04'])
+      const rows = await labelStore.listFrom({
+        limit: 100,
+        subjects: [subjectOf('eva-03'), subjectOf('eva-01')],
+      })
+      expect(rows.map((row) => row.subjectKey)).toEqual([
+        subjectOf('eva-01'),
+        subjectOf('eva-03'),
+      ])
+      expect(rows.map((row) => row.seq)).toEqual([seqs[0], seqs[2]])
+    })
+
+    it('treats upTo as inclusive and cursor as exclusive', async () => {
+      const seqs = await appendAll(['eva-01', 'eva-02', 'eva-03', 'eva-04'])
+      const rows = await labelStore.listFrom({
+        cursor: seqs[0],
+        upTo: seqs[2],
+        limit: 100,
+      })
+      expect(rows.map((row) => row.seq)).toEqual([seqs[1], seqs[2]])
+    })
+
+    it('returns nothing for an empty subjects list', async () => {
+      await appendAll(['eva-01', 'eva-02'])
+      expect(await labelStore.listFrom({ limit: 100, subjects: [] })).toEqual(
+        [],
+      )
+    })
+
+    it('behaves as before when the new options are absent', async () => {
+      const seqs = await appendAll(['eva-01', 'eva-02', 'eva-03'])
+      const rows = await labelStore.listFrom({ cursor: seqs[0], limit: 100 })
+      expect(rows.map((row) => row.seq)).toEqual(seqs.slice(1))
+    })
+
+    it('reports 0 as the head of an empty log and the last seq afterwards', async () => {
+      expect(await labelStore.headSeq()).toBe(0)
+      const seqs = await appendAll(['eva-01', 'eva-02', 'eva-03'])
+      expect(await labelStore.headSeq()).toBe(seqs[2])
+    })
+
+    it('reports the highest seq, not the row count, when seqs have gaps', async () => {
+      const [first, second] = await appendAll(['eva-01', 'eva-02'])
+      await cleanupClient`DELETE FROM "moderation_label" WHERE seq = ${first}`
+      expect(await labelStore.headSeq()).toBe(second)
+    })
+
+    it('lets a cursor reader see every label while appends run, over 5 runs', async () => {
+      const writerDbs = Array.from({ length: 10 }, () =>
+        createServicePgDb(pgUrl),
+      )
+      try {
+        for (let run = 0; run < 5; run++) {
+          const writers = Promise.all(
+            writerDbs.map(async (writerDb, index) => {
+              const writerStore = new PgLabelStore(writerDb)
+              let expected: number | null = null
+              for (let step = 0; step < 3; step++) {
+                const result = await writerStore.appendIfLatest(
+                  expected,
+                  labelFor(`run-${run}-pilot-${index}`, { neg: step === 1 }),
+                )
+                if (result.kind !== 'appended') {
+                  throw new Error('expected append')
+                }
+                expected = result.label.seq
+              }
+            }),
+          )
+
+          const seen: number[] = []
+          let cursor = 0
+          const readPage = async (): Promise<number> => {
+            const page = await labelStore.listFrom({ cursor, limit: 5 })
+            seen.push(...page.map((row) => row.seq))
+            if (page.length > 0) cursor = page[page.length - 1].seq
+            return page.length
+          }
+          let writersDone = false
+          void writers.then(
+            () => (writersDone = true),
+            () => (writersDone = true),
+          )
+          while (!writersDone) {
+            if ((await readPage()) === 0) await new Promise(setImmediate)
+          }
+          await writers
+          const head = await labelStore.headSeq()
+          while (cursor < head) await readPage()
+
+          const everySeq = (await labelStore.listFrom({ limit: 1000 })).map(
+            (row) => row.seq,
+          )
+          expect(everySeq).toHaveLength(30 * (run + 1))
+          expect(seen).toEqual(everySeq)
+        }
+      } finally {
+        await Promise.all(
+          writerDbs.map((writerDb) => closeServicePgDb(writerDb)),
+        )
+      }
+    }, 60_000)
   })
 
   describe('space-form record subjects', () => {
@@ -688,6 +831,7 @@ describe('zone.stratos.moderation.createLabel on Postgres', () => {
           active: true,
           signingKeyDid: 'did:key:zTest',
           boundaries: [TOKYO3_BOUNDARY],
+          custody: 'pds',
         })
 
         const enrolled = await spaceLabel(spaceRecordUri({ skey: 'general' }))
@@ -698,6 +842,26 @@ describe('zone.stratos.moderation.createLabel on Postgres', () => {
         expect([enrolled.status, legacy.status]).toEqual([200, 200])
         expect(await allLabels()).toHaveLength(2)
       })
+    })
+
+    it('(w1) a takedown for a member with stratos custody is InvalidRequest and appends nothing', async () => {
+      await enrollMember(SHINJI_DID, [TOKYO3_BOUNDARY], 'stratos')
+
+      const res = await spaceLabel(spaceRecordUri({ author: SHINJI_DID }))
+
+      expect(res.status).toBe(400)
+      expect(res.data.error).toBe('InvalidRequest')
+      expect(res.data.message).toContain('repo-form URI')
+      expect(await allLabels()).toEqual([])
+    })
+
+    it('(w3) a member with pds custody still appends one label', async () => {
+      await enrollMember(SHINJI_DID, [TOKYO3_BOUNDARY], 'pds')
+
+      const res = await spaceLabel(spaceRecordUri({ author: SHINJI_DID }))
+
+      expect(res.status).toBe(200)
+      expect(await allLabels()).toHaveLength(1)
     })
 
     it('an unknown catalog boundary is InvalidRequest and appends nothing', async () => {

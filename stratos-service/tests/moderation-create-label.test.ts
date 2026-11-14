@@ -497,6 +497,7 @@ describe('zone.stratos.moderation.createLabel', () => {
       ctx.labelStore = {
         latestForSubject: (key) => real.latestForSubject(key),
         listFrom: (opts) => real.listFrom(opts),
+        headSeq: () => real.headSeq(),
         appendIfLatest: async (expected, label) => {
           if (!failed) {
             failed = true
@@ -601,6 +602,7 @@ describe('zone.stratos.moderation.createLabel', () => {
       ctx.labelStore = {
         latestForSubject: (key) => real.latestForSubject(key),
         listFrom: (opts) => real.listFrom(opts),
+        headSeq: () => real.headSeq(),
         appendIfLatest: alwaysStale,
       } satisfies LabelStore
 
@@ -621,6 +623,7 @@ describe('zone.stratos.moderation.createLabel', () => {
       ctx.labelStore = {
         latestForSubject: (key) => real.latestForSubject(key),
         listFrom: (opts) => real.listFrom(opts),
+        headSeq: () => real.headSeq(),
         appendIfLatest: async (expected, label) => {
           markersAtAppend.push(await marker('h6'))
           return real.appendIfLatest(expected, label)
@@ -650,6 +653,7 @@ describe('zone.stratos.moderation.createLabel', () => {
       ctx.labelStore = {
         latestForSubject: (key) => real.latestForSubject(key),
         listFrom: (opts) => real.listFrom(opts),
+        headSeq: () => real.headSeq(),
         appendIfLatest: alwaysStale,
       } satisfies LabelStore
 
@@ -793,6 +797,7 @@ describe('zone.stratos.moderation.createLabel', () => {
           return latest
         },
         listFrom: (opts) => real.listFrom(opts),
+        headSeq: () => real.headSeq(),
         appendIfLatest: (expected, label) =>
           real.appendIfLatest(expected, label),
       } satisfies LabelStore
@@ -864,6 +869,7 @@ describe('zone.stratos.moderation.createLabel', () => {
             : latest
         },
         listFrom: (opts) => real.listFrom(opts),
+        headSeq: () => real.headSeq(),
         appendIfLatest: async (expected, label) => {
           const result = await real.appendIfLatest(expected, label)
           appended = true
@@ -899,6 +905,7 @@ describe('zone.stratos.moderation.createLabel', () => {
             : latest
         },
         listFrom: (opts) => real.listFrom(opts),
+        headSeq: () => real.headSeq(),
         appendIfLatest: async (expected, label) => {
           const result = await real.appendIfLatest(expected, label)
           appended = true
@@ -975,7 +982,7 @@ describe('zone.stratos.moderation.createLabel', () => {
       ])
       ctx.enrollmentStore = {
         getEnrollment: async (did: string) =>
-          memberships.has(did) ? { active: true } : null,
+          memberships.has(did) ? { active: true, custody: 'pds' } : null,
         getBoundaries: async (did: string) => memberships.get(did) ?? [],
       }
       ctx.boundaryStore = {
@@ -1209,6 +1216,38 @@ describe('zone.stratos.moderation.createLabel', () => {
       })
     })
 
+    describe('a hosted author', () => {
+      it('a member enrolled with no custody field is InvalidRequest and appends nothing', async () => {
+        ctx.enrollmentStore = {
+          getEnrollment: async () => ({ active: true }),
+          getBoundaries: async () => [TOKYO3_BOUNDARY],
+        }
+
+        const res = await spaceLabel(spaceRecordUri())
+
+        expect(res.status).toBe(400)
+        expect(res.data.error).toBe('InvalidRequest')
+        expect(res.data.message).toContain('repo-form URI')
+        expect(await allLabels()).toEqual([])
+      })
+
+      it('reads the enrollment once per request', async () => {
+        const getEnrollment = vi.fn(async () => ({
+          active: true,
+          custody: 'pds',
+        }))
+        ctx.enrollmentStore = {
+          getEnrollment,
+          getBoundaries: async () => [TOKYO3_BOUNDARY],
+        }
+
+        const res = await spaceLabel(spaceRecordUri())
+
+        expect(res.status).toBe(200)
+        expect(getEnrollment).toHaveBeenCalledTimes(1)
+      })
+    })
+
     it('(u) an account subject is still InvalidRequest and appends nothing', async () => {
       const res = await createLabel({
         subject: {
@@ -1294,6 +1333,7 @@ describe('zone.stratos.moderation.createLabel', () => {
         active: true,
         signingKeyDid: 'did:key:zTest',
         boundaries: [TOKYO3_BOUNDARY],
+        custody: 'pds',
       })
     })
 
@@ -1364,6 +1404,7 @@ describe('zone.stratos.moderation.createLabel', () => {
           active: true,
           signingKeyDid: 'did:key:zTest',
           boundaries: [TOKYO3_BOUNDARY],
+          custody: 'pds',
         })
 
         const enrolled = await spaceLabel(spaceRecordUri(ASUKA_DID, 'general'))
@@ -1386,6 +1427,108 @@ describe('zone.stratos.moderation.createLabel', () => {
 
         expect(res.status).toBe(200)
         expect(await allLabels()).toHaveLength(2)
+      })
+    })
+
+    describe('custody of the author', () => {
+      async function enrollWithCustody(
+        did: string,
+        custody: 'stratos' | 'pds' | undefined,
+      ) {
+        await members.enroll({
+          did,
+          enrolledAt: new Date().toISOString(),
+          active: true,
+          signingKeyDid: 'did:key:zTest',
+          boundaries: [TOKYO3_BOUNDARY],
+          ...(custody ? { custody } : {}),
+        })
+      }
+
+      async function seedTakedown(uri: string) {
+        await labelStore.appendIfLatest(null, {
+          subjectKey: uri,
+          subjectKind: 'record',
+          val: '!takedown',
+          neg: false,
+          boundaries: [TOKYO3_BOUNDARY],
+          createdBy: moderator.did(),
+          createdAt: new Date().toISOString(),
+        })
+      }
+
+      function negation(uri: string): Promise<AxiosResponse> {
+        return createLabel({
+          subject: { $type: RECORD_SUBJECT_TYPE, uri },
+          val: '!takedown',
+          neg: true,
+        })
+      }
+
+      it('(w1) a takedown for a member with stratos custody is InvalidRequest and appends nothing', async () => {
+        await enrollWithCustody(SHINJI_DID, 'stratos')
+
+        const res = await spaceLabel(spaceRecordUri(SHINJI_DID))
+
+        expect(res.status).toBe(400)
+        expect(res.data.error).toBe('InvalidRequest')
+        expect(res.data.message).toContain('repo-form URI')
+        expect(await allLabels()).toEqual([])
+      })
+
+      it('(w2) a member enrolled with no custody is held by Stratos and rejected', async () => {
+        await enrollWithCustody(SHINJI_DID, undefined)
+
+        const res = await spaceLabel(spaceRecordUri(SHINJI_DID))
+
+        expect(res.status).toBe(400)
+        expect(res.data.message).toContain('repo-form URI')
+        expect(await allLabels()).toEqual([])
+      })
+
+      it('(w3) a member with pds custody still appends one label', async () => {
+        await enrollWithCustody(SHINJI_DID, 'pds')
+
+        const res = await spaceLabel(spaceRecordUri(SHINJI_DID))
+
+        expect(res.status).toBe(200)
+        expect(await allLabels()).toHaveLength(1)
+      })
+
+      it('(w4) a negation for a stratos-custody author is rejected while a takedown is in force', async () => {
+        await enrollWithCustody(SHINJI_DID, 'stratos')
+        const uri = spaceRecordUri(SHINJI_DID)
+        await seedTakedown(uri)
+
+        const res = await negation(uri)
+
+        expect(res.status).toBe(400)
+        expect(res.data.message).toContain('repo-form URI')
+        expect(await allLabels()).toHaveLength(1)
+      })
+
+      it('(w5) an author with no enrollment row is not rejected for custody', async () => {
+        const uri = spaceRecordUri(SHINJI_DID)
+        const withoutTakedown = await negation(uri)
+        await seedTakedown(uri)
+
+        const withTakedown = await negation(uri)
+
+        expect(withoutTakedown.status).toBe(400)
+        expect(withoutTakedown.data.message).toBe(
+          'author is not a member of the boundary',
+        )
+        expect(withTakedown.status).toBe(200)
+        expect(await allLabels()).toHaveLength(2)
+      })
+
+      it('(w6) reads the enrollment once per request', async () => {
+        const reads = vi.spyOn(members, 'getEnrollment')
+
+        const res = await spaceLabel(spaceRecordUri(ASUKA_DID))
+
+        expect(res.status).toBe(200)
+        expect(reads).toHaveBeenCalledTimes(1)
       })
     })
   })
