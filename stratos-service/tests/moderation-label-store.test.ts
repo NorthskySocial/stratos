@@ -138,6 +138,47 @@ describe('SqliteLabelStore', () => {
     expect(latest?.subjectKey).toBe(target.subjectKey)
   })
 
+  it('latestTakedowns returns exactly the keys whose latest label is a takedown', async () => {
+    const append = async (rkey: string, neg: boolean) => {
+      const key = recordLabel(rkey).subjectKey
+      const latest = await store.latestForSubject(key)
+      const result = await store.appendIfLatest(
+        latest?.seq ?? null,
+        recordLabel(rkey, { neg }),
+      )
+      if (result.kind !== 'appended') throw new Error('expected append')
+    }
+    await append('takedown-then-negation', false)
+    await append('takedown-then-negation', true)
+    await append('negation-then-takedown', true)
+    await append('negation-then-takedown', false)
+    await append('takedown-only', false)
+    await append('negation-only', true)
+    const keyOf = (rkey: string) => recordLabel(rkey).subjectKey
+
+    const hidden = await store.latestTakedowns([
+      keyOf('takedown-then-negation'),
+      keyOf('negation-then-takedown'),
+      keyOf('takedown-only'),
+      keyOf('negation-only'),
+      keyOf('never-labelled'),
+    ])
+
+    expect(hidden).toEqual(
+      new Set([keyOf('negation-then-takedown'), keyOf('takedown-only')]),
+    )
+  })
+
+  it('latestTakedowns ignores keys that were not asked for and an empty list', async () => {
+    await store.appendIfLatest(null, recordLabel('asked'))
+    await store.appendIfLatest(null, recordLabel('not-asked'))
+
+    expect(
+      await store.latestTakedowns([recordLabel('asked').subjectKey]),
+    ).toEqual(new Set([recordLabel('asked').subjectKey]))
+    expect(await store.latestTakedowns([])).toEqual(new Set())
+  })
+
   it('latestForSubject returns undefined for an unknown key', async () => {
     await store.appendIfLatest(null, recordLabel('known'))
     expect(

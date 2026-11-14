@@ -54,6 +54,7 @@ import { createAuthVerifiers } from '../src/infra/auth/verifiers.js'
 import { ADMIN_SESSION_COOKIE } from '../src/oauth/admin-routes.js'
 import { SqliteAdminSessionStore } from '../src/oauth/admin-session-store.js'
 import { SqliteAdminUserStore } from '../src/oauth/admin-user-store.js'
+import type { EnrollmentRecord } from '../src/oauth/index.js'
 import { createTestConfig } from './utils'
 import { makeSpaceUri } from './helpers/space-uri.js'
 
@@ -122,6 +123,7 @@ describe('zone.stratos.moderation.queryLabels', () => {
   let deactivated: Secp256k1Keypair
   let boundaryless: Secp256k1Keypair
   let unenrolled: Secp256k1Keypair
+  let member: Secp256k1Keypair
   let signingKey: Secp256k1Keypair
   let verifiers: ReturnType<typeof createAuthVerifiers>
   let logger: Record<'debug' | 'info' | 'warn' | 'error', Mock<LogFn>>
@@ -147,14 +149,15 @@ describe('zone.stratos.moderation.queryLabels', () => {
     boundaries: string[],
     options: { service?: boolean } = {},
   ) {
-    await members.enroll({
+    const enrollment: EnrollmentRecord = {
       did,
       enrolledAt: new Date().toISOString(),
       active: true,
       signingKeyDid: 'did:key:zTest',
       boundaries,
-      ...(options.service ? { service: true } : {}),
-    } as never)
+      ...(options.service ? { isService: true } : {}),
+    }
+    await members.enroll(enrollment)
   }
 
   beforeEach(async () => {
@@ -198,9 +201,10 @@ describe('zone.stratos.moderation.queryLabels', () => {
     deactivated = await Secp256k1Keypair.create({ exportable: true })
     boundaryless = await Secp256k1Keypair.create({ exportable: true })
     unenrolled = await Secp256k1Keypair.create({ exportable: true })
+    member = await Secp256k1Keypair.create({ exportable: true })
     signingKey = await Secp256k1Keypair.create()
     const documents = new Map(
-      [moderator, nerv, deactivated, boundaryless, unenrolled].map(
+      [moderator, nerv, deactivated, boundaryless, unenrolled, member].map(
         (keypair) => [keypair.did(), didDocumentFor(keypair)],
       ),
     )
@@ -580,6 +584,79 @@ describe('zone.stratos.moderation.queryLabels', () => {
       expect(asCredential.credentials.type).toBe('space-credential')
 
       await expectUnauthorized(headers)
+    })
+  })
+
+  describe('(r5) only a service enrollment reads as a scoped service', () => {
+    it('(r5a) rejects an active member holding a boundary who presents a service JWT for its own DID', async () => {
+      await enroll(member.did(), [TOKYO3])
+      await append(recordUri('shared'), [TOKYO3])
+      expect(await members.getBoundaries(member.did())).toEqual([TOKYO3])
+
+      const res = await query(await bearer(member))
+
+      expect(res.status).toBe(401)
+      expect(res.data.labels).toBeUndefined()
+    })
+
+    it('(r5a2) rejects a member whose enrollment carries no service flag at all', async () => {
+      await enroll(member.did(), [TOKYO3])
+      await append(recordUri('shared'), [TOKYO3])
+      const stored = await members.getEnrollment(member.did())
+      vi.spyOn(members, 'getEnrollment').mockImplementation(async (did) =>
+        did === member.did()
+          ? ({ ...stored, isService: undefined } as never)
+          : null,
+      )
+
+      const res = await query(await bearer(member))
+
+      expect(res.status).toBe(401)
+      expect(res.data.labels).toBeUndefined()
+    })
+
+    it('(r5b) gives a service enrollment its scoped labels', async () => {
+      const shared = await append(recordUri('shared'), [TOKYO3])
+      await append(recordUri('geofront-only'), [GEOFRONT])
+
+      const res = await query(await bearer(nerv))
+
+      expect(res.status).toBe(200)
+      expect(seqsOf(res)).toEqual([shared.seq])
+    })
+
+    it('(r5c) gives a moderation service with no enrollment the full log', async () => {
+      expect(await members.getEnrollment(moderator.did())).toBeNull()
+      const shared = await append(recordUri('shared'), [TOKYO3])
+      const geofront = await append(recordUri('geofront-only'), [GEOFRONT])
+
+      const res = await query(await bearer(moderator))
+
+      expect(res.status).toBe(200)
+      expect(seqsOf(res)).toEqual([shared.seq, geofront.seq])
+    })
+
+    it('(r5d) rejects a deactivated service enrollment', async () => {
+      expect((await members.getEnrollment(deactivated.did()))?.isService).toBe(
+        true,
+      )
+      await append(recordUri('shared'), [TOKYO3])
+
+      const res = await query(await bearer(deactivated))
+
+      expect(res.status).toBe(401)
+      expect(res.data.labels).toBeUndefined()
+    })
+
+    it('(r5e) reads the caller enrollment once for the boundary check and once for the service check', async () => {
+      await append(recordUri('shared'), [TOKYO3])
+      const lookups = vi.spyOn(members, 'getEnrollment')
+
+      const res = await query(await bearer(nerv))
+
+      expect(res.status).toBe(200)
+      const byCaller = lookups.mock.calls.filter(([did]) => did === nerv.did())
+      expect(byCaller).toHaveLength(2)
     })
   })
 

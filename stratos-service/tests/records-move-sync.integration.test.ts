@@ -33,6 +33,7 @@ import {
   eventInScope,
   type SeqEvent,
 } from '../src/subscription/index.js'
+import { SqliteLabelStore } from '../src/features/moderation/index.js'
 import { listRepoOps, type RepoOp } from '../src/features/pull-sync/index.js'
 import { createMockBlobStore, createTestConfig } from './utils/index.js'
 
@@ -126,6 +127,7 @@ describe('Record move sync contract', () => {
       cfg,
       actorStore,
       enrollmentStore,
+      labelStore: new SqliteLabelStore(db, join(dataDir, 'service.sqlite')),
       serviceDid,
       writeRateLimiter: { assertWriteAllowed: vi.fn() },
       actorSigner: {

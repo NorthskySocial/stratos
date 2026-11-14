@@ -22,6 +22,12 @@ export interface LabelStore {
     subjects?: string[]
   }) => Promise<StoredLabel[]>
 
+  /**
+   * The subset of `subjectKeys` whose latest label, by `seq`, is a takedown
+   * rather than a negation. One query; no query for an empty list.
+   */
+  latestTakedowns: (subjectKeys: string[]) => Promise<Set<string>>
+
   /** Highest `seq` in the log, or `0` when it is empty. */
   headSeq: () => Promise<number>
 

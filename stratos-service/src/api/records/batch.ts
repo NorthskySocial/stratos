@@ -241,9 +241,11 @@ async function persistBatchBlocks(
 ): Promise<void> {
   for (const pre of precomputed) {
     if (pre.action === 'delete') {
+      // A taken-down record must stay deletable so consumers drop their copy.
       const existing = await store.record.getRecord(
         new AtUriSyntax(pre.uri),
         null,
+        true,
       )
       if (!existing) {
         throw new InvalidRequestError('Record not found', 'RecordNotFound')

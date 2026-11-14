@@ -112,6 +112,27 @@ export class SqliteLabelStore implements LabelStore {
     return rows.map(toStoredLabel)
   }
 
+  // Any latest label that is not a negation counts as a takedown, which holds
+  // only while `!takedown` is the sole accepted value. Another value needs a
+  // `val` condition here and in the Postgres implementation.
+  async latestTakedowns(subjectKeys: string[]): Promise<Set<string>> {
+    if (subjectKeys.length === 0) return new Set()
+    const rows = await this.db
+      .select({ subjectKey: moderationLabel.subjectKey })
+      .from(moderationLabel)
+      .where(
+        and(
+          inArray(moderationLabel.subjectKey, subjectKeys),
+          eq(moderationLabel.neg, false),
+          sql`${moderationLabel.seq} = (
+            SELECT MAX(newer.seq) FROM moderation_label newer
+            WHERE newer.subjectKey = ${moderationLabel.subjectKey}
+          )`,
+        ),
+      )
+    return new Set(rows.map((row) => row.subjectKey))
+  }
+
   async headSeq(): Promise<number> {
     const [row] = await this.db
       .select({ head: max(moderationLabel.seq) })
@@ -267,6 +288,24 @@ export class PgLabelStore implements LabelStore {
       .orderBy(asc(pgModerationLabel.seq))
       .limit(opts.limit)
     return rows.map(toStoredLabel)
+  }
+
+  async latestTakedowns(subjectKeys: string[]): Promise<Set<string>> {
+    if (subjectKeys.length === 0) return new Set()
+    const rows = await this.db
+      .select({ subjectKey: pgModerationLabel.subjectKey })
+      .from(pgModerationLabel)
+      .where(
+        and(
+          inArray(pgModerationLabel.subjectKey, subjectKeys),
+          eq(pgModerationLabel.neg, false),
+          sql`${pgModerationLabel.seq} = (
+            SELECT MAX(newer.seq) FROM moderation_label newer
+            WHERE newer."subjectKey" = ${pgModerationLabel.subjectKey}
+          )`,
+        ),
+      )
+    return new Set(rows.map((row) => row.subjectKey))
   }
 
   async headSeq(): Promise<number> {

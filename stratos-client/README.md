@@ -993,21 +993,60 @@ same as a subject with no labels.
 Moderation services must bind `lxm` to `zone.stratos.moderation.queryLabels`.
 Other services authenticate with ordinary service auth.
 
-A moderation service reads every label. An enrolled service reads a record label
-only if it shares a boundary with the label. A record label with no boundaries
-is visible only to moderation services.
+A moderation service reads every label. A service that holds a service
+enrollment reads a record label only if it shares a boundary with the label. A
+record label with no boundaries is visible only to moderation services.
 
-An enrolled service reads an account label if it shares a boundary with the
-member's enrollment. The enrollment can be active or not. It never reads an
-account label when the member has no enrollment. The reserved all-members
-boundary makes the account label of every enrolled member visible to every
-enrolled service. It also makes every record label that carries it visible.
+A service that holds a service enrollment reads an account label if it shares a
+boundary with the member's enrollment. The enrollment can be active or not. It
+never reads an account label when the member has no enrollment. The reserved
+all-members boundary makes the account label of every enrolled member visible
+to every service holding a service enrollment. It also makes every record
+label that carries it visible.
 
 Errors:
 
 - `InvalidRequest`: the `cursor` or `subjects` is malformed. An empty
   `subjects` list is malformed.
 - Auth errors: a service with no active enrollment, a service with no
-  boundaries, and every user, admin and space-credential caller, get a 401. A moderation service with a wrong
-  audience, an expired token, or a bad signature gets the ordinary service-auth
-  message.
+  boundaries, a caller whose enrollment is not a service enrollment (for
+  example a member who mints a service-auth JWT for their own DID), and every
+  user, admin and space-credential caller, get a 401. An operator grants a
+  service enrollment by listing the service in `STRATOS_SERVICE_ENROLLMENTS`.
+  A moderation service with a wrong audience, an expired token, or a bad
+  signature gets the ordinary service-auth message.
+
+#### Takedown and `subscribeRecords` and `listRepoOps`
+
+A takedown changes what the sync streams send. Stratos checks each record when
+it reads the frames.
+
+- `subscribeRecords` and `listRepoOps` leave out the create and update ops of a
+  record that is taken down now.
+- Stratos skips an event that has no ops left.
+- Delete ops always pass the takedown filter. The boundary scope rules still
+  apply to them. Your copy of a taken-down record can still be removed.
+- A takedown never adds an event to either stream. Read labels with
+  `queryLabels`.
+- After a negation, a replay serves the record again.
+
+A takedown applies to sync frames that Stratos reads after it. A page that
+Stratos already read can still deliver the record once. Apply labels in your
+consumer.
+
+Deleting a taken-down record that carries a boundary sends a delete event.
+Subscribers in the record's boundaries receive it. This holds for a single
+delete and for a delete in a batch.
+
+After a taken-down record is deleted, sync replays still leave out its create
+and update ops while the latest label is a takedown.
+
+One limit applies:
+
+- An author can delete a taken-down record and create a new one at the same
+  URI. The new record has no takedown, so Stratos serves it. While it exists,
+  sync replays serve it and the earlier history of that URI. If the author
+  deletes it again, replays leave out every create and update for the URI while
+  its latest label is a takedown. The delete op still arrives. If you apply
+  labels by URI, you still refuse the new record. A moderation service repeats
+  `createLabel` to hide it on the host.

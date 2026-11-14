@@ -287,6 +287,18 @@ export class PgActorRecordReader {
       : { applied: false }
   }
 
+  async getTakedownStates(uris: string[]): Promise<Map<string, boolean>> {
+    if (uris.length === 0) return new Map()
+    const rows = await this.db
+      .select({
+        uri: pgStratosRecord.uri,
+        takedownRef: pgStratosRecord.takedownRef,
+      })
+      .from(pgStratosRecord)
+      .where(inArray(pgStratosRecord.uri, uris))
+    return new Map(rows.map((row) => [row.uri, row.takedownRef !== null]))
+  }
+
   async getRecordBoundaries(uri: string | AtUri): Promise<string[]> {
     const rows = await this.db
       .select({ boundary: pgStratosRecordBoundary.boundary })

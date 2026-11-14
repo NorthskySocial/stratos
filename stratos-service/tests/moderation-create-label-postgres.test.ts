@@ -452,6 +452,7 @@ describe('zone.stratos.moderation.createLabel on Postgres', () => {
           latestForSubject: (key) => real.latestForSubject(key),
           listFrom: (opts) => real.listFrom(opts),
           headSeq: () => real.headSeq(),
+          latestTakedowns: (keys) => real.latestTakedowns(keys),
           appendIfLatest: async (expected, label) => {
             if (!failed) {
               failed = true
@@ -531,6 +532,7 @@ describe('zone.stratos.moderation.createLabel on Postgres', () => {
           latestForSubject: (key) => real.latestForSubject(key),
           listFrom: (opts) => real.listFrom(opts),
           headSeq: () => real.headSeq(),
+          latestTakedowns: (keys) => real.latestTakedowns(keys),
           appendIfLatest: async (expected, label) => {
             markersAtAppend.push(await marker('h6'))
             return real.appendIfLatest(expected, label)
@@ -565,6 +567,7 @@ describe('zone.stratos.moderation.createLabel on Postgres', () => {
           },
           listFrom: (opts) => real.listFrom(opts),
           headSeq: () => real.headSeq(),
+          latestTakedowns: (keys) => real.latestTakedowns(keys),
           appendIfLatest: (expected, label) =>
             real.appendIfLatest(expected, label),
         } satisfies LabelStore

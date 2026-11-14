@@ -729,3 +729,93 @@ describe('getRecordBoundaries', () => {
     expect(await reader.getRecordBoundaries(uri)).toEqual([SEELE])
   })
 })
+
+describe('getTakedownStates', () => {
+  let db: StratosDb
+  let reader: StratosRecordReader
+  let transactor: StratosRecordTransactor
+  let testDir: string
+
+  const uriOf = (rkey: string) =>
+    `at://did:plc:misato/zone.stratos.feed.post/${rkey}`
+
+  const index = async (rkey: string) => {
+    const record = { $type: 'zone.stratos.feed.post', text: rkey }
+    await transactor.indexRecord(
+      new AtUri(uriOf(rkey)),
+      await createCid(record),
+      record,
+      'create',
+      'rev1',
+    )
+  }
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `stratos-takedown-uris-test-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(testDir, { recursive: true })
+    db = createStratosDb(join(testDir, 'test.db'))
+    await migrateStratosDb(db)
+    reader = new StratosRecordReader(db, decodeRecord)
+    transactor = new StratosRecordTransactor(db, decodeRecord)
+  })
+
+  afterEach(async () => {
+    await closeStratosDb(db)
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('maps marked rows to true and unmarked rows to false, and omits unknown uris', async () => {
+    await index('rei')
+    await index('asuka')
+    await index('shinji')
+    await transactor.updateRecordTakedown(uriOf('rei'), {
+      applied: true,
+      ref: 'TD-REI',
+    })
+    await transactor.updateRecordTakedown(uriOf('shinji'), {
+      applied: true,
+      ref: 'TD-SHINJI',
+    })
+
+    const found = await reader.getTakedownStates([
+      uriOf('rei'),
+      uriOf('asuka'),
+      uriOf('shinji'),
+      uriOf('kaworu'),
+    ])
+
+    expect(found).toEqual(
+      new Map([
+        [uriOf('rei'), true],
+        [uriOf('asuka'), false],
+        [uriOf('shinji'), true],
+      ]),
+    )
+  })
+
+  it('reports a row as unmarked once its takedown is negated', async () => {
+    await index('rei')
+    await transactor.updateRecordTakedown(uriOf('rei'), {
+      applied: true,
+      ref: 'TD-REI',
+    })
+    await transactor.updateRecordTakedown(uriOf('rei'), { applied: false })
+
+    expect(await reader.getTakedownStates([uriOf('rei')])).toEqual(
+      new Map([[uriOf('rei'), false]]),
+    )
+  })
+
+  it('returns an empty map for an empty list', async () => {
+    await index('rei')
+    await transactor.updateRecordTakedown(uriOf('rei'), {
+      applied: true,
+      ref: 'TD-REI',
+    })
+
+    expect(await reader.getTakedownStates([])).toEqual(new Map())
+  })
+})

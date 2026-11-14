@@ -1,16 +1,31 @@
-import { describe, expect, it, vi } from 'vitest'
-import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import {
+  decode,
+  encode as cborEncode,
+  toBytes as cborToBytes,
+} from '@atcute/cbor'
 import {
   computeCid,
   encodeRecord,
   parseCid,
 } from '@northskysocial/stratos-core'
-import type { AppContext } from '../src/context.js'
+import { type AppContext, StratosActorStore } from '../src/context.js'
+import {
+  closeServiceDb,
+  createServiceDb,
+  migrateServiceDb,
+  type ServiceDb,
+} from '../src/db/index.js'
+import { SqliteLabelStore } from '../src/features/moderation/index.js'
 import {
   encodeSeqCursor,
   listRepoOps,
   OplogTruncatedError,
 } from '../src/features/pull-sync/index.js'
+import { createMockBlobStore } from './utils/index.js'
 
 const REPO_DID = 'did:plc:tenchi-masaki'
 const BOUNDARY = 'jurai'
@@ -36,6 +51,7 @@ interface SeqRow {
  * between them deterministically.
  */
 class ScriptedActorStore {
+  constructor(private readonly realActorStore: StratosActorStore) {}
   readonly rows: SeqRow[] = []
   root: { cid: string; rev: string } | null = null
   commitBytes: Uint8Array | null = null
@@ -92,29 +108,32 @@ class ScriptedActorStore {
     return true
   }
 
-  async read<T>(_did: string, fn: (store: unknown) => Promise<T>): Promise<T> {
-    return fn({
-      sequence: {
-        getOldestSeq: async () => this.rows[0]?.seq ?? 0,
-        getLatestSeq: async () => this.rows[this.rows.length - 1]?.seq ?? 0,
-        getEventsSince: async (cursor: number, limit = 100) => {
-          // Capture the page before the hook runs, so a write appended by the
-          // hook lands strictly after this read.
-          const page = this.rows
-            .filter((row) => row.seq > cursor)
-            .slice(0, limit)
-          this.onSequenceRead()
-          return page
+  async read<T>(did: string, fn: (store: unknown) => Promise<T>): Promise<T> {
+    return this.realActorStore.read(did, (real) =>
+      fn({
+        sequence: {
+          getOldestSeq: async () => this.rows[0]?.seq ?? 0,
+          getLatestSeq: async () => this.rows[this.rows.length - 1]?.seq ?? 0,
+          getEventsSince: async (cursor: number, limit = 100) => {
+            // Capture the page before the hook runs, so a write appended by the
+            // hook lands strictly after this read.
+            const page = this.rows
+              .filter((row) => row.seq > cursor)
+              .slice(0, limit)
+            this.onSequenceRead()
+            return page
+          },
         },
-      },
-      repo: {
-        getRootDetailed: async () => {
-          this.onCommitRead()
-          return this.root
+        record: real.record,
+        repo: {
+          getRootDetailed: async () => {
+            this.onCommitRead()
+            return this.root
+          },
+          getBytes: async () => this.commitBytes,
         },
-        getBytes: async () => this.commitBytes,
-      },
-    })
+      }),
+    )
   }
 }
 
@@ -130,8 +149,31 @@ async function encodeSignedCommit(rev: string): Promise<Uint8Array> {
   })
 }
 
+let dataDir: string
+let serviceDb: ServiceDb
+let realActorStore: StratosActorStore
+let labelStore: SqliteLabelStore
+
+beforeAll(async () => {
+  dataDir = await mkdtemp(join(tmpdir(), 'stratos-oplog-race-'))
+  serviceDb = createServiceDb(join(dataDir, 'service.sqlite'))
+  await migrateServiceDb(serviceDb)
+  labelStore = new SqliteLabelStore(serviceDb, join(dataDir, 'service.sqlite'))
+  realActorStore = new StratosActorStore({
+    dataDir,
+    blobstore: () => createMockBlobStore(),
+    cborToRecord: (content) => decode(content) as Record<string, unknown>,
+  })
+  await realActorStore.create(REPO_DID)
+})
+
+afterAll(async () => {
+  await closeServiceDb(serviceDb)
+  await rm(dataDir, { recursive: true, force: true })
+})
+
 function makeCtx(actorStore: ScriptedActorStore): AppContext {
-  return { actorStore } as unknown as AppContext
+  return { actorStore, labelStore } as unknown as AppContext
 }
 
 describe('listRepoOps head-of-oplog race', () => {
@@ -139,7 +181,7 @@ describe('listRepoOps head-of-oplog race', () => {
   const callerBoundaries: ReadonlySet<string> = new Set([BOUNDARY])
 
   it('returns a cursor, not a commit, when a write lands during the commit read', async () => {
-    const actorStore = new ScriptedActorStore()
+    const actorStore = new ScriptedActorStore(realActorStore)
     actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
     actorStore.root = { cid: 'commitCid', rev: REV.r1 }
     actorStore.commitBytes = await encodeSignedCommit(REV.r2)
@@ -159,7 +201,7 @@ describe('listRepoOps head-of-oplog race', () => {
   })
 
   it('can return no ops and the same cursor the caller sent', async () => {
-    const actorStore = new ScriptedActorStore()
+    const actorStore = new ScriptedActorStore(realActorStore)
     actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
     actorStore.root = { cid: 'commitCid', rev: REV.r1 }
     actorStore.commitBytes = await encodeSignedCommit(REV.r2)
@@ -185,7 +227,7 @@ describe('listRepoOps head-of-oplog race', () => {
   })
 
   it('stays at the head when the write lands after the probe', async () => {
-    const actorStore = new ScriptedActorStore()
+    const actorStore = new ScriptedActorStore(realActorStore)
     actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
     actorStore.root = { cid: 'commitCid', rev: REV.r1 }
     actorStore.commitBytes = await encodeSignedCommit(REV.r1)
@@ -212,7 +254,7 @@ describe('listRepoOps head-of-oplog race', () => {
   })
 
   it('returns the commit and no cursor when no write lands during the commit read', async () => {
-    const actorStore = new ScriptedActorStore()
+    const actorStore = new ScriptedActorStore(realActorStore)
     actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
     actorStore.root = { cid: 'commitCid', rev: REV.r1 }
     actorStore.commitBytes = await encodeSignedCommit(REV.r1)
@@ -225,7 +267,7 @@ describe('listRepoOps head-of-oplog race', () => {
   })
 
   it('withholds the commit when the op budget ends the page at the last event', async () => {
-    const actorStore = new ScriptedActorStore()
+    const actorStore = new ScriptedActorStore(realActorStore)
     actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
     actorStore.root = { cid: 'commitCid', rev: REV.r1 }
     actorStore.commitBytes = await encodeSignedCommit(REV.r1)
@@ -241,7 +283,7 @@ describe('listRepoOps head-of-oplog race', () => {
   })
 
   it('signals the head with no commit and no cursor for a repo with no root yet', async () => {
-    const actorStore = new ScriptedActorStore()
+    const actorStore = new ScriptedActorStore(realActorStore)
 
     const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
 
@@ -251,7 +293,7 @@ describe('listRepoOps head-of-oplog race', () => {
   })
 
   it('fails closed with OplogTruncated on a non-delete op without a cid', async () => {
-    const actorStore = new ScriptedActorStore()
+    const actorStore = new ScriptedActorStore(realActorStore)
     // `cid: null` on the wire means delete, so a cid-less create cannot be
     // emitted truthfully. A silent drop would yield a head response that
     // omits a persisted op — a permanent sync gap — so the whole page must
@@ -285,7 +327,7 @@ describe('listRepoOps head-of-oplog race', () => {
     // format anchors the full key, not a substring.
     const invalidRkeys = ['..', '', '.', 'evil rkey', 'ayeka!']
     for (const rkey of invalidRkeys) {
-      const actorStore = new ScriptedActorStore()
+      const actorStore = new ScriptedActorStore(realActorStore)
       actorStore.appendEvent(1, REV.r1, rkey, 'cidKagato')
       actorStore.root = { cid: 'commitCid', rev: REV.r1 }
       actorStore.commitBytes = await encodeSignedCommit(REV.r1)

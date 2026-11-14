@@ -50,6 +50,7 @@ import { ActiveBoundaryEnrollmentStore } from '../src/features/boundary/enrollme
 import { ReservedDomainEnrollmentStore } from '../src/infra/storage/reserved-domain-enrollment-store.js'
 import { createAuthVerifiers } from '../src/infra/auth/verifiers.js'
 import { PgAdminSessionStore, PgAdminUserStore } from '../src/oauth/index.js'
+import type { EnrollmentRecord } from '../src/oauth/index.js'
 import { createTestConfig } from './utils'
 import {
   startPostgresContainer,
@@ -115,6 +116,7 @@ describe('zone.stratos.moderation.queryLabels on Postgres', () => {
   let enrollmentStore: ActiveBoundaryEnrollmentStore
   let moderator: Secp256k1Keypair
   let nerv: Secp256k1Keypair
+  let member: Secp256k1Keypair
   let logger: Record<'debug' | 'info' | 'warn' | 'error', Mock<LogFn>>
   let ctx: AppContext
   let httpServer: http.Server
@@ -153,9 +155,10 @@ describe('zone.stratos.moderation.queryLabels on Postgres', () => {
 
     moderator = await Secp256k1Keypair.create({ exportable: true })
     nerv = await Secp256k1Keypair.create({ exportable: true })
+    member = await Secp256k1Keypair.create({ exportable: true })
     const signingKey = await Secp256k1Keypair.create()
     const documents = new Map(
-      [moderator, nerv].map((keypair) => [
+      [moderator, nerv, member].map((keypair) => [
         keypair.did(),
         didDocumentFor(keypair),
       ]),
@@ -211,14 +214,15 @@ describe('zone.stratos.moderation.queryLabels on Postgres', () => {
   })
 
   async function enroll(did: string, boundaries: string[], service = false) {
-    await enrollmentStore.enroll({
+    const enrollment: EnrollmentRecord = {
       did,
       enrolledAt: new Date().toISOString(),
       active: true,
       signingKeyDid: 'did:key:zTest',
       boundaries,
-      ...(service ? { service: true } : {}),
-    } as never)
+      ...(service ? { isService: true } : {}),
+    }
+    await enrollmentStore.enroll(enrollment)
   }
 
   async function bearer(keypair: Secp256k1Keypair) {
@@ -364,6 +368,27 @@ describe('zone.stratos.moderation.queryLabels on Postgres', () => {
     expect(outOfScope.data).toEqual(empty.data)
     expect(outOfScope.data.labels).toEqual([])
     expect(seqsOf(visible)).toEqual([inScope.seq])
+  })
+
+  it('(r5a) rejects an active member holding a boundary who presents a service JWT for its own DID', async () => {
+    await enroll(member.did(), [TOKYO3])
+    await append(recordUri('shared'), [TOKYO3])
+    expect(await enrollmentStore.getBoundaries(member.did())).toEqual([TOKYO3])
+
+    const res = await query(await bearer(member))
+
+    expect(res.status).toBe(401)
+    expect(res.data.labels).toBeUndefined()
+  })
+
+  it('(r5b) gives a service enrollment its scoped labels', async () => {
+    const shared = await append(recordUri('shared'), [TOKYO3])
+    await append(recordUri('geofront-only'), [GEOFRONT])
+
+    const res = await query(await bearer(nerv))
+
+    expect(res.status).toBe(200)
+    expect(seqsOf(res)).toEqual([shared.seq])
   })
 
   it('(q6) a moderation service sees the full log and a plain service the scoped view', async () => {

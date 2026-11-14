@@ -9,6 +9,7 @@ import {
   eq,
   gt,
   gte,
+  inArray,
   isNull,
   lt,
   lte,
@@ -304,6 +305,24 @@ export class StratosRecordReader {
     return res[0].takedownRef
       ? { applied: true, ref: res[0].takedownRef }
       : { applied: false }
+  }
+
+  /**
+   * Reads, in one query, the takedown state of each given record URI.
+   * @param uris - Record URIs to check.
+   * @returns `true` for a row with a takedown marker, `false` for a row
+   * without one. A URI with no row is absent.
+   */
+  async getTakedownStates(uris: string[]): Promise<Map<string, boolean>> {
+    if (uris.length === 0) return new Map()
+    const rows = await this.db
+      .select({
+        uri: stratosRecord.uri,
+        takedownRef: stratosRecord.takedownRef,
+      })
+      .from(stratosRecord)
+      .where(inArray(stratosRecord.uri, uris))
+    return new Map(rows.map((row) => [row.uri, row.takedownRef !== null]))
   }
 
   async getRecordBoundaries(uri: string | AtUri): Promise<string[]> {

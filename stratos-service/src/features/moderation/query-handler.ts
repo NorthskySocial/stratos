@@ -1,4 +1,4 @@
-import { InvalidRequestError } from '@atproto/xrpc-server'
+import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import {
   labelVisibleToService,
   logQueryCursor,
@@ -116,9 +116,15 @@ async function readAsEnrolledService(
 ): Promise<LabelPage> {
   // Only plain service auth reaches here; the check keeps any other credential
   // type from being treated as an enrolled service.
-  requireServiceCaller(auth)
+  const callerDid = requireServiceCaller(auth)
   // Rejects a missing or deactivated enrollment and an empty boundary set.
   const caller = [...(await resolveEffectiveBoundaries(ctx, auth))]
+  // Members can mint service-auth JWTs for their own DID, so a service JWT
+  // alone does not prove the caller is a service.
+  const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
+  if (!enrollment?.isService) {
+    throw new AuthRequiredError('Service enrollment required')
+  }
   return query.subjects === undefined
     ? scanLog(ctx, query, caller)
     : scanSubjects(ctx, { ...query, subjects: query.subjects }, caller)
