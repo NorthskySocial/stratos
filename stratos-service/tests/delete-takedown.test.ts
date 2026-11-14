@@ -17,6 +17,7 @@ import {
 } from '@northskysocial/stratos-core'
 
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
+import { EnrollmentBoundaryResolver } from '../src/features/enrollment/index.js'
 import type { AppContext } from '../src/context.js'
 import {
   applyWritesBatch,
@@ -47,8 +48,9 @@ const SEELE_SERVICE_DID = 'did:web:seele.de'
 const AUTHOR_DID = 'did:plc:rei-ayanami'
 const ADMIN_DID = 'did:plc:gendo-ikari'
 const POST = 'zone.stratos.feed.post'
-const NERV = 'nerv'
-const SEELE = 'seele'
+const NERV_NAME = 'nerv'
+const NERV = `${SERVICE_DID}/${NERV_NAME}`
+const SEELE = `${SERVICE_DID}/seele`
 const IDLE_MS = 100
 
 function sleep(ms: number): Promise<void> {
@@ -121,11 +123,14 @@ describe('deleting a taken-down record', () => {
       warn: vi.fn(),
     }
     const cfg = createTestConfig(dataDir)
+    cfg.stratos.serviceDid = SERVICE_DID
+    cfg.stratos.allowedDomains = [NERV_NAME]
     labelStore = new SqliteLabelStore(db, join(dataDir, 'service.sqlite'))
     ctx = {
       cfg,
       actorStore,
       enrollmentStore,
+      boundaryResolver: new EnrollmentBoundaryResolver(enrollmentStore),
       labelStore,
       serviceDid: SERVICE_DID,
       sequenceEvents,
@@ -146,6 +151,7 @@ describe('deleting a taken-down record', () => {
       active: true,
       signingKeyDid: AUTHOR_DID,
     })
+    await enrollmentStore.setBoundaries(AUTHOR_DID, [NERV])
     for (const [did, boundary] of [
       [NERV_SERVICE_DID, NERV],
       [SEELE_SERVICE_DID, SEELE],
@@ -173,7 +179,7 @@ describe('deleting a taken-down record', () => {
       moderationCfg.service.did,
       idResolver,
       moderationCfg,
-      { getEnrollment: async () => ({ active: true }) } as never,
+      enrollmentStore,
       new SqliteAdminSessionStore(db),
       new SqliteAdminUserStore(db),
       [ADMIN_DID],
@@ -221,7 +227,6 @@ describe('deleting a taken-down record', () => {
         collection: POST,
         rkey,
         record: postBody(rkey),
-        validate: false,
       },
       AUTHOR_DID,
     )
@@ -570,13 +575,6 @@ describe('deleting a taken-down record', () => {
     })
 
     it('(e1b) the same holds when a batch deleted the record', async () => {
-      ctx.cfg.stratos.serviceDid = SERVICE_DID
-      ctx.cfg.stratos.allowedDomains.push(NERV)
-      Object.assign(ctx, {
-        boundaryResolver: {
-          getBoundaries: async () => [`${SERVICE_DID}/${NERV}`],
-        },
-      })
       await createPost('ayanami')
       await takeDown('ayanami')
       await applyWritesBatch(ctx, AUTHOR_DID, [
@@ -658,7 +656,7 @@ describe('deleting a taken-down record', () => {
       await removePost('ayanami')
       await appendLabelOnStore(AUTHOR_DID, 'account', false)
       await appendLabelOnStore(
-        `at://${SERVICE_DID}/space/zone.stratos.space.feed/${NERV}/${AUTHOR_DID}/${POST}/ayanami`,
+        `at://${SERVICE_DID}/space/zone.stratos.space.feed/${NERV_NAME}/${AUTHOR_DID}/${POST}/ayanami`,
         'record',
         false,
       )
@@ -672,23 +670,6 @@ describe('deleting a taken-down record', () => {
   })
 
   describe('batch delete of a taken-down record', () => {
-    const QUALIFIED_NERV = `${SERVICE_DID}/${NERV}`
-
-    beforeEach(async () => {
-      // A batch create validates its boundary against the service config and
-      // the caller's enrollment, unlike the createRecord calls above. Its
-      // boundary must be qualified with this service's DID.
-      ctx.cfg.stratos.serviceDid = SERVICE_DID
-      ctx.cfg.stratos.allowedDomains.push(NERV)
-      Object.assign(ctx, {
-        boundaryResolver: { getBoundaries: async () => [QUALIFIED_NERV] },
-      })
-      await enrollmentStore.setBoundaries(NERV_SERVICE_DID, [
-        NERV,
-        QUALIFIED_NERV,
-      ])
-    })
-
     const batchDeleteAndCreate = (deleteRkey: string, createRkey: string) =>
       applyWritesBatch(ctx, AUTHOR_DID, [
         { action: 'delete', collection: POST, rkey: deleteRkey },
@@ -696,10 +677,7 @@ describe('deleting a taken-down record', () => {
           action: 'create',
           collection: POST,
           rkey: createRkey,
-          record: {
-            ...postBody(createRkey),
-            boundary: { values: [{ value: QUALIFIED_NERV }] },
-          },
+          record: postBody(createRkey),
         },
       ])
 
@@ -741,7 +719,7 @@ describe('deleting a taken-down record', () => {
         }),
       ])
 
-      const delivered = await listOps(callerSet(NERV, QUALIFIED_NERV))
+      const delivered = await listOps(callerSet(NERV))
       expect(delivered.ops.map((op) => [op.rkey, op.cid === null])).toEqual(
         expect.arrayContaining([
           ['ayanami', true],
@@ -755,7 +733,7 @@ describe('deleting a taken-down record', () => {
       await takeDown('ayanami')
       await batchDeleteAndCreate('ayanami', 'katsuragi')
 
-      const res = await listOps(callerSet(NERV, QUALIFIED_NERV))
+      const res = await listOps(callerSet(NERV))
 
       expect(res.ops.filter((op) => op.rkey === 'ayanami')).toEqual([
         expect.objectContaining({

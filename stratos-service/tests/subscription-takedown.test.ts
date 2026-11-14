@@ -21,6 +21,7 @@ import {
 
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
 import { createRecord } from '../src/api/records/index.js'
+import { EnrollmentBoundaryResolver } from '../src/features/enrollment/index.js'
 import { RepoWriteLocks } from '../src/shared/repo-write-lock.js'
 import {
   closeServiceDb,
@@ -45,7 +46,9 @@ const SUBSCRIBER_DID = 'did:web:nerv.tokyo.jp'
 const AUTHOR_DID = 'did:plc:rei-ayanami'
 const ADMIN_DID = 'did:plc:gendo-ikari'
 const POST = 'zone.stratos.feed.post'
-const SHARED_BOUNDARY = 'nerv'
+const SHARED_BOUNDARY_NAME = 'nerv'
+const SHARED_BOUNDARY = `${SERVICE_DID}/${SHARED_BOUNDARY_NAME}`
+const OTHER_BOUNDARY = `${SERVICE_DID}/seele`
 const PAGE_SIZE = 100
 const IDLE_MS = 100
 
@@ -107,10 +110,14 @@ describe('subscribeRecords takedown filter', () => {
     })
     sequenceEvents = new EventEmitter()
     revCounter = 0
+    const cfg = createTestConfig(dataDir)
+    cfg.stratos.serviceDid = SERVICE_DID
+    cfg.stratos.allowedDomains = [SHARED_BOUNDARY_NAME]
     ctx = {
-      cfg: createTestConfig(dataDir),
+      cfg,
       actorStore,
       enrollmentStore,
+      boundaryResolver: new EnrollmentBoundaryResolver(enrollmentStore),
       serviceDid: SERVICE_DID,
       labelStore: new SqliteLabelStore(db, join(dataDir, 'service.sqlite')),
       sequenceEvents,
@@ -431,7 +438,7 @@ describe('subscribeRecords takedown filter', () => {
         cfg.service.did,
         idResolver,
         cfg,
-        { getEnrollment: async () => ({ active: true }) } as never,
+        enrollmentStore,
         new SqliteAdminSessionStore(labelDb),
         new SqliteAdminUserStore(labelDb),
         [ADMIN_DID],
@@ -537,6 +544,7 @@ describe('subscribeRecords takedown filter', () => {
         active: true,
         signingKeyDid: AUTHOR_DID,
       })
+      await enrollmentStore.setBoundaries(AUTHOR_DID, [SHARED_BOUNDARY])
       const writeCtx = {
         ...ctx,
         writeRateLimiter: { assertWriteAllowed: vi.fn() },
@@ -558,7 +566,6 @@ describe('subscribeRecords takedown filter', () => {
               ...postBody(rkey),
               createdAt: '1996-10-04T00:00:00.000Z',
             },
-            validate: false,
           },
           AUTHOR_DID,
         )
@@ -626,7 +633,7 @@ describe('subscribeRecords takedown filter', () => {
     }, 10_000)
 
     it('a page whose events are all out of scope makes no lookup', async () => {
-      await appendBacklog(30, 'seele')
+      await appendBacklog(30, OTHER_BOUNDARY)
       const { ctx: lookupCtx, counter } = countingLookupCtx()
 
       const frames = await framesUntilIdle(lookupCtx)
