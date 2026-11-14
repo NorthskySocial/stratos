@@ -3076,6 +3076,11 @@ export const stratosLexicons: LexiconDoc[] = [
         "record": {
           "type": "unknown",
           "description": "The record content. Present for create and update operations."
+        },
+        "boundary": {
+          "type": "ref",
+          "ref": "zone.stratos.boundary.defs#Domains",
+          "description": "The boundary the op belongs to; present on create, update and scoped removal ops written by current servers; absent on ops written before it existed, where consumers fall back to the record body."
         }
       }
     },

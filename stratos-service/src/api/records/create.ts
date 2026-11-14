@@ -12,16 +12,21 @@ import type { AppContext } from '../../context-types.js'
 import type { ActorSignFn } from '../../infra/signing/index.js'
 import {
   assertCollectionInHostedSpaceType,
-  validateWritableRecord,
+  authorizeRecordBoundary,
+  validateRecordContent,
   withConcurrencyRetry,
 } from './validation.js'
-import { type SequenceTrace, type WritePhases } from './types.js'
+import {
+  type RecordWriteInput,
+  type SequenceTrace,
+  type WritePhases,
+} from './types.js'
 import { type Cid as CID } from '@atproto/lex-data'
 import {
   createRepoManager,
   ensureActorStoreExists as ensureStoreExists,
 } from './util.js'
-import { assertStratosCustody } from './custody.js'
+import { assertStratosCustody, assertWritableEnrollment } from './custody.js'
 
 export interface CreateRecordInput {
   repo: string
@@ -72,7 +77,7 @@ export async function createRecord(
   callerDid: string,
 ): Promise<CreateRecordOutput & { phases?: WritePhases }> {
   const phases: WritePhases = {}
-  const { collection, record, validate = true } = input
+  const { collection, record } = input
   const sequenceTrace: SequenceTrace = {
     requestId: input.requestId,
     queuedAtMs: Date.now(),
@@ -84,48 +89,37 @@ export async function createRecord(
   let performanceTimer = performance.now()
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
   phases.enrollment = performance.now() - performanceTimer
-  if (!enrollment || !enrollment.active) {
-    throw new InvalidRequestError(
-      'User is not enrolled in this Stratos service',
-      'NotEnrolled',
-    )
-  }
-  // Service enrollments are read-only: they may subscribe and hydrate within
-  // their boundaries but must not create records. Classification uses the
-  // explicit `isService` flag, never `pdsEndpoint` emptiness.
-  if (enrollment.isService) {
-    throw new InvalidRequestError(
-      'Service identities cannot create records',
-      'ServiceWriteForbidden',
-    )
-  }
+  assertWritableEnrollment(enrollment)
   assertStratosCustody(enrollment)
 
   const actorSign = await ctx.actorSigner.getSignFn(callerDid)
 
-  // Validate the record if requested
-  if (validate) {
-    performanceTimer = performance.now()
-    await validateWritableRecord(ctx, callerDid, collection, record)
-    phases.validation = performance.now() - performanceTimer
-  }
-
-  const precomputed = await precomputeRecordData(
-    callerDid,
-    collection,
-    record,
-    input.rkey,
-    phases,
-  )
-
-  const result = await performCreateTransaction(
+  performanceTimer = performance.now()
+  // `validate: false` cannot loosen any Stratos rule on this path: lexicon
+  // errors are never fatal, and the business rules run on every write.
+  await validateRecordContent(ctx, collection, record)
+  const boundary = await authorizeRecordBoundary(
     ctx,
     callerDid,
     collection,
-    input.rkey ?? precomputed.uri.rkey,
     record,
-    precomputed.recordBytes,
-    precomputed.cid,
+  )
+  phases.validation = performance.now() - performanceTimer
+
+  const rkey = input.rkey ?? TID.nextStr()
+  const writeInput: RecordWriteInput = {
+    callerDid,
+    boundary,
+    collection,
+    rkey,
+    record: record as Record<string, unknown>,
+  }
+  const precomputed = await precomputeRecordData(writeInput, phases)
+
+  const result = await performCreateTransaction(
+    ctx,
+    writeInput,
+    precomputed,
     actorSign,
     sequenceTrace,
     phases,
@@ -144,26 +138,15 @@ export async function createRecord(
 
 /**
  * Pre-compute record data (URI, bytes, CID) outside of transaction.
- *
- * @param callerDid - DID of the caller
- * @param collection - Collection NSID
- * @param record - Record data
- * @param inputRkey - Optional record key
- * @param phases - Write phases for tracking performance
- * @returns Precomputed record data
  */
 async function precomputeRecordData(
-  callerDid: string,
-  collection: string,
-  record: unknown,
-  inputRkey: string | undefined,
+  input: RecordWriteInput,
   phases: WritePhases,
 ): Promise<PrecomputedRecordData> {
   const t0 = performance.now()
-  const rkey = inputRkey ?? TID.nextStr()
-  const uri = AtUri.make(callerDid, collection, rkey)
-  const recordBytes = encodeRecord(record as Record<string, unknown>)
-  const recordCid = await computeCid(record as Record<string, unknown>)
+  const uri = AtUri.make(input.callerDid, input.collection, input.rkey)
+  const recordBytes = encodeRecord(input.record)
+  const recordCid = await computeCid(input.record)
   phases.prepareCommitBuild = performance.now() - t0
   return { uri, recordBytes, cid: recordCid }
 }
@@ -202,44 +185,25 @@ async function validateCreateInput(
 
 /**
  * Performs the create transaction with retry logic.
- * @param ctx - Application Context
- * @param callerDid - DID of the caller
- * @param collection - Collection name
- * @param rkey - Record key
- * @param record - Record data
- * @param recordBytes - Record bytes
- * @param cid - Content ID
- * @param actorSign - Bound actor signing function
- * @param sequenceTrace - Sequence trace
- * @param phases - Write phases
- * @returns Result of the create transaction
  */
 async function performCreateTransaction(
   ctx: AppContext,
-  callerDid: string,
-  collection: string,
-  rkey: string,
-  record: unknown,
-  recordBytes: Uint8Array,
-  cid: CID,
+  input: RecordWriteInput,
+  precomputed: PrecomputedRecordData,
   actorSign: ActorSignFn,
   sequenceTrace: SequenceTrace,
   phases: WritePhases,
 ): Promise<TransactionResult> {
   const t0 = performance.now()
-  const unlock = await ctx.repoWriteLocks.acquire(callerDid)
+  const unlock = await ctx.repoWriteLocks.acquire(input.callerDid)
   try {
-    await ensureStoreExists(ctx.actorStore, callerDid)
+    await ensureStoreExists(ctx.actorStore, input.callerDid)
 
     const retry = await withConcurrencyRetry(async () => {
       return executeTransaction(
         ctx,
-        callerDid,
-        collection,
-        rkey,
-        record,
-        recordBytes,
-        cid,
+        input,
+        precomputed,
         actorSign,
         sequenceTrace,
         phases,
@@ -256,30 +220,16 @@ async function performCreateTransaction(
 
 /**
  * Execute the create transaction.
- * @param ctx - The application context
- * @param callerDid - DID of the caller
- * @param collection - Collection name
- * @param rkey - Record key
- * @param record - Record data
- * @param recordBytes - Record bytes
- * @param cid - CID of the record
- * @param actorSign - Bound signing function for the actor
- * @param sequenceTrace - Sequence trace for the operation
- * @param phases - Write phases for tracking performance
- * @returns Result of the create transaction
  */
 async function executeTransaction(
   ctx: AppContext,
-  callerDid: string,
-  collection: string,
-  rkey: string,
-  record: unknown,
-  recordBytes: Uint8Array,
-  cid: CID,
+  input: RecordWriteInput,
+  { recordBytes, cid }: PrecomputedRecordData,
   actorSign: ActorSignFn,
   sequenceTrace: SequenceTrace,
   phases: WritePhases,
 ): Promise<TransactionResult> {
+  const { callerDid, boundary, collection, rkey, record } = input
   // WARNING: Use `transact()` — not `readThenTransact()`. The manager calls
   // lockRoot() (FOR UPDATE) internally, so a separate read phase would double
   // the root query and lose the row lock, leading to failed writes under concurrency.
@@ -294,7 +244,7 @@ async function executeTransaction(
     )
 
     const repoWrites: RepoWrite[] = [
-      { action: 'create', collection, rkey, record, cid },
+      { action: 'create', collection, rkey, record, cid, boundary },
     ]
 
     // Pass store.repo directly — it carries the LRU block cache. Passing
@@ -308,16 +258,17 @@ async function executeTransaction(
 
     const uri = AtUri.make(callerDid, collection, rkey)
     const ti = performance.now()
-    await store.record.indexRecord(
+    await store.record.indexRecordInBoundary(
       uri.toString(),
       cid,
-      record as Record<string, unknown>,
+      record,
+      boundary,
       'create',
       writeResult.rev,
     )
 
     // Associate blobs with the record. Boundary residence lives on the
-    // record row, which indexRecord maintains.
+    // record row, which indexRecordInBoundary maintains.
     const blobs = StratosValidator.extractBlobs(record)
     for (const blobCidStr of blobs) {
       const blobCid = parseCid(blobCidStr)

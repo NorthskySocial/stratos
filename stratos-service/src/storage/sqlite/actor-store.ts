@@ -200,6 +200,30 @@ class SqliteActorRecordTransactor
   }
 
   /**
+   * Index a record under an already authorized boundary. The boundary comes
+   * from the caller, never from the record body.
+   */
+  indexRecordInBoundary(
+    uri: string | AtUri,
+    cid: Cid,
+    record: Record<string, unknown>,
+    boundary: string,
+    action: 'create' | 'update',
+    repoRev: string,
+    timestamp?: string,
+  ) {
+    return this.transactor.indexRecordInBoundary(
+      uri,
+      cid,
+      record,
+      boundary,
+      action,
+      repoRev,
+      timestamp,
+    )
+  }
+
+  /**
    * Delete a record by URI
    * @param uri - URI of the record to delete
    * @returns Promise that resolves when the record is deleted

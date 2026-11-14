@@ -63,6 +63,9 @@ export class ActorStoreSequencingService implements SequencingService {
         uri: `at://${_did}/${write.collection}/${write.rkey}`,
         cid: write.cid?.toString(),
         record: write.record,
+        boundary: write.boundary
+          ? { values: [{ value: write.boundary }] }
+          : undefined,
         commitCid: commitCid.toString(),
         rev,
         trace: this.trace,

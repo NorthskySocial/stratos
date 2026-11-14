@@ -106,6 +106,15 @@ export interface ActorRecordTransactor extends ActorRecordReader {
     repoRev?: string,
     timestamp?: string,
   ): Promise<void>
+  indexRecordInBoundary(
+    uri: string | AtUri,
+    cid: Cid,
+    record: Record<string, unknown>,
+    boundary: string,
+    action: 'create' | 'update',
+    repoRev: string,
+    timestamp?: string,
+  ): Promise<void>
   deleteRecord(uri: string | AtUri): Promise<void>
   removeBacklinksByUri(uri: string | AtUri): Promise<void>
   addBacklinks(

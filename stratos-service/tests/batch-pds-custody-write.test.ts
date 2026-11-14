@@ -90,14 +90,11 @@ describe('applyWritesBatch pds-custody rejection', () => {
     expect(ctx.actorSigner.getSignFn).toHaveBeenCalledWith(CALLER_DID)
   })
 
-  it('allows a missing enrollment to reach the existing write path', async () => {
+  it('rejects a missing enrollment', async () => {
     const ctx = buildContext(undefined)
 
     await expect(
       applyWritesBatch(ctx, CALLER_DID, buildOps()),
-    ).rejects.not.toMatchObject({
-      code: 'PdsCustodyWriteForbidden',
-    })
-    expect(ctx.actorSigner.getSignFn).toHaveBeenCalledWith(CALLER_DID)
+    ).rejects.toMatchObject({ error: 'NotEnrolled' })
   })
 })

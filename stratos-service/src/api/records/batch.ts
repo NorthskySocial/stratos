@@ -15,17 +15,19 @@ import type { AppContext } from '../../context.js'
 import { signAndPersistCommit, StratosBlockStoreReader } from '../../features'
 import {
   assertCollectionInHostedSpaceType,
-  validateWritableRecord,
+  authorizeRecordBoundary,
+  validateRecordContent,
   withConcurrencyRetry,
 } from './validation.js'
 import {
   type BatchWriteResult,
   type CommitResult,
+  type RecordWriteInput,
   sequenceChange,
   type SequenceTrace,
 } from './types.js'
 import { ensureActorStoreExists } from './util.js'
-import { assertStratosCustody } from './custody.js'
+import { assertStratosCustody, assertWritableEnrollment } from './custody.js'
 
 export type BatchAction = 'create' | 'update' | 'delete'
 
@@ -42,6 +44,8 @@ export interface PrecomputedBatchOp {
   uriStr: string
   uri: string
   action: BatchAction
+  /** Authorized input for create and update ops; absent for deletes. */
+  writeInput?: RecordWriteInput
   recordBytes?: Uint8Array
   cid?: CID
   tempRev?: string
@@ -79,7 +83,13 @@ async function calculatePrecomputed(
         }
       }
 
-      await validateWritableRecord(ctx, callerDid, op.collection, op.record)
+      await validateRecordContent(ctx, op.collection, op.record)
+      const boundary = await authorizeRecordBoundary(
+        ctx,
+        callerDid,
+        op.collection,
+        op.record,
+      )
       const recordBytes = encodeRecord(op.record)
       const cid = await computeCid(op.record)
       const tempRev = TID.nextStr()
@@ -89,6 +99,13 @@ async function calculatePrecomputed(
         uriStr,
         uri: uri.toString(),
         action: op.action,
+        writeInput: {
+          callerDid,
+          boundary,
+          collection: op.collection,
+          rkey,
+          record: op.record as Record<string, unknown>,
+        },
         recordBytes,
         cid,
         tempRev,
@@ -124,10 +141,11 @@ async function prepareWriteResults(
   store: {
     record: {
       deleteRecord(uri: AtUriSyntax): Promise<void>
-      indexRecord(
+      indexRecordInBoundary(
         uri: AtUriSyntax,
         cid: CID,
         record: Record<string, unknown>,
+        boundary: string,
         action: 'create' | 'update',
         rev: string,
       ): Promise<void>
@@ -142,10 +160,12 @@ async function prepareWriteResults(
       await store.record.deleteRecord(new AtUriSyntax(pre.uriStr))
       results.push({})
     } else {
-      await store.record.indexRecord(
+      const { record, boundary } = pre.writeInput!
+      await store.record.indexRecordInBoundary(
         new AtUriSyntax(pre.uriStr),
         pre.cid!,
-        pre.op.record as Record<string, unknown>,
+        record,
+        boundary,
         pre.action,
         rev,
       )
@@ -298,6 +318,9 @@ async function sequenceBatchChanges(
       uri: pre.uri,
       cid: pre.action !== 'delete' ? pre.cid!.toString() : undefined,
       record: pre.action !== 'delete' ? pre.op.record : undefined,
+      boundary: pre.writeInput
+        ? { values: [{ value: pre.writeInput.boundary }] }
+        : undefined,
       commitCid,
       rev,
       trace: sequenceTrace,
@@ -327,9 +350,7 @@ async function sequenceBatchChanges(
     // update.ts:sequenceMoveRemovals for the full rationale.
     const removedDomains = computeRemovedDomains(pre)
     if (removedDomains.length > 0) {
-      const newDomains = StratosValidator.extractBoundaryDomains(
-        pre.op.record as Record<string, unknown>,
-      )
+      const newDomains = [pre.writeInput!.boundary]
       await sequenceChange(store, {
         action: 'delete',
         uri: pre.uri,
@@ -355,12 +376,8 @@ async function sequenceBatchChanges(
  */
 function computeRemovedDomains(pre: PrecomputedBatchOp): string[] {
   if (pre.action !== 'update' || !pre.previousDomains?.length) return []
-  const newDomains = new Set(
-    StratosValidator.extractBoundaryDomains(
-      pre.op.record as Record<string, unknown>,
-    ),
-  )
-  return pre.previousDomains.filter((d) => !newDomains.has(d))
+  const newBoundary = pre.writeInput!.boundary
+  return pre.previousDomains.filter((domain) => domain !== newBoundary)
 }
 
 /**
@@ -387,6 +404,7 @@ export async function applyWritesBatch(
   }
 
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
+  assertWritableEnrollment(enrollment)
   assertStratosCustody(enrollment)
 
   const precomputed: PrecomputedBatchOp[] = await calculatePrecomputed(

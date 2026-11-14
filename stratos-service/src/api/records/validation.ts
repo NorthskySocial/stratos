@@ -37,23 +37,15 @@ export function assertCollectionInHostedSpaceType(collection: string): void {
 }
 
 /**
- * Validates that the caller has permission to write domains in the given collection.
- * @param ctx - Application context
- * @param callerDid - DID of the caller
- * @param collection - Collection name
- * @param record - Record data
- * @throws InvalidRequestError if the caller is not authorized to write domains
+ * Authorizes the caller to write the record's single boundary and returns it.
+ * @throws InvalidRequestError if the boundary is not exactly one, is malformed, targets another service, or is not held by the caller
  */
-export async function assertCallerCanWriteDomains(
+export async function authorizeRecordBoundary(
   ctx: AppContext,
   callerDid: string,
   collection: string,
   record: unknown,
-): Promise<void> {
-  if (!collection.startsWith('zone.stratos.')) {
-    return
-  }
-
+): Promise<string> {
   const requestedDomains = StratosValidator.extractBoundaryDomains(
     record as Record<string, unknown>,
   )
@@ -89,7 +81,10 @@ export async function assertCallerCanWriteDomains(
     }
   }
 
-  const callerDomains = await ctx.boundaryResolver.getBoundaries(callerDid)
+  // a hand-built context without a write cache falls back to the live resolver
+  const callerDomains = await (
+    ctx.writeBoundaryResolver ?? ctx.boundaryResolver
+  ).getBoundaries(callerDid)
   const missingDomains = requestedDomains.filter(
     (domain) => !callerDomains.includes(domain),
   )
@@ -102,19 +97,18 @@ export async function assertCallerCanWriteDomains(
       'ForbiddenBoundary',
     )
   }
+
+  return onlyDomain
 }
 
 /**
- * Validates that the caller has permission to write records in the given collection.
- * @param ctx - Application context
- * @param callerDid - DID of the caller
- * @param collection - Collection name
- * @param record - Record data
- * @throws InvalidRequestError if the caller is not authorized to write records
+ * Validates the record against the lexicon and Stratos record rules. It runs on
+ * every legacy write; `validate: false` cannot skip it. Its `allowedDomains`
+ * check is what rejects a boundary the catalog has just deactivated, while the
+ * write cache still lists it for the member.
  */
-export async function validateWritableRecord(
+export async function validateRecordContent(
   ctx: AppContext,
-  callerDid: string,
   collection: string,
   record: unknown,
 ): Promise<void> {
@@ -132,8 +126,6 @@ export async function validateWritableRecord(
     }
     throw err
   }
-
-  await assertCallerCanWriteDomains(ctx, callerDid, collection, record)
 }
 
 /**

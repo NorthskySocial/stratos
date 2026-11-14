@@ -2,6 +2,14 @@ import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { ActorTransactor } from '../../actor-store-types.js'
 import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
 
+export interface RecordWriteInput {
+  callerDid: string
+  boundary: string
+  collection: string
+  rkey: string
+  record: Record<string, unknown>
+}
+
 export interface WritePhases {
   enrollment?: number
   actorExists?: number

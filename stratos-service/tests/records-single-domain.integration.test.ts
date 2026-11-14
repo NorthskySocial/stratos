@@ -22,7 +22,7 @@ import {
 } from '../src/db/index.js'
 import {
   applyWritesBatch,
-  assertCallerCanWriteDomains,
+  authorizeRecordBoundary,
   createRecord,
   updateRecord,
 } from '../src/api/records/index.js'
@@ -230,21 +230,16 @@ describe('Single-domain write enforcement', () => {
   // runs the record-shape validator (`assertValid`) first, which also rejects
   // zero-boundary and disallowed domains; these assertions pin the distinct
   // exactly-one and skey errors the helper itself raises.
-  describe('assertCallerCanWriteDomains (shared helper)', () => {
+  describe('authorizeRecordBoundary (shared helper)', () => {
     it('rejects zero domains with InvalidDomainCount', async () => {
       await expect(
-        assertCallerCanWriteDomains(
-          ctx,
-          testDid,
-          collection,
-          postWithDomains([]),
-        ),
+        authorizeRecordBoundary(ctx, testDid, collection, postWithDomains([])),
       ).rejects.toThrow(/exactly one domain, received 0/)
     })
 
     it('rejects two domains with InvalidDomainCount', async () => {
       await expect(
-        assertCallerCanWriteDomains(
+        authorizeRecordBoundary(
           ctx,
           testDid,
           collection,
@@ -256,7 +251,7 @@ describe('Single-domain write enforcement', () => {
     it('rejects a domain whose bare name is not a valid skey', async () => {
       // A space in the bare name violates record-key syntax.
       await expect(
-        assertCallerCanWriteDomains(
+        authorizeRecordBoundary(
           ctx,
           testDid,
           collection,
@@ -267,13 +262,13 @@ describe('Single-domain write enforcement', () => {
 
     it('accepts a single valid-skey domain the caller holds', async () => {
       await expect(
-        assertCallerCanWriteDomains(
+        authorizeRecordBoundary(
           ctx,
           testDid,
           collection,
           postWithDomains([DOMAIN_A]),
         ),
-      ).resolves.toBeUndefined()
+      ).resolves.toBe(DOMAIN_A)
     })
   })
 })

@@ -9,6 +9,9 @@ import { Server as XrpcServer } from '@atproto/xrpc-server'
 import {
   createAttestationPayload,
   DefaultLexiconProvider,
+  type BoundaryResolver,
+  type EnrollmentStoreReader,
+  type EnrollmentStoreWriter,
   type Logger,
 } from '@northskysocial/stratos-core'
 import {
@@ -53,6 +56,7 @@ import { replayStoreFromCache } from './infra/auth/replay-store.js'
 import { JwksResolver } from './infra/auth/jwks-resolver.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { RedisCache } from './infra/storage/redis-cache.js'
+import { CachedEnrollmentStore } from './infra/storage/cached-enrollment-store.js'
 import { openServiceSigningIdentity } from './infra/signing/service-identity.js'
 import { InProcessActorSigner } from './infra/signing/index.js'
 
@@ -202,7 +206,8 @@ export async function createAppContext(
   })
   ctx.boundaryManager.start()
 
-  setupMigrationCallback(ctx)
+  setupMigrationCallback(ctx, ctx.boundaryResolver)
+  setupMigrationCallback(ctx, ctx.writeBoundaryResolver)
 
   return ctx
 }
@@ -249,13 +254,20 @@ async function initCoreServices(
     storage.boundaryStore,
   )
 
-  const boundaryResolver = cfg.enrollment.valkeyUrl
-    ? new MigratingBoundaryResolver({
-        enrollmentStore,
-        serviceDid: getServiceDidWithFragment(cfg),
-        logger,
-      })
-    : new EnrollmentBoundaryResolver(enrollmentStore)
+  const boundaryResolver = createBoundaryResolver(cfg, enrollmentStore, logger)
+
+  // Only write authorization reads through this cache. Every other read stays
+  // live, so mutations keep going through `enrollmentStore` and reach the
+  // cache by event.
+  const writeBoundaryCache = new CachedEnrollmentStore(enrollmentStore)
+  enrollmentEvents.on('enrollment', ({ did }) => {
+    writeBoundaryCache.invalidate(did)
+  })
+  const writeBoundaryResolver = createBoundaryResolver(
+    cfg,
+    writeBoundaryCache,
+    logger,
+  )
 
   const blobCtx = initBlob(actorStore, boundaryResolver, logger)
 
@@ -263,7 +275,10 @@ async function initCoreServices(
 
   const mstCtx = initMst(signingKey)
 
-  const repoCtx = initRepo(cfg, actorStore, mstCtx, sequenceEvents)
+  const repoCtx = {
+    ...initRepo(cfg, actorStore, mstCtx, sequenceEvents),
+    writeBoundaryResolver,
+  }
 
   return {
     enrollmentCtx,
@@ -277,6 +292,24 @@ async function initCoreServices(
     hydrationCtx,
     repoCtx,
   }
+}
+
+/**
+ * Chooses the boundary resolver class: read-repair migration when Valkey is
+ * configured, plain store reads otherwise.
+ */
+function createBoundaryResolver(
+  cfg: AppContextOptions['cfg'],
+  enrollmentStore: EnrollmentStoreWriter & EnrollmentStoreReader,
+  logger?: Logger,
+): BoundaryResolver {
+  return cfg.enrollment.valkeyUrl
+    ? new MigratingBoundaryResolver({
+        enrollmentStore,
+        serviceDid: getServiceDidWithFragment(cfg),
+        logger,
+      })
+    : new EnrollmentBoundaryResolver(enrollmentStore)
 }
 
 /**
@@ -463,13 +496,17 @@ function initExpressApp(): express.Express {
 }
 
 /**
- * Sets up the migration callback for the application context.
+ * Sets up the migration callback on a boundary resolver of the application context.
  * @param ctx - Application context.
+ * @param resolver - Resolver to attach the callback to; ignored unless it migrates.
  */
-function setupMigrationCallback(ctx: AppContext) {
-  if (!(ctx.boundaryResolver instanceof MigratingBoundaryResolver)) return
+function setupMigrationCallback(
+  ctx: AppContext,
+  resolver: BoundaryResolver | undefined,
+) {
+  if (!(resolver instanceof MigratingBoundaryResolver)) return
 
-  ctx.boundaryResolver.onMigrated = (
+  resolver.onMigrated = (
     did: string,
     boundaries: string[],
     priorBoundaries: string[],

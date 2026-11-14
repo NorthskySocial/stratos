@@ -10,14 +10,16 @@ import {
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context-types.js'
 import {
+  authorizeRecordBoundary,
   assertCollectionInHostedSpaceType,
-  validateWritableRecord,
+  validateRecordContent,
   withConcurrencyRetry,
 } from './validation.js'
 import { createRepoManager } from './util.js'
-import { assertStratosCustody } from './custody.js'
+import { assertStratosCustody, assertWritableEnrollment } from './custody.js'
 import {
   sequenceChange,
+  type RecordWriteInput,
   type SequenceTrace,
   type WritePhases,
 } from './types.js'
@@ -44,11 +46,6 @@ export interface UpdateRecordOutput {
 
 /**
  * Prepare phases for update transaction.
- * @param ctx - The application context
- * @param input - The update record input
- * @param callerDid - The DID of the caller
- * @param phases - The write phases object
- * @returns The URI, record bytes, and CID
  * @throws InvalidRequestError if the repo does not exist
  */
 async function prepareUpdatePhases(
@@ -57,7 +54,7 @@ async function prepareUpdatePhases(
   callerDid: string,
   phases: WritePhases,
 ) {
-  const { collection, record, validate = true } = input
+  const { collection, record } = input
   let t0 = performance.now()
   const exists = await ctx.actorStore.exists(callerDid)
   if (!exists) {
@@ -65,22 +62,34 @@ async function prepareUpdatePhases(
   }
   phases.actorExists = performance.now() - t0
 
-  if (validate) {
-    t0 = performance.now()
-    await validateWritableRecord(ctx, callerDid, collection, record)
-    phases.validation = performance.now() - t0
-  }
+  t0 = performance.now()
+  // `validate: false` cannot loosen any Stratos rule on this path: lexicon
+  // errors are never fatal, and the business rules run on every write.
+  await validateRecordContent(ctx, collection, record)
+  const boundary = await authorizeRecordBoundary(
+    ctx,
+    callerDid,
+    collection,
+    record,
+  )
+  phases.validation = performance.now() - t0
 
   // Pre-compute CPU-bound work outside the transaction
   t0 = performance.now()
   const rkey = input.rkey
-  const uriStr = `at://${callerDid}/${collection}/${rkey}`
-  const uri = new AtUriSyntax(uriStr)
   const recordBytes = encodeRecord(record)
   const cid = await computeCid(record)
   phases.encode = performance.now() - t0
 
-  return { uri, recordBytes, cid }
+  const writeInput: RecordWriteInput = {
+    callerDid,
+    boundary,
+    collection,
+    rkey,
+    record: record as Record<string, unknown>,
+  }
+
+  return { writeInput, recordBytes, cid }
 }
 
 /**
@@ -119,9 +128,10 @@ export async function updateRecord(
   assertCollectionInHostedSpaceType(collection)
 
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
+  assertWritableEnrollment(enrollment)
   assertStratosCustody(enrollment)
 
-  const { recordBytes, cid } = await prepareUpdatePhases(
+  const { writeInput, recordBytes, cid } = await prepareUpdatePhases(
     ctx,
     input,
     callerDid,
@@ -145,8 +155,7 @@ export async function updateRecord(
         const result = await performUpdate(
           ctx,
           store,
-          callerDid,
-          input,
+          writeInput,
           recordBytes,
           cid,
           sequenceTrace,
@@ -175,25 +184,16 @@ export async function updateRecord(
 
 /**
  * Perform the update operation on the record.
- * @param ctx - The application context
- * @param store - The actor transactor store
- * @param callerDid - The DID of the caller
- * @param input - The update record input
- * @param recordBytes - The bytes of the updated record
- * @param cid - The CID of the updated record
- * @param sequenceTrace - The sequence trace for the update
- * @returns The updated record details
  */
 async function performUpdate(
   ctx: AppContext,
   store: ActorTransactor,
-  callerDid: string,
-  input: UpdateRecordInput,
+  input: RecordWriteInput,
   recordBytes: Uint8Array,
   cid: CID,
   sequenceTrace: SequenceTrace,
 ) {
-  const { collection, rkey, record } = input
+  const { callerDid, collection, rkey, record } = input
   const actorSign = await ctx.actorSigner.getSignFn(callerDid)
   const manager = createRepoManager(ctx.logger, store, actorSign, sequenceTrace)
 
@@ -205,7 +205,14 @@ async function performUpdate(
   const previousDomains = await readRecordDomains(store, uri)
 
   const repoWrites: RepoWrite[] = [
-    { action: 'update', collection, rkey, record, cid },
+    {
+      action: 'update',
+      collection,
+      rkey,
+      record,
+      cid,
+      boundary: input.boundary,
+    },
   ]
 
   const writeResult = await manager.applyWrites(
@@ -217,23 +224,24 @@ async function performUpdate(
 
   await sequenceMoveRemovals(store, {
     uriStr,
-    record,
+    newBoundary: input.boundary,
     previousDomains,
     commitCid: writeResult.commitCid.toString(),
     rev: writeResult.rev,
     sequenceTrace,
   })
 
-  await store.record.indexRecord(
+  await store.record.indexRecordInBoundary(
     uri,
     cid,
-    record as Record<string, unknown>,
+    record,
+    input.boundary,
     'update',
     writeResult.rev,
   )
 
   // Replace blob associations so removed blobs drop out of the index.
-  // Boundary residence lives on the record row, which indexRecord maintains.
+  // Boundary residence lives on the record row, which indexRecordInBoundary maintains.
   await store.blob.removeRecordBlobAssociations(uri.toString())
   const blobs = StratosValidator.extractBlobs(record)
   for (const blobCidStr of blobs) {
@@ -279,28 +287,29 @@ async function readRecordDomains(
  * - old-domain-only subscriber: observes the removal (delete op),
  * - new-domain subscriber: observes the update (carries the new boundary),
  * - third-party subscriber: observes nothing.
- *
- * @param store - The actor transactor store.
- * @param args - Move context: URI, new record, prior domains, commit/rev, trace.
  */
 async function sequenceMoveRemovals(
   store: ActorTransactor,
   args: {
     uriStr: string
-    record: unknown
+    newBoundary: string
     previousDomains: string[]
     commitCid: string
     rev: string
     sequenceTrace: SequenceTrace
   },
 ): Promise<void> {
-  const { uriStr, record, previousDomains, commitCid, rev, sequenceTrace } =
-    args
+  const {
+    uriStr,
+    newBoundary,
+    previousDomains,
+    commitCid,
+    rev,
+    sequenceTrace,
+  } = args
   if (previousDomains.length === 0) return
 
-  const newDomains = new Set(
-    StratosValidator.extractBoundaryDomains(record as Record<string, unknown>),
-  )
+  const newDomains = new Set([newBoundary])
   const removedDomains = previousDomains.filter((d) => !newDomains.has(d))
   if (removedDomains.length === 0) return
 

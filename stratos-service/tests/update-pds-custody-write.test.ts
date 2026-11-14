@@ -94,14 +94,11 @@ describe('updateRecord pds-custody rejection', () => {
     expect(ctx.actorStore.exists).toHaveBeenCalledWith(CALLER_DID)
   })
 
-  it('allows a missing enrollment to reach the existing write path', async () => {
+  it('rejects a missing enrollment', async () => {
     const ctx = buildContext(undefined)
 
     await expect(
       updateRecord(ctx, buildInput(), CALLER_DID),
-    ).rejects.not.toMatchObject({
-      code: 'PdsCustodyWriteForbidden',
-    })
-    expect(ctx.actorStore.exists).toHaveBeenCalledWith(CALLER_DID)
+    ).rejects.toMatchObject({ error: 'NotEnrolled' })
   })
 })
