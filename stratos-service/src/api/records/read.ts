@@ -3,7 +3,6 @@ import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import {
   canAccessRecord,
   isDomainlessRecord,
-  StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
@@ -57,9 +56,7 @@ export async function getRecord(
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
 
-    const recordBoundaries = StratosValidator.extractBoundaryDomains(
-      record.value,
-    )
+    const recordBoundaries = await store.record.getRecordBoundaries(uri)
     logDomainlessInvariant(ctx.logger, recordBoundaries, {
       uri,
       ownerDid: repo,
@@ -115,12 +112,13 @@ export async function listRecords(
       reverse,
     })
 
+    const boundariesByRecord = await Promise.all(
+      list.map((record) => store.record.getRecordBoundaries(record.uri)),
+    )
     let domainlessCount = 0
     const records = list
-      .filter((record) => {
-        const recordBoundaries = StratosValidator.extractBoundaryDomains(
-          record.value,
-        )
+      .filter((_record, index) => {
+        const recordBoundaries = boundariesByRecord[index]
         if (isDomainlessRecord(recordBoundaries)) {
           domainlessCount += 1
         }

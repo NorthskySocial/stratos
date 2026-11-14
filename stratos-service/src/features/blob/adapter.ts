@@ -4,7 +4,6 @@ import {
   type BoundaryResolver,
   canAccessRecord,
   type Logger,
-  StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from '../../actor-store-types.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
@@ -79,9 +78,7 @@ export class BlobAuthServiceImpl implements BlobAuthService {
       for (const uri of recordUris) {
         const record = await store.record.getRecord(uri, null)
         if (record) {
-          const recordBoundaries = StratosValidator.extractBoundaryDomains(
-            record.value,
-          )
+          const recordBoundaries = await store.record.getRecordBoundaries(uri)
           logDomainlessInvariant(this.logger, recordBoundaries, {
             uri: uri.toString(),
             ownerDid: actorDid,
@@ -177,9 +174,7 @@ export class BlobAuthServiceImpl implements BlobAuthService {
       for (const uri of recordUris) {
         const record = await store.record.getRecord(uri, null)
         if (record) {
-          const recordBoundaries = StratosValidator.extractBoundaryDomains(
-            record.value,
-          )
+          const recordBoundaries = await store.record.getRecordBoundaries(uri)
           logDomainlessInvariant(this.logger, recordBoundaries, {
             uri: uri.toString(),
             ownerDid: actorDid,

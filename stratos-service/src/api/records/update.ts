@@ -202,7 +202,7 @@ async function performUpdate(
 
   // Capture the pre-update domain so a domain change (a "move") can emit a
   // removal scoped to the OLD domain. Read before applyWrites overwrites it.
-  const previousDomains = await readRecordDomains(store, uri)
+  const previousDomains = await store.record.getRecordBoundaries(uri)
 
   const repoWrites: RepoWrite[] = [
     {
@@ -258,23 +258,6 @@ async function performUpdate(
       rev: writeResult.rev,
     },
   }
-}
-
-/**
- * Read the domains currently stored for a record, prior to an update. Returns
- * an empty array when the record does not yet exist.
- *
- * @param store - The actor transactor store.
- * @param uri - The record URI.
- * @returns The record's current boundary domains.
- */
-async function readRecordDomains(
-  store: ActorTransactor,
-  uri: AtUriSyntax,
-): Promise<string[]> {
-  const existing = await store.record.getRecord(uri, null)
-  if (!existing) return []
-  return StratosValidator.extractBoundaryDomains(existing.value)
 }
 
 /**

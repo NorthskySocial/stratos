@@ -13,7 +13,6 @@ import {
   canAccessRecord,
   hydrateRecordBlobs,
   type Logger,
-  StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from '../../actor-store-types.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
@@ -51,7 +50,7 @@ export class ActorStoreRecordResolver implements RecordResolver {
         return null
       }
 
-      const boundaries = StratosValidator.extractBoundaryDomains(record.value)
+      const boundaries = await store.record.getRecordBoundaries(uri)
       return {
         uri: record.uri,
         cid: record.cid,
@@ -101,9 +100,7 @@ export class ActorStoreRecordResolver implements RecordResolver {
         const atUri = new AtUriSyntax(uriStr)
         const record = await store.record.getRecord(atUri, null)
         if (record) {
-          const boundaries = StratosValidator.extractBoundaryDomains(
-            record.value,
-          )
+          const boundaries = await store.record.getRecordBoundaries(uriStr)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-argument
           result.set(atUri.toString() as any, {
             uri: record.uri,

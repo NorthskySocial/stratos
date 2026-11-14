@@ -7,7 +7,6 @@ import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import {
   resolveRepoHost,
   spaceUriToBoundary,
-  StratosValidator,
   type Custody,
   type StoredEnrollment,
 } from '@northskysocial/stratos-core'
@@ -202,7 +201,7 @@ async function handleGetSpaceRecord(
     // The record must belong to the requested space. Unlike the generic
     // repo read (where a domainless record is public), a space read FAILS
     // CLOSED on records outside the space — domainless records included.
-    const domains = StratosValidator.extractBoundaryDomains(record.value)
+    const domains = await store.record.getRecordBoundaries(uri)
     if (!domains.includes(boundary)) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }

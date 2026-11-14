@@ -171,7 +171,7 @@ export async function resolveParentBoundaries(
       if (!parentRecord) {
         return undefined
       }
-      return StratosValidator.extractBoundaryDomains(parentRecord.value)
+      return store.record.getRecordBoundaries(parentUri)
     },
   )
 

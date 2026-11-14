@@ -283,13 +283,9 @@ async function persistBatchBlocks(
     } else {
       if (pre.action === 'update') {
         // Capture pre-update domains so a move can emit a scoped removal.
-        const existing = await store.record.getRecord(
+        pre.previousDomains = await store.record.getRecordBoundaries(
           new AtUriSyntax(pre.uri),
-          null,
         )
-        pre.previousDomains = existing
-          ? StratosValidator.extractBoundaryDomains(existing.value)
-          : []
       }
       await store.repo.putBlock(pre.cid!, pre.recordBytes!, pre.tempRev!)
     }
