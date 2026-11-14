@@ -1,5 +1,5 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
-import { RepoWrite, StratosValidator } from '@northskysocial/stratos-core'
+import { RepoWrite } from '@northskysocial/stratos-core'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context.js'
 import { createRepoManager } from './util.js'
@@ -84,10 +84,11 @@ export async function deleteRecord(
           sequenceTrace,
         )
 
-        // Capture the record's domains before applyWrites removes it, so a
-        // boundary-carrying removal can be sequenced. A plain delete op carries
-        // no boundary and is dropped by the fail-closed scope gate for every
-        // subscriber, so without this the deletion would never propagate.
+        // Capture the record's domains before the delete removes its rows, so
+        // a boundary-carrying removal can be sequenced. A plain delete op
+        // carries no boundary and is dropped by the fail-closed scope gate for
+        // every subscriber, so without this the deletion would never propagate.
+        // The stored rows are the boundary; the body only claims one.
         // true: a taken-down record still needs its boundaries and swap check.
         const existing = await store.record.getRecord(uri, null, true)
         if (
@@ -99,9 +100,7 @@ export async function deleteRecord(
             'InvalidSwap',
           )
         }
-        const deletedDomains = existing
-          ? StratosValidator.extractBoundaryDomains(existing.value)
-          : []
+        const deletedDomains = await store.record.getRecordBoundaries(uri)
 
         const repoWrites: RepoWrite[] = [{ action: 'delete', collection, rkey }]
 

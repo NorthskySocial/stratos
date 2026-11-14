@@ -9,7 +9,6 @@ import {
   encodeRecord,
   MstWriteOp,
   parseCid,
-  StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context.js'
 import { signAndPersistCommit, StratosBlockStoreReader } from '../../features'
@@ -276,9 +275,10 @@ async function persistBatchBlocks(
       }
       // Capture the deleted record's domains so a boundary-carrying removal can
       // be sequenced (a plain delete op carries no boundary and is otherwise
-      // invisible to every subscriber).
-      pre.previousDomains = StratosValidator.extractBoundaryDomains(
-        existing.value,
+      // invisible to every subscriber). The stored rows are the boundary; the
+      // body only claims one.
+      pre.previousDomains = await store.record.getRecordBoundaries(
+        new AtUriSyntax(pre.uri),
       )
     } else {
       if (pre.action === 'update') {

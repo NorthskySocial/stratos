@@ -217,15 +217,20 @@ describe('BlobAuthServiceImpl', () => {
     )
     const missingUri = 'at://did:plc:shinji/zone.stratos.feed.post/missing'
     const presentUri = 'at://did:plc:shinji/zone.stratos.feed.post/present'
+    await actorStore.transact('did:plc:shinji', async (store) => {
+      await store.blob.trackBlob({
+        cid: blobCid,
+        mimeType: 'image/png',
+        size: 1,
+      })
+      await store.blob.associateBlobWithRecord(blobCid, missingUri)
+    })
     await seedRecordWithBlob(
       actorStore,
       presentUri,
       'did:web:nerv.tokyo.jp/pilots',
       blobCid,
     )
-    await actorStore.transact('did:plc:shinji', async (store) => {
-      await store.blob.associateBlobWithRecord(blobCid, missingUri)
-    })
 
     const result = await service.canAccessBlob(
       'did:plc:asuka',

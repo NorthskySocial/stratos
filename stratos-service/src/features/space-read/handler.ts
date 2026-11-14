@@ -198,9 +198,9 @@ async function handleGetSpaceRecord(
     if (!record?.value) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
-    // The record must belong to the requested space. Unlike the generic
-    // repo read (where a domainless record is public), a space read FAILS
-    // CLOSED on records outside the space — domainless records included.
+    // The record must belong to the requested space. The generic repo read
+    // also denies a domainless record to every viewer but its owner; a space
+    // read has no owner exception, so it denies it to the owner too.
     const domains = await store.record.getRecordBoundaries(uri)
     if (!domains.includes(boundary)) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')

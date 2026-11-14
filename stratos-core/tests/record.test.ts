@@ -723,7 +723,13 @@ describe('getRecordBoundaries', () => {
 
   it('returns stored rows, not the boundary claimed by the record body', async () => {
     const uri = uriOf('kaji')
-    await index('kaji', EVA)
+    const body = bodyWith(EVA)
+    await transactor.putRecord({
+      uri: uri.toString(),
+      cid: await createCid(body),
+      value: body,
+      content: encodeRecord(body),
+    })
     await transactor.replaceRecordBoundaries(uri, [SEELE])
 
     expect(await reader.getRecordBoundaries(uri)).toEqual([SEELE])
