@@ -1254,20 +1254,6 @@ describe('zone.stratos.moderation.createLabel', () => {
         expect(getEnrollment).toHaveBeenCalledTimes(1)
       })
     })
-
-    it('(u) an account subject is still InvalidRequest and appends nothing', async () => {
-      const res = await createLabel({
-        subject: {
-          $type: 'zone.stratos.moderation.defs#accountSubject',
-          did: ASUKA_DID,
-        },
-        val: '!takedown',
-      })
-
-      expect(res.status).toBe(400)
-      expect(res.data.error).toBe('InvalidRequest')
-      expect(await allLabels()).toEqual([])
-    })
   })
   describe('space-form record subjects with the production enrollment and catalog stores', () => {
     const SPACE_TYPE = 'zone.stratos.space.feed'

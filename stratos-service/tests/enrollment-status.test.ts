@@ -1,10 +1,20 @@
 import { EventEmitter } from 'node:events'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as fc from 'fast-check'
 import express from 'express'
 import type { Server as XrpcServer } from '@atproto/xrpc-server'
 import type { AppContext } from '../src/index.js'
+import {
+  closeServiceDb,
+  createServiceDb,
+  migrateServiceDb,
+} from '../src/db/index.js'
+import { SqliteLabelStore } from '../src/features/moderation/index.js'
 import { registerEnrollmentHandlers } from '../src/features/index.js'
+import { RepoWriteLocks } from '../src/shared/repo-write-lock.js'
 import { ResolveEnrollmentsCache } from '../src/features/enrollment/handler.js'
 import type { Enrollment } from '@northskysocial/stratos-core'
 
@@ -768,6 +778,16 @@ describe('resolveEnrollments cache invalidation', () => {
 
   it('re-reads the store after setActive within the cache TTL', async () => {
     const { ctx, state } = createHarness()
+    // setActive reads the takedown hold from the label log and writes under
+    // the per-member lock.
+    const dir = mkdtempSync(join(tmpdir(), 'stratos-status-labels-'))
+    const dbPath = join(dir, 'service.sqlite')
+    const labelDb = createServiceDb(dbPath)
+    await migrateServiceDb(labelDb)
+    Object.assign(ctx, {
+      labelStore: new SqliteLabelStore(labelDb, dbPath),
+      repoWriteLocks: new RepoWriteLocks(),
+    })
 
     await invokeResolveRoute(ctx, { did: REI })
     expect(state.boundaryReads).toBe(1)
@@ -778,6 +798,8 @@ describe('resolveEnrollments cache invalidation', () => {
       { did: REI, active: false },
     )
     expect(admin.statusCode).toBe(200)
+    await closeServiceDb(labelDb)
+    rmSync(dir, { recursive: true, force: true })
 
     const after = await invokeResolveRoute(ctx, { did: REI })
     expect(after.statusCode).toBe(200)

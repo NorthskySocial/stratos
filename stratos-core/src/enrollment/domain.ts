@@ -138,3 +138,14 @@ export function reconcileCustody(
   if (verdict === 'not-capable') return 'stratos'
   return current
 }
+
+/**
+ * An operator's hold and a moderation takedown are independent, so a member
+ * is active only when neither is set.
+ */
+export function computeEnrollmentActive(holds: {
+  operatorHold: boolean
+  takedownHold: boolean
+}): boolean {
+  return !holds.operatorHold && !holds.takedownHold
+}

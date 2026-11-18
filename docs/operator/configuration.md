@@ -224,6 +224,36 @@ from serving a record to a holder of a space credential. Consumers must apply
 labels. The reserved-boundary statements hold while the reserved boundary is an
 active catalog entry.
 
+### Account takedowns and the operator hold
+
+A moderation service can label a member's account as taken down. The subject is
+an `accountSubject` with the member's DID.
+
+- A takedown deactivates the member's enrollment.
+- A negation reactivates it only when no operator hold is set.
+- Stratos rejects a DID with no enrollment as `SubjectNotFound`.
+- Stratos rejects a service enrollment as an account subject.
+- This works for members with `stratos` custody and `pds` custody.
+- Stratos writes no record or blob marker for an account takedown.
+
+An operator hold is separate. `zone.stratos.admin.setActive` with `active: false`
+sets it. `active: true` clears it. The two holds do not lift each other.
+
+- While an account takedown is in force, activating the member fails with
+  `AccountTakenDown`. Nothing changes.
+- Members who were inactive when the hold was introduced became operator-held
+  once.
+- An inactive member who completes OAuth gets 403 `EnrollmentDenied`. Nothing
+  changes.
+- An inactive member cannot unenroll. `POST /oauth/revoke` and the XRPC
+  `zone.stratos.enrollment.unenroll` both refuse. Stratos keeps the row until
+  the hold lifts.
+- An inactive member cannot write. `createRecord`, `deleteRecord`,
+  `applyWrites` and `uploadBlob` are all refused with `NotEnrolled` before the
+  handler runs. Updates go through `applyWrites`.
+
+Consumers read account labels through `queryLabels`.
+
 ### Takedown and the sync streams
 
 A takedown changes what `zone.stratos.sync.subscribeRecords` and

@@ -16,6 +16,7 @@ import {
   selectEnrollBoundaries,
   serviceDIDToRkey,
 } from '../routes.js'
+import { INACTIVE_ENROLLMENT_DENIED_BODY } from '../enrollment-denied.js'
 import { detectSpacesCapability } from '../spaces-capability.js'
 import {
   decodeRoomOAuthState,
@@ -88,6 +89,10 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
       const release = await config.repoWriteLocks.acquire(did)
       let alreadyEnrolled = false
       try {
+        if (await hasInactiveEnrollment(enrollmentStore, did)) {
+          return denyInactiveEnrollment(res)
+        }
+
         alreadyEnrolled = await enrollmentStore.isEnrolled(did)
 
         if (alreadyEnrolled) {
@@ -581,4 +586,24 @@ function withReservedBoundary(
   return reservedBoundary && reservedBoundary !== boundary
     ? [boundary, reservedBoundary]
     : [boundary]
+}
+
+/**
+ * A held member has a row with active=false, and isEnrolled reads that as
+ * "not enrolled", which would send them down the fresh-enrollment path and
+ * write active=true over the hold.
+ */
+async function hasInactiveEnrollment(
+  enrollmentStore: EnrollmentStore,
+  did: string,
+): Promise<boolean> {
+  return (await enrollmentStore.getEnrollment(did))?.active === false
+}
+
+/**
+ * The session is left in place: the PDS sync worker restores it, and a lifted
+ * hold needs it.
+ */
+function denyInactiveEnrollment(res: express.Response) {
+  return res.status(403).json(INACTIVE_ENROLLMENT_DENIED_BODY)
 }

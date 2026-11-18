@@ -102,8 +102,13 @@ session:
 
 Deactivation is reversible and keeps the member's boundaries.
 
-Each change queues an update of the member's PDS record, announces the
-change on the sync stream, and is written to the
+`setActive` with `active: false` sets the operator hold. `active: true` clears
+it. An account takedown label is a second, separate hold. While one is in force,
+`setActive` with `active: true` fails with `AccountTakenDown`. It changes
+nothing.
+
+`setActive` does not queue an update of the member's PDS record. It does not
+add an event to the sync stream. A change to `active` is written to the
 [signed boundary history](/operator/boundary-history).
 
 ## Checking a member

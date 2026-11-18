@@ -263,7 +263,8 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
         "isService" BOOLEAN NOT NULL DEFAULT FALSE,
         "custody" TEXT NOT NULL DEFAULT 'stratos',
         "repoHost" TEXT,
-        "capabilityVerdict" TEXT
+        "capabilityVerdict" TEXT,
+        "operatorHold" BOOLEAN NOT NULL DEFAULT FALSE
       )
     `,
   )
@@ -333,6 +334,8 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
     sql`ALTER TABLE "enrollment" ADD COLUMN IF NOT EXISTS "capabilityVerdict" TEXT`,
   )
 
+  await addOperatorHoldColumn(db)
+
   await migratePdsSyncTables(db)
 
   await executeMigrationStep(
@@ -361,6 +364,36 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
       CREATE INDEX IF NOT EXISTS "moderation_label_subject_seq_idx" ON "moderation_label"("subjectKey", "seq")
     `,
   )
+}
+
+/**
+ * Add `operatorHold` and mark the rows that are inactive right now as held.
+ *
+ * The backfill runs only in the migration that adds the column. Every inactive
+ * row at that point was deactivated by an operator. From then on a takedown
+ * also leaves a member inactive with no operator hold, so a backfill on a
+ * later start would mark that member as operator-held and lifting the takedown
+ * would not reactivate them. The table lock makes the check, the add, and the
+ * backfill one step even when two instances migrate at once.
+ */
+async function addOperatorHoldColumn(db: ServicePgDb): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`LOCK TABLE "enrollment" IN ACCESS EXCLUSIVE MODE`)
+    const existing = await tx.execute(sql`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'enrollment'
+        AND column_name = 'operatorHold'
+    `)
+    if (existing.length > 0) return
+
+    await tx.execute(
+      sql`ALTER TABLE "enrollment" ADD COLUMN "operatorHold" BOOLEAN NOT NULL DEFAULT FALSE`,
+    )
+    await tx.execute(
+      sql`UPDATE "enrollment" SET "operatorHold" = ("active" = 'false')`,
+    )
+  })
 }
 
 /**

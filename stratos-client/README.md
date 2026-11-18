@@ -952,7 +952,11 @@ be `!takedown`. Set `neg: true` to lift a takedown.
   record hidden.
 - **Member's PDS record:** use the seven-segment space-form URI. Stratos records
   the label. Stratos cannot hide a record that it does not host.
-- **Account subject:** not accepted yet.
+- **Account subject:** use `{ "$type": "zone.stratos.moderation.defs#accountSubject", "did": "{did}" }`.
+  A takedown deactivates the member's enrollment. A negation reactivates it only
+  when no operator hold is set. Stratos writes no record or blob marker.
+  `SubjectNotFound` means the DID has no enrollment. Stratos rejects a service
+  enrollment as an account subject. This works for both custody classes.
 
 Stratos rejects a space-form subject when:
 
@@ -967,6 +971,32 @@ The response `label` is absent when the request changed nothing and the subject
 has no label. A repeat of the label in force returns that label.
 
 To read labels back, see `queryLabels` below.
+
+#### Account takedowns and the operator hold
+
+A member has two separate holds. Either one leaves the member inactive.
+
+- An operator sets the operator hold with `zone.stratos.admin.setActive` and
+  `active: false`. `active: true` clears it.
+- An account takedown label sets the takedown hold. A negation clears it.
+- The holds are independent. Clearing one never clears the other.
+- While an account takedown is in force, `setActive` with `active: true` fails
+  with `AccountTakenDown`. It changes nothing.
+- `setActive` does not add an event to the sync streams.
+
+Members who were inactive when the operator hold was introduced became
+operator-held once.
+
+An inactive member cannot write. `createRecord`, `deleteRecord`,
+`applyWrites` and `uploadBlob` are all refused with `NotEnrolled` before the
+handler runs. Stratos has no separate `updateRecord` route. Updates go through
+`applyWrites`.
+
+An inactive member who completes OAuth gets 403 `EnrollmentDenied` with the
+message "Your enrollment on this Stratos service is not active". Nothing
+changes. An inactive member also cannot unenroll. `POST /oauth/revoke` and
+`zone.stratos.enrollment.unenroll` both refuse. The member can leave once the
+hold lifts.
 
 #### Reading labels with `queryLabels`
 
@@ -996,6 +1026,9 @@ Other services authenticate with ordinary service auth.
 A moderation service reads every label. A service that holds a service
 enrollment reads a record label only if it shares a boundary with the label. A
 record label with no boundaries is visible only to moderation services.
+
+An account label comes back with an `accountSubject` that carries the member's
+DID.
 
 A service that holds a service enrollment reads an account label if it shares a
 boundary with the member's enrollment. The enrollment can be active or not. It

@@ -187,6 +187,7 @@ export interface EnrollmentEvent {
 
 export type EnrollmentEventEmitter = EventEmitter<{
   enrollment: [EnrollmentEvent]
+  activeChanged: [{ did: string }]
 }>
 
 export type SequenceEventEmitter = EventEmitter<{

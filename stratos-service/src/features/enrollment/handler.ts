@@ -13,6 +13,7 @@ import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
 import { SPACE_TYPE } from '../../oauth'
 import { createRepoHostResolverDeps } from '../space-read/index.js'
+import { applyEnrollmentHolds, isAccountTakenDown } from './holds.js'
 import { verifyEnrolled } from './internal/auth.js'
 import type { PdsSyncPageKey } from './internal/pds-sync-store.js'
 
@@ -91,6 +92,9 @@ export function registerEnrollmentHandlers(
     RESOLVE_CACHE_MAX_ENTRIES,
   )
   ctx.enrollmentEvents.on('enrollment', ({ did }) => {
+    resolveCache.invalidate(did)
+  })
+  ctx.enrollmentEvents.on('activeChanged', ({ did }) => {
     resolveCache.invalidate(did)
   })
   registerEnrollmentStatus(server, ctx)
@@ -361,7 +365,7 @@ function registerAdminBoundaryHandlers(
   registerAddBoundaryHandler(ctx, resolveCache)
   registerRemoveBoundaryHandler(ctx, resolveCache)
   registerSetBoundariesHandler(ctx, resolveCache)
-  registerSetActiveHandler(ctx, resolveCache)
+  registerSetActiveHandler(ctx)
   registerAdminUserHandlers(ctx)
 }
 
@@ -568,10 +572,7 @@ function registerRemoveAdminHandler(ctx: AppContext): void {
  * also removes their PDS enrollment record.
  * @param ctx - Application context
  */
-function registerSetActiveHandler(
-  ctx: AppContext,
-  resolveCache: ResolveEnrollmentsCache,
-): void {
+function registerSetActiveHandler(ctx: AppContext): void {
   ctx.app.post(
     '/xrpc/zone.stratos.admin.setActive',
     adminJsonParser,
@@ -596,24 +597,28 @@ function registerSetActiveHandler(
           })
         }
 
-        const enrollment = await ctx.enrollmentStore.getEnrollment(did)
-        if (!enrollment) {
+        if (active && (await isAccountTakenDown(ctx, did))) {
+          return res.status(400).json({
+            error: 'AccountTakenDown',
+            message: 'An account takedown is in force for this member',
+          })
+        }
+
+        const holds = await applyEnrollmentHolds(ctx, did, {
+          operatorHold: !active,
+        })
+        if (!holds) {
           return res.status(404).json({
             error: 'NotFound',
             message: `user ${did} is not enrolled`,
           })
         }
 
-        if (enrollment.active !== active) {
-          await ctx.enrollmentStore.updateEnrollment(did, { active })
-          resolveCache.invalidate(did)
-        }
-
         ctx.logger?.info(
-          { adminDid, targetDid: did, active },
-          active ? 'admin activated member' : 'admin deactivated member',
+          { adminDid, targetDid: did, active: holds.active },
+          holds.active ? 'admin activated member' : 'admin deactivated member',
         )
-        res.json({ did, active })
+        res.json({ did, active: holds.active })
       } catch (err) {
         ctx.logger?.error(
           { err: err instanceof Error ? err.message : String(err) },

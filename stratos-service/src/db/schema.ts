@@ -60,6 +60,9 @@ export const enrollment = sqliteTable('enrollment', {
   custody: text('custody').notNull().default('stratos'),
   repoHost: text('repoHost'),
   capabilityVerdict: text('capabilityVerdict'),
+  operatorHold: integer('operatorHold', { mode: 'boolean' })
+    .notNull()
+    .default(false),
 })
 
 /**

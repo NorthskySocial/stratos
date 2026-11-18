@@ -15,6 +15,7 @@ import {
 import type { AppContext } from '../../context-types.js'
 import type { XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
+import { applyEnrollmentHolds } from '../enrollment/index.js'
 import { registerQueryLabelsHandler } from './query-handler.js'
 import { toWireLabel } from './wire-label.js'
 
@@ -40,15 +41,17 @@ type HostedRecordSubject = Extract<
 
 type SpaceRecordSubject = Extract<ParsedLabelSubject, { kind: 'space-record' }>
 
+type AccountSubject = Extract<ParsedLabelSubject, { kind: 'account' }>
+
 interface LabelRequestContext {
   ctx: AppContext
-  subject: HostedRecordSubject | SpaceRecordSubject
+  subject: HostedRecordSubject | SpaceRecordSubject | AccountSubject
   subjectKey: string
   callerDid: string
   neg: boolean
   ref: string | undefined
   boundaries: string[]
-  /** A hosted takedown hides the record before the append; space records have nothing to hide. */
+  /** A hosted or account takedown hides the subject before the append; space records have nothing to hide. */
   beforeAppend?: () => Promise<void>
 }
 
@@ -88,7 +91,7 @@ async function handleCreateLabel(
     case 'space-record':
       return handleSpaceLabel(ctx, parsed.value, input, callerDid, neg)
     case 'account':
-      throw new InvalidRequestError('unsupported subject')
+      return handleAccountLabel(ctx, parsed.value, input, callerDid, neg)
   }
 }
 
@@ -176,6 +179,50 @@ async function handleSpaceLabel(
   return label ? { label: toWireLabel(label) } : {}
 }
 
+async function handleAccountLabel(
+  ctx: AppContext,
+  subject: AccountSubject,
+  input: CreateLabelInput,
+  callerDid: string,
+  neg: boolean,
+): Promise<{ label?: Record<string, unknown> }> {
+  const enrollment = await ctx.enrollmentStore.getEnrollment(subject.did)
+  if (!enrollment) throw subjectAccountNotFound()
+  if (enrollment.isService) {
+    throw new InvalidRequestError(
+      'account subject must be a member, not a service',
+    )
+  }
+
+  const deactivateMember = async () => {
+    const holds = await applyEnrollmentHolds(ctx, subject.did, {
+      takedownHold: true,
+    })
+    // The row can vanish after the existence check, for example a concurrent
+    // unenroll. Appending then would label a DID with no enrollment.
+    if (!holds) throw subjectAccountNotFound()
+  }
+  // A takedown deactivates first so a failed append leaves the member
+  // inactive. The recompute runs last and reads the stored operator hold, so a
+  // negation never lifts one. A failed append skips it and a repeat finishes.
+  const label = await writeLabel({
+    ctx,
+    subject,
+    subjectKey: labelSubjectKey(subject),
+    callerDid,
+    neg,
+    ref: input.ref,
+    boundaries: [],
+    ...(neg ? {} : { beforeAppend: deactivateMember }),
+  })
+  await applyEnrollmentHolds(ctx, subject.did, {})
+  return label ? { label: toWireLabel(label) } : {}
+}
+
+function subjectAccountNotFound(): InvalidRequestError {
+  return new InvalidRequestError('Subject account not found', 'SubjectNotFound')
+}
+
 /** The author, never the authority: only a member's own records can be labelled. */
 async function assertAuthorHoldsBoundary(
   ctx: AppContext,
@@ -240,8 +287,10 @@ async function writeLabel(
     await request.beforeAppend?.()
     const newLabel: NewLabel = {
       subjectKey,
-      subjectKind: 'record',
-      ...(subject.cid === undefined ? {} : { cid: subject.cid }),
+      subjectKind: subject.kind === 'account' ? 'account' : 'record',
+      ...(subject.kind === 'account' || subject.cid === undefined
+        ? {}
+        : { cid: subject.cid }),
       val: TAKEDOWN_VALUE,
       neg,
       ...(ref ? { ref } : {}),

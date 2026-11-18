@@ -60,6 +60,8 @@ export interface EnrollmentRecord {
   repoHost?: string
   /** The most recently observed capability probe verdict. See StoredEnrollment. */
   capabilityVerdict?: SpacesCapability
+  /** An operator deactivated this enrollment by hand. See StoredEnrollment. */
+  operatorHold?: boolean
 }
 
 /**

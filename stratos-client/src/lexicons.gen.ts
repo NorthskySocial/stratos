@@ -983,7 +983,11 @@ export const stratosLexicons: LexiconDoc[] = [
         }
       },
       "errors": [
-        { "name": "NotFound", "description": "The DID is not enrolled." }
+        { "name": "NotFound", "description": "The DID is not enrolled." },
+        {
+          "name": "AccountTakenDown",
+          "description": "An account takedown is in force, so the member cannot be activated."
+        }
       ]
     }
   }

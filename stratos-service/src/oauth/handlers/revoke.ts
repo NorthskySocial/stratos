@@ -1,7 +1,35 @@
 import express from 'express'
 import { Agent } from '@atproto/api'
+import type { StoredEnrollment } from '@northskysocial/stratos-core'
 import type { OAuthRoutesConfig } from '../routes.js'
+import { INACTIVE_ENROLLMENT_DENIED_BODY } from '../enrollment-denied.js'
 import { serviceDIDToRkey } from '../routes.js'
+
+type Revocable =
+  | { enrollment: StoredEnrollment }
+  | { refusal: { status: number; body: { error: string; message: string } } }
+
+function checkRevocable(enrollment: StoredEnrollment | null): Revocable {
+  if (!enrollment) {
+    return {
+      refusal: {
+        status: 404,
+        body: { error: 'NotFound', message: 'User is not enrolled' },
+      },
+    }
+  }
+  // Deleting a held member's row would drop the hold and let them enroll
+  // again. The XRPC unenroll already refuses inactive members.
+  if (enrollment.active === false) {
+    return {
+      refusal: {
+        status: 403,
+        body: INACTIVE_ENROLLMENT_DENIED_BODY,
+      },
+    }
+  }
+  return { enrollment }
+}
 
 export const handleRevoke = (
   config: OAuthRoutesConfig,
@@ -18,13 +46,11 @@ export const handleRevoke = (
       if (!did) return
 
       // Check if enrolled
-      const currentEnrollment = await enrollmentStore.getEnrollment(did)
-      if (!currentEnrollment) {
-        return res.status(404).json({
-          error: 'NotFound',
-          message: 'User is not enrolled',
-        })
+      const revocable = checkRevocable(await enrollmentStore.getEnrollment(did))
+      if ('refusal' in revocable) {
+        return res.status(revocable.refusal.status).json(revocable.refusal.body)
       }
+      const currentEnrollment = revocable.enrollment
 
       // Best-effort PDS enrollment record deletion using stored rkey or service DID
       const rkey =
