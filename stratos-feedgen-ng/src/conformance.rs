@@ -18,6 +18,7 @@ mod tests {
         moderation_label::{LabelSubject, parse_label_page},
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         server,
+        store::{InteractionKind, ProjectionInteraction},
     };
 
     #[derive(Deserialize)]
@@ -453,6 +454,45 @@ mod tests {
         }
     }
 
+    fn expected_interaction_changes(case_name: &str) -> (Vec<ProjectionInteraction>, Vec<String>) {
+        const SUBJECT: &str = "at://did:plc:misato-katsuragi/zone.stratos.feed.post/gaghiel";
+        let interaction =
+            |kind, collection: &str, rkey: &str, indexed_at: &str| ProjectionInteraction {
+                uri: format!("at://did:plc:misato-katsuragi/{collection}/{rkey}"),
+                actor_did: "did:plc:misato-katsuragi".to_owned(),
+                kind,
+                subject_uri: SUBJECT.to_owned(),
+                boundary: "did:web:nerv.tokyo.jp/geofront".to_owned(),
+                indexed_at: indexed_at.to_owned(),
+                retained_at: "1998-05-03T00:00:00.000Z".to_owned(),
+            };
+        match case_name {
+            "a like of a post, written through the generic write procedures" => (
+                vec![interaction(
+                    InteractionKind::Like,
+                    "app.bsky.feed.like",
+                    "rei-like",
+                    "2026-11-18T11:34:29.831Z",
+                )],
+                Vec::new(),
+            ),
+            "a repost of a post, written through the generic write procedures" => (
+                vec![interaction(
+                    InteractionKind::Repost,
+                    "app.bsky.feed.repost",
+                    "asuka-repost",
+                    "2026-11-18T11:34:29.836Z",
+                )],
+                Vec::new(),
+            ),
+            "a delete of the like" => (
+                Vec::new(),
+                vec!["at://did:plc:misato-katsuragi/app.bsky.feed.like/rei-like".to_owned()],
+            ),
+            other => panic!("no interaction expectation for case {other}"),
+        }
+    }
+
     #[test]
     fn reads_no_post_change_in_the_like_and_repost_frames_stratos_sends() {
         let fixture: ActorFrameFixture = serde_json::from_str(include_str!(
@@ -480,6 +520,17 @@ mod tests {
             assert!(page.upserts.is_empty(), "case {} upserted", case.name);
             assert!(page.deletes.is_empty(), "case {} deleted", case.name);
             assert_eq!(page.sequence, frame_sequence(&frame), "case {}", case.name);
+            let (expected_upserts, expected_deletes) = expected_interaction_changes(&case.name);
+            assert_eq!(
+                page.interactions.upserts, expected_upserts,
+                "case {}",
+                case.name
+            );
+            assert_eq!(
+                page.interactions.deletes, expected_deletes,
+                "case {}",
+                case.name
+            );
             interactions.push(case.name);
         }
         assert_eq!(
@@ -487,5 +538,160 @@ mod tests {
             3,
             "the shared fixture must hold a like, a repost and a like delete"
         );
+    }
+
+    const FEED_VIEW_FIXTURE_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../stratos-feedgen/testdata/conformance/v1/feed-view.json"
+    );
+
+    fn served_feed_view_with_a_liked_and_reposted_post() -> serde_json::Value {
+        use crate::{
+            authorization::ViewerAuthorization,
+            feed_service::FeedQuery,
+            feeds::FeedDescription,
+            lifecycle::ControlLifecycle,
+            service::ProjectionReader,
+            store::{ActorPage, EncryptedStore, InteractionChanges, ProjectionPost, StorageKey},
+        };
+
+        const AUTHORITY: &str = "did:web:stratos.example.test";
+        const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
+        const SPIKE: &str = "did:plc:spikespiegel";
+        const FAYE: &str = "did:plc:fayevalentine";
+        const JET: &str = "did:plc:jetblack";
+        let post_uri = format!("at://{SPIKE}/zone.stratos.feed.post/see-you-space-cowboy");
+        let interaction = |kind: InteractionKind, actor: &str, rkey: &str| ProjectionInteraction {
+            uri: format!("at://{actor}/{}/{rkey}", kind.collection()),
+            actor_did: actor.to_owned(),
+            kind,
+            subject_uri: post_uri.clone(),
+            boundary: BOUNDARY.to_owned(),
+            indexed_at: "1998-04-03T00:00:02.000Z".to_owned(),
+            retained_at: "1998-05-03T00:00:00.000Z".to_owned(),
+        };
+        let page_of =
+            |actor: &str, upserts: Vec<ProjectionPost>, changes: Vec<ProjectionInteraction>| {
+                ActorPage {
+                    authority_did: AUTHORITY.to_owned(),
+                    actor_did: actor.to_owned(),
+                    sequence: 1,
+                    upserts,
+                    deletes: Vec::new(),
+                    updated_at: "1998-04-03T00:00:03.000Z".to_owned(),
+                    interactions: InteractionChanges {
+                        upserts: changes,
+                        deletes: Vec::new(),
+                    },
+                }
+            };
+        let lifecycle = ControlLifecycle::for_authority(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            AUTHORITY,
+        )
+        .unwrap();
+        lifecycle
+            .apply_actor_page(page_of(
+                SPIKE,
+                vec![ProjectionPost {
+                    uri: post_uri.clone(),
+                    author_did: SPIKE.to_owned(),
+                    cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+                    sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                    indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
+                    retained_at: "1998-05-03T00:00:00.000Z".to_owned(),
+                    record_json: serde_json::to_vec(&serde_json::json!({
+                        "$type": "zone.stratos.feed.post",
+                        "text": "See you, space cowboy",
+                        "createdAt": "1998-04-03T00:00:00.000Z"
+                    }))
+                    .unwrap(),
+                    blob_refs_json: b"[]".to_vec(),
+                    boundaries: vec![BOUNDARY.to_owned()],
+                }],
+                Vec::new(),
+            ))
+            .unwrap();
+        lifecycle
+            .apply_actor_page(page_of(
+                FAYE,
+                Vec::new(),
+                vec![interaction(InteractionKind::Like, FAYE, "swordfish")],
+            ))
+            .unwrap();
+        lifecycle
+            .apply_actor_page(page_of(
+                JET,
+                Vec::new(),
+                vec![
+                    interaction(InteractionKind::Like, JET, "hard-boiled"),
+                    interaction(InteractionKind::Repost, JET, "bounty"),
+                ],
+            ))
+            .unwrap();
+        lifecycle
+            .apply_viewer_authorization(
+                ViewerAuthorization {
+                    did: FAYE.to_owned(),
+                    boundaries: vec![BOUNDARY.to_owned()],
+                    expires_at: 100,
+                },
+                1,
+            )
+            .unwrap();
+        lifecycle.session_established();
+        lifecycle.mark_labels_current();
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+        let feeds = FeedRegistry::new([FeedDescription {
+            id: "bebop".to_owned(),
+            boundary: BOUNDARY.to_owned(),
+            display_name: None,
+            description: None,
+        }])
+        .unwrap();
+        let (body, served) = lifecycle
+            .serve_viewer_feed(
+                FAYE,
+                &feeds,
+                FeedQuery {
+                    feed_id: "bebop",
+                    cursor: None,
+                    limit: 50,
+                    now: 2,
+                    as_of: "1998-04-02T00:00:00.000Z",
+                    blob_base_url: "https://feedgen.example.test",
+                },
+            )
+            .unwrap();
+        assert_eq!(served, 1);
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    #[test]
+    fn serves_the_feed_view_pinned_in_the_shared_fixture() {
+        let served = served_feed_view_with_a_liked_and_reposted_post();
+        if std::env::var("WRITE_FEED_VIEW_FIXTURE").as_deref() == Ok("1") {
+            let fixture = serde_json::json!({ "version": 1, "output": served });
+            std::fs::write(
+                FEED_VIEW_FIXTURE_PATH,
+                serde_json::to_string_pretty(&fixture).unwrap() + "\n",
+            )
+            .unwrap();
+        }
+        let pinned: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(FEED_VIEW_FIXTURE_PATH).unwrap())
+                .unwrap();
+        assert_eq!(pinned["version"], 1);
+        assert_eq!(pinned["output"], served);
     }
 }

@@ -106,6 +106,35 @@ export const getFeedLexicon: LexiconDoc = {
           description:
             'Authenticated feedgen blob URLs. Record blob refs remain unchanged. Absent for custody whose blobs must be read from the host.',
         },
+        likeCount: {
+          type: 'integer',
+          minimum: 0,
+          description:
+            "Number of distinct actors who like this post in the feed's boundary.",
+        },
+        repostCount: {
+          type: 'integer',
+          minimum: 0,
+          description:
+            "Number of distinct actors who repost this post in the feed's boundary.",
+        },
+        viewer: {
+          type: 'ref',
+          ref: '#viewerState',
+        },
+      },
+    },
+    viewerState: {
+      type: 'object',
+      properties: {
+        like: {
+          type: 'string',
+          description: "URI of the viewer's like record.",
+        },
+        repost: {
+          type: 'string',
+          description: "URI of the viewer's repost record.",
+        },
       },
     },
     authorView: {

@@ -24,7 +24,60 @@ impl EncryptedStore {
         } else {
             None
         };
-        Ok(FeedPage { posts, cursor })
+        Ok(FeedPage {
+            posts,
+            cursor,
+            summaries: std::collections::BTreeMap::new(),
+        })
+    }
+
+    /// Counts and the viewer's own record URIs for the posts of one served
+    /// page. Only the feed's own boundary, exact subjects and unexpired rows
+    /// count, and no other actor's DID or record URI leaves the query.
+    pub fn interaction_summaries(
+        &self,
+        boundary: &str,
+        viewer: &str,
+        uris: &[String],
+        as_of: &str,
+    ) -> Result<std::collections::BTreeMap<String, InteractionSummary>, StoreError> {
+        if !is_utc_timestamp(as_of) || uris.len() > usize::from(crate::cursor::MAX_FEED_LIMIT) {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        if uris.is_empty() {
+            return Ok(std::collections::BTreeMap::new());
+        }
+        let subjects =
+            serde_json::to_string(uris).map_err(|_| StoreError::InvalidProjectionMutation)?;
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT subject_uri,
+                   COUNT(DISTINCT CASE WHEN kind = 'like' THEN actor_did END),
+                   COUNT(DISTINCT CASE WHEN kind = 'repost' THEN actor_did END),
+                   MIN(CASE WHEN kind = 'like' AND actor_did = ?2 THEN uri END),
+                   MIN(CASE WHEN kind = 'repost' AND actor_did = ?2 THEN uri END)
+                 FROM interaction
+                 WHERE boundary = ?1 AND retained_at > ?3
+                   AND subject_uri IN (SELECT value FROM json_each(?4))
+                 GROUP BY subject_uri",
+            )
+            .map_err(StoreError::Open)?;
+        statement
+            .query_map(params![boundary, viewer, as_of, subjects], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    InteractionSummary {
+                        like_count: row.get(1)?,
+                        repost_count: row.get(2)?,
+                        viewer_like: row.get(3)?,
+                        viewer_repost: row.get(4)?,
+                    },
+                ))
+            })
+            .map_err(StoreError::Open)?
+            .collect::<Result<_, _>>()
+            .map_err(StoreError::Open)
     }
 
     pub fn blob_post(&self, uri: &str, as_of: &str) -> Result<Option<BlobPost>, StoreError> {
@@ -96,5 +149,94 @@ impl EncryptedStore {
             .map_err(StoreError::Open)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::Open)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn open_store() -> EncryptedStore {
+        EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap()
+    }
+
+    #[test]
+    fn a_summary_request_for_more_than_a_page_of_posts_is_refused() {
+        let store = open_store();
+        let uris = (0..=crate::cursor::MAX_FEED_LIMIT)
+            .map(|index| format!("at://did:plc:spikespiegel/zone.stratos.feed.post/{index}"))
+            .collect::<Vec<_>>();
+
+        assert!(matches!(
+            store.interaction_summaries("bebop", "did:plc:faye", &uris, "1998-04-03T00:00:00.000Z"),
+            Err(StoreError::InvalidProjectionMutation)
+        ));
+        assert!(
+            store
+                .interaction_summaries(
+                    "bebop",
+                    "did:plc:faye",
+                    &uris[..usize::from(crate::cursor::MAX_FEED_LIMIT)],
+                    "1998-04-03T00:00:00.000Z",
+                )
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_summary_request_needs_a_utc_time() {
+        let store = open_store();
+
+        assert!(matches!(
+            store.interaction_summaries("bebop", "did:plc:faye", &[], "yesterday"),
+            Err(StoreError::InvalidProjectionMutation)
+        ));
+    }
+
+    #[test]
+    fn a_summary_covers_only_the_requested_posts() {
+        let mut store = open_store();
+        let liked = "at://did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+        let unrequested = "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop";
+        let interactions = [liked, unrequested]
+            .into_iter()
+            .enumerate()
+            .map(|(index, subject)| ProjectionInteraction {
+                uri: format!("at://did:plc:fayevalentine/app.bsky.feed.like/{index}"),
+                actor_did: "did:plc:fayevalentine".to_owned(),
+                kind: InteractionKind::Like,
+                subject_uri: subject.to_owned(),
+                boundary: "bebop".to_owned(),
+                indexed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                retained_at: "1998-04-05T00:00:00.000Z".to_owned(),
+            })
+            .collect();
+        store
+            .apply_actor_page(ActorPage {
+                authority_did: "did:web:stratos.example.test".to_owned(),
+                actor_did: "did:plc:fayevalentine".to_owned(),
+                sequence: 1,
+                upserts: Vec::new(),
+                deletes: Vec::new(),
+                updated_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                interactions: InteractionChanges {
+                    upserts: interactions,
+                    deletes: Vec::new(),
+                },
+            })
+            .unwrap();
+
+        let summaries = store
+            .interaction_summaries(
+                "bebop",
+                "did:plc:jetblack",
+                &[liked.to_owned()],
+                "1998-04-04T00:00:00.000Z",
+            )
+            .unwrap();
+
+        assert_eq!(summaries.keys().collect::<Vec<_>>(), [liked]);
+        assert_eq!(summaries[liked].like_count, 1);
     }
 }

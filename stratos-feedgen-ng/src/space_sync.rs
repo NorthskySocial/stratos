@@ -4,8 +4,12 @@ use cid::Cid;
 use serde_json::Value;
 
 use crate::{
+    actor_event::MAX_SUBJECT_URI_BYTES,
     identifier::{Did, RecordUri},
-    store::{EncryptedStore, SpaceStageMutation, SpaceStagePage, StoreError, is_utc_timestamp},
+    store::{
+        EncryptedStore, InteractionKind, SpaceStageMutation, SpaceStagePage, StoreError,
+        is_utc_timestamp,
+    },
 };
 
 pub const POST_COLLECTION: &str = "zone.stratos.feed.post";
@@ -114,7 +118,8 @@ impl std::fmt::Display for SpaceSyncError {
 
 impl std::error::Error for SpaceSyncError {}
 
-/// Validates and stages only inline post values from one bounded PDS page.
+/// Validates and stages only inline post, like and repost values from one
+/// bounded PDS page.
 /// A terminal page remains unqueryable because promotion requires independent
 /// commit verification in the caller.
 pub fn prepare_space_page(
@@ -145,14 +150,14 @@ pub fn prepare_space_page(
             skipped += 1;
             continue;
         }
-        if op.collection != POST_COLLECTION {
+        if op.collection != POST_COLLECTION && interaction_kind(&op.collection).is_none() {
             continue;
         }
         if op.cid.is_some()
             && op
                 .value
                 .as_ref()
-                .is_some_and(|value| !is_post_record(value))
+                .is_some_and(|value| !is_admitted_record(&op.collection, value))
         {
             skipped += 1;
             continue;
@@ -283,12 +288,32 @@ fn validate_target(target: &SpaceSyncTarget) -> Result<(), SpaceSyncError> {
     }
 }
 
-fn is_post_record(value: &Value) -> bool {
+fn interaction_kind(collection: &str) -> Option<InteractionKind> {
+    InteractionKind::ALL
+        .into_iter()
+        .find(|kind| kind.collection() == collection)
+}
+
+fn has_record_type(value: &Value, collection: &str) -> bool {
     value
         .as_object()
         .and_then(|record| record.get("$type"))
         .and_then(Value::as_str)
-        == Some(POST_COLLECTION)
+        == Some(collection)
+}
+
+fn is_admitted_record(collection: &str, value: &Value) -> bool {
+    if collection == POST_COLLECTION {
+        return has_record_type(value, POST_COLLECTION);
+    }
+    has_record_type(value, collection)
+        && value
+            .get("subject")
+            .and_then(|subject| subject.get("uri"))
+            .and_then(Value::as_str)
+            .is_some_and(|subject_uri| {
+                subject_uri.len() <= MAX_SUBJECT_URI_BYTES && RecordUri::parse(subject_uri).is_ok()
+            })
 }
 
 fn serialize_bounded(value: &Value) -> Result<Vec<u8>, serde_json::Error> {
@@ -323,7 +348,9 @@ mod tests {
         POST_COLLECTION, SpacePage, SpaceRepoOp, SpaceSyncTarget, prepare_space_page,
         stage_space_page,
     };
-    use crate::store::{EncryptedStore, PdsSpaceMember, StorageKey};
+    use crate::actor_event::MAX_SUBJECT_URI_BYTES;
+    use crate::moderation_label::{LabelPage, LabelSubject, ModerationLabel};
+    use crate::store::{EncryptedStore, InteractionKind, PdsSpaceMember, StorageKey};
 
     const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
     const ACTOR: &str = "did:plc:fayevalentine";
@@ -563,6 +590,235 @@ mod tests {
                 .posts
                 .is_empty()
         );
+    }
+
+    fn subject_uri() -> String {
+        format!("{SPACE}/did:plc:spikespiegel/{POST_COLLECTION}/bang")
+    }
+
+    fn interaction_op(kind: InteractionKind, rkey: &str, subject: &str) -> SpaceRepoOp {
+        SpaceRepoOp {
+            collection: kind.collection().to_owned(),
+            rkey: rkey.to_owned(),
+            cid: Some(CID.to_owned()),
+            value: Some(json!({
+                "$type": kind.collection(),
+                "subject": { "uri": subject, "cid": CID },
+                "createdAt": "2026-09-21T00:00:00.000Z",
+                "boundary": { "values": ["did:web:stratos.example.test/forged"] }
+            })),
+        }
+    }
+
+    fn terminal_page(ops: Vec<SpaceRepoOp>) -> SpacePage {
+        SpacePage {
+            ops,
+            next_cursor: None,
+        }
+    }
+
+    fn like_uri(rkey: &str) -> String {
+        format!("{SPACE}/{ACTOR}/app.bsky.feed.like/{rkey}")
+    }
+
+    const PROMOTED_AT: &str = "2026-09-23T00:00:00.000Z";
+
+    #[test]
+    fn a_staged_like_is_hidden_until_verification_and_takes_the_target_boundary() {
+        let mut store = authorized_store();
+        let prepared = prepare_space_page(
+            target(&store),
+            terminal_page(vec![interaction_op(
+                InteractionKind::Like,
+                "swordfish",
+                &subject_uri(),
+            )]),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!((prepared.indexed, prepared.skipped), (1, 0));
+        stage_space_page(&mut store, prepared).unwrap();
+
+        assert!(store.interaction_rows().is_empty());
+
+        store
+            .promote_authorized_space_stage(BOUNDARY, SPACE, ACTOR, PROMOTED_AT)
+            .unwrap();
+        assert_eq!(
+            store.interaction_rows(),
+            [(
+                like_uri("swordfish"),
+                "like".to_owned(),
+                subject_uri(),
+                BOUNDARY.to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn a_staged_repost_is_promoted_as_a_repost() {
+        let mut store = authorized_store();
+        let prepared = prepare_space_page(
+            target(&store),
+            terminal_page(vec![interaction_op(
+                InteractionKind::Repost,
+                "kamehameha",
+                &subject_uri(),
+            )]),
+            NOW,
+        )
+        .unwrap();
+        stage_space_page(&mut store, prepared).unwrap();
+        store
+            .promote_authorized_space_stage(BOUNDARY, SPACE, ACTOR, PROMOTED_AT)
+            .unwrap();
+
+        let rows = store.interaction_rows();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, "repost");
+        assert_eq!(
+            rows[0].0,
+            format!("{SPACE}/{ACTOR}/app.bsky.feed.repost/kamehameha")
+        );
+    }
+
+    #[test]
+    fn malformed_interaction_ops_are_skipped_and_the_page_still_stages() {
+        let mut store = authorized_store();
+        let mut wrong_type = interaction_op(InteractionKind::Like, "wrong-type", &subject_uri());
+        wrong_type.value = Some(json!({
+            "$type": "app.bsky.feed.repost",
+            "subject": { "uri": subject_uri() }
+        }));
+        let mut no_subject = interaction_op(InteractionKind::Like, "no-subject", &subject_uri());
+        no_subject.value = Some(json!({ "$type": InteractionKind::Like.collection() }));
+        let mut numeric_subject = interaction_op(InteractionKind::Like, "numeric", &subject_uri());
+        numeric_subject.value = Some(json!({
+            "$type": InteractionKind::Like.collection(),
+            "subject": { "uri": 7 }
+        }));
+        let not_a_uri = interaction_op(InteractionKind::Like, "not-a-uri", "https://example.test");
+        let long_but_valid_subject = format!(
+            "at://did:plc:{}/{POST_COLLECTION}/bang",
+            "a".repeat(MAX_SUBJECT_URI_BYTES - 8)
+        );
+        assert!(crate::identifier::RecordUri::parse(&long_but_valid_subject).is_ok());
+        assert!(long_but_valid_subject.len() > MAX_SUBJECT_URI_BYTES);
+        let oversized = interaction_op(InteractionKind::Like, "oversized", &long_but_valid_subject);
+        let ops = vec![
+            wrong_type,
+            no_subject,
+            numeric_subject,
+            not_a_uri,
+            oversized,
+            SpaceRepoOp {
+                collection: POST_COLLECTION.to_owned(),
+                rkey: "bang".to_owned(),
+                cid: Some(CID.to_owned()),
+                value: Some(json!({ "$type": POST_COLLECTION })),
+            },
+        ];
+        let prepared = prepare_space_page(target(&store), terminal_page(ops), NOW).unwrap();
+
+        assert_eq!(
+            (prepared.indexed, prepared.deleted, prepared.skipped),
+            (1, 0, 5)
+        );
+        stage_space_page(&mut store, prepared).unwrap();
+        store
+            .promote_authorized_space_stage(BOUNDARY, SPACE, ACTOR, PROMOTED_AT)
+            .unwrap();
+        assert!(store.interaction_rows().is_empty());
+        assert_eq!(
+            store
+                .list_posts_by_boundary(BOUNDARY, None, 50, NOW)
+                .unwrap()
+                .posts
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_staged_delete_removes_a_promoted_like() {
+        let mut store = authorized_store();
+        let like = interaction_op(InteractionKind::Like, "swordfish", &subject_uri());
+        let prepared = prepare_space_page(target(&store), terminal_page(vec![like]), NOW).unwrap();
+        stage_space_page(&mut store, prepared).unwrap();
+        store
+            .promote_authorized_space_stage(BOUNDARY, SPACE, ACTOR, PROMOTED_AT)
+            .unwrap();
+        assert_eq!(store.interaction_rows().len(), 1);
+
+        let removal = SpaceRepoOp {
+            collection: InteractionKind::Like.collection().to_owned(),
+            rkey: "swordfish".to_owned(),
+            cid: None,
+            value: None,
+        };
+        let prepared =
+            prepare_space_page(target(&store), terminal_page(vec![removal]), NOW).unwrap();
+        assert_eq!(prepared.deleted, 1);
+        stage_space_page(&mut store, prepared).unwrap();
+        store
+            .promote_authorized_space_stage(BOUNDARY, SPACE, ACTOR, "2026-09-24T00:00:00.000Z")
+            .unwrap();
+
+        assert!(store.interaction_rows().is_empty());
+    }
+
+    fn promote_a_staged_like(store: &mut EncryptedStore) {
+        let prepared = prepare_space_page(
+            target(store),
+            terminal_page(vec![interaction_op(
+                InteractionKind::Like,
+                "swordfish",
+                &subject_uri(),
+            )]),
+            "2026-09-22T00:00:02.000Z",
+        )
+        .unwrap();
+        stage_space_page(store, prepared).unwrap();
+        store
+            .promote_authorized_space_stage(BOUNDARY, SPACE, ACTOR, PROMOTED_AT)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_taken_down_accounts_staged_like_is_not_promoted() {
+        let mut control = authorized_store();
+        promote_a_staged_like(&mut control);
+        assert_eq!(control.interaction_rows().len(), 1);
+
+        let mut store = authorized_store();
+        store
+            .apply_label_page(
+                "did:web:stratos.example.test",
+                &LabelPage {
+                    cursor: 1,
+                    labels: vec![ModerationLabel {
+                        seq: 1,
+                        subject: LabelSubject::Account {
+                            did: ACTOR.to_owned(),
+                        },
+                        neg: false,
+                    }],
+                },
+                NOW,
+            )
+            .unwrap();
+        store
+            .replace_pds_space_members(
+                BOUNDARY,
+                vec![PdsSpaceMember {
+                    did: ACTOR.to_owned(),
+                }],
+                "2026-09-22T00:00:01.000Z",
+            )
+            .unwrap();
+        promote_a_staged_like(&mut store);
+
+        assert!(store.interaction_rows().is_empty());
     }
 
     #[test]

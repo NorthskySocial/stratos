@@ -961,6 +961,7 @@ mod tests {
                 }],
                 deletes: Vec::new(),
                 updated_at: "1998-04-03T00:00:02.000Z".to_owned(),
+                interactions: crate::store::InteractionChanges::default(),
             })
             .unwrap();
         let lifecycle = ControlLifecycle::new(ProjectionReader::new(store), readiness);
@@ -1656,6 +1657,7 @@ mod tests {
                 }],
                 deletes: Vec::new(),
                 updated_at: "1998-04-03T00:00:02.000Z".to_owned(),
+                interactions: crate::store::InteractionChanges::default(),
             })
             .unwrap();
         lifecycle
@@ -1727,5 +1729,181 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    const ACTOR_AUTHORITY: &str = "did:web:stratos.example.test";
+    const ACTOR_BEBOP: &str = "did:web:stratos.example.test/bebop";
+    const FAYE: &str = "did:plc:faye";
+    const RETAINED_AT: &str = "1998-05-03T00:00:00.000Z";
+    const LIKE: &str = "app.bsky.feed.like";
+    const REPOST: &str = "app.bsky.feed.repost";
+    const FAYE_LIKE_SUBJECT: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+
+    fn faye_uri(collection: &str, rkey: &str) -> String {
+        format!("at://{FAYE}/{collection}/{rkey}")
+    }
+
+    fn enrolled_lifecycle() -> ControlLifecycle {
+        let lifecycle = ControlLifecycle::for_authority(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            ACTOR_AUTHORITY,
+        )
+        .unwrap();
+        lifecycle
+            .reconcile_actor_enrollment(
+                FAYE,
+                "1998-04-03T00:00:00.000Z",
+                Some(ActorEnrollment {
+                    did: FAYE.to_owned(),
+                    boundaries: vec![ACTOR_BEBOP.to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        lifecycle
+    }
+
+    fn commit_frame(sequence: u64, ops: serde_json::Value) -> Vec<u8> {
+        let mut bytes = serde_cbor::to_vec(&serde_json::json!({"t": "#commit"})).unwrap();
+        bytes.extend(
+            serde_cbor::to_vec(&serde_json::json!({
+                "seq": sequence,
+                "did": FAYE,
+                "time": "1998-04-03T00:00:00.000Z",
+                "rev": "3jzfcijpj2z2a",
+                "ops": ops,
+            }))
+            .unwrap(),
+        );
+        bytes
+    }
+
+    fn like_create_ops(rkey: &str) -> serde_json::Value {
+        serde_json::json!([{
+            "action": "create",
+            "path": format!("app.bsky.feed.like/{rkey}"),
+            "cid": "bafyreia",
+            "record": {
+                "$type": LIKE,
+                "subject": {"uri": FAYE_LIKE_SUBJECT, "cid": "bafyreib"},
+                "boundary": {"values": [{"value": "bebop"}]},
+            },
+        }])
+    }
+
+    fn apply(lifecycle: &ControlLifecycle, frame: &[u8]) -> ActorFrameResult {
+        lifecycle
+            .apply_actor_frame(frame, ACTOR_AUTHORITY, FAYE, RETAINED_AT)
+            .unwrap()
+    }
+
+    fn faye_cursor(lifecycle: &ControlLifecycle) -> Option<u64> {
+        lifecycle
+            .actor_sync_state(ACTOR_AUTHORITY, FAYE)
+            .unwrap()
+            .unwrap()
+            .cursor
+    }
+
+    #[test]
+    fn a_like_frame_is_stored_and_a_later_delete_frame_removes_it() {
+        let lifecycle = enrolled_lifecycle();
+
+        assert!(matches!(
+            apply(&lifecycle, &commit_frame(7, like_create_ops("one"))),
+            ActorFrameResult::Applied
+        ));
+        assert_eq!(
+            lifecycle.read(|projection| projection.interaction_rows()),
+            [(
+                faye_uri(LIKE, "one"),
+                "like".to_owned(),
+                FAYE_LIKE_SUBJECT.to_owned(),
+                ACTOR_BEBOP.to_owned()
+            )]
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+
+        let delete = commit_frame(
+            8,
+            serde_json::json!([{"action": "delete", "path": "app.bsky.feed.like/one"}]),
+        );
+        assert!(matches!(
+            apply(&lifecycle, &delete),
+            ActorFrameResult::Applied
+        ));
+        assert!(
+            lifecycle
+                .read(|projection| projection.interaction_rows())
+                .is_empty()
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(8));
+    }
+
+    #[test]
+    fn a_malformed_like_frame_still_advances_the_cursor() {
+        let lifecycle = enrolled_lifecycle();
+        let malformed = commit_frame(
+            7,
+            serde_json::json!([{
+                "action": "create",
+                "path": "app.bsky.feed.like/one",
+                "cid": "bafyreia",
+                "record": {"$type": REPOST},
+            }]),
+        );
+
+        assert!(matches!(
+            apply(&lifecycle, &malformed),
+            ActorFrameResult::Applied
+        ));
+        assert!(
+            lifecycle
+                .read(|projection| projection.interaction_rows())
+                .is_empty()
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+    }
+
+    #[test]
+    fn a_replayed_frame_does_not_readmit_a_taken_down_like() {
+        let lifecycle = enrolled_lifecycle();
+        lifecycle
+            .apply_label_page(
+                &crate::moderation_label::LabelPage {
+                    cursor: 1,
+                    labels: vec![crate::moderation_label::ModerationLabel {
+                        seq: 1,
+                        subject: crate::moderation_label::LabelSubject::Record {
+                            uri: faye_uri(LIKE, "one"),
+                            author_did: FAYE.to_owned(),
+                        },
+                        neg: false,
+                    }],
+                },
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap();
+
+        for _ in 0..2 {
+            assert!(matches!(
+                apply(&lifecycle, &commit_frame(7, like_create_ops("one"))),
+                ActorFrameResult::Applied
+            ));
+        }
+        assert!(matches!(
+            apply(&lifecycle, &commit_frame(8, like_create_ops("two"))),
+            ActorFrameResult::Applied
+        ));
+
+        let stored = lifecycle.read(|projection| projection.interaction_rows());
+        assert_eq!(
+            stored.iter().map(|row| row.0.clone()).collect::<Vec<_>>(),
+            [faye_uri(LIKE, "two")]
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(8));
     }
 }

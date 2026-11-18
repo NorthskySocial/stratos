@@ -9,7 +9,10 @@ use serde_json::{Map as JsonMap, Value as JsonValue};
 use crate::{
     authority::normalize_boundary,
     identifier::{Did, RecordUri},
-    store::{ActorPage, ProjectionPost, is_utc_timestamp},
+    store::{
+        ActorPage, InteractionChanges, InteractionKind, ProjectionInteraction, ProjectionPost,
+        is_utc_timestamp,
+    },
 };
 
 const POST_COLLECTION: &str = "zone.stratos.feed.post";
@@ -18,6 +21,7 @@ const MAX_BOUNDARIES: usize = 128;
 const MAX_BOUNDARY_BYTES: usize = 256;
 const MAX_BLOB_REFS: usize = 128;
 const MAX_VALUE_DEPTH: usize = 32;
+pub(crate) const MAX_SUBJECT_URI_BYTES: usize = 2_048;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ActorEventError {
@@ -73,10 +77,27 @@ pub fn parse_actor_commit(
         return Err(ActorEventError::InvalidFrame);
     }
 
+    let context = InteractionContext {
+        service_did,
+        actor_did,
+        authorized_boundaries,
+        indexed_at: &commit.time,
+        retained_at,
+    };
     let mut mutations = BTreeMap::new();
+    let mut interaction_mutations = BTreeMap::new();
+    let mut skipped_interactions = 0_usize;
     for operation in commit.ops {
         let path = operation.path.trim_start_matches('/');
         let Some(record_key) = path.strip_prefix(&format!("{POST_COLLECTION}/")) else {
+            if let Some((kind, record_key)) = interaction_route(path) {
+                match interaction_mutation(&operation, kind, record_key, &context) {
+                    Some((uri, mutation)) => {
+                        interaction_mutations.insert(uri, mutation);
+                    }
+                    None => skipped_interactions += 1,
+                }
+            }
             continue;
         };
         if record_key.is_empty() {
@@ -149,14 +170,102 @@ pub fn parse_actor_commit(
             PostMutation::Delete => deletes.push(uri),
         }
     }
+    let mut interactions = InteractionChanges::default();
+    for (uri, mutation) in interaction_mutations {
+        match mutation {
+            InteractionMutation::Upsert(interaction) => interactions.upserts.push(*interaction),
+            InteractionMutation::Delete => interactions.deletes.push(uri),
+        }
+    }
+    if skipped_interactions > 0 {
+        eprintln!("event=actor_interaction_skipped count={skipped_interactions}");
+    }
     Ok(Some(ActorPage {
         authority_did: service_did.to_owned(),
         actor_did: actor_did.to_owned(),
         sequence: commit.seq,
         upserts,
         deletes,
+        interactions,
         updated_at: commit.time,
     }))
+}
+
+struct InteractionContext<'a> {
+    service_did: &'a str,
+    actor_did: &'a str,
+    authorized_boundaries: &'a BTreeSet<String>,
+    indexed_at: &'a str,
+    retained_at: &'a str,
+}
+
+fn interaction_route(path: &str) -> Option<(InteractionKind, &str)> {
+    let (collection, record_key) = path.split_once('/')?;
+    let kind = InteractionKind::ALL
+        .into_iter()
+        .find(|kind| kind.collection() == collection)?;
+    Some((kind, record_key))
+}
+
+/// A like or repost that cannot be read is skipped rather than failing the
+/// frame, so one bad record cannot stall an actor's stream or its posts.
+fn interaction_mutation(
+    operation: &RawOperation,
+    kind: InteractionKind,
+    record_key: &str,
+    context: &InteractionContext<'_>,
+) -> Option<(String, InteractionMutation)> {
+    let uri = format!(
+        "at://{}/{}/{record_key}",
+        context.actor_did,
+        kind.collection()
+    );
+    match RecordUri::parse(&uri) {
+        Ok(RecordUri::Repo {
+            author, collection, ..
+        }) if author.as_str() == context.actor_did && collection == kind.collection() => {}
+        _ => return None,
+    }
+    let mutation = match operation.action.as_str() {
+        "delete" => InteractionMutation::Delete,
+        "create" | "update" => {
+            let record = operation.record.as_ref()?;
+            if record_type(record) != Some(kind.collection()) {
+                return None;
+            }
+            let subject_uri = map_field(record, "subject")
+                .and_then(|subject| map_field(subject, "uri"))
+                .and_then(text_value)
+                .filter(|subject_uri| subject_uri.len() <= MAX_SUBJECT_URI_BYTES)?;
+            RecordUri::parse(subject_uri).ok()?;
+            let boundary = operation
+                .boundary
+                .as_ref()
+                .or_else(|| map_field(record, "boundary"));
+            let boundaries = match boundary {
+                Some(boundary) => {
+                    current_boundaries(boundary, context.service_did, context.authorized_boundaries)
+                        .ok()?
+                }
+                None => Vec::new(),
+            };
+            match <[String; 1]>::try_from(boundaries) {
+                Ok([boundary]) => InteractionMutation::Upsert(Box::new(ProjectionInteraction {
+                    uri: uri.clone(),
+                    actor_did: context.actor_did.to_owned(),
+                    kind,
+                    subject_uri: subject_uri.to_owned(),
+                    boundary,
+                    indexed_at: context.indexed_at.to_owned(),
+                    retained_at: context.retained_at.to_owned(),
+                })),
+                Err(boundaries) if boundaries.is_empty() => InteractionMutation::Delete,
+                Err(_) => return None,
+            }
+        }
+        _ => return None,
+    };
+    Some((uri, mutation))
 }
 
 #[derive(Deserialize)]
@@ -181,6 +290,11 @@ struct RawOperation {
     cid: Option<CborValue>,
     record: Option<CborValue>,
     boundary: Option<CborValue>,
+}
+
+enum InteractionMutation {
+    Upsert(Box<ProjectionInteraction>),
+    Delete,
 }
 
 enum PostMutation {
@@ -381,7 +495,10 @@ mod tests {
     use serde::Serialize;
     use serde_cbor::Value as CborValue;
 
-    use super::{ActorEventError, POST_COLLECTION, created_at, parse_actor_commit};
+    use super::{
+        ActorEventError, MAX_SUBJECT_URI_BYTES, POST_COLLECTION, created_at, parse_actor_commit,
+    };
+    use crate::store::{InteractionChanges, InteractionKind, ProjectionInteraction};
 
     #[derive(Serialize)]
     struct Header<'a> {
@@ -971,5 +1088,415 @@ mod tests {
             ),
             Err(ActorEventError::InvalidFrame)
         ));
+    }
+
+    const FAYE_LIKE_SUBJECT: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+    const FAYE_SPACE_SUBJECT: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+    const LIKE: &str = "app.bsky.feed.like";
+    const REPOST: &str = "app.bsky.feed.repost";
+    const CREW: &str = "did:web:stratos.example.test/crew";
+
+    fn text(value: &str) -> CborValue {
+        CborValue::Text(value.to_owned())
+    }
+
+    fn subject_ref(uri: CborValue) -> CborValue {
+        CborValue::Map(BTreeMap::from([
+            (text("uri"), uri),
+            (text("cid"), text("bafyreib")),
+        ]))
+    }
+
+    fn interaction_body(
+        collection: &str,
+        subject: Option<CborValue>,
+        body_boundary: Option<CborValue>,
+    ) -> CborValue {
+        let mut fields = BTreeMap::from([
+            (text("$type"), text(collection)),
+            (text("createdAt"), text(CREATED_AT)),
+        ]);
+        if let Some(subject) = subject {
+            fields.insert(text("subject"), subject);
+        }
+        if let Some(body_boundary) = body_boundary {
+            fields.insert(text("boundary"), body_boundary);
+        }
+        CborValue::Map(fields)
+    }
+
+    fn valid_body(collection: &str) -> CborValue {
+        interaction_body(collection, Some(subject_ref(text(FAYE_LIKE_SUBJECT))), None)
+    }
+
+    fn interaction_op(
+        action: &'static str,
+        path: &'static str,
+        record: Option<CborValue>,
+        op_boundary: Option<CborValue>,
+    ) -> Operation {
+        Operation {
+            action,
+            path,
+            cid: Some(text("bafyreie")),
+            record,
+            boundary: op_boundary,
+        }
+    }
+
+    fn two_boundaries() -> BTreeSet<String> {
+        authorized_for(&[BEBOP, CREW])
+    }
+
+    fn faye_uri(collection: &str, rkey: &str) -> String {
+        format!("at://did:plc:faye/{collection}/{rkey}")
+    }
+
+    fn expected_interaction(
+        collection: &str,
+        rkey: &str,
+        subject: &str,
+        boundary: &str,
+    ) -> ProjectionInteraction {
+        ProjectionInteraction {
+            uri: faye_uri(collection, rkey),
+            actor_did: "did:plc:faye".to_owned(),
+            kind: if collection == LIKE {
+                InteractionKind::Like
+            } else {
+                InteractionKind::Repost
+            },
+            subject_uri: subject.to_owned(),
+            boundary: boundary.to_owned(),
+            indexed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            retained_at: "1998-05-03T00:00:00.000Z".to_owned(),
+        }
+    }
+
+    enum Outcome {
+        Upsert(ProjectionInteraction),
+        Delete(String),
+        Skipped,
+    }
+
+    #[test]
+    fn reads_likes_and_reposts_by_collection_and_skips_what_is_malformed() {
+        let overlong_subject = format!(
+            "at://did:plc:{}/zone.stratos.feed.post/swordfish",
+            "a".repeat(MAX_SUBJECT_URI_BYTES)
+        );
+        let cases: Vec<(&str, Operation, Outcome)> = vec![
+            (
+                "like create with an operation boundary",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Upsert(expected_interaction(LIKE, "one", FAYE_LIKE_SUBJECT, BEBOP)),
+            ),
+            (
+                "repost create with an operation boundary",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.repost/two",
+                    Some(valid_body(REPOST)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Upsert(expected_interaction(
+                    REPOST,
+                    "two",
+                    FAYE_LIKE_SUBJECT,
+                    BEBOP,
+                )),
+            ),
+            (
+                "update behaves as create",
+                interaction_op(
+                    "update",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Upsert(expected_interaction(LIKE, "one", FAYE_LIKE_SUBJECT, BEBOP)),
+            ),
+            (
+                "body boundary when the operation has none",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text(FAYE_LIKE_SUBJECT))),
+                        Some(boundary(&["bebop"])),
+                    )),
+                    None,
+                ),
+                Outcome::Upsert(expected_interaction(LIKE, "one", FAYE_LIKE_SUBJECT, BEBOP)),
+            ),
+            (
+                "the operation boundary wins over the body claim",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text(FAYE_LIKE_SUBJECT))),
+                        Some(boundary(&["crew"])),
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Upsert(expected_interaction(LIKE, "one", FAYE_LIKE_SUBJECT, BEBOP)),
+            ),
+            (
+                "a subject in the space form",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text(FAYE_SPACE_SUBJECT))),
+                        None,
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Upsert(expected_interaction(LIKE, "one", FAYE_SPACE_SUBJECT, BEBOP)),
+            ),
+            (
+                "an unauthorized boundary becomes a delete",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["swordfish"])),
+                ),
+                Outcome::Delete(faye_uri(LIKE, "one")),
+            ),
+            (
+                "no boundary at all becomes a delete",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    None,
+                ),
+                Outcome::Delete(faye_uri(LIKE, "one")),
+            ),
+            (
+                "two boundaries are skipped",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop", "crew"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a wrong $type",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(REPOST)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a missing subject",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(LIKE, None, None)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a subject uri that is not text",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(CborValue::Integer(7))),
+                        None,
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "an overlong subject uri",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text(&overlong_subject))),
+                        None,
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "an unparseable subject uri",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text("https://example.test/gaghiel"))),
+                        None,
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a boundary body that is not usable",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary_values_not_an_array()),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a create without a record",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    None,
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "an unknown action",
+                interaction_op(
+                    "bogus",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "an empty record key",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a delete",
+                interaction_op("delete", "app.bsky.feed.repost/two", None, None),
+                Outcome::Delete(faye_uri(REPOST, "two")),
+            ),
+            (
+                "another collection stays ignored",
+                interaction_op(
+                    "create",
+                    "app.bsky.graph.follow/three",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+        ];
+
+        for (name, operation, outcome) in cases {
+            let page = parse_one(operation, &two_boundaries())
+                .unwrap_or_else(|_| panic!("case {name} failed the frame"));
+            assert!(page.upserts.is_empty(), "case {name} changed posts");
+            assert!(page.deletes.is_empty(), "case {name} deleted posts");
+            match outcome {
+                Outcome::Upsert(expected) => {
+                    assert_eq!(page.interactions.upserts, [expected], "case {name}");
+                    assert!(page.interactions.deletes.is_empty(), "case {name}");
+                }
+                Outcome::Delete(uri) => {
+                    assert!(page.interactions.upserts.is_empty(), "case {name}");
+                    assert_eq!(page.interactions.deletes, [uri], "case {name}");
+                }
+                Outcome::Skipped => {
+                    assert_eq!(
+                        page.interactions,
+                        InteractionChanges::default(),
+                        "case {name}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_malformed_like_never_changes_the_posts_of_the_same_commit() {
+        let page = parse_actor_commit(
+            &frame(vec![
+                create_op(record(CREATED_AT, &["bebop"]), None),
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(REPOST)),
+                    Some(boundary(&["bebop"])),
+                ),
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.repost/two",
+                    Some(valid_body(REPOST)),
+                    Some(boundary(&["bebop"])),
+                ),
+            ]),
+            SERVICE,
+            "did:plc:faye",
+            &authorized(),
+            "1998-05-03T00:00:00.000Z",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(only_upsert_boundaries(&page), [BEBOP]);
+        assert_eq!(
+            page.interactions.upserts,
+            [expected_interaction(
+                REPOST,
+                "two",
+                FAYE_LIKE_SUBJECT,
+                BEBOP
+            )]
+        );
+        assert!(page.interactions.deletes.is_empty());
+    }
+
+    #[test]
+    fn the_last_operation_on_one_interaction_wins() {
+        let page = parse_actor_commit(
+            &frame(vec![
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                interaction_op("delete", "app.bsky.feed.like/one", None, None),
+            ]),
+            SERVICE,
+            "did:plc:faye",
+            &authorized(),
+            "1998-05-03T00:00:00.000Z",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(page.interactions.upserts.is_empty());
+        assert_eq!(page.interactions.deletes, [faye_uri(LIKE, "one")]);
     }
 }

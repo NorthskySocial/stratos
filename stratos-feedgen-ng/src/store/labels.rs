@@ -84,6 +84,24 @@ fn remove_taken_down_post(
     Ok(RemovedPost { blobs, boundaries })
 }
 
+fn remove_taken_down_interaction(
+    transaction: &rusqlite::Transaction<'_>,
+    uri: &str,
+) -> Result<Option<String>, StoreError> {
+    let boundary: Option<String> = transaction
+        .query_row(
+            "SELECT boundary FROM interaction WHERE uri = ?1",
+            [uri],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StoreError::Open)?;
+    if boundary.is_some() {
+        super::interactions::delete_interaction(transaction, uri)?;
+    }
+    Ok(boundary)
+}
+
 fn subject_key(subject: &LabelSubject) -> &str {
     match subject {
         LabelSubject::Record { uri, .. } => uri,
@@ -209,6 +227,7 @@ impl EncryptedStore {
             let removed = remove_taken_down_post(&transaction, uri)?;
             removed_blobs.extend(removed.blobs);
             removed_record_boundaries.extend(removed.boundaries);
+            removed_record_boundaries.extend(remove_taken_down_interaction(&transaction, uri)?);
         }
         transaction
             .execute(
@@ -796,12 +815,15 @@ mod tests {
                 }],
                 deletes: Vec::new(),
                 updated_at: UPDATED_AT.to_owned(),
+                interactions: crate::store::InteractionChanges::default(),
             })
             .unwrap();
         store
             .connection
             .execute_batch(
-                "DROP TABLE label_subject; DROP TABLE label_cursor;
+                "DROP TRIGGER interaction_after_post_delete; DROP TABLE interaction;
+                 DELETE FROM schema_migration WHERE version = 9;
+                 DROP TABLE label_subject; DROP TABLE label_cursor;
                  DELETE FROM schema_migration WHERE version = 8;
                  PRAGMA user_version = 7;",
             )
@@ -852,6 +874,7 @@ mod tests {
             upserts,
             deletes,
             updated_at: UPDATED_AT.to_owned(),
+            interactions: crate::store::InteractionChanges::default(),
         }
     }
 

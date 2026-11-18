@@ -14,6 +14,12 @@ const CONTRACT_TESTS: Record<RustContractKind, readonly string[]> = {
     'lifecycle::tests::serves_a_post_whose_boundary_is_only_on_the_operation_to_viewers_in_that_boundary',
     'conformance::tests::parses_the_actor_commit_frames_stratos_sends_in_the_shared_fixture',
     'actor_event::tests::the_body_fallback_is_still_limited_to_current_enrollment',
+    'store::interactions::tests::an_account_takedown_removes_every_interaction_the_account_made',
+    'store::interactions::tests::pds_member_removal_removes_the_members_interactions_in_that_boundary',
+    'store::interactions::tests::a_boundary_purge_removes_the_interactions_stored_under_it',
+    'feed_service::tests::a_viewer_never_sees_another_viewers_record_uris',
+    'feed_service::tests::an_expired_like_is_not_counted_and_no_liker_is_named',
+    'conformance::tests::serves_the_feed_view_pinned_in_the_shared_fixture',
   ],
   recovery: [
     'store::tests::restarting_a_staged_page_requires_a_new_terminal_verification',
@@ -26,6 +32,10 @@ const CONTRACT_TESTS: Record<RustContractKind, readonly string[]> = {
     'label_poller::tests::a_fresh_start_applies_labels_before_serving_and_refuses_the_post',
     'label_poller::tests::a_negated_stratos_post_returns_by_replay_while_another_takedown_stays_refused',
     'label_poller::tests::a_catch_up_after_the_bound_reopens_feeds_without_a_restart',
+    'lifecycle::tests::a_like_frame_is_stored_and_a_later_delete_frame_removes_it',
+    'lifecycle::tests::a_replayed_frame_does_not_readmit_a_taken_down_like',
+    'space_sync::tests::a_staged_like_is_hidden_until_verification_and_takes_the_target_boundary',
+    'space_sync::tests::a_taken_down_accounts_staged_like_is_not_promoted',
   ],
 }
 

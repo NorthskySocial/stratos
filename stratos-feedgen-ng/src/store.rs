@@ -15,12 +15,14 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, pa
 
 mod actor;
 mod connection;
+mod interactions;
 mod labels;
 mod migrations;
 mod read;
 mod retention;
 mod space;
 
+pub use interactions::{InteractionChanges, InteractionKind, ProjectionInteraction};
 pub use labels::LabelPageEffects;
 
 const STORAGE_KEY_BYTES: usize = 32;
@@ -275,6 +277,7 @@ pub struct ActorPage {
     pub sequence: u64,
     pub upserts: Vec<ProjectionPost>,
     pub deletes: Vec<String>,
+    pub interactions: InteractionChanges,
     pub updated_at: String,
 }
 
@@ -364,10 +367,20 @@ pub struct BlobPost {
     pub boundaries: Vec<String>,
 }
 
+/// What one viewer may see of the likes and reposts of one post.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct InteractionSummary {
+    pub like_count: u32,
+    pub repost_count: u32,
+    pub viewer_like: Option<String>,
+    pub viewer_repost: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FeedPage {
     pub posts: Vec<FeedPost>,
     pub cursor: Option<crate::cursor::FeedCursor>,
+    pub summaries: std::collections::BTreeMap<String, InteractionSummary>,
 }
 
 fn feed_post_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FeedPost> {
@@ -489,7 +502,7 @@ fn validate_actor_page(page: &ActorPage) -> Result<(), StoreError> {
             return Err(StoreError::InvalidProjectionMutation);
         }
     }
-    Ok(())
+    interactions::validate_interaction_changes(&page.interactions, &page.actor_did)
 }
 
 fn normalize_actor_page(mut page: ActorPage) -> ActorPage {

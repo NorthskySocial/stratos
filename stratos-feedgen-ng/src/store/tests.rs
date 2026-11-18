@@ -83,6 +83,7 @@ fn actor_page(sequence: u64, upserts: Vec<ProjectionPost>, deletes: Vec<String>)
         upserts,
         deletes,
         updated_at: "1998-04-03T00:00:02.000Z".to_string(),
+        interactions: crate::store::InteractionChanges::default(),
     }
 }
 
