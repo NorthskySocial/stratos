@@ -18,9 +18,10 @@
     attestationVerified?: boolean | null
     onreply: (post: FeedPost) => void
     ondelete: (post: FeedPost) => Promise<void>
+    onrefresh?: () => Promise<void>
   }
 
-  let {post, stratosAgent, publicAgent, currentDid, session, enrollment, attestationVerified = null, onreply, ondelete}: Props = $props()
+  let {post, stratosAgent, publicAgent, currentDid, session, enrollment, attestationVerified = null, onreply, ondelete, onrefresh}: Props = $props()
 
   let inspectorOpen = $state(false)
   let imageUrls = $state<Record<string, string>>({})
@@ -337,7 +338,7 @@
     <div class="post-actions">
         <button class="reply-btn" onclick={() => onreply(post)}>Reply</button>
         {#if post.isPrivate && session && enrollment}
-            <LikeButton {post} {session} {enrollment} {attestationVerified}/>
+            <LikeButton {post} {session} {enrollment} {attestationVerified} {onrefresh}/>
         {/if}
         {#if canDelete}
             <button

@@ -22,6 +22,7 @@ mod read;
 mod retention;
 mod space;
 
+pub(crate) use interactions::MAX_SUBJECT_URI_BYTES;
 pub use interactions::{InteractionChanges, InteractionKind, ProjectionInteraction};
 pub use labels::LabelPageEffects;
 

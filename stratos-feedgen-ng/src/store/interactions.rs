@@ -2,6 +2,7 @@ use super::*;
 
 /// Accounts for index and row overhead that the text columns alone do not.
 const INTERACTION_ROW_OVERHEAD_BYTES: i64 = 64;
+pub(crate) const MAX_SUBJECT_URI_BYTES: usize = 2_048;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InteractionKind {
@@ -24,6 +25,12 @@ impl InteractionKind {
             Self::Like => "app.bsky.feed.like",
             Self::Repost => "app.bsky.feed.repost",
         }
+    }
+
+    pub fn from_collection(collection: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.collection() == collection)
     }
 }
 
@@ -131,6 +138,25 @@ pub(super) fn delete_expired_interactions(
         .map_err(StoreError::Open)
 }
 
+/// Removes expired interactions and those kept past the configured maximum,
+/// the rule compaction applies to posts, so a shortened retention policy also
+/// reaches rows stored before it.
+pub(super) fn delete_interactions_outside_retention(
+    transaction: &rusqlite::Transaction<'_>,
+    as_of: &str,
+    maximum_retained_at: &str,
+    limit: i64,
+) -> Result<usize, StoreError> {
+    transaction
+        .execute(
+            "DELETE FROM interaction WHERE uri IN (
+               SELECT uri FROM interaction WHERE retained_at <= ?1 OR retained_at > ?2
+               ORDER BY retained_at ASC, uri ASC LIMIT ?3)",
+            params![as_of, maximum_retained_at, limit],
+        )
+        .map_err(StoreError::Open)
+}
+
 /// Removes interactions whose subject is not a post in the interaction's own
 /// boundary, oldest first. Such rows can never be counted.
 pub(super) fn evict_orphan_interactions(
@@ -181,9 +207,8 @@ pub(super) fn validate_interaction_changes(
     for uri in &changes.deletes {
         let uri = crate::identifier::RecordUri::parse(uri)
             .map_err(|_| StoreError::InvalidProjectionMutation)?;
-        let is_interaction_collection = InteractionKind::ALL
-            .iter()
-            .any(|kind| kind.collection() == record_collection(&uri));
+        let is_interaction_collection =
+            InteractionKind::from_collection(record_collection(&uri)).is_some();
         if uri.author().as_str() != actor_did
             || !matches!(uri, crate::identifier::RecordUri::Repo { .. })
             || !is_interaction_collection
@@ -212,7 +237,8 @@ fn validate_interaction(interaction: &ProjectionInteraction) -> Result<(), Store
         .map_err(|_| StoreError::InvalidProjectionMutation)?;
     crate::identifier::RecordUri::parse(&interaction.subject_uri)
         .map_err(|_| StoreError::InvalidProjectionMutation)?;
-    if uri.author().as_str() != interaction.actor_did
+    if interaction.subject_uri.len() > MAX_SUBJECT_URI_BYTES
+        || uri.author().as_str() != interaction.actor_did
         || record_collection(&uri) != interaction.kind.collection()
         || interaction.boundary.is_empty()
         || !is_utc_timestamp(&interaction.indexed_at)
@@ -227,6 +253,29 @@ fn record_collection(uri: &crate::identifier::RecordUri) -> &str {
     match uri {
         crate::identifier::RecordUri::Repo { collection, .. }
         | crate::identifier::RecordUri::Space { collection, .. } => collection,
+    }
+}
+
+impl EncryptedStore {
+    pub fn list_interaction_boundaries_for_uris(
+        &self,
+        uris: &[String],
+    ) -> Result<Vec<String>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT boundary FROM interaction WHERE uri = ?1")
+            .map_err(StoreError::Open)?;
+        let mut boundaries = Vec::new();
+        for uri in uris {
+            let rows = statement
+                .query_map([uri], |row| row.get(0))
+                .map_err(StoreError::Open)?;
+            boundaries.extend(
+                rows.collect::<Result<Vec<String>, _>>()
+                    .map_err(StoreError::Open)?,
+            );
+        }
+        Ok(boundaries)
     }
 }
 
@@ -524,6 +573,37 @@ mod tests {
         }
     }
 
+    fn subject_of_length(length: usize) -> String {
+        let fixed = "at://did:plc:/zone.stratos.feed.post/bang".len();
+        format!(
+            "at://did:plc:{}/zone.stratos.feed.post/bang",
+            "a".repeat(length - fixed)
+        )
+    }
+
+    #[test]
+    fn a_subject_longer_than_the_bound_is_refused_by_the_store() {
+        let at_bound = subject_of_length(MAX_SUBJECT_URI_BYTES);
+        let over_bound = subject_of_length(MAX_SUBJECT_URI_BYTES + 1);
+        assert_eq!(at_bound.len(), MAX_SUBJECT_URI_BYTES);
+        assert!(crate::identifier::RecordUri::parse(&over_bound).is_ok());
+
+        let mut store = open_store();
+        assert!(store.put_interaction(&like(FAYE, "one", &at_bound, BEBOP)));
+        assert_refused(
+            &like(FAYE, "two", &over_bound, BEBOP),
+            "subject is over the bound",
+        );
+        let mut page = page_of_posts(1, Vec::new(), Vec::new());
+        page.actor_did = FAYE.to_owned();
+        page.interactions.upserts = vec![like(FAYE, "three", &over_bound, BEBOP)];
+        assert!(matches!(
+            store.apply_actor_page(page),
+            Err(StoreError::InvalidProjectionMutation)
+        ));
+        assert_eq!(store.interaction_uris(), [like_uri(FAYE, "one")]);
+    }
+
     #[test]
     fn deleting_a_post_through_an_actor_page_removes_only_its_interactions() {
         let mut store = open_store();
@@ -738,6 +818,51 @@ mod tests {
         assert!(!compaction.has_more);
         assert_eq!(store.interaction_uris(), [kept.uri]);
         assert_eq!(store.count("post"), 1);
+    }
+
+    const SHORTENED_AS_OF: &str = "1998-04-03T00:00:00.000Z";
+    const SHORTENED_MAXIMUM_RETAINED_AT: &str = "1998-04-04T00:00:00.000Z";
+
+    #[test]
+    fn compaction_applies_a_shortened_retention_policy_to_existing_interactions() {
+        let mut store = open_store();
+        for rkey in ["one", "two"] {
+            store.put_interaction(&like(FAYE, rkey, &post_uri("bang"), BEBOP));
+        }
+
+        let compaction = store
+            .compact_projection(
+                SHORTENED_AS_OF,
+                SHORTENED_MAXIMUM_RETAINED_AT,
+                u64::MAX / 2,
+                10,
+            )
+            .unwrap();
+
+        assert_eq!(compaction.deleted, 2);
+        assert!(!compaction.has_more);
+        assert!(store.interaction_uris().is_empty());
+    }
+
+    #[test]
+    fn compaction_reports_interactions_left_past_a_shortened_maximum() {
+        let mut store = open_store();
+        for rkey in ["one", "two", "three"] {
+            store.put_interaction(&like(FAYE, rkey, &post_uri("bang"), BEBOP));
+        }
+
+        let compaction = store
+            .compact_projection(
+                SHORTENED_AS_OF,
+                SHORTENED_MAXIMUM_RETAINED_AT,
+                u64::MAX / 2,
+                2,
+            )
+            .unwrap();
+
+        assert_eq!(compaction.deleted, 2);
+        assert!(compaction.has_more);
+        assert_eq!(store.count("interaction"), 1);
     }
 
     #[test]

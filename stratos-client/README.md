@@ -587,15 +587,16 @@ The `zone.stratos.repo` procedures allow three collections: `zone.stratos.feed.p
 - `subject.uri` must be the post's `uri` exactly as the feed returns it. For a post that Stratos
   holds, `subject.cid` must be the post's current CID.
 - A post by a member who hosts their own repo (`pds` custody) is not held by Stratos. For such a
-  post Stratos checks neither that the record exists nor its CID. It checks that the author is an
-  active member of the boundary who hosts their own repo, and that the URI is well formed for that
-  boundary.
+  post Stratos checks neither that the record exists nor its CID. `subject.cid` must still be a
+  valid CID. Stratos checks that the author is an active member of the boundary who
+  hosts their own repo, and that the URI is well formed for that boundary.
 - A member has one like or repost per post. A second one is `RecordAlreadyExists`.
 - To remove one, call `deleteBoundaryRecord` with the rkey of the record in `viewer.like` or
   `viewer.repost`.
-- Any wrong subject (not a post, another boundary, a URI that is not canonical, a wrong CID, a post
-  that Stratos holds but cannot find) returns one error: `InvalidRecord` with the message `The subject must be a
-post in this boundary`.
+- Any wrong subject (not a `{ uri, cid }` reference, not a post, another boundary, a URI that is
+  not canonical, a wrong CID, a post that Stratos holds but cannot find) returns one error, whatever
+  the `validate` value: `InvalidRecord` with the message `The subject must be a post in this
+boundary`.
 - A record in a boundary does not need a `boundary` field. Leave it out of the body, because the
   `boundary` parameter names it. If the body has one, it must name exactly that boundary. An
   entry that carries its own `$type` is a `BoundaryMismatch`.

@@ -57,11 +57,6 @@ type ApplyWritesResult =
   | ({ $type: string } & RecordWriteOutput)
   | { $type: string }
 
-/**
- * Handler for `zone.stratos.repo.createRecord`: one create in a boundary.
- * @param ctx - Application Context
- * @returns XRPC handler for creating a record in a boundary
- */
 export const createBoundaryRecordHandler = (ctx: AppContext) =>
   createXrpcHandler<BoundaryRecordInput>(
     ctx,
@@ -82,11 +77,6 @@ export const createBoundaryRecordHandler = (ctx: AppContext) =>
     },
   )
 
-/**
- * Handler for `zone.stratos.repo.putRecord`: a create or an update in a boundary.
- * @param ctx - Application Context
- * @returns XRPC handler for putting a record in a boundary
- */
 export const putBoundaryRecordHandler = (ctx: AppContext) =>
   createXrpcHandler<BoundaryRecordInput & { rkey: string }>(
     ctx,
@@ -107,12 +97,7 @@ export const putBoundaryRecordHandler = (ctx: AppContext) =>
     },
   )
 
-/**
- * Handler for `zone.stratos.repo.deleteRecord`. A record that is not in the
- * boundary answers like one that does not exist.
- * @param ctx - Application Context
- * @returns XRPC handler for deleting a record from a boundary
- */
+/** A record that is not in the boundary answers like one that does not exist. */
 export const deleteBoundaryRecordHandler = (ctx: AppContext) =>
   createXrpcHandler<BoundaryDeleteInput>(
     ctx,
@@ -147,11 +132,6 @@ export const deleteBoundaryRecordHandler = (ctx: AppContext) =>
     },
   )
 
-/**
- * Handler for `zone.stratos.repo.applyWrites`: one commit in one boundary.
- * @param ctx - Application Context
- * @returns XRPC handler for applying a batch of writes to a boundary
- */
 export const applyBoundaryWritesHandler = (ctx: AppContext) =>
   createXrpcHandler<BoundaryApplyWritesInput>(
     ctx,

@@ -10,8 +10,8 @@ use crate::{
     authority::normalize_boundary,
     identifier::{Did, RecordUri},
     store::{
-        ActorPage, InteractionChanges, InteractionKind, ProjectionInteraction, ProjectionPost,
-        is_utc_timestamp,
+        ActorPage, InteractionChanges, InteractionKind, MAX_SUBJECT_URI_BYTES,
+        ProjectionInteraction, ProjectionPost, is_utc_timestamp,
     },
 };
 
@@ -21,7 +21,6 @@ const MAX_BOUNDARIES: usize = 128;
 const MAX_BOUNDARY_BYTES: usize = 256;
 const MAX_BLOB_REFS: usize = 128;
 const MAX_VALUE_DEPTH: usize = 32;
-pub(crate) const MAX_SUBJECT_URI_BYTES: usize = 2_048;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ActorEventError {
@@ -97,6 +96,9 @@ pub fn parse_actor_commit(
                     }
                     None => skipped_interactions += 1,
                 }
+            } else if operation_action(&operation).is_none() {
+                // Only likes and reposts may carry an unreadable action.
+                return Err(ActorEventError::InvalidFrame);
             }
             continue;
         };
@@ -111,11 +113,11 @@ pub fn parse_actor_commit(
             _ => return Err(ActorEventError::InvalidFrame),
         }
 
-        match operation.action.as_str() {
-            "delete" => {
+        match operation_action(&operation) {
+            Some("delete") => {
                 mutations.insert(uri, PostMutation::Delete);
             }
-            "create" | "update" => {
+            Some("create" | "update") => {
                 let record = operation.record.ok_or(ActorEventError::InvalidFrame)?;
                 if record_type(&record) != Some(POST_COLLECTION) {
                     return Err(ActorEventError::InvalidFrame);
@@ -201,9 +203,7 @@ struct InteractionContext<'a> {
 
 fn interaction_route(path: &str) -> Option<(InteractionKind, &str)> {
     let (collection, record_key) = path.split_once('/')?;
-    let kind = InteractionKind::ALL
-        .into_iter()
-        .find(|kind| kind.collection() == collection)?;
+    let kind = InteractionKind::from_collection(collection)?;
     Some((kind, record_key))
 }
 
@@ -226,7 +226,7 @@ fn interaction_mutation(
         }) if author.as_str() == context.actor_did && collection == kind.collection() => {}
         _ => return None,
     }
-    let mutation = match operation.action.as_str() {
+    let mutation = match operation_action(operation)? {
         "delete" => InteractionMutation::Delete,
         "create" | "update" => {
             let record = operation.record.as_ref()?;
@@ -283,13 +283,19 @@ struct RawCommit {
     ops: Vec<RawOperation>,
 }
 
+// The action is read as any value so that one like or repost with an
+// unreadable action is skipped instead of failing the whole commit.
 #[derive(Deserialize)]
 struct RawOperation {
-    action: String,
+    action: Option<CborValue>,
     path: String,
     cid: Option<CborValue>,
     record: Option<CborValue>,
     boundary: Option<CborValue>,
+}
+
+fn operation_action(operation: &RawOperation) -> Option<&str> {
+    operation.action.as_ref().and_then(text_value)
 }
 
 enum InteractionMutation {
@@ -1474,6 +1480,115 @@ mod tests {
             )]
         );
         assert!(page.interactions.deletes.is_empty());
+    }
+
+    #[derive(Serialize)]
+    struct CommitOfValues {
+        seq: u64,
+        did: &'static str,
+        time: &'static str,
+        rev: &'static str,
+        ops: Vec<CborValue>,
+    }
+
+    fn frame_of_values(ops: Vec<CborValue>) -> Vec<u8> {
+        let mut frame = serde_cbor::to_vec(&Header { kind: "#commit" }).unwrap();
+        frame.extend(
+            serde_cbor::to_vec(&CommitOfValues {
+                seq: 7,
+                did: "did:plc:faye",
+                time: "1998-04-03T00:00:00.000Z",
+                rev: "3jzfcijpj2z2a",
+                ops,
+            })
+            .unwrap(),
+        );
+        frame
+    }
+
+    fn with_action(operation: Operation, action: Option<CborValue>) -> CborValue {
+        let CborValue::Map(mut fields) = serde_cbor::value::to_value(&operation).unwrap() else {
+            unreachable!();
+        };
+        match action {
+            Some(action) => fields.insert(text("action"), action),
+            None => fields.remove(&text("action")),
+        };
+        CborValue::Map(fields)
+    }
+
+    fn parse_values(ops: Vec<CborValue>) -> Result<crate::store::ActorPage, ActorEventError> {
+        parse_actor_commit(
+            &frame_of_values(ops),
+            SERVICE,
+            "did:plc:faye",
+            &authorized(),
+            "1998-05-03T00:00:00.000Z",
+        )
+        .map(|page| page.unwrap())
+    }
+
+    fn valid_like(path: &'static str, collection: &str) -> Operation {
+        interaction_op(
+            "create",
+            path,
+            Some(valid_body(collection)),
+            Some(boundary(&["bebop"])),
+        )
+    }
+
+    #[test]
+    fn a_like_or_repost_with_an_unreadable_action_is_skipped_and_the_post_beside_it_is_kept() {
+        let page = parse_values(vec![
+            with_action(
+                create_op(record(CREATED_AT, &["bebop"]), None),
+                Some(text("create")),
+            ),
+            with_action(
+                valid_like("app.bsky.feed.like/one", LIKE),
+                Some(CborValue::Integer(7)),
+            ),
+            with_action(valid_like("app.bsky.feed.like/two", LIKE), None),
+            with_action(
+                valid_like("app.bsky.feed.repost/three", REPOST),
+                Some(CborValue::Null),
+            ),
+        ])
+        .unwrap();
+
+        assert_eq!(only_upsert_boundaries(&page), [BEBOP]);
+        assert_eq!(page.interactions, InteractionChanges::default());
+    }
+
+    #[test]
+    fn an_unreadable_action_outside_likes_and_reposts_still_fails_the_frame() {
+        let post = || create_op(record(CREATED_AT, &["bebop"]), None);
+        let follow = || valid_like("app.bsky.graph.follow/three", LIKE);
+        let unreadable_actions = [Some(CborValue::Integer(7)), None, Some(CborValue::Null)];
+        for action in unreadable_actions {
+            for operation in [post(), follow()] {
+                assert_eq!(
+                    parse_values(vec![with_action(operation, action.clone())]).err(),
+                    Some(ActorEventError::InvalidFrame)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_unreadable_path_still_fails_the_frame() {
+        let CborValue::Map(mut like) = with_action(
+            valid_like("app.bsky.feed.like/one", LIKE),
+            Some(text("create")),
+        ) else {
+            unreachable!();
+        };
+        like.insert(text("path"), CborValue::Integer(7));
+
+        assert_eq!(
+            parse_values(vec![CborValue::Map(like)]).err(),
+            Some(ActorEventError::InvalidFrame)
+        );
     }
 
     #[test]

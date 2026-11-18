@@ -36,6 +36,7 @@ const CONTRACT_TESTS: Record<RustContractKind, readonly string[]> = {
     'lifecycle::tests::a_replayed_frame_does_not_readmit_a_taken_down_like',
     'space_sync::tests::a_staged_like_is_hidden_until_verification_and_takes_the_target_boundary',
     'space_sync::tests::a_taken_down_accounts_staged_like_is_not_promoted',
+    'lifecycle::tests::a_like_with_an_unreadable_action_beside_a_post_keeps_the_post_and_advances_the_cursor',
   ],
 }
 

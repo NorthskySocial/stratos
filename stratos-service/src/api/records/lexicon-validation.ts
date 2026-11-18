@@ -8,6 +8,7 @@ import {
 import { parseRecordUri, stratosLexicons } from '@northskysocial/stratos-core'
 
 const DOMAINS_TYPE = 'zone.stratos.boundary.defs#Domains'
+const STRONG_REF = 'com.atproto.repo.strongRef'
 
 // References sit near the top of a record; the bound keeps a hostile nesting
 // from exhausting the stack.
@@ -81,6 +82,15 @@ export function requireLexiconValidation(
   return 'valid'
 }
 
+/**
+ * Whether a value is a reference the strongRef lexicon accepts, reading a
+ * space record URI in its repo form as the record check does.
+ */
+export function isWellFormedStrongRef(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  return lexicons.validate(STRONG_REF, rewriteUris(value, 0)).success
+}
+
 function isKnownRecordLexicon(collection: string): boolean {
   return lexicons.getDef(collection)?.type === 'record'
 }
@@ -136,8 +146,8 @@ function withTypedBoundaryClaim(
 // The lexicon library's at-uri format does not know space record URIs yet, so
 // the check sees a copy in which each `uri` property holding one names the same
 // record in repo form. Only this copy is changed; the stored record keeps the
-// URI the client sent.
-function withRepoFormUris(
+// URI the client sent. Exported so tests can pin the depth bound.
+export function withRepoFormUris(
   record: Record<string, unknown>,
 ): Record<string, unknown> {
   return rewriteUris(record, 0) as Record<string, unknown>

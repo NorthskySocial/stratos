@@ -20,7 +20,8 @@ export async function assertCollectionGranted(
   collection: string,
 ): Promise<void> {
   const session = await ctx.oauthStores.sessionStore.get(callerDid)
-  const scope: unknown = session?.tokenSet.scope
+  // A stored row is parsed JSON, so its shape is not guaranteed by the type.
+  const scope: unknown = session?.tokenSet?.scope
   if (typeof scope !== 'string') return
   if (!isOutOfDate(scope, collection, ctx.serviceDid)) return
   throw new InvalidRequestError(

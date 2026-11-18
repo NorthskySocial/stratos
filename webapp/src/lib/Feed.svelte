@@ -5,6 +5,7 @@
   import {groupIntoThreads} from './feed'
   import PostCard from './PostCard.svelte'
   import type {StratosEnrollment} from './stratos'
+  import {providePendingLikes} from './pending-likes'
 
   interface Props {
     posts: FeedPost[]
@@ -33,6 +34,8 @@
   } as const
 
   let threads = $derived(groupIntoThreads(posts))
+
+  providePendingLikes()
 </script>
 
 {#snippet threadNode(node)}
@@ -46,7 +49,7 @@
         {#if node.depth > 0}
             <div class="thread-line"></div>
         {/if}
-        <PostCard post={node.post} {stratosAgent} {publicAgent} {serviceUrl} {currentDid} {session} {enrollment} {attestationVerified} {onreply} {ondelete}/>
+        <PostCard post={node.post} {stratosAgent} {publicAgent} {serviceUrl} {currentDid} {session} {enrollment} {attestationVerified} {onreply} {ondelete} onrefresh={onretry}/>
     </div>
     {#each node.replies as child (child.post.uri)}
         {@render threadNode(child)}

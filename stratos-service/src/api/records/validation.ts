@@ -16,6 +16,7 @@ import {
   type StratosConfig,
   StratosValidationError,
   StratosValidator,
+  SUBJECT_ERROR_MESSAGE,
 } from '@northskysocial/stratos-core'
 import { MissingBlockError } from '@atcute/mst'
 import type { AppContext } from '../../context.js'
@@ -23,6 +24,7 @@ import {
   HOSTED_SPACE_TYPE,
   SPACE_TYPE_REGISTRY,
 } from '../../shared/space-type-registry.js'
+import { isWellFormedStrongRef } from './lexicon-validation.js'
 import { resolveReferencedRecord } from './references.js'
 
 // Cache the boundaries in case a post gets _really_ popular.
@@ -223,6 +225,17 @@ export async function validateRecordInBoundary(
       },
     ),
   )
+}
+
+/**
+ * Refuses a subject that is not a well-formed reference with the subject
+ * error. It runs in every validate mode and before the lexicon check, which
+ * would otherwise answer a misshapen subject in its own words.
+ * @throws InvalidRequestError `InvalidRecord` with the subject error
+ */
+export function assertSubjectWellFormed(record: Record<string, unknown>): void {
+  if (isWellFormedStrongRef(record.subject)) return
+  throw new InvalidRequestError(SUBJECT_ERROR_MESSAGE, 'InvalidRecord')
 }
 
 /**

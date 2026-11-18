@@ -545,7 +545,7 @@ function defineSubjectRefusals(getHarness: () => WriteHarness) {
         expect(await harness.sequencedOps(MISATO)).toEqual(ops)
       })
 
-      it('judges a subject the lexicon cannot read by the lexicon when it checks, and by the rule when it does not', async () => {
+      it('answers a subject the lexicon cannot read with the subject error, whether or not the lexicon checks', async () => {
         const unreadable = [
           { uri: 7, cid },
           { uri: repoUriOf(SHINJI, 'eva01'), cid: 7 },
@@ -564,11 +564,105 @@ function defineSubjectRefusals(getHarness: () => WriteHarness) {
             'eva-check',
             {},
           )
+          const required = await send(
+            INTERACTION_PROCEDURES[0],
+            subject,
+            'eva-require',
+            { validate: true },
+          )
 
           expect(skipped.status).toBe(400)
           expect(skipped.body).toEqual(SUBJECT_BODY)
           expect(checked.status).toBe(400)
-          expect(checked.body).toMatchObject({ error: 'InvalidRecord' })
+          expect(checked.body).toEqual(SUBJECT_BODY)
+          expect(required.status).toBe(400)
+          expect(required.body).toEqual(SUBJECT_BODY)
+        }
+      })
+
+      const misshapenSubjects = (): Array<[string, unknown]> => [
+        ['no subject', undefined],
+        ['a subject that is a string', repoUriOf(SHINJI, 'eva01')],
+        ['a subject that is null', null],
+        ['a subject that is an array', [repoUriOf(SHINJI, 'eva01'), cid]],
+        ['no uri', { cid }],
+        ['a uri that is a number', { uri: 7, cid }],
+        ['a uri that is an object', { uri: { rkey: 'eva01' }, cid }],
+        ['a uri that is not a uri', { uri: 'eva01', cid }],
+        ['no cid', { uri: repoUriOf(SHINJI, 'eva01') }],
+        ['a cid that is a number', { uri: repoUriOf(SHINJI, 'eva01'), cid: 7 }],
+        [
+          'a cid given as a link',
+          { uri: repoUriOf(SHINJI, 'eva01'), cid: { $link: cid } },
+        ],
+        [
+          'a cid that is not a cid',
+          { uri: repoUriOf(SHINJI, 'eva01'), cid: 'eva01' },
+        ],
+        [
+          'a space-form subject with no cid',
+          { uri: spaceUriOf(ASUKA, 'eva02') },
+        ],
+        [
+          'a space-form subject whose cid is not a cid',
+          { uri: spaceUriOf(ASUKA, 'eva02'), cid: 'eva02' },
+        ],
+      ]
+
+      it('answers the same bytes for a subject of the wrong shape as for a missing post, through every procedure and validate value', async () => {
+        const missingPost = await send(
+          INTERACTION_PROCEDURES[0],
+          { uri: repoUriOf(SHINJI, 'eva99'), cid },
+          'eva-missing',
+          {},
+        )
+        expect(missingPost.body).toEqual(SUBJECT_BODY)
+        const answers = new Set<string>([JSON.stringify(missingPost)])
+        let counter = 0
+        for (const procedure of INTERACTION_PROCEDURES) {
+          for (const [name, subject] of misshapenSubjects()) {
+            for (const fields of VALIDATE_MODES) {
+              const response = await send(
+                procedure,
+                subject,
+                `eva-m${counter++}`,
+                fields,
+              )
+
+              const label = `${procedure.name}, ${name}, ${JSON.stringify(fields)}`
+              expect(response.status, label).toBe(400)
+              expect(response.body, label).toEqual(SUBJECT_BODY)
+              answers.add(JSON.stringify(response))
+            }
+          }
+        }
+        expect(answers.size).toBe(1)
+      }, 60_000)
+
+      it('keeps the lexicon error for a field other than the subject', async () => {
+        const subject = { uri: repoUriOf(SHINJI, 'eva01'), cid }
+        const wrongFields: Array<[string, unknown]> = [
+          ['createdAt', interaction(collection, subject, { createdAt: 'eva' })],
+          ['via', interaction(collection, subject, { via: { uri: 7, cid } })],
+        ]
+        for (const [field, record] of wrongFields) {
+          for (const fields of [{}, { validate: true }]) {
+            const response = await harness.call(CREATE, asMember(MISATO), {
+              boundary: HARNESS_ENGINEERING,
+              repo: MISATO,
+              collection,
+              rkey: 'eva-field',
+              record,
+              ...fields,
+            })
+
+            expect(response.status, field).toBe(400)
+            const body = response.body as { error: string; message: string }
+            expect(body.error, field).toBe('InvalidRecord')
+            expect(body.message, field).toMatch(
+              new RegExp(`^Invalid ${collection} record: Record/${field}`),
+            )
+          }
         }
       })
 

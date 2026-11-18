@@ -1869,6 +1869,63 @@ mod tests {
     }
 
     #[test]
+    fn a_like_with_an_unreadable_action_beside_a_post_keeps_the_post_and_advances_the_cursor() {
+        let lifecycle = enrolled_lifecycle();
+        let post_uri = format!("at://{FAYE}/zone.stratos.feed.post/see-you");
+        let frame = commit_frame(
+            7,
+            serde_json::json!([
+                {
+                    "action": "create",
+                    "path": "zone.stratos.feed.post/see-you",
+                    "cid": "bafyreia",
+                    "record": {
+                        "$type": "zone.stratos.feed.post",
+                        "createdAt": "1998-04-03T00:00:00.000Z",
+                        "boundary": {"values": [{"value": "bebop"}]},
+                    },
+                },
+                {
+                    "action": 7,
+                    "path": "app.bsky.feed.like/one",
+                    "cid": "bafyreib",
+                    "record": {
+                        "$type": LIKE,
+                        "subject": {"uri": FAYE_LIKE_SUBJECT, "cid": "bafyreib"},
+                        "boundary": {"values": [{"value": "bebop"}]},
+                    },
+                },
+                {
+                    "path": "app.bsky.feed.repost/two",
+                    "cid": "bafyreic",
+                    "record": {
+                        "$type": REPOST,
+                        "subject": {"uri": FAYE_LIKE_SUBJECT, "cid": "bafyreib"},
+                        "boundary": {"values": [{"value": "bebop"}]},
+                    },
+                },
+            ]),
+        );
+
+        assert!(matches!(
+            apply(&lifecycle, &frame),
+            ActorFrameResult::Applied
+        ));
+
+        let stored_post = lifecycle
+            .read(|projection| projection.blob_post(&post_uri, "1998-04-03T00:00:00.000Z"))
+            .unwrap()
+            .expect("the post is stored");
+        assert_eq!(stored_post.boundaries, [ACTOR_BEBOP]);
+        assert!(
+            lifecycle
+                .read(|projection| projection.interaction_rows())
+                .is_empty()
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+    }
+
+    #[test]
     fn a_replayed_frame_does_not_readmit_a_taken_down_like() {
         let lifecycle = enrolled_lifecycle();
         lifecycle

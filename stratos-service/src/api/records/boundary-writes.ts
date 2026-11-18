@@ -38,6 +38,7 @@ import { assertCollectionGranted } from './scope-check.js'
 import { ensureActorStoreExists } from './util.js'
 import {
   assertCollectionInHostedSpaceType,
+  assertSubjectWellFormed,
   authorizeBoundary,
   validateRecordInBoundary,
   assertBoundaryInCatalog,
@@ -343,6 +344,9 @@ async function prepareWrites(
         }
       }
       const record = write.record as Record<string, unknown>
+      if (subjectCollections.has(write.collection)) {
+        assertSubjectWellFormed(record)
+      }
       // The lexicon check comes first so the rules only see a well-formed record.
       const validationStatus = lexiconCheck(write.collection, record)
       await validateRecordInBoundary(ctx, write.collection, record, boundary)

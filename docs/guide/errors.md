@@ -67,14 +67,16 @@ collections and answers `InvalidCollection` for a like or repost.
 | `ScopeUpgradeRequired` | 400    | The member's grant predates the collection of a like or repost        | Send the member through OAuth authorization again. Do not retry first |
 | `InvalidRecord`        | 400    | For a like or repost: `The subject must be a post in this boundary`   | Use the `uri` and `cid` of a post in the same boundary, as served     |
 
-The subject message is the same for every wrong subject. A post that Stratos
-holds but cannot find, a post in another boundary, a URI that is not canonical
-and a wrong CID all return it. The error does not tell them apart.
+The subject message is the same for every wrong subject, whatever the
+`validate` value. A subject that is not a `{ uri, cid }` reference, a post that
+Stratos holds but cannot find, a post in another boundary, a URI that is not
+canonical and a wrong CID all return it. The error does not tell them apart.
 
 For a post by a member who hosts their own repo, Stratos does not hold the
-record. It checks neither that the record exists nor its CID. It checks that the
-author is an active member of the boundary who hosts their own repo, and that
-the URI is well formed for that boundary.
+record. It checks neither that the record exists nor its CID. `subject.cid`
+must still be a valid CID. Stratos checks that the author is an
+active member of the boundary who hosts their own repo, and that the URI is
+well formed for that boundary.
 
 `ScopeUpgradeRequired` is returned only when the member's stored grant has a
 space grant for this service that lacks the collection. See

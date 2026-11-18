@@ -381,15 +381,17 @@ The rules:
   must be canonical. For a post that Stratos holds, `subject.cid` is the post's
   current CID.
 - For a post by a member who hosts their own repo, Stratos does not hold the
-  record. It checks neither that the record exists nor its CID. It checks that
-  the author is an active member of the boundary who hosts their own repo, and
-  that the URI is well formed for that boundary.
+  record. It checks neither that the record exists nor its CID. `subject.cid`
+  must still be a valid CID. Stratos checks that the author is an
+  active member of the boundary who hosts their own repo, and that the URI is
+  well formed for that boundary.
 - A member has one like or repost per post. A second one fails with
   `RecordAlreadyExists`.
 - To remove a like or repost, call `deleteBoundaryRecord` (the `deleteRecord` procedure).
-- Every wrong subject returns the same error: `InvalidRecord` with the message
-  `The subject must be a post in this boundary`. A post that Stratos holds but
-  cannot find is a wrong subject.
+- Every wrong subject returns the same error, whatever the `validate` value:
+  `InvalidRecord` with the message `The subject must be a post in this boundary`.
+  A subject that is not a `{ uri, cid }` reference, and a post that Stratos
+  holds but cannot find, are wrong subjects.
 
 The feed shows the result. Each post has `likeCount` and `repostCount`. Its
 `viewer` object has `like` and `repost`, the URIs of the viewer's own records.

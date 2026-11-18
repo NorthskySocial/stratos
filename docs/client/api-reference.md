@@ -230,12 +230,14 @@ or when the scope cannot be read. Posts are not checked.
 
 [Creating Records](/client/creating-records#likes-and-reposts) has the rules.
 The `subject` must be a post in the same boundary. A member has one like or
-repost per post. Any wrong subject returns `InvalidRecord` with the message
-`The subject must be a post in this boundary`. For a post by a member who hosts
-their own repo, Stratos does not hold the record. It checks neither that the
-record exists nor its CID. It checks that the author is an active member of the
-boundary who hosts their own repo, and that the URI is well formed for that
-boundary.
+repost per post. Any wrong subject, including one that is not a `{ uri, cid }`
+reference, returns `InvalidRecord` with the message
+`The subject must be a post in this boundary`, whatever the `validate` value.
+For a post by a member who hosts their own repo, Stratos does not hold the
+record. It checks neither that the record exists nor its CID. `subject.cid`
+must still be a valid CID. Stratos checks that the author is an
+active member of the boundary who hosts their own repo, and that the URI is
+well formed for that boundary.
 
 #### Differences from the upstream procedures
 

@@ -644,9 +644,7 @@ fn staged_interaction_kind(uri: &crate::identifier::RecordUri) -> Option<Interac
     let crate::identifier::RecordUri::Space { collection, .. } = uri else {
         return None;
     };
-    InteractionKind::ALL
-        .into_iter()
-        .find(|kind| kind.collection() == collection)
+    InteractionKind::from_collection(collection)
 }
 
 fn upsert_staged_interaction(

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type {OAuthSession} from '@atproto/oauth-client-browser'
   import {
+    BoundaryWriteError,
     createBoundaryRecord,
     deleteBoundaryRecord,
     ScopeUpgradeRequiredError,
@@ -8,22 +9,25 @@
   import type {FeedPost} from './feed'
   import type {StratosEnrollment} from './stratos'
   import {stratosWriteClient} from './boundary-writes'
+  import {usePendingLikes} from './pending-likes'
 
   interface Props {
     post: FeedPost
     session: Pick<OAuthSession, 'sub' | 'fetchHandler'>
     enrollment: StratosEnrollment
     attestationVerified: boolean | null
+    onrefresh?: () => Promise<void>
   }
 
   const LIKE_COLLECTION = 'app.bsky.feed.like'
 
-  let {post, session, enrollment, attestationVerified}: Props = $props()
+  let {post, session, enrollment, attestationVerified, onrefresh}: Props = $props()
 
   const noteId = $props.id()
+  const pendingLikes = usePendingLikes()
 
-  // What this member did since the feed last said what they had. The feed generator ingests a write a moment later, so a refresh that does not show it yet must not undo it.
-  let own = $state<{likeUri: string | undefined; likeCount: number} | null>(null)
+  // A refresh that does not show this member's write yet must not undo it.
+  let own = $derived(pendingLikes.get(post.uri) ?? null)
   let busy = $state(false)
   let error = $state('')
 
@@ -41,7 +45,7 @@
   )
 
   $effect(() => {
-    if (feedAgrees) own = null
+    if (own && feedAgrees) pendingLikes.clear(post.uri)
   })
 
   function describeFailure(err: unknown): string {
@@ -68,7 +72,13 @@
       },
     )
     if (!created.ok) throw new Error(created.reason)
-    own = {likeUri: created.value.uri, likeCount: likeCount + 1}
+    pendingLikes.record(post.uri, {likeUri: created.value.uri, likeCount: likeCount + 1})
+  }
+
+  // The service holds a like the feed has not shown, as after an unlike here and a like elsewhere: the served post is the truth.
+  async function adoptExistingLike() {
+    pendingLikes.clear(post.uri)
+    await onrefresh?.()
   }
 
   async function unlike(existingLikeUri: string) {
@@ -80,7 +90,7 @@
       {boundary, repo: session.sub, collection: LIKE_COLLECTION, rkey},
     )
     if (!deleted.ok) throw new Error(deleted.reason)
-    own = {likeUri: undefined, likeCount: Math.max(0, likeCount - 1)}
+    pendingLikes.record(post.uri, {likeUri: undefined, likeCount: Math.max(0, likeCount - 1)})
   }
 
   async function toggle() {
@@ -94,6 +104,10 @@
         await like()
       }
     } catch (err) {
+      if (err instanceof BoundaryWriteError && err.errorName === 'RecordAlreadyExists') {
+        await adoptExistingLike()
+        return
+      }
       console.error('Like failed:', err)
       error = describeFailure(err)
     } finally {

@@ -22,6 +22,7 @@ export {
   isEligibleSubject,
   parseCanonicalRepoUri,
   parseCanonicalSpaceRecordUri,
+  SUBJECT_ERROR_MESSAGE,
   type ExpectedSubject,
   type RepoSubjectFacts,
   type SpaceSubjectFacts,

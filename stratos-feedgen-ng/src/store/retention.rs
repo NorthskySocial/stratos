@@ -20,7 +20,8 @@ impl EncryptedStore {
         Ok((deleted_posts + deleted_interactions) as u64)
     }
 
-    /// Deletes expired or oldest posts in short transactions until the configured cap is met.
+    /// Deletes expired posts and interactions, then orphan interactions, then the
+    /// oldest posts, in short transactions until the configured cap is met.
     pub fn compact_projection(
         &mut self,
         as_of: &str,
@@ -152,9 +153,10 @@ impl EncryptedStore {
                 params![as_of, maximum_retained_at, limit],
             )
             .map_err(StoreError::Open)?;
-        let expired_interactions = interactions::delete_expired_interactions(
+        let expired_interactions = interactions::delete_interactions_outside_retention(
             &transaction,
             as_of,
+            maximum_retained_at,
             limit.saturating_sub(expired_posts as i64),
         )?;
         let expired = expired_posts + expired_interactions;
@@ -177,7 +179,7 @@ impl EncryptedStore {
         let expired_remaining: bool = transaction
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM post WHERE retained_at <= ?1 OR retained_at > ?2)
-                     OR EXISTS(SELECT 1 FROM interaction WHERE retained_at <= ?1)",
+                     OR EXISTS(SELECT 1 FROM interaction WHERE retained_at <= ?1 OR retained_at > ?2)",
                 params![as_of, maximum_retained_at],
                 |row| row.get(0),
             )

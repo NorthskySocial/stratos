@@ -440,7 +440,7 @@ describe('grantAllowsCreate', () => {
     )
   })
 
-  it('refuses a grant from another authority and never throws on any string', () => {
+  it('refuses a grant from another authority and answers a boolean for generated strings', () => {
     const elsewhere = `${SPACE.replace(AUTHORITY, encodeURIComponent('did:web:seele.example'))}&collection=${POST}&action=create`
     expect(grantAllowsCreate(elsewhere, POST, HARNESS_SERVICE_DID)).toBe(false)
 

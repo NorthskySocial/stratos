@@ -1121,6 +1121,32 @@ const interactionStrongRef = fc.record({
 
 const interactionSubject = fc.oneof(interactionStrongRef, arbitraryJson)
 
+// Values that no lex-form decoder rewrites, so the service sees what was sent.
+const plainNonString = fc.oneof(
+  fc.integer(),
+  fc.double({ noNaN: true, noDefaultInfinity: true }),
+  fc.boolean(),
+  fc.constant(null),
+  fc.array(fc.integer(), { maxLength: 3 }),
+  fc.dictionary(fc.stringMatching(/^[a-z]{1,6}$/), fc.integer(), {
+    maxKeys: 3,
+  }),
+)
+const wellFormedSubjectUri = fc.constantFrom(uriOf('eva-op'), SPACE_FORM_URI)
+// A leading space keeps the string from being an at-uri or a cid.
+const notAUriOrCid = fc.string().map((tail) => ` ${tail}`)
+
+const misshapenSubject = fc.oneof(
+  plainNonString,
+  fc.string(),
+  fc.record({ cid: fc.constant(POST_CID) }),
+  fc.record({ uri: plainNonString, cid: fc.constant(POST_CID) }),
+  fc.record({ uri: notAUriOrCid, cid: fc.constant(POST_CID) }),
+  fc.record({ uri: wellFormedSubjectUri }),
+  fc.record({ uri: wellFormedSubjectUri, cid: plainNonString }),
+  fc.record({ uri: wellFormedSubjectUri, cid: notAUriOrCid }),
+)
+
 const interactionVia = fc.option(
   fc.oneof(interactionStrongRef, arbitraryJson),
   { nil: undefined },
@@ -1316,6 +1342,42 @@ function defineInteractionNeverServerError(getHarness: () => WriteHarness) {
 
               expect(response.status).toBeLessThan(500)
               expect(response.status).not.toBe(429)
+            },
+          ),
+          { numRuns: 60 },
+        )
+      },
+    )
+
+    it.each(SENDERS)(
+      'through $name answers the subject error for any subject that is not a strong reference',
+      async (sender) => {
+        await fc.assert(
+          fc.asyncProperty(
+            fc.constantFrom(...INTERACTION_COLLECTIONS),
+            misshapenSubject,
+            fc.constantFrom<ValidateField>(
+              {},
+              { validate: true },
+              { validate: false },
+            ),
+            async (collection, subject, fields) => {
+              const record = interactionRecord(
+                collection,
+                subject,
+                undefined,
+                '1996-10-04T00:00:00.000Z',
+              )
+
+              const response = await sender.send(collection, record, fields)
+
+              expect(response).toEqual({
+                status: 400,
+                body: {
+                  error: 'InvalidRecord',
+                  message: 'The subject must be a post in this boundary',
+                },
+              })
             },
           ),
           { numRuns: 60 },

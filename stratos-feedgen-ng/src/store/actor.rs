@@ -447,27 +447,6 @@ impl EncryptedStore {
         })
     }
 
-    pub fn list_interaction_boundaries_for_uris(
-        &self,
-        uris: &[String],
-    ) -> Result<Vec<String>, StoreError> {
-        let mut statement = self
-            .connection
-            .prepare("SELECT boundary FROM interaction WHERE uri = ?1")
-            .map_err(StoreError::Open)?;
-        let mut boundaries = Vec::new();
-        for uri in uris {
-            let rows = statement
-                .query_map([uri], |row| row.get(0))
-                .map_err(StoreError::Open)?;
-            boundaries.extend(
-                rows.collect::<Result<Vec<String>, _>>()
-                    .map_err(StoreError::Open)?,
-            );
-        }
-        Ok(boundaries)
-    }
-
     pub fn list_boundaries_for_uris(&self, uris: &[String]) -> Result<Vec<String>, StoreError> {
         let mut statement = self
             .connection

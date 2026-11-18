@@ -4,11 +4,10 @@ use cid::Cid;
 use serde_json::Value;
 
 use crate::{
-    actor_event::MAX_SUBJECT_URI_BYTES,
     identifier::{Did, RecordUri},
     store::{
-        EncryptedStore, InteractionKind, SpaceStageMutation, SpaceStagePage, StoreError,
-        is_utc_timestamp,
+        EncryptedStore, InteractionKind, MAX_SUBJECT_URI_BYTES, SpaceStageMutation, SpaceStagePage,
+        StoreError, is_utc_timestamp,
     },
 };
 
@@ -150,7 +149,9 @@ pub fn prepare_space_page(
             skipped += 1;
             continue;
         }
-        if op.collection != POST_COLLECTION && interaction_kind(&op.collection).is_none() {
+        if op.collection != POST_COLLECTION
+            && InteractionKind::from_collection(&op.collection).is_none()
+        {
             continue;
         }
         if op.cid.is_some()
@@ -288,12 +289,6 @@ fn validate_target(target: &SpaceSyncTarget) -> Result<(), SpaceSyncError> {
     }
 }
 
-fn interaction_kind(collection: &str) -> Option<InteractionKind> {
-    InteractionKind::ALL
-        .into_iter()
-        .find(|kind| kind.collection() == collection)
-}
-
 fn has_record_type(value: &Value, collection: &str) -> bool {
     value
         .as_object()
@@ -348,8 +343,8 @@ mod tests {
         POST_COLLECTION, SpacePage, SpaceRepoOp, SpaceSyncTarget, prepare_space_page,
         stage_space_page,
     };
-    use crate::actor_event::MAX_SUBJECT_URI_BYTES;
     use crate::moderation_label::{LabelPage, LabelSubject, ModerationLabel};
+    use crate::store::MAX_SUBJECT_URI_BYTES;
     use crate::store::{EncryptedStore, InteractionKind, PdsSpaceMember, StorageKey};
 
     const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
@@ -817,6 +812,50 @@ mod tests {
             )
             .unwrap();
         promote_a_staged_like(&mut store);
+
+        assert!(store.interaction_rows().is_empty());
+    }
+
+    fn take_down_the_like(store: &mut EncryptedStore) {
+        store
+            .apply_label_page(
+                "did:web:stratos.example.test",
+                &LabelPage {
+                    cursor: 1,
+                    labels: vec![ModerationLabel {
+                        seq: 1,
+                        subject: LabelSubject::Record {
+                            uri: like_uri("swordfish"),
+                            author_did: ACTOR.to_owned(),
+                        },
+                        neg: false,
+                    }],
+                },
+                NOW,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_staged_like_with_a_record_takedown_is_not_promoted() {
+        let mut control = authorized_store();
+        promote_a_staged_like(&mut control);
+        assert_eq!(control.interaction_rows().len(), 1);
+
+        let mut store = authorized_store();
+        take_down_the_like(&mut store);
+        promote_a_staged_like(&mut store);
+
+        assert!(store.interaction_rows().is_empty());
+    }
+
+    #[test]
+    fn a_promoted_like_is_removed_when_its_record_takedown_arrives() {
+        let mut store = authorized_store();
+        promote_a_staged_like(&mut store);
+        assert_eq!(store.interaction_rows().len(), 1);
+
+        take_down_the_like(&mut store);
 
         assert!(store.interaction_rows().is_empty());
     }
