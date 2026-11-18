@@ -271,11 +271,9 @@ export async function resolveParentBoundaries(
   const boundaries = await ctx.actorStore.read(
     parentUri.hostname,
     async (store) => {
-      const parentRecord = await store.record.getRecord(parentUri, null)
-      if (!parentRecord) {
-        return undefined
-      }
-      return store.record.getRecordBoundaries(parentUri)
+      const parent =
+        await store.record.getVisibleRecordWithBoundaries(parentUri)
+      return parent?.boundaries
     },
   )
 

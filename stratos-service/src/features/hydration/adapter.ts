@@ -15,6 +15,7 @@ import {
   type Logger,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from '../../actor-store-types.js'
+import { readVisibleRecordsInChunks } from '../../api/records/read.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
 
 /**
@@ -44,18 +45,18 @@ export class ActorStoreRecordResolver implements RecordResolver {
     }
 
     return this.actorStore.read(ownerDid, async (store) => {
-      const atUri = new AtUriSyntax(uri)
-      const record = await store.record.getRecord(atUri, null)
-      if (!record) {
+      const found = await store.record.getVisibleRecordWithBoundaries(
+        new AtUriSyntax(uri),
+      )
+      if (!found) {
         return null
       }
 
-      const boundaries = await store.record.getRecordBoundaries(uri)
       return {
-        uri: record.uri,
-        cid: record.cid,
-        value: record.value,
-        boundaries,
+        uri: found.record.uri,
+        cid: found.record.cid,
+        value: found.record.value,
+        boundaries: found.boundaries,
       }
     })
   }
@@ -96,17 +97,15 @@ export class ActorStoreRecordResolver implements RecordResolver {
     }
 
     await this.actorStore.read(ownerDid, async (store) => {
-      for (const uriStr of uris) {
-        const atUri = new AtUriSyntax(uriStr)
-        const record = await store.record.getRecord(atUri, null)
-        if (record) {
-          const boundaries = await store.record.getRecordBoundaries(uriStr)
+      const visible = await readVisibleRecordsInChunks(store, uris)
+      for (const [index, found] of visible.entries()) {
+        if (found) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-argument
-          result.set(atUri.toString() as any, {
-            uri: record.uri,
-            cid: record.cid,
-            value: record.value,
-            boundaries,
+          result.set(new AtUriSyntax(uris[index]).toString() as any, {
+            uri: found.record.uri,
+            cid: found.record.cid,
+            value: found.record.value,
+            boundaries: found.boundaries,
           })
         }
       }

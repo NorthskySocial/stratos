@@ -116,6 +116,14 @@ class SqliteActorRecordReader implements IActorRecordReader {
     return this.reader.getRecordBoundaries(uri)
   }
 
+  getVisibleRecordWithBoundaries(uri: string | AtUri) {
+    return this.reader.getVisibleRecordWithBoundaries(uri)
+  }
+
+  getVisibleRecordsWithBoundaries(uris: readonly (string | AtUri)[]) {
+    return this.reader.getVisibleRecordsWithBoundaries(uris)
+  }
+
   /**
    * Get the current CID of a record by URI
    * @param uri - URI of the record

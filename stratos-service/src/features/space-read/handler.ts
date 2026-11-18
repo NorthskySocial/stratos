@@ -194,14 +194,16 @@ async function handleGetSpaceRecord(
 
   const uri = `at://${repo}/${collection}/${rkey}`
   return await ctx.actorStore.read(repo, async (store) => {
-    const record = await store.record.getRecord(new AtUriSyntax(uri), null)
-    if (!record?.value) {
+    const found = await store.record.getVisibleRecordWithBoundaries(
+      new AtUriSyntax(uri),
+    )
+    if (!found?.record.value) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
+    const { record, boundaries: domains } = found
     // The record must belong to the requested space. The generic repo read
     // also denies a domainless record to every viewer but its owner; a space
     // read has no owner exception, so it denies it to the owner too.
-    const domains = await store.record.getRecordBoundaries(uri)
     if (!domains.includes(boundary)) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }

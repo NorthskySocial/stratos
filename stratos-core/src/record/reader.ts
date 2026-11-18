@@ -14,6 +14,7 @@ import {
   lt,
   lte,
   type SQL,
+  sql,
 } from 'drizzle-orm'
 import {
   countAll,
@@ -77,6 +78,23 @@ export interface RecordWithMeta {
   indexedAt: string
   takedownRef: string | null
 }
+
+/**
+ * A record that is not taken down, with the boundary rows stored for it.
+ */
+export interface VisibleRecordWithBoundaries {
+  record: RecordWithMeta
+  boundaries: string[]
+}
+
+/**
+ * The most URIs one `getVisibleRecordsWithBoundaries` call accepts; callers
+ * chunk longer lists.
+ */
+export const MAX_VISIBLE_RECORD_BATCH = 100
+
+const normalizeRecordUri = (uri: AtUri | string): string =>
+  new AtUri(uri.toString()).toString()
 
 /**
  * Reader for stratos records
@@ -332,6 +350,79 @@ export class StratosRecordReader {
       .where(eq(stratosRecordBoundary.recordUri, uri.toString()))
       .orderBy(asc(stratosRecordBoundary.boundary))
     return rows.map((row) => row.boundary)
+  }
+
+  /**
+   * Reads a record together with its boundary rows in one statement, so the
+   * body and the rows always belong to the same moment.
+   * @param uri - The URI of the record.
+   * @returns The record and its stored boundaries, or null when the record is
+   * missing or taken down.
+   */
+  async getVisibleRecordWithBoundaries(
+    uri: AtUri | string,
+  ): Promise<VisibleRecordWithBoundaries | null> {
+    const found = await this.getVisibleRecordsWithBoundaries([uri])
+    return found.get(normalizeRecordUri(uri)) ?? null
+  }
+
+  /**
+   * Batch form of {@link getVisibleRecordWithBoundaries}, still one statement.
+   * @param uris - At most {@link MAX_VISIBLE_RECORD_BATCH} record URIs.
+   * @returns The visible records keyed by normalized URI. Missing and
+   * taken-down records are absent.
+   * @throws When more than {@link MAX_VISIBLE_RECORD_BATCH} URIs are given.
+   */
+  async getVisibleRecordsWithBoundaries(
+    uris: readonly (AtUri | string)[],
+  ): Promise<Map<string, VisibleRecordWithBoundaries>> {
+    if (uris.length > MAX_VISIBLE_RECORD_BATCH) {
+      throw new RangeError(
+        `at most ${MAX_VISIBLE_RECORD_BATCH} uris per call, got ${uris.length}`,
+      )
+    }
+    const normalized = [...new Set(uris.map(normalizeRecordUri))]
+    if (normalized.length === 0) return new Map()
+
+    const boundaryColumn = stratosRecordBoundary.boundary
+    const rows = await this.db
+      .select({
+        uri: stratosRecord.uri,
+        cid: stratosRecord.cid,
+        indexedAt: stratosRecord.indexedAt,
+        takedownRef: stratosRecord.takedownRef,
+        content: stratosRepoBlock.content,
+        boundaries: sql<string>`json_group_array(distinct ${boundaryColumn} order by ${boundaryColumn}) filter (where ${boundaryColumn} is not null)`,
+      })
+      .from(stratosRecord)
+      .innerJoin(stratosRepoBlock, eq(stratosRepoBlock.cid, stratosRecord.cid))
+      .leftJoin(
+        stratosRecordBoundary,
+        eq(stratosRecordBoundary.recordUri, stratosRecord.uri),
+      )
+      .where(
+        and(
+          inArray(stratosRecord.uri, normalized),
+          isNull(stratosRecord.takedownRef),
+        ),
+      )
+      .groupBy(stratosRecord.uri)
+
+    return new Map(
+      rows.map((row) => [
+        row.uri,
+        {
+          record: {
+            uri: row.uri,
+            cid: row.cid,
+            value: this.cborToRecord(row.content),
+            indexedAt: row.indexedAt,
+            takedownRef: row.takedownRef,
+          },
+          boundaries: JSON.parse(row.boundaries) as string[],
+        },
+      ]),
+    )
   }
 
   /**

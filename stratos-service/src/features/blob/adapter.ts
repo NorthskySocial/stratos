@@ -76,9 +76,9 @@ export class BlobAuthServiceImpl implements BlobAuthService {
 
       // 5. Check if viewer has access to ANY of the records
       for (const uri of recordUris) {
-        const record = await store.record.getRecord(uri, null)
-        if (record) {
-          const recordBoundaries = await store.record.getRecordBoundaries(uri)
+        const found = await store.record.getVisibleRecordWithBoundaries(uri)
+        if (found) {
+          const recordBoundaries = found.boundaries
           logDomainlessInvariant(this.logger, recordBoundaries, {
             uri: uri.toString(),
             ownerDid: actorDid,
@@ -172,9 +172,9 @@ export class BlobAuthServiceImpl implements BlobAuthService {
       if (!recordUris || recordUris.length === 0) return false
 
       for (const uri of recordUris) {
-        const record = await store.record.getRecord(uri, null)
-        if (record) {
-          const recordBoundaries = await store.record.getRecordBoundaries(uri)
+        const found = await store.record.getVisibleRecordWithBoundaries(uri)
+        if (found) {
+          const recordBoundaries = found.boundaries
           logDomainlessInvariant(this.logger, recordBoundaries, {
             uri: uri.toString(),
             ownerDid: actorDid,

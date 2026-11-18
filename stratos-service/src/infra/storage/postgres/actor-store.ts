@@ -30,6 +30,7 @@ import {
   type ListRecordsOpts,
   type Logger,
   LruBlockCache,
+  MAX_VISIBLE_RECORD_BATCH,
   migrateStratosPgDb,
   parseCid,
   pgSchema as pgActorSchema,
@@ -49,6 +50,7 @@ import {
   type StratosPgDbOrTx,
   type StratosRecordDescript,
   StratosValidator,
+  type VisibleRecordWithBoundaries,
 } from '@northskysocial/stratos-core'
 import {
   ActorReader,
@@ -59,6 +61,9 @@ import {
 } from '../../../actor-store-types.js'
 
 // ─── Record Reader ──────────────────────────────────────────────────────────
+
+const normalizeRecordUri = (uri: string | AtUri): string =>
+  new AtUri(uri.toString()).toString()
 
 /**
  * Reader for actor records from the PostgreSQL database.
@@ -306,6 +311,86 @@ export class PgActorRecordReader {
       .where(eq(pgStratosRecordBoundary.recordUri, uri.toString()))
       .orderBy(asc(pgStratosRecordBoundary.boundary))
     return rows.map((row) => row.boundary)
+  }
+
+  /**
+   * Read a record together with its boundary rows in one statement, so the
+   * body and the rows always belong to the same moment.
+   *
+   * @param uri - The URI of the record.
+   * @returns The record and its stored boundaries, or null when the record is
+   * missing or taken down.
+   */
+  async getVisibleRecordWithBoundaries(
+    uri: string | AtUri,
+  ): Promise<VisibleRecordWithBoundaries | null> {
+    const found = await this.getVisibleRecordsWithBoundaries([uri])
+    return found.get(normalizeRecordUri(uri)) ?? null
+  }
+
+  /**
+   * Batch form of {@link getVisibleRecordWithBoundaries}, still one statement.
+   *
+   * @param uris - At most {@link MAX_VISIBLE_RECORD_BATCH} record URIs.
+   * @returns The visible records keyed by normalized URI. Missing and
+   * taken-down records are absent.
+   * @throws When more than {@link MAX_VISIBLE_RECORD_BATCH} URIs are given.
+   */
+  async getVisibleRecordsWithBoundaries(
+    uris: readonly (string | AtUri)[],
+  ): Promise<Map<string, VisibleRecordWithBoundaries>> {
+    if (uris.length > MAX_VISIBLE_RECORD_BATCH) {
+      throw new RangeError(
+        `at most ${MAX_VISIBLE_RECORD_BATCH} uris per call, got ${uris.length}`,
+      )
+    }
+    const normalized = [...new Set(uris.map(normalizeRecordUri))]
+    if (normalized.length === 0) return new Map()
+
+    const boundaryColumn = pgStratosRecordBoundary.boundary
+    const rows = await this.db
+      .select({
+        uri: pgStratosRecord.uri,
+        cid: pgStratosRecord.cid,
+        indexedAt: pgStratosRecord.indexedAt,
+        takedownRef: pgStratosRecord.takedownRef,
+        content: pgStratosRepoBlock.content,
+        boundaries: sql<
+          string[]
+        >`coalesce(array_agg(distinct ${boundaryColumn} order by ${boundaryColumn}) filter (where ${boundaryColumn} is not null), '{}')`,
+      })
+      .from(pgStratosRecord)
+      .innerJoin(
+        pgStratosRepoBlock,
+        eq(pgStratosRepoBlock.cid, pgStratosRecord.cid),
+      )
+      .leftJoin(
+        pgStratosRecordBoundary,
+        eq(pgStratosRecordBoundary.recordUri, pgStratosRecord.uri),
+      )
+      .where(
+        and(
+          inArray(pgStratosRecord.uri, normalized),
+          isNull(pgStratosRecord.takedownRef),
+        ),
+      )
+      .groupBy(pgStratosRecord.uri, pgStratosRepoBlock.cid)
+
+    return new Map(
+      rows.map((row) => [
+        row.uri,
+        {
+          record: {
+            uri: row.uri,
+            cid: row.cid,
+            value: this.cborToRecord(row.content),
+            indexedAt: row.indexedAt,
+            takedownRef: row.takedownRef ? row.takedownRef.toString() : null,
+          },
+          boundaries: row.boundaries,
+        },
+      ]),
+    )
   }
 
   /**
