@@ -100,6 +100,45 @@ To poll a PDS on a private network, set both
 `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS` (the same CIDR format). This grant is
 separate from PLC trust and applies to that PDS origin only.
 
+## Moderation labels
+
+The feed generator reads the authority's moderation label log every 10 seconds.
+It applies takedown labels to its local projection.
+
+Feeds open only after the feed generator has read the label log to its head.
+If the log is unreachable for 50 seconds, which is five polls, feeds return
+`FeedNotReady`. They reopen without a restart once the log is read to its head
+again.
+
+The feed generator DID needs a service enrollment that covers every boundary it
+serves. Without it, the authority refuses its label queries. Its feeds then
+never open.
+
+An account takedown removes the member's posts, sync position and viewer
+authorization. It also stops the member's worker. A replayed `enroll` event or a
+staged space page does not re-admit the member while the takedown stands.
+
+When an account takedown is lifted, the feed generator asks the authority
+whether the member is enrolled again. It asks on up to 6 polls. If another hold
+remains, the member returns to feeds only after a new enrollment event.
+
+A record takedown removes the post and evicts its cached blobs. Later updates
+and replays of that post are refused while the takedown stands.
+
+When a record takedown is lifted, the feed generator reads the author again.
+For a Stratos-hosted author, it replays the author from the start of the stream.
+For a self-hosted author, it clears the space cursor and stage. The next pass
+then lists from the start.
+
+A post returns only if the stream or the host still carries it. Other taken-down
+posts of the same author stay refused.
+
+With several Stratos processes, another process can report a member as enrolled
+for up to 60 seconds after a takedown. It answers from its own cache.
+
+The TypeScript feed generator does not apply labels. Label logs and metrics
+carry fixed event names only. They never carry a DID, record URI or CID.
+
 ## Staged space limits
 
 The validated `FEEDGEN_PROJECTION_MAX_BYTES` budget includes published posts,
