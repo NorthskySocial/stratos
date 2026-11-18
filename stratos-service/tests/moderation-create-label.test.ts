@@ -24,6 +24,7 @@ import {
   parseCid,
   RECORD_SUBJECT_TYPE,
   stratosLexicons,
+  type BoundaryCatalogStore,
   type BoundaryDefinition,
   type LabelStore,
   type StoredLabel,
@@ -60,6 +61,10 @@ import { SqliteAdminSessionStore } from '../src/oauth/admin-session-store.js'
 import { SqliteAdminUserStore } from '../src/oauth/admin-user-store.js'
 import { createMockBlobStore, createTestConfig } from './utils'
 import { makeSpaceUri } from './helpers/space-uri.js'
+import {
+  buildSqliteMembershipStores,
+  catalogDefinition,
+} from './helpers/enrollment-holds.js'
 
 const SERVICE_DID = 'did:web:stratos.test'
 const CREATE_LABEL_NSID = 'zone.stratos.moderation.createLabel'
@@ -951,7 +956,19 @@ describe('zone.stratos.moderation.createLabel', () => {
     const SEELE_DID = 'did:web:seele.example'
     // Known and held on purpose, so only the authority check can reject it.
     const SEELE_BOUNDARY = `${SEELE_DID}/tokyo-3`
-    let memberships: Map<string, string[]>
+    let members: ActiveBoundaryEnrollmentStore
+    let catalog: BoundaryCatalogStore
+
+    async function enrollMember(did: string, boundaries: string[]) {
+      await members.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        active: true,
+        signingKeyDid: 'did:key:zTest',
+        boundaries,
+        custody: 'pds',
+      })
+    }
 
     function spaceRecordUri(
       options: {
@@ -981,23 +998,22 @@ describe('zone.stratos.moderation.createLabel', () => {
       })
     }
 
-    beforeEach(() => {
-      memberships = new Map([
-        [ASUKA_DID, [TOKYO3_BOUNDARY, SEELE_BOUNDARY]],
-        // Would pass if the authority were checked in place of the author.
-        [SERVICE_DID, [TOKYO3_BOUNDARY, GEOFRONT]],
-      ])
-      ctx.enrollmentStore = {
-        getEnrollment: async (did: string) =>
-          memberships.has(did) ? { active: true, custody: 'pds' } : null,
-        getBoundaries: async (did: string) => memberships.get(did) ?? [],
-      }
-      ctx.boundaryStore = {
-        get: async (boundary: string) =>
-          [TOKYO3_BOUNDARY, GEOFRONT, SEELE_BOUNDARY].includes(boundary)
-            ? { boundary }
-            : null,
-      }
+    beforeEach(async () => {
+      ;({ members, catalog } = await buildSqliteMembershipStores(db, {
+        serviceDid: SERVICE_DID,
+        reservedBoundary: `${SERVICE_DID}/general`,
+        boundaries: [TOKYO3_BOUNDARY, GEOFRONT],
+      }))
+      // Room ids are unique, and this one would collide with tokyo-3's.
+      await catalog.create({
+        ...catalogDefinition(SEELE_BOUNDARY),
+        roomId: 'seele-tokyo-3',
+      })
+      ctx.enrollmentStore = members
+      ctx.boundaryStore = catalog
+      await enrollMember(ASUKA_DID, [TOKYO3_BOUNDARY, SEELE_BOUNDARY])
+      // Would pass if the authority were checked in place of the author.
+      await enrollMember(SERVICE_DID, [TOKYO3_BOUNDARY, GEOFRONT])
     })
 
     it('(m) a takedown for a member appends one label with the mapped boundary and writes no marker', async () => {
@@ -1060,7 +1076,10 @@ describe('zone.stratos.moderation.createLabel', () => {
     })
 
     it('(o) an unknown boundary is InvalidRequest and appends nothing', async () => {
-      memberships.set(ASUKA_DID, [`${SERVICE_DID}/lilith`])
+      // Written past the catalog check, which would refuse an unknown boundary.
+      await new SqliteEnrollmentStore(db).setBoundaries(ASUKA_DID, [
+        `${SERVICE_DID}/lilith`,
+      ])
 
       const res = await spaceLabel(spaceRecordUri({ skey: 'lilith' }))
 
@@ -1078,7 +1097,7 @@ describe('zone.stratos.moderation.createLabel', () => {
     })
 
     it('(p) an author outside the boundary is rejected even when the authority is a member', async () => {
-      memberships.set(SHINJI_DID, [GEOFRONT])
+      await enrollMember(SHINJI_DID, [GEOFRONT])
 
       const res = await spaceLabel(spaceRecordUri({ author: SHINJI_DID }))
 
@@ -1090,7 +1109,7 @@ describe('zone.stratos.moderation.createLabel', () => {
     it('(q) a negation appends after the author left the boundary', async () => {
       const uri = spaceRecordUri()
       await spaceLabel(uri, { ref: 'case-0201' })
-      memberships.set(ASUKA_DID, [])
+      await members.setBoundaries(ASUKA_DID, [])
 
       const res = await spaceLabel(uri, { neg: true })
 
@@ -1119,7 +1138,7 @@ describe('zone.stratos.moderation.createLabel', () => {
         const uri = spaceRecordUri()
         await spaceLabel(uri, { ref: 'case-0202' })
         await spaceLabel(uri, { neg: true })
-        memberships.set(ASUKA_DID, [])
+        await members.setBoundaries(ASUKA_DID, [])
 
         const res = await spaceLabel(uri, { neg: true })
 
@@ -1149,7 +1168,10 @@ describe('zone.stratos.moderation.createLabel', () => {
       it('a negation whose boundary is no longer known is InvalidRequest', async () => {
         const uri = spaceRecordUri()
         await spaceLabel(uri, { ref: 'case-0203' })
-        ctx.boundaryStore = { get: async () => null }
+        const lookUp = catalog.get.bind(catalog)
+        vi.spyOn(catalog, 'get').mockImplementation(async (boundary) =>
+          boundary === TOKYO3_BOUNDARY ? null : lookUp(boundary),
+        )
 
         const res = await spaceLabel(uri, { neg: true })
 
@@ -1225,10 +1247,13 @@ describe('zone.stratos.moderation.createLabel', () => {
 
     describe('a hosted author', () => {
       it('a member enrolled with no custody field is InvalidRequest and appends nothing', async () => {
-        ctx.enrollmentStore = {
-          getEnrollment: async () => ({ active: true }),
-          getBoundaries: async () => [TOKYO3_BOUNDARY],
-        }
+        await members.enroll({
+          did: ASUKA_DID,
+          enrolledAt: new Date().toISOString(),
+          active: true,
+          signingKeyDid: 'did:key:zTest',
+          boundaries: [TOKYO3_BOUNDARY],
+        })
 
         const res = await spaceLabel(spaceRecordUri())
 
@@ -1239,14 +1264,7 @@ describe('zone.stratos.moderation.createLabel', () => {
       })
 
       it('reads the enrollment once per request', async () => {
-        const getEnrollment = vi.fn(async () => ({
-          active: true,
-          custody: 'pds',
-        }))
-        ctx.enrollmentStore = {
-          getEnrollment,
-          getBoundaries: async () => [TOKYO3_BOUNDARY],
-        }
+        const getEnrollment = vi.spyOn(members, 'getEnrollment')
 
         const res = await spaceLabel(spaceRecordUri())
 

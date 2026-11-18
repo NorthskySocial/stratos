@@ -1,6 +1,10 @@
 import express, { type Request, type Response } from 'express'
 import { ensureValidDid } from '@atproto/syntax'
-import { InvalidRequestError, Server as XrpcServer } from '@atproto/xrpc-server'
+import {
+  ForbiddenError,
+  InvalidRequestError,
+  Server as XrpcServer,
+} from '@atproto/xrpc-server'
 import {
   boundaryToSpaceUri,
   type Custody,
@@ -12,6 +16,7 @@ import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
 import { SPACE_TYPE } from '../../oauth'
+import { INACTIVE_ENROLLMENT_DENIED_BODY } from '../../oauth/enrollment-denied.js'
 import { createRepoHostResolverDeps } from '../space-read/index.js'
 import { applyEnrollmentHolds, isAccountTakenDown } from './holds.js'
 import { verifyEnrolled } from './internal/auth.js'
@@ -271,8 +276,22 @@ function registerEnrollmentUnenroll(
           )
         }
 
-        // 3. Perform hard delete: local enrollment record and actor data
-        await ctx.enrollmentService.unenroll(did!)
+        // 3. Perform hard delete: local enrollment record and actor data. A
+        // hold can land during steps 1 and 2. Hold changes take the same lock,
+        // so the check and the delete cannot straddle one.
+        const release = await ctx.repoWriteLocks.acquire(did!)
+        try {
+          const enrollment = await ctx.enrollmentStore.getEnrollment(did!)
+          if (enrollment?.active === false) {
+            throw new ForbiddenError(
+              INACTIVE_ENROLLMENT_DENIED_BODY.message,
+              INACTIVE_ENROLLMENT_DENIED_BODY.error,
+            )
+          }
+          await ctx.enrollmentService.unenroll(did!)
+        } finally {
+          release()
+        }
         resolveCache.invalidate(did!)
 
         // 4. Delete signing key (if it exists)

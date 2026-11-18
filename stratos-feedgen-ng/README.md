@@ -48,7 +48,10 @@ response handling to focused `server/` modules. `feed_service.rs` and
 `space_sync.rs` enforce read and space-target rules; `service.rs` coordinates
 projection admission and invalidation. `store.rs` defines the SQLCipher store
 and shared types; `store/` groups connection, actor, space, read, and retention
-operations. Rust traits live near the consumers that need them.
+operations. `label_poller.rs` follows the authority's moderation label log and
+applies takedowns and their negations; `moderation_label.rs` validates label
+pages; `store/labels.rs` keeps the label cursor and the subjects under
+takedown. Rust traits live near the consumers that need them.
 
 Stratos-custody actors arrive through authenticated subscriptions. PDS-custody
 repos are selected from current authority membership, not record claims or
@@ -106,13 +109,23 @@ The feed generator reads the authority's moderation label log every 10 seconds.
 It applies takedown labels to its local projection.
 
 Feeds open only after the feed generator has read the label log to its head.
-If the log is unreachable for 50 seconds, which is five polls, feeds return
-`FeedNotReady`. They reopen without a restart once the log is read to its head
+Feeds return `FeedNotReady` once 50 seconds, which is five polls, pass without
+such a read. A separate task enforces this. It holds while a poll is still
+running, when polls stop at their limit of 50 pages, and when the polling task
+has died. Feeds reopen without a restart once the log is read to its head
 again.
 
+A takedown therefore stays in feeds for at most 50 seconds after the authority
+records it. With a reachable log it normally leaves within one poll. While
+lifted account takedowns are being checked, a poll first spends up to 10
+seconds asking the authority about them, plus one 5-second request already
+started. That delays the label pages by up to 15 seconds.
+
 The feed generator DID needs a service enrollment that covers every boundary it
-serves. Without it, the authority refuses its label queries. Its feeds then
-never open.
+serves. With no service enrollment, the authority refuses its label queries and
+its feeds never open. An enrollment that covers only some served boundaries
+gives no error. The authority returns only the labels of the covered
+boundaries, so takedowns in the other boundaries are never applied.
 
 An account takedown removes the member's posts, sync position and viewer
 authorization. It also stops the member's worker. A replayed `enroll` event or a
@@ -127,8 +140,24 @@ and replays of that post are refused while the takedown stands.
 
 When a record takedown is lifted, the feed generator reads the author again.
 For a Stratos-hosted author, it replays the author from the start of the stream.
-For a self-hosted author, it clears the space cursor and stage. The next pass
-then lists from the start.
+The replayed author takes the next free connection slot ahead of authors that
+are waiting their turn. A running worker is not interrupted. For a self-hosted
+author, it clears the space cursor and stage. The next pass then lists from the
+start. A sync of that author already in flight is refused, so it cannot store
+its old position after the reset.
+
+The post returns within these bounds, with a reachable authority:
+
+- Stratos-hosted author: two polls (20 seconds) to see the negation and act on
+  it, plus at most one worker lease (15 seconds) for a slot, plus the replay.
+- Self-hosted author: two polls (20 seconds), plus the wait for the next space
+  pass (up to 30 seconds), plus that pass.
+
+Each poll can add up to 15 seconds while lifted account takedowns are being
+checked. The bounds assume the replay or listing finishes within one worker
+lease or one pass. A longer history continues on later turns. The bounds do not
+apply when the actor pool is at its limit of 4,096 tracked actors. The replay is
+then retried on later polls.
 
 A post returns only if the stream or the host still carries it. Other taken-down
 posts of the same author stay refused.

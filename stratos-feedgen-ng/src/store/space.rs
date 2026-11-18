@@ -896,6 +896,16 @@ impl EncryptedStore {
                 )
                 .map_err(StoreError::Open)?;
         }
+        // A sync already in flight holds the old generation, so its stage and
+        // promotion are refused and cannot write a cursor back after the reset.
+        // Membership itself is untouched.
+        transaction
+            .execute(
+                "UPDATE pds_member_generation SET generation = generation + 1
+                 WHERE boundary = ?1 AND did = ?2",
+                params![boundary, did],
+            )
+            .map_err(StoreError::Open)?;
         transaction.commit().map_err(StoreError::Open)
     }
 

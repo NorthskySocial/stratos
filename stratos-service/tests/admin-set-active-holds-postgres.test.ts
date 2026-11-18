@@ -21,6 +21,7 @@ import {
 } from './helpers/test-env.js'
 import {
   defineCallbackHoldScenarios,
+  defineInFlightUnenrollScenarios,
   defineSetActiveScenarios,
   RESERVED_BOUNDARY,
   type HoldsBackend,
@@ -58,4 +59,5 @@ describe('admin setActive and callback holds on Postgres', () => {
 
   defineSetActiveScenarios(() => backend)
   defineCallbackHoldScenarios(() => backend)
+  defineInFlightUnenrollScenarios(() => backend)
 })

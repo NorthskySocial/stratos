@@ -89,10 +89,13 @@ Caught up means the authority returned the cursor the Feedgen already held. A
 Feedgen whose `queryLabels` calls are refused, for example because its DID has
 no service enrollment covering its boundaries, never opens its feeds.
 
-Reads close again when the label log has been unreachable for more than five
-poll intervals, which is 50 seconds. They reopen without a restart once the log
-is reachable and the cursor has caught up again. A page that advances the
-cursor but does not reach the head does not reopen them.
+Reads close again once five poll intervals, which is 50 seconds, pass without
+the cursor catching up. A separate task enforces this, so it holds while a poll
+is still running, when polls keep stopping at their page limit, and when the
+polling task has died. A takedown is therefore served for at most 50 seconds
+after the authority records it. Reads reopen without a restart once the log is
+reachable and the cursor has caught up again. A page that advances the cursor
+but does not reach the head does not reopen them.
 
 A taken-down account loses its posts, its sync position and its viewer
 authorization, and its sync worker stops. A replayed `enroll` or a staged space

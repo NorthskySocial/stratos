@@ -701,6 +701,8 @@ describe('resolveEnrollments cache invalidation', () => {
 
   it('returns enrolled false after unenroll within the cache TTL', async () => {
     const { ctx, xrpc } = createHarness()
+    // Unenroll checks the member again under the per-member lock.
+    Object.assign(ctx, { repoWriteLocks: new RepoWriteLocks() })
 
     const before = await invokeResolveRoute(ctx, { did: REI })
     expect((before.body as ResolveBody).enrolled).toBe(true)

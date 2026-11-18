@@ -145,7 +145,9 @@ fn parse_subject(subject: Option<&Value>) -> Result<Option<LabelSubject>, LabelP
                 did: did.to_owned(),
             }))
         }
-        _ => Ok(None),
+        // Skipping an unreadable takedown would advance the cursor past it.
+        None => Err(LabelPageError::InvalidSubject),
+        Some(_) => Ok(None),
     }
 }
 
@@ -213,6 +215,11 @@ mod tests {
         let no_created_at = r##"{"seq":1,"subject":{"$type":"zone.stratos.moderation.defs#recordSubject","uri":"at://did:plc:spikespiegel/zone.stratos.feed.post/bebop1"},"val":"!takedown"}"##;
         let no_seq = r##"{"subject":{"$type":"zone.stratos.moderation.defs#recordSubject","uri":"at://did:plc:spikespiegel/zone.stratos.feed.post/bebop1"},"val":"!takedown","createdAt":"2026-11-01T00:00:00Z"}"##;
         let bad_account = r##"{"seq":1,"subject":{"$type":"zone.stratos.moderation.defs#accountSubject","did":"not-a-did"},"val":"!takedown","createdAt":"2026-11-01T00:00:00Z"}"##;
+        let untyped_takedown = r##"{"seq":1,"subject":{"uri":"at://did:plc:spikespiegel/zone.stratos.feed.post/bebop1"},"val":"!takedown","createdAt":"2026-11-01T00:00:00Z"}"##;
+        let non_string_type_takedown = r##"{"seq":1,"subject":{"$type":7,"did":"did:plc:spikespiegel"},"val":"!takedown","createdAt":"2026-11-01T00:00:00Z"}"##;
+        let scalar_subject_takedown = r##"{"seq":1,"subject":"did:plc:spikespiegel","val":"!takedown","createdAt":"2026-11-01T00:00:00Z"}"##;
+        let subjectless_takedown =
+            r##"{"seq":1,"val":"!takedown","createdAt":"2026-11-01T00:00:00Z"}"##;
         let cases: Vec<(&str, Vec<u8>, u64, u16)> = vec![
             ("invalid json", b"{".to_vec(), 0, 100),
             ("missing cursor", br#"{"labels":[]}"#.to_vec(), 0, 100),
@@ -286,6 +293,30 @@ mod tests {
                 0,
                 100,
             ),
+            (
+                "takedown subject without $type",
+                page("1", &[untyped_takedown.to_owned()]),
+                0,
+                100,
+            ),
+            (
+                "takedown subject with a non-string $type",
+                page("1", &[non_string_type_takedown.to_owned()]),
+                0,
+                100,
+            ),
+            (
+                "takedown subject that is not an object",
+                page("1", &[scalar_subject_takedown.to_owned()]),
+                0,
+                100,
+            ),
+            (
+                "takedown without a subject",
+                page("1", &[subjectless_takedown.to_owned()]),
+                0,
+                100,
+            ),
         ];
         for (name, body, request_cursor, limit) in cases {
             assert!(
@@ -311,6 +342,27 @@ mod tests {
         assert_eq!(parsed.cursor, 3);
         assert_eq!(parsed.labels.len(), 1);
         assert_eq!(parsed.labels[0].seq, 3);
+    }
+
+    #[test]
+    fn other_values_are_skipped_whatever_their_subject() {
+        let untyped = r##"{"seq":1,"subject":{"uri":"at://did:plc:spikespiegel/zone.stratos.feed.post/bebop1"},"val":"spam","createdAt":"2026-11-01T00:00:00Z"}"##;
+        let subjectless = r##"{"seq":2,"val":"spam","createdAt":"2026-11-01T00:00:00Z"}"##;
+        let scalar =
+            r##"{"seq":3,"subject":"ein","val":"spam","createdAt":"2026-11-01T00:00:00Z"}"##;
+        let body = page(
+            "4",
+            &[
+                untyped.to_owned(),
+                subjectless.to_owned(),
+                scalar.to_owned(),
+                record_label(4, REPO_URI),
+            ],
+        );
+        let parsed = parse_label_page(&body, 0, 100).unwrap();
+        assert_eq!(parsed.cursor, 4);
+        assert_eq!(parsed.labels.len(), 1);
+        assert_eq!(parsed.labels[0].seq, 4);
     }
 
     #[test]

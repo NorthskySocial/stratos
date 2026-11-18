@@ -101,6 +101,7 @@ pub struct ActorPool {
     service_did: String,
     failures: watch::Sender<u64>,
     commands: mpsc::Sender<PoolCommand>,
+    #[cfg(test)]
     replays_completed: Arc<AtomicU64>,
     manager: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -128,6 +129,7 @@ impl ActorPool {
             service_did: config.service_did.clone(),
             failures: failures.clone(),
             commands,
+            #[cfg(test)]
             replays_completed: Arc::clone(&replays_completed),
             manager: tokio::sync::Mutex::new(None),
         });
@@ -202,7 +204,8 @@ impl ActorPool {
         result.await.map_err(|_| ActorPoolError::Stopped)?
     }
 
-    pub fn replays_completed(&self) -> u64 {
+    #[cfg(test)]
+    pub(crate) fn replays_completed(&self) -> u64 {
         self.replays_completed
             .load(std::sync::atomic::Ordering::SeqCst)
     }
@@ -282,6 +285,8 @@ struct WorkerFinished {
 #[derive(Default)]
 struct Rotation {
     last_started: BTreeMap<String, u64>,
+    // A replay brings back a lifted takedown, so it does not wait its turn.
+    replayed: BTreeSet<String>,
     next_id: u64,
 }
 
@@ -315,7 +320,7 @@ async fn run_manager(
                     if let Some(waiters) = replaying.remove(&completion.did)
                         && stopping.is_none()
                     {
-                        let outcome = finish_replay(&lifecycle, &config.service_did, &completion.did, &mut desired);
+                        let outcome = finish_replay(&lifecycle, &config.service_did, &completion.did, &mut desired, &mut rotation.replayed);
                         if outcome.is_ok() {
                             replays_completed.fetch_add(1, Ordering::SeqCst);
                         }
@@ -345,6 +350,7 @@ async fn run_manager(
                             desired.remove(did);
                         }
                         rotation.last_started.retain(|did, _| desired.contains(did));
+                        rotation.replayed.retain(|did| desired.contains(did));
                         stop_removed_workers(&active, &desired);
                         let stats = stats_for(&desired, &active, config.max_connections);
                         telemetry.set_actor_pool(stats.active, stats.waiting, stats.max_connections);
@@ -366,6 +372,7 @@ async fn run_manager(
                         } else {
                             desired.remove(&did);
                             rotation.last_started.remove(&did);
+                            rotation.replayed.remove(&did);
                             if let Some(worker) = active.get(&did) {
                                 let _ = worker.shutdown.send(true);
                             }
@@ -388,7 +395,7 @@ async fn run_manager(
                             replaying.insert(did, vec![reply]);
                             continue;
                         }
-                        let outcome = finish_replay(&lifecycle, &config.service_did, &did, &mut desired);
+                        let outcome = finish_replay(&lifecycle, &config.service_did, &did, &mut desired, &mut rotation.replayed);
                         if outcome.is_ok() {
                             replays_completed.fetch_add(1, Ordering::SeqCst);
                         }
@@ -418,6 +425,7 @@ fn finish_replay(
     service_did: &str,
     did: &str,
     desired: &mut BTreeSet<String>,
+    replayed: &mut BTreeSet<String>,
 ) -> Result<(), ActorPoolError> {
     lifecycle
         .reset_actor_cursor(did)
@@ -433,6 +441,7 @@ fn finish_replay(
         return Err(ActorPoolError::CapacityExceeded);
     }
     desired.insert(did.to_owned());
+    replayed.insert(did.to_owned());
     Ok(())
 }
 
@@ -495,7 +504,9 @@ fn start_waiting_workers(
     telemetry: &Arc<FeedTelemetry>,
 ) {
     while active.len() < usize::from(config.max_connections) {
-        let Some(did) = next_waiting_actor(desired, active, &rotation.last_started) else {
+        let Some(did) = next_replayed_actor(desired, active, &rotation.replayed)
+            .or_else(|| next_waiting_actor(desired, active, &rotation.last_started))
+        else {
             telemetry.set_actor_pool(
                 active.len(),
                 desired.len().saturating_sub(active.len()),
@@ -503,6 +514,7 @@ fn start_waiting_workers(
             );
             return;
         };
+        rotation.replayed.remove(&did);
         rotation.next_id = rotation.next_id.saturating_add(1);
         let id = rotation.next_id;
         rotation.last_started.insert(did.clone(), id);
@@ -531,6 +543,17 @@ fn start_waiting_workers(
         desired.len().saturating_sub(active.len()),
         config.max_connections,
     );
+}
+
+fn next_replayed_actor(
+    desired: &BTreeSet<String>,
+    active: &BTreeMap<String, ActiveWorker>,
+    replayed: &BTreeSet<String>,
+) -> Option<String> {
+    replayed
+        .iter()
+        .find(|did| desired.contains(*did) && !active.contains_key(*did))
+        .cloned()
 }
 
 fn next_waiting_actor(
@@ -1189,6 +1212,63 @@ mod tests {
         let requests = server.requests.lock().unwrap().clone();
         assert!(requests[0].contains("cursor=42"), "{}", requests[0]);
         assert!(!requests[1].contains("cursor"), "{}", requests[1]);
+        pool.stop().await;
+    }
+
+    const ED: &str = "did:plc:edwardwong";
+    const JET: &str = "did:plc:jetblack";
+    // Long enough for one idle worker to rotate out and the next to connect.
+    const ROTATION_WINDOW: Duration = super::IDLE_ROTATION_AFTER.saturating_mul(2);
+
+    fn connected_actor(request: &str) -> String {
+        url::Url::parse(&format!("ws://stratos.example.test{request}"))
+            .unwrap()
+            .query_pairs()
+            .find(|(name, _)| name == "did")
+            .map(|(_, did)| did.into_owned())
+            .expect("the request names its actor")
+    }
+
+    #[tokio::test]
+    async fn a_replayed_actor_takes_its_own_freed_slot_before_waiting_actors() {
+        let server = StreamServer::start().await;
+        let lifecycle = lifecycle_with_actors_at_cursor(&[ED, FAYE, JET, SPIKE], 42);
+        let pool = pool_against(&format!("http://{}", server.address), &lifecycle);
+        pool.sync_from_store().await.unwrap();
+        assert!(wait_until(|| server.request_count() == 1).await);
+        let first = server.requests.lock().unwrap()[0].clone();
+        assert_eq!(connected_actor(&first), ED);
+
+        pool.replay_actor(ED).await.unwrap();
+
+        assert!(wait_until(|| server.request_count() == 2).await);
+        let second = server.requests.lock().unwrap()[1].clone();
+        assert_eq!(connected_actor(&second), ED, "{second}");
+        assert!(!second.contains("cursor"), "{second}");
+        // The head start is spent once; the rotation resumes after it.
+        assert!(wait_until_within(ROTATION_WINDOW, || server.request_count() == 3).await);
+        let third = server.requests.lock().unwrap()[2].clone();
+        assert_eq!(connected_actor(&third), FAYE, "{third}");
+        pool.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_replayed_actor_waiting_for_a_slot_starts_before_actors_waiting_their_turn() {
+        let server = StreamServer::start().await;
+        let lifecycle = lifecycle_with_actors_at_cursor(&[ED, FAYE, JET, SPIKE], 42);
+        let pool = pool_against(&format!("http://{}", server.address), &lifecycle);
+        pool.sync_from_store().await.unwrap();
+        // Ed runs first and rotates out idle; Faye takes the slot.
+        assert!(wait_until_within(ROTATION_WINDOW, || server.request_count() == 2).await);
+        let second = server.requests.lock().unwrap()[1].clone();
+        assert_eq!(connected_actor(&second), FAYE);
+
+        pool.replay_actor(ED).await.unwrap();
+
+        assert!(wait_until_within(ROTATION_WINDOW, || server.request_count() == 3).await);
+        let third = server.requests.lock().unwrap()[2].clone();
+        assert_eq!(connected_actor(&third), ED, "{third}");
+        assert!(!third.contains("cursor"), "{third}");
         pool.stop().await;
     }
 }

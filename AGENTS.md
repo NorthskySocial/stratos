@@ -240,6 +240,7 @@ in the Rust feed generator.
 | `feed_service.rs`, `service.rs`, `lifecycle.rs`                       | Boundary-scoped feed reads, projection admission, and readiness transitions               |
 | `store.rs`, `store/`                                                  | SQLCipher key handling and actor, space, read, and retention storage operations           |
 | `blob_cache.rs`, `blob_service.rs`, `blob_upstream.rs`                | Bounded in-memory blob cache and authenticated upstream download                          |
+| `label_poller.rs`, `moderation_label.rs`, `store/labels.rs`           | Moderation label polling, label page validation, and the label cursor and takedown set    |
 
 Feed lexicons live in `lexicons/zone/stratos/feedgen/`. See
 `stratos-feedgen-ng/README.md` for runtime configuration and

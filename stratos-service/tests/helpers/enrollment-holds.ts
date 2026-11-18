@@ -1,13 +1,20 @@
 import { EventEmitter } from 'node:events'
+import { mkdtempSync, rmSync } from 'node:fs'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { inspect } from 'node:util'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi, type Mock } from 'vitest'
 import axios, { type AxiosResponse } from 'axios'
 import express from 'express'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import type { IdResolver } from '@atproto/identity'
-import { createServiceJwt, Server as XrpcServer } from '@atproto/xrpc-server'
+import {
+  createServiceJwt,
+  XRPCError,
+  Server as XrpcServer,
+} from '@atproto/xrpc-server'
+import { decode } from '@atcute/cbor'
 import type { EnrollmentStore } from '../../src/oauth'
 import type { AppContext } from '../../src'
 import type { EnrollmentEventEmitter } from '../../src/context-types.js'
@@ -29,7 +36,22 @@ import { registerModerationHandlers } from '../../src/features/moderation/index.
 import { verifyEnrolled } from '../../src/features/enrollment/index.js'
 import { createAuthVerifiers } from '../../src/infra/auth/verifiers.js'
 import { WriteRateLimiter } from '../../src/shared/rate-limiter.js'
-import { createTestConfig } from '../utils'
+import { EnrollmentServiceImpl } from '../../src/features/enrollment/adapter.js'
+import { StratosActorStore } from '../../src/storage/sqlite/actor-store.js'
+import { createMockBlobStore, createTestConfig } from '../utils'
+import type { ServiceDb } from '../../src/db/index.js'
+import {
+  AuditedEnrollmentStore,
+  BoundaryAudit,
+  migrateBoundaryAudit,
+  SqliteBoundaryAuditBackend,
+  sqliteAuditSql,
+} from '../../src/features/boundary-audit/index.js'
+import { ActiveBoundaryEnrollmentStore } from '../../src/features/boundary/enrollment-store.js'
+import { migrateSqliteBoundaries } from '../../src/features/boundary/migrate.js'
+import { createSqliteBoundaryStore } from '../../src/features/boundary/store.js'
+import { ReservedDomainEnrollmentStore } from '../../src/infra/storage/reserved-domain-enrollment-store.js'
+import { SqliteEnrollmentStore } from '../../src/storage/sqlite/enrollment-store.js'
 
 export const SERVICE_DID = 'did:web:bebop.example'
 export const RESERVED_BOUNDARY = `${SERVICE_DID}/crew`
@@ -100,7 +122,10 @@ export interface SetActiveHarness {
 }
 
 /** The real setActive route over real stores; only admin auth is stubbed. */
-export function buildSetActiveHarness(backend: HoldsBackend): SetActiveHarness {
+export function buildSetActiveHarness(
+  backend: HoldsBackend,
+  repoWriteLocks: RepoWriteLocks = new RepoWriteLocks(),
+): SetActiveHarness {
   const app = express()
   const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
   const signals: string[] = []
@@ -110,7 +135,7 @@ export function buildSetActiveHarness(backend: HoldsBackend): SetActiveHarness {
     enrollmentStore: backend.enrollmentStore,
     labelStore: backend.labelStore,
     enrollmentEvents,
-    repoWriteLocks: new RepoWriteLocks(),
+    repoWriteLocks,
     enrollmentService: {
       isEnrolled: (did: string) => backend.enrollmentStore.isEnrolled(did),
       getEnrollment: vi.fn(),
@@ -349,7 +374,10 @@ function mockHttpResponse(): MockHttpResponse {
  * The real callback and revoke handlers over real stores. The OAuth client,
  * the PDS record writer and key provisioning are external collaborators.
  */
-export function buildCallbackHarness(backend: HoldsBackend): CallbackHarness {
+export function buildCallbackHarness(
+  backend: HoldsBackend,
+  repoWriteLocks: RepoWriteLocks = new RepoWriteLocks(),
+): CallbackHarness {
   const oauthClient = {
     callback: vi.fn(),
     revoke: vi.fn().mockResolvedValue(undefined),
@@ -386,7 +414,7 @@ export function buildCallbackHarness(backend: HoldsBackend): CallbackHarness {
       sig: new Uint8Array(),
       signingKey: 'did:key:zDnaeNewKey',
     }),
-    repoWriteLocks: new RepoWriteLocks(),
+    repoWriteLocks,
   }
 
   return {
@@ -459,7 +487,7 @@ const CREATE_LABEL_METHOD = 'zone.stratos.moderation.createLabel'
 const QUERY_LABELS_METHOD = 'zone.stratos.moderation.queryLabels'
 const POST_COLLECTION = 'zone.stratos.feed.post'
 
-function catalogDefinition(boundary: string): BoundaryDefinition {
+export function catalogDefinition(boundary: string): BoundaryDefinition {
   const now = new Date().toISOString()
   return {
     boundary,
@@ -488,6 +516,51 @@ export async function seedBoundaryCatalog(
   for (const boundary of [SWORDFISH_BOUNDARY, GEOFRONT_BOUNDARY]) {
     await catalog.create(catalogDefinition(boundary))
   }
+}
+
+export interface MembershipStores {
+  members: ActiveBoundaryEnrollmentStore
+  catalog: BoundaryCatalogStore
+}
+
+/**
+ * The SQLite enrollment decorator chain createStorageContext builds, over a
+ * real boundary catalog that holds `boundaries`. The reserved all-members
+ * boundary stays out of the catalog unless it is listed.
+ */
+export async function buildSqliteMembershipStores(
+  db: ServiceDb,
+  options: {
+    serviceDid: string
+    reservedBoundary: string
+    boundaries: string[]
+  },
+): Promise<MembershipStores> {
+  await migrateSqliteBoundaries(db)
+  const catalog = createSqliteBoundaryStore(db)
+  for (const boundary of options.boundaries) {
+    if (!(await catalog.create(catalogDefinition(boundary)))) {
+      throw new Error(`catalog fixture rejected ${boundary}`)
+    }
+  }
+  await migrateBoundaryAudit(sqliteAuditSql(db))
+  const audit = new BoundaryAudit(
+    options.serviceDid,
+    new SqliteBoundaryAuditBackend(db),
+  )
+  const auditKey = await Secp256k1Keypair.create()
+  audit.setSigner({
+    publicKey: auditKey.did(),
+    sign: (bytes) => auditKey.sign(bytes),
+  })
+  const members = new ActiveBoundaryEnrollmentStore(
+    new ReservedDomainEnrollmentStore(
+      new AuditedEnrollmentStore(new SqliteEnrollmentStore(db), audit),
+      options.reservedBoundary,
+    ),
+    catalog,
+  )
+  return { members, catalog }
 }
 
 export interface SeededAccount {
@@ -831,5 +904,350 @@ export function defineAccountLabelScenarios(getBackend: () => HoldsBackend) {
     expect(await harness.labels()).toEqual([])
     expect(await rowOf(backend, ED_DID)).toEqual(before)
     expect(harness.signals).toEqual([])
+  })
+}
+
+const UNENROLL_METHOD = 'zone.stratos.enrollment.unenroll'
+
+export interface Pause {
+  /** Settles once the paused call has started. */
+  reached: Promise<void>
+  resume: () => void
+}
+
+type CallThrough = (...args: unknown[]) => unknown
+
+interface PausableMock {
+  getMockImplementation(): unknown
+  mockImplementationOnce(implementation: CallThrough): unknown
+}
+
+/** Holds the next call of an external collaborator's mock until resumed. */
+export function pauseNextCall(mock: PausableMock): Pause {
+  let reach!: () => void
+  let resume!: () => void
+  const reached = new Promise<void>((resolve) => {
+    reach = resolve
+  })
+  const gate = new Promise<void>((resolve) => {
+    resume = resolve
+  })
+  const settled = mock.getMockImplementation() as CallThrough | undefined
+  mock.mockImplementationOnce(async (...args: unknown[]) => {
+    reach()
+    await gate
+    return settled?.(...args)
+  })
+  return { reached, resume }
+}
+
+/** Holds the next call of a real store method, then forwards it to the store. */
+export function pauseNextStoreCall<T extends object, K extends keyof T>(
+  store: T,
+  method: K,
+): Pause {
+  const forward = (store[method] as (...args: unknown[]) => unknown).bind(store)
+  const spy = vi.spyOn(store, method as never) as unknown as Mock
+  const pause = pauseNextCall(spy.mockImplementation(forward))
+  return pause
+}
+
+/** Long enough for an unlocked unenroll to finish its local delete. */
+export function settleBriefly(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 50))
+}
+
+export interface UnenrollResult {
+  status: number
+  body: unknown
+}
+
+export interface UnenrollHarness {
+  pdsSyncWorker: { cancel: Mock }
+  oauthClient: { revoke: Mock }
+  unenrollAs: (did: string) => Promise<UnenrollResult>
+  close: () => void
+}
+
+/**
+ * The real XRPC unenroll handler and enrollment service over real stores. The
+ * PDS sync worker, the PDS record writer and the OAuth client are external
+ * collaborators. The enrollment check the standard verifier makes runs first.
+ */
+export function buildUnenrollHarness(
+  backend: HoldsBackend,
+  repoWriteLocks: RepoWriteLocks = new RepoWriteLocks(),
+): UnenrollHarness {
+  const actorDir = mkdtempSync(join(tmpdir(), 'stratos-unenroll-actors-'))
+  const actorStore = new StratosActorStore({
+    dataDir: actorDir,
+    blobstore: () => createMockBlobStore(),
+    cborToRecord: (content) => decode(content) as Record<string, unknown>,
+  })
+  const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
+  const methods = new Map<
+    string,
+    { handler: (ctx: unknown) => Promise<{ body: unknown }> }
+  >()
+  const pdsSyncWorker = { cancel: vi.fn().mockResolvedValue(undefined) }
+  const oauthClient = { revoke: vi.fn().mockResolvedValue(undefined) }
+  const cfg = createTestConfig(actorDir)
+  const ctx = {
+    app: express(),
+    cfg,
+    enrollmentStore: backend.enrollmentStore,
+    labelStore: backend.labelStore,
+    enrollmentEvents,
+    repoWriteLocks,
+    actorStore,
+    enrollmentService: new EnrollmentServiceImpl(
+      backend.enrollmentStore,
+      (did) => actorStore.create(did),
+      (did) => actorStore.destroy(did),
+      undefined,
+      enrollmentEvents,
+    ),
+    pdsSyncWorker,
+    profileRecordWriter: {
+      deleteEnrollmentRecord: vi.fn().mockResolvedValue(undefined),
+    },
+    oauthClient,
+    boundaryResolver: {
+      getBoundaries: (did: string) =>
+        backend.enrollmentStore.getBoundaries(did),
+    },
+    authVerifier: { standard: vi.fn(), admin: vi.fn() },
+    serviceDid: SERVICE_DID,
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  } as unknown as AppContext
+  registerEnrollmentHandlers(
+    {
+      method: (nsid: string, config: never) => methods.set(nsid, config),
+    } as never,
+    ctx,
+  )
+
+  return {
+    pdsSyncWorker,
+    oauthClient,
+    unenrollAs: async (did) => {
+      await verifyEnrolled(did, {
+        idResolver: {} as IdResolver,
+        enrollmentStore: backend.enrollmentStore,
+        config: cfg.enrollment,
+      })
+      try {
+        const res = await methods.get(UNENROLL_METHOD)!.handler({
+          params: {},
+          auth: { credentials: { type: 'user', did } },
+        })
+        return { status: 200, body: res.body }
+      } catch (err) {
+        if (!(err instanceof XRPCError)) throw err
+        return { status: err.statusCode, body: err.payload }
+      }
+    },
+    close: () => rmSync(actorDir, { recursive: true, force: true }),
+  }
+}
+
+/**
+ * An unenroll that passed its enrollment check before a hold arrived must not
+ * delete the row: the hold would go with it and the member could enroll again
+ * as active. Shared by both backends.
+ */
+export function defineInFlightUnenrollScenarios(
+  getBackend: () => HoldsBackend,
+) {
+  const open: Array<{ close: () => void | Promise<void> }> = []
+  afterEach(async () => {
+    vi.restoreAllMocks()
+    await Promise.all(open.splice(0).map((harness) => harness.close()))
+  })
+
+  function unenrollHarness(backend: HoldsBackend, locks?: RepoWriteLocks) {
+    const harness = buildUnenrollHarness(backend, locks)
+    open.push(harness)
+    return harness
+  }
+
+  async function accountLabelHarness(backend: HoldsBackend) {
+    const harness = await buildAccountLabelHarness(backend)
+    open.push(harness)
+    return harness
+  }
+
+  async function expectHeldAndUnableToEnroll(
+    backend: HoldsBackend,
+    did: string,
+    hold: { operatorHold: boolean },
+  ) {
+    const row = await rowOf(backend, did)
+    expect(row?.active).toBe(false)
+    expect(row?.operatorHold).toBe(hold.operatorHold)
+    expect(row?.boundaries.length).toBeGreaterThan(0)
+    const again = await buildCallbackHarness(backend).complete(did)
+    expect(again.status).toHaveBeenCalledWith(403)
+    expect(again.json).toHaveBeenCalledWith(ENROLLMENT_DENIED_BODY)
+    expect((await rowOf(backend, did))?.active).toBe(false)
+  }
+
+  it('a revoke past its check refuses once an operator hold lands and keeps the row', async () => {
+    const backend = getBackend()
+    const callback = buildCallbackHarness(backend)
+    await seedMember(backend, { did: SPIKE_DID })
+    const atPds = pauseNextCall(callback.oauthClient.restore)
+    const revoking = callback.revokeAs(SPIKE_DID)
+    await atPds.reached
+
+    expect(
+      (await buildSetActiveHarness(backend).setActive(SPIKE_DID, false))
+        .statusCode,
+    ).toBe(200)
+    atPds.resume()
+    const res = await revoking
+
+    expect(res.status).toHaveBeenCalledWith(403)
+    expect(res.json).toHaveBeenCalledWith(ENROLLMENT_DENIED_BODY)
+    expect(callback.oauthClient.revoke).not.toHaveBeenCalled()
+    await expectHeldAndUnableToEnroll(backend, SPIKE_DID, {
+      operatorHold: true,
+    })
+  })
+
+  it('a revoke past its check refuses once an account takedown lands and keeps the row', async () => {
+    const backend = getBackend()
+    const callback = buildCallbackHarness(backend)
+    const moderation = await accountLabelHarness(backend)
+    await seedAccount(backend, { did: FAYE_DID })
+    const atPds = pauseNextCall(callback.oauthClient.restore)
+    const revoking = callback.revokeAs(FAYE_DID)
+    await atPds.reached
+
+    expect((await moderation.takedown(FAYE_DID)).status).toBe(200)
+    atPds.resume()
+    const res = await revoking
+
+    expect(res.status).toHaveBeenCalledWith(403)
+    expect(res.json).toHaveBeenCalledWith(ENROLLMENT_DENIED_BODY)
+    expect(callback.oauthClient.revoke).not.toHaveBeenCalled()
+    expect(await moderation.labels()).toHaveLength(1)
+    await expectHeldAndUnableToEnroll(backend, FAYE_DID, {
+      operatorHold: false,
+    })
+  })
+
+  it('a revoke waits for a hold that is being applied and then refuses', async () => {
+    const backend = getBackend()
+    const locks = new RepoWriteLocks()
+    const callback = buildCallbackHarness(backend, locks)
+    const { setActive } = buildSetActiveHarness(backend, locks)
+    await seedMember(backend, { did: JET_DID })
+    const atPds = pauseNextCall(callback.oauthClient.restore)
+    const revoking = callback.revokeAs(JET_DID)
+    await atPds.reached
+    const insideHold = pauseNextStoreCall(backend.labelStore, 'latestTakedowns')
+    const holding = setActive(JET_DID, false)
+    await insideHold.reached
+
+    atPds.resume()
+    await settleBriefly()
+    insideHold.resume()
+    const [res, held] = await Promise.all([revoking, holding])
+
+    expect(held.statusCode).toBe(200)
+    expect(res.status).toHaveBeenCalledWith(403)
+    expect(res.json).toHaveBeenCalledWith(ENROLLMENT_DENIED_BODY)
+    await expectHeldAndUnableToEnroll(backend, JET_DID, { operatorHold: true })
+  })
+
+  it('an XRPC unenroll past its check refuses once an operator hold lands and keeps the row', async () => {
+    const backend = getBackend()
+    const harness = unenrollHarness(backend)
+    await seedMember(backend, { did: SPIKE_DID })
+    const atSyncQueue = pauseNextCall(harness.pdsSyncWorker.cancel)
+    const unenrolling = harness.unenrollAs(SPIKE_DID)
+    await atSyncQueue.reached
+
+    expect(
+      (await buildSetActiveHarness(backend).setActive(SPIKE_DID, false))
+        .statusCode,
+    ).toBe(200)
+    atSyncQueue.resume()
+    const res = await unenrolling
+
+    expect(res).toEqual({ status: 403, body: ENROLLMENT_DENIED_BODY })
+    expect(harness.oauthClient.revoke).not.toHaveBeenCalled()
+    await expectHeldAndUnableToEnroll(backend, SPIKE_DID, {
+      operatorHold: true,
+    })
+  })
+
+  it('an XRPC unenroll past its check refuses once an account takedown lands and keeps the row', async () => {
+    const backend = getBackend()
+    const harness = unenrollHarness(backend)
+    const moderation = await accountLabelHarness(backend)
+    await seedAccount(backend, { did: FAYE_DID })
+    const atSyncQueue = pauseNextCall(harness.pdsSyncWorker.cancel)
+    const unenrolling = harness.unenrollAs(FAYE_DID)
+    await atSyncQueue.reached
+
+    expect((await moderation.takedown(FAYE_DID)).status).toBe(200)
+    atSyncQueue.resume()
+    const res = await unenrolling
+
+    expect(res).toEqual({ status: 403, body: ENROLLMENT_DENIED_BODY })
+    expect(await moderation.labels()).toHaveLength(1)
+    await expectHeldAndUnableToEnroll(backend, FAYE_DID, {
+      operatorHold: false,
+    })
+  })
+
+  it('an XRPC unenroll waits for a hold that is being applied and then refuses', async () => {
+    const backend = getBackend()
+    const locks = new RepoWriteLocks()
+    const harness = unenrollHarness(backend, locks)
+    const { setActive } = buildSetActiveHarness(backend, locks)
+    await seedMember(backend, { did: JET_DID })
+    const atSyncQueue = pauseNextCall(harness.pdsSyncWorker.cancel)
+    const unenrolling = harness.unenrollAs(JET_DID)
+    await atSyncQueue.reached
+    const insideHold = pauseNextStoreCall(backend.labelStore, 'latestTakedowns')
+    const holding = setActive(JET_DID, false)
+    await insideHold.reached
+
+    atSyncQueue.resume()
+    await settleBriefly()
+    insideHold.resume()
+    const [res, held] = await Promise.all([unenrolling, holding])
+
+    expect(held.statusCode).toBe(200)
+    expect(res).toEqual({ status: 403, body: ENROLLMENT_DENIED_BODY })
+    await expectHeldAndUnableToEnroll(backend, JET_DID, { operatorHold: true })
+  })
+
+  it('an XRPC unenroll of an active member still deletes the row', async () => {
+    const backend = getBackend()
+    const harness = unenrollHarness(backend)
+    await seedMember(backend, { did: ED_DID })
+
+    const res = await harness.unenrollAs(ED_DID)
+
+    expect(res).toEqual({ status: 200, body: { success: true } })
+    expect(await rowOf(backend, ED_DID)).toBeNull()
+    expect(harness.oauthClient.revoke).toHaveBeenCalledWith(ED_DID)
+  })
+
+  it('a revoke of an active member still deletes the row', async () => {
+    const backend = getBackend()
+    const callback = buildCallbackHarness(backend)
+    await seedMember(backend, { did: ED_DID })
+
+    const res = await callback.revokeAs(ED_DID)
+
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ did: ED_DID, revoked: true }),
+    )
+    expect(await rowOf(backend, ED_DID)).toBeNull()
   })
 }

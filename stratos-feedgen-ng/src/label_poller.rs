@@ -24,6 +24,8 @@ pub const LABEL_POLL_INTERVAL: Duration = Duration::from_secs(10);
 // Five missed polls tolerate a brief outage without serving on a log that may
 // already hold a takedown.
 pub const LABEL_MAX_STALENESS: Duration = LABEL_POLL_INTERVAL.saturating_mul(5);
+/// How long one cycle may spend asking the authority about lifted account takedowns.
+pub const ACCOUNT_REINSTATEMENT_BUDGET: Duration = LABEL_POLL_INTERVAL;
 const MAX_LABEL_PAGES_PER_CYCLE: usize = 50;
 const REINSTATING_ACCOUNTS_PER_CYCLE: u16 = 64;
 const REINSTATING_RECORDS_PER_CYCLE: u16 = 64;
@@ -38,45 +40,12 @@ enum LabelCycle {
     Failed(LabelPollOutcome),
 }
 
-/// Withdraws read admission when the label log has not been read to its head for too long.
-struct LabelFreshness {
-    last_caught_up: Instant,
-    withdrawn: bool,
-}
-
-impl LabelFreshness {
-    fn new(started: Instant) -> Self {
-        Self {
-            last_caught_up: started,
-            withdrawn: false,
-        }
-    }
-
-    fn observe(&mut self, cycle: LabelCycle, now: Instant, lifecycle: &ControlLifecycle) {
-        match cycle {
-            LabelCycle::CaughtUp => {
-                self.last_caught_up = now;
-                self.withdrawn = false;
-            }
-            LabelCycle::Failed(_) => {
-                let silent_for = now.saturating_duration_since(self.last_caught_up);
-                // Withdrawn once per outage, so a long one does not repeat the log line.
-                if silent_for > LABEL_MAX_STALENESS && !self.withdrawn {
-                    lifecycle.mark_labels_stale();
-                    self.withdrawn = true;
-                    eprintln!("event=label_log_stale");
-                }
-            }
-            LabelCycle::PageCapReached => {}
-        }
-    }
-}
-
 /// What a label poller needs to stop and restart the workers of whole accounts.
 #[derive(Clone)]
 pub struct AccountEnforcement {
     pub actors: Arc<ActorPool>,
     pub authority: Arc<dyn AuthorityClient>,
+    pub reinstatement_budget: Duration,
 }
 
 /// What a label poller needs to drop cached blobs of removed records.
@@ -85,10 +54,18 @@ pub struct RecordEnforcement {
     pub blobs: Arc<BlobService>,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct LabelTiming {
+    poll_interval: Duration,
+    max_staleness: Duration,
+}
+
 /// Follows the authority label log independently of the service session.
 pub struct LabelPoller {
     shutdown: watch::Sender<bool>,
     task: tokio::sync::Mutex<Option<JoinHandle<()>>>,
+    // A task of its own, so a stuck or dead poller cannot keep reads open.
+    staleness_guard: tokio::sync::Mutex<Option<JoinHandle<()>>>,
 }
 
 impl LabelPoller {
@@ -99,31 +76,46 @@ impl LabelPoller {
         lifecycle: Arc<ControlLifecycle>,
         telemetry: Arc<FeedTelemetry>,
     ) -> Self {
-        Self::start_with_interval(
+        Self::start_with_timing(
             client,
             accounts,
             records,
             lifecycle,
             telemetry,
-            LABEL_POLL_INTERVAL,
+            LabelTiming {
+                poll_interval: LABEL_POLL_INTERVAL,
+                max_staleness: LABEL_MAX_STALENESS,
+            },
         )
     }
 
-    pub fn start_with_interval(
+    fn start_with_timing(
         client: Arc<dyn LabelLogClient>,
         accounts: AccountEnforcement,
         records: RecordEnforcement,
         lifecycle: Arc<ControlLifecycle>,
         telemetry: Arc<FeedTelemetry>,
-        interval: Duration,
+        timing: LabelTiming,
     ) -> Self {
         let (shutdown, receiver) = watch::channel(false);
+        let staleness_guard = tokio::spawn(guard_label_staleness(
+            Arc::clone(&lifecycle),
+            timing.max_staleness,
+            receiver.clone(),
+        ));
         let task = tokio::spawn(run_forever(
-            client, accounts, records, lifecycle, telemetry, interval, receiver,
+            client,
+            accounts,
+            records,
+            lifecycle,
+            telemetry,
+            timing.poll_interval,
+            receiver,
         ));
         Self {
             shutdown,
             task: tokio::sync::Mutex::new(Some(task)),
+            staleness_guard: tokio::sync::Mutex::new(Some(staleness_guard)),
         }
     }
 
@@ -131,6 +123,34 @@ impl LabelPoller {
         let _ = self.shutdown.send(true);
         if let Some(task) = self.task.lock().await.take() {
             let _ = task.await;
+        }
+        if let Some(guard) = self.staleness_guard.lock().await.take() {
+            let _ = guard.await;
+        }
+    }
+}
+
+async fn guard_label_staleness(
+    lifecycle: Arc<ControlLifecycle>,
+    max_staleness: Duration,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    loop {
+        if lifecycle.withdraw_stale_labels(Instant::now(), max_staleness) {
+            eprintln!("event=label_log_stale");
+        }
+        // A catch-up can only move the deadline later, so sleeping until the
+        // current one never sleeps past the real one.
+        let wake_at = lifecycle
+            .labels_fresh_until(max_staleness)
+            .unwrap_or_else(|| Instant::now() + max_staleness);
+        tokio::select! {
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(wake_at)) => {}
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
         }
     }
 }
@@ -144,12 +164,9 @@ async fn run_forever(
     interval: Duration,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let mut freshness = LabelFreshness::new(Instant::now());
     loop {
         tokio::select! {
-            cycle = run_cycle(&lifecycle, client.as_ref(), &accounts, &records, &telemetry) => {
-                freshness.observe(cycle, Instant::now(), &lifecycle);
-            }
+            _ = run_cycle(&lifecycle, client.as_ref(), &accounts, &records, &telemetry) => {}
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
                     return;
@@ -174,10 +191,22 @@ async fn run_cycle(
     records: &RecordEnforcement,
     telemetry: &FeedTelemetry,
 ) -> LabelCycle {
+    let mut failures = EnforcementFailures::default();
     // Before the pages, so a negation is acted on one cycle after it is seen.
-    reinstate_accounts(lifecycle, accounts).await;
-    reinstate_records(lifecycle, accounts).await;
-    let result = poll_to_caught_up(lifecycle, client, accounts, records, telemetry).await;
+    reinstate_accounts(lifecycle, accounts, &mut failures).await;
+    reinstate_records(lifecycle, accounts, &mut failures).await;
+    let result = poll_to_caught_up(
+        lifecycle,
+        client,
+        accounts,
+        records,
+        telemetry,
+        &mut failures,
+    )
+    .await;
+    for line in failures.lines() {
+        eprintln!("{line}");
+    }
     if let LabelCycle::Failed(outcome) = result {
         telemetry.record_label_poll(outcome);
         eprintln!("{}", failure_line(outcome));
@@ -191,6 +220,7 @@ async fn poll_to_caught_up(
     accounts: &AccountEnforcement,
     records: &RecordEnforcement,
     telemetry: &FeedTelemetry,
+    failures: &mut EnforcementFailures,
 ) -> LabelCycle {
     let mut cursor = match lifecycle.label_cursor() {
         Ok(cursor) => cursor,
@@ -220,7 +250,7 @@ async fn poll_to_caught_up(
             if let LabelSubject::Account { did } = subject
                 && accounts.actors.sync_actor(did).await.is_err()
             {
-                eprintln!("{}", enforcement_failure_line("worker_stop"));
+                failures.record("worker_stop");
             }
         }
         for (author_did, cid) in &effects.removed_blobs {
@@ -232,15 +262,25 @@ async fn poll_to_caught_up(
     LabelCycle::PageCapReached
 }
 
-async fn reinstate_accounts(lifecycle: &ControlLifecycle, accounts: &AccountEnforcement) {
+async fn reinstate_accounts(
+    lifecycle: &ControlLifecycle,
+    accounts: &AccountEnforcement,
+    failures: &mut EnforcementFailures,
+) {
     let pending = match lifecycle.reinstating_accounts(REINSTATING_ACCOUNTS_PER_CYCLE) {
         Ok(pending) => pending,
         Err(_) => {
-            eprintln!("{}", enforcement_failure_line("store"));
+            failures.record("store");
             return;
         }
     };
+    // Each resolution can take a full request timeout, and the label pages wait
+    // behind this phase, so it stops starting new ones once the budget is spent.
+    let budget_ends = Instant::now() + accounts.reinstatement_budget;
     for (did, attempts) in pending {
+        if Instant::now() >= budget_ends {
+            break;
+        }
         let now = OffsetDateTime::now_utc();
         let resolution = match accounts
             .authority
@@ -250,7 +290,7 @@ async fn reinstate_accounts(lifecycle: &ControlLifecycle, accounts: &AccountEnfo
             Ok(resolution) => resolution,
             // An unreachable authority says nothing about the hold, so it costs no attempt.
             Err(_) => {
-                eprintln!("{}", enforcement_failure_line("authority"));
+                failures.record("authority");
                 continue;
             }
         };
@@ -268,7 +308,7 @@ async fn reinstate_accounts(lifecycle: &ControlLifecycle, accounts: &AccountEnfo
             keep_account_out(lifecycle, &did, attempts)
         };
         if let Err(kind) = outcome {
-            eprintln!("{}", enforcement_failure_line(kind));
+            failures.record(kind);
         }
     }
 }
@@ -318,11 +358,15 @@ enum ReplayScope {
     PdsMember { boundary: String, did: String },
 }
 
-async fn reinstate_records(lifecycle: &ControlLifecycle, accounts: &AccountEnforcement) {
+async fn reinstate_records(
+    lifecycle: &ControlLifecycle,
+    accounts: &AccountEnforcement,
+    failures: &mut EnforcementFailures,
+) {
     let pending = match lifecycle.reinstating_records(REINSTATING_RECORDS_PER_CYCLE) {
         Ok(pending) => pending,
         Err(_) => {
-            eprintln!("{}", enforcement_failure_line("store"));
+            failures.record("store");
             return;
         }
     };
@@ -333,12 +377,12 @@ async fn reinstate_records(lifecycle: &ControlLifecycle, accounts: &AccountEnfor
             Ok(Some(scope)) => scope,
             Ok(None) => {
                 if lifecycle.finish_reinstatement(&uri).is_err() {
-                    eprintln!("{}", enforcement_failure_line("store"));
+                    failures.record("store");
                 }
                 continue;
             }
             Err(kind) => {
-                eprintln!("{}", enforcement_failure_line(kind));
+                failures.record(kind);
                 continue;
             }
         };
@@ -348,7 +392,7 @@ async fn reinstate_records(lifecycle: &ControlLifecycle, accounts: &AccountEnfor
                 let replayed = match replay_author(lifecycle, accounts, &scope).await {
                     Ok(()) => true,
                     Err(kind) => {
-                        eprintln!("{}", enforcement_failure_line(kind));
+                        failures.record(kind);
                         false
                     }
                 };
@@ -358,7 +402,7 @@ async fn reinstate_records(lifecycle: &ControlLifecycle, accounts: &AccountEnfor
         };
         // A failed replay leaves the row, so the next cycle tries again.
         if replayed && lifecycle.finish_reinstatement(&uri).is_err() {
-            eprintln!("{}", enforcement_failure_line("store"));
+            failures.record("store");
         }
     }
 }
@@ -428,8 +472,23 @@ fn member_boundary(uri: &str) -> Option<String> {
     (expected == format!("at://{authority}/space/{space_type}/{space_key}")).then_some(boundary)
 }
 
-fn enforcement_failure_line(kind: &'static str) -> String {
-    format!("event=account_label_enforcement_failed kind={kind}")
+/// Counts enforcement failures by kind, so a cycle logs each kind once.
+#[derive(Default)]
+struct EnforcementFailures(BTreeMap<&'static str, usize>);
+
+impl EnforcementFailures {
+    fn record(&mut self, kind: &'static str) {
+        *self.0.entry(kind).or_default() += 1;
+    }
+
+    fn lines(&self) -> Vec<String> {
+        self.0
+            .iter()
+            .map(|(kind, count)| {
+                format!("event=label_enforcement_failed kind={kind} count={count}")
+            })
+            .collect()
+    }
 }
 
 fn failure_line(outcome: LabelPollOutcome) -> String {
@@ -466,7 +525,7 @@ mod tests {
         collections::BTreeMap,
         sync::{
             Arc, Mutex,
-            atomic::{AtomicUsize, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
         },
         time::Duration,
     };
@@ -476,7 +535,8 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::{
-        AccountEnforcement, LabelCycle, LabelPoller, RecordEnforcement, failure_line, run_cycle,
+        AccountEnforcement, LabelCycle, LabelPoller, LabelTiming, RecordEnforcement, failure_line,
+        run_cycle,
     };
     use crate::{
         actor_stream::{ActorPool, ActorStreamConfig},
@@ -508,6 +568,8 @@ mod tests {
         requests: Arc<Mutex<Vec<u64>>>,
         resolution: Arc<Mutex<Vec<u8>>>,
         resolve_calls: Arc<AtomicUsize>,
+        resolution_delay: Arc<Mutex<Option<Duration>>>,
+        endless_log: Arc<AtomicBool>,
         task: tokio::task::JoinHandle<()>,
     }
 
@@ -538,6 +600,17 @@ mod tests {
         fn resolve_call_count(&self) -> usize {
             self.resolve_calls.load(Ordering::SeqCst)
         }
+
+        /// `None` holds every resolution open until the client gives up.
+        fn delay_resolutions(&self, delay: Option<Duration>) {
+            *self.resolution_delay.lock().unwrap() =
+                Some(delay.unwrap_or(Duration::from_secs(3600)));
+        }
+
+        /// Every cursor without a route answers with one more page, so no cycle catches up.
+        fn never_drain_the_log(&self) {
+            self.endless_log.store(true, Ordering::SeqCst);
+        }
     }
 
     async fn respond_by_cursor(routes: impl IntoIterator<Item = (u64, Vec<u8>)>) -> Responder {
@@ -547,11 +620,15 @@ mod tests {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let resolution = Arc::new(Mutex::new(http_response("404 Not Found", b"{}")));
         let resolve_calls = Arc::new(AtomicUsize::new(0));
+        let resolution_delay = Arc::new(Mutex::new(None::<Duration>));
+        let endless_log = Arc::new(AtomicBool::new(false));
         let task = tokio::spawn({
             let routes = Arc::clone(&routes);
             let requests = Arc::clone(&requests);
             let resolution = Arc::clone(&resolution);
             let resolve_calls = Arc::clone(&resolve_calls);
+            let resolution_delay = Arc::clone(&resolution_delay);
+            let endless_log = Arc::clone(&endless_log);
             async move {
                 loop {
                     let Ok((mut stream, _)) = listener.accept().await else {
@@ -573,8 +650,16 @@ mod tests {
                     if request_line.contains("resolveEnrollments") {
                         resolve_calls.fetch_add(1, Ordering::SeqCst);
                         let response = resolution.lock().unwrap().clone();
-                        let _ = stream.write_all(&response).await;
-                        let _ = stream.shutdown().await;
+                        let delay = *resolution_delay.lock().unwrap();
+                        // Answered apart from the accept loop, so a slow resolution
+                        // does not hold up label pages.
+                        tokio::spawn(async move {
+                            if let Some(delay) = delay {
+                                tokio::time::sleep(delay).await;
+                            }
+                            let _ = stream.write_all(&response).await;
+                            let _ = stream.shutdown().await;
+                        });
                         continue;
                     }
                     let cursor = request_line
@@ -583,12 +668,12 @@ mod tests {
                         .and_then(|value| value.parse().ok())
                         .unwrap_or(0);
                     requests.lock().unwrap().push(cursor);
-                    let response = routes
-                        .lock()
-                        .unwrap()
-                        .get(&cursor)
-                        .cloned()
-                        .unwrap_or_else(|| http_response("404 Not Found", b"{}"));
+                    let routed = routes.lock().unwrap().get(&cursor).cloned();
+                    let response = match routed {
+                        Some(response) => response,
+                        None if endless_log.load(Ordering::SeqCst) => label_page(cursor + 1, &[]),
+                        None => http_response("404 Not Found", b"{}"),
+                    };
                     let _ = stream.write_all(&response).await;
                     let _ = stream.shutdown().await;
                 }
@@ -600,6 +685,8 @@ mod tests {
             requests,
             resolution,
             resolve_calls,
+            resolution_delay,
+            endless_log,
             task,
         }
     }
@@ -839,13 +926,16 @@ mod tests {
         let (lifecycle, readiness) = lifecycle_with(Arc::new(FeedTelemetry::disabled()));
         reconcile_session(&lifecycle);
         // A short injected interval keeps the test off the production 10 s cadence.
-        let poller = LabelPoller::start_with_interval(
+        let poller = LabelPoller::start_with_timing(
             client(&responder),
             enforcement(&responder, &lifecycle),
             record_enforcement(),
             Arc::clone(&lifecycle),
             Arc::new(FeedTelemetry::disabled()),
-            Duration::from_millis(20),
+            LabelTiming {
+                poll_interval: Duration::from_millis(20),
+                max_staleness: super::LABEL_MAX_STALENESS,
+            },
         );
         wait_for_requests(&responder, 1).await;
         assert!(!readiness.lock().unwrap().is_ready());
@@ -981,6 +1071,7 @@ mod tests {
         AccountEnforcement {
             actors,
             authority: client(responder),
+            reinstatement_budget: super::ACCOUNT_REINSTATEMENT_BUDGET,
         }
     }
 
@@ -2209,7 +2300,6 @@ mod tests {
         responder: Responder,
         lifecycle: Arc<ControlLifecycle>,
         accounts: AccountEnforcement,
-        freshness: super::LabelFreshness,
         started: std::time::Instant,
     }
 
@@ -2224,7 +2314,6 @@ mod tests {
                 responder,
                 lifecycle,
                 accounts,
-                freshness: super::LabelFreshness::new(started),
                 started,
             };
             assert_eq!(scene.cycle_at(Duration::ZERO).await, LabelCycle::CaughtUp);
@@ -2233,6 +2322,9 @@ mod tests {
         }
 
         async fn cycle_at(&mut self, elapsed: Duration) -> LabelCycle {
+            let stamp_before = self
+                .lifecycle
+                .labels_fresh_until(super::LABEL_MAX_STALENESS);
             let cycle = run_cycle(
                 &self.lifecycle,
                 client(&self.responder).as_ref(),
@@ -2241,8 +2333,16 @@ mod tests {
                 &FeedTelemetry::disabled(),
             )
             .await;
-            self.freshness
-                .observe(cycle, self.started + elapsed, &self.lifecycle);
+            // A catch-up is stamped with the real clock, so the check runs at the
+            // stated instant only after a cycle that left the stamp alone. A cycle
+            // that moved it without catching up stays visible as reopened reads.
+            let stamp_after = self
+                .lifecycle
+                .labels_fresh_until(super::LABEL_MAX_STALENESS);
+            if cycle != LabelCycle::CaughtUp && stamp_after == stamp_before {
+                self.lifecycle
+                    .withdraw_stale_labels(self.started + elapsed, super::LABEL_MAX_STALENESS);
+            }
             cycle
         }
 
@@ -2320,5 +2420,334 @@ mod tests {
             .await;
         assert_eq!(cycle, LabelCycle::CaughtUp);
         assert!(scene.serves());
+    }
+
+    // Short enough that no test waits on the production bound.
+    const TEST_STALENESS: Duration = Duration::from_millis(300);
+    const TEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
+    // Room for scheduling on a loaded machine, still far below the 5 s request timeout.
+    const SCHEDULING_SLACK: Duration = Duration::from_millis(700);
+    const ED: &str = "did:plc:radicaledward";
+
+    fn start_poller(
+        responder: &Responder,
+        lifecycle: &Arc<ControlLifecycle>,
+        accounts: AccountEnforcement,
+    ) -> LabelPoller {
+        LabelPoller::start_with_timing(
+            client(responder),
+            accounts,
+            record_enforcement(),
+            Arc::clone(lifecycle),
+            Arc::new(FeedTelemetry::disabled()),
+            LabelTiming {
+                poll_interval: TEST_POLL_INTERVAL,
+                max_staleness: TEST_STALENESS,
+            },
+        )
+    }
+
+    async fn feeds_close_within(lifecycle: &ControlLifecycle, window: Duration) -> bool {
+        let deadline = std::time::Instant::now() + window;
+        while std::time::Instant::now() < deadline {
+            if matches!(serve_feed(lifecycle), Err(FeedServiceError::FeedNotReady)) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        false
+    }
+
+    async fn feeds_open_within(lifecycle: &ControlLifecycle, window: Duration) -> bool {
+        let deadline = std::time::Instant::now() + window;
+        while std::time::Instant::now() < deadline {
+            if serve_feed(lifecycle).is_ok() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        false
+    }
+
+    async fn scene_with_a_reinstating_account() -> Scene {
+        let scene = Scene::enrolled_with_two_posts().await;
+        scene.takedown().await;
+        scene.announce_negation();
+        assert_eq!(scene.cycle().await, LabelCycle::CaughtUp);
+        assert_eq!(scene.lifecycle.reinstating_accounts(10).unwrap().len(), 1);
+        assert!(serve_feed(&scene.lifecycle).is_ok());
+        scene
+    }
+
+    #[tokio::test]
+    async fn a_hung_reinstatement_and_an_unreachable_log_close_feeds_at_the_bound() {
+        let scene = scene_with_a_reinstating_account().await;
+        scene.responder.delay_resolutions(None);
+        scene
+            .responder
+            .set_routes([(2, http_response("500 Internal Server Error", b"{}"))]);
+        let pages_before = scene.responder.requested_cursors().len();
+
+        let poller = start_poller(&scene.responder, &scene.lifecycle, scene.accounts.clone());
+        tokio::time::sleep(TEST_STALENESS / 2).await;
+        assert!(serve_feed(&scene.lifecycle).is_ok());
+
+        assert!(
+            feeds_close_within(&scene.lifecycle, TEST_STALENESS / 2 + SCHEDULING_SLACK).await,
+            "feeds stayed open past the bound"
+        );
+        // The cycle is still waiting on its first resolution and has read no page.
+        assert_eq!(scene.responder.resolve_call_count(), 1);
+        assert_eq!(scene.responder.requested_cursors().len(), pages_before);
+        poller.stop().await;
+    }
+
+    #[tokio::test]
+    async fn sustained_page_cap_cycles_close_feeds_at_the_bound() {
+        let scene = StalenessScene::caught_up().await;
+        scene.responder.set_routes([]);
+        scene.responder.never_drain_the_log();
+
+        let poller = start_poller(&scene.responder, &scene.lifecycle, scene.accounts.clone());
+        tokio::time::sleep(TEST_STALENESS / 2).await;
+        assert!(serve_feed(&scene.lifecycle).is_ok());
+
+        assert!(
+            feeds_close_within(&scene.lifecycle, TEST_STALENESS / 2 + SCHEDULING_SLACK).await,
+            "feeds stayed open past the bound"
+        );
+        assert!(scene.responder.requested_cursors().len() > super::MAX_LABEL_PAGES_PER_CYCLE);
+        poller.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_reopens_feeds_the_bound_closed() {
+        let scene = StalenessScene::caught_up().await;
+        scene.log_is_down();
+        let poller = start_poller(&scene.responder, &scene.lifecycle, scene.accounts.clone());
+        assert!(feeds_close_within(&scene.lifecycle, TEST_STALENESS + SCHEDULING_SLACK).await);
+
+        scene.responder.set_routes([(4, label_page(4, &[]))]);
+
+        assert!(feeds_open_within(&scene.lifecycle, SCHEDULING_SLACK).await);
+        poller.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_slow_but_successful_cycle_does_not_flap() {
+        let scene = scene_with_a_reinstating_account().await;
+        // An unanswered resolution costs no attempt, so every cycle stays this slow.
+        scene.responder.delay_resolutions(Some(TEST_STALENESS / 3));
+
+        let poller = start_poller(&scene.responder, &scene.lifecycle, scene.accounts.clone());
+        let watched_until = std::time::Instant::now() + TEST_STALENESS * 4;
+        while std::time::Instant::now() < watched_until {
+            assert!(serve_feed(&scene.lifecycle).is_ok(), "feeds flapped");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        assert!(scene.responder.resolve_call_count() >= 3);
+        poller.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_dead_poller_task_still_closes_feeds_at_the_bound() {
+        let scene = StalenessScene::caught_up().await;
+        let pages_before = scene.responder.requested_cursors().len();
+        let poller = start_poller(&scene.responder, &scene.lifecycle, scene.accounts.clone());
+        wait_for_requests(&scene.responder, pages_before + 1).await;
+
+        poller
+            .task
+            .lock()
+            .await
+            .as_ref()
+            .expect("the poller task runs")
+            .abort();
+        assert!(serve_feed(&scene.lifecycle).is_ok());
+
+        assert!(
+            feeds_close_within(&scene.lifecycle, TEST_STALENESS + SCHEDULING_SLACK).await,
+            "feeds stayed open after the poller died"
+        );
+        poller.stop().await;
+    }
+
+    #[tokio::test]
+    async fn the_account_phase_stops_at_its_budget_and_the_pages_are_still_read() {
+        let scene = Scene::enrolled_with_two_posts().await;
+        scene.responder.set_routes([
+            (0, account_page(2, &[(1, SPIKE, false), (2, ED, false)])),
+            (2, account_page(2, &[])),
+        ]);
+        assert_eq!(scene.cycle().await, LabelCycle::CaughtUp);
+        scene.responder.set_routes([
+            (2, account_page(4, &[(3, SPIKE, true), (4, ED, true)])),
+            (4, account_page(4, &[])),
+        ]);
+        assert_eq!(scene.cycle().await, LabelCycle::CaughtUp);
+        assert_eq!(scene.lifecycle.reinstating_accounts(10).unwrap().len(), 2);
+        scene
+            .responder
+            .delay_resolutions(Some(Duration::from_millis(150)));
+        let budgeted = AccountEnforcement {
+            reinstatement_budget: Duration::from_millis(100),
+            ..scene.accounts.clone()
+        };
+        let pages_before = scene.responder.requested_cursors().len();
+
+        let cycle = run_cycle(
+            &scene.lifecycle,
+            scene.label_client.as_ref(),
+            &budgeted,
+            &record_enforcement(),
+            &FeedTelemetry::disabled(),
+        )
+        .await;
+
+        assert_eq!(cycle, LabelCycle::CaughtUp);
+        assert_eq!(scene.responder.resolve_call_count(), 1);
+        assert_eq!(scene.responder.requested_cursors().len(), pages_before + 1);
+        assert_eq!(scene.lifecycle.reinstating_accounts(10).unwrap().len(), 2);
+    }
+
+    /// Lists like `HostPages`, but holds its first page until released.
+    #[derive(Clone)]
+    struct HeldHostPages {
+        pages: HostPages,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+        held: Arc<AtomicBool>,
+    }
+
+    #[async_trait]
+    impl SpacePageReader for HeldHostPages {
+        async fn list_page(
+            &self,
+            target: &PdsPollTarget,
+            cursor: Option<&str>,
+            limit: usize,
+        ) -> Result<SpaceHostPage, SpaceHostError> {
+            if !self.held.swap(true, Ordering::SeqCst) {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
+            self.pages.list_page(target, cursor, limit).await
+        }
+    }
+
+    #[async_trait]
+    impl SpacePageSource for HeldHostPages {
+        async fn connect(
+            &self,
+            _: &PdsPollTarget,
+            _: Arc<crate::space_credential::HeldSpaceCredential>,
+        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
+            Ok(Arc::new(self.clone()))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_space_reset_wins_over_a_sync_already_in_flight() {
+        let scene = pds_scene().await;
+        scene
+            .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), false)])
+            .await;
+        scene
+            .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), true)])
+            .await;
+        let held = HeldHostPages {
+            pages: HostPages {
+                pages: Arc::new(Mutex::new(
+                    vec![listing(Some("c9"), &["swordfish", "redtail"])].into(),
+                )),
+                requested_cursors: Arc::new(Mutex::new(Vec::new())),
+            },
+            entered: Arc::new(tokio::sync::Notify::new()),
+            release: Arc::new(tokio::sync::Notify::new()),
+            held: Arc::new(AtomicBool::new(false)),
+        };
+        let synchronizer = PdsSpaceSynchronizer::new(
+            Arc::new(held.clone()),
+            Arc::new(SpaceCredentialManager::with_clock(
+                Arc::new(Issuer),
+                fixed_credential_clock,
+            )),
+            Arc::new(Verified),
+        );
+        let target = PdsPollTarget {
+            space_uri: SPACE.to_owned(),
+            boundary: SPACE_BOUNDARY.to_owned(),
+            did: FAYE_VALENTINE.to_owned(),
+            host: "https://pds.example.test/".to_owned(),
+            generation: scene
+                .lifecycle
+                .pds_member_generation(SPACE_BOUNDARY, FAYE_VALENTINE)
+                .unwrap()
+                .expect("faye is a current member"),
+        };
+        let in_flight = tokio::spawn({
+            let lifecycle = Arc::clone(&scene.lifecycle);
+            async move {
+                let observed_at = super::format_utc_millis(time::OffsetDateTime::now_utc());
+                synchronizer
+                    .sync_target(&lifecycle, &target, &observed_at, FAR_RETENTION)
+                    .await
+            }
+        });
+        held.entered.notified().await;
+
+        assert_eq!(scene.cycle().await, LabelCycle::CaughtUp);
+        assert!(scene.reinstating_records().is_empty());
+        held.release.notify_one();
+        let outcome = in_flight.await.unwrap();
+
+        assert_eq!(scene.faye_space_cursor(), None);
+        assert!(
+            matches!(
+                outcome,
+                Err(crate::pds_space_sync::PdsSpaceSyncError::Target(
+                    crate::space_sync::SpaceSyncError::UnauthorizedTarget
+                ))
+            ),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            held.pages.requested_cursors.lock().unwrap().clone(),
+            [Some("c1".to_owned())]
+        );
+        assert!(
+            scene
+                .lifecycle
+                .pds_member_generation(SPACE_BOUNDARY, FAYE_VALENTINE)
+                .unwrap()
+                .is_some(),
+            "faye stays a member"
+        );
+        let next_pass = sync_faye(
+            &scene.lifecycle,
+            vec![listing(None, &["swordfish", "redtail"])],
+        )
+        .await;
+        assert_eq!(next_pass, [None]);
+        assert!(scene.feed_lists(FAYE_SPACE_POST));
+    }
+
+    #[test]
+    fn a_cycle_logs_each_enforcement_failure_kind_once_with_a_count() {
+        let mut failures = super::EnforcementFailures::default();
+        for kind in ["authority", "store", "authority", "replay", "authority"] {
+            failures.record(kind);
+        }
+
+        assert_eq!(
+            failures.lines(),
+            [
+                "event=label_enforcement_failed kind=authority count=3",
+                "event=label_enforcement_failed kind=replay count=1",
+                "event=label_enforcement_failed kind=store count=1",
+            ]
+        );
+        assert!(super::EnforcementFailures::default().lines().is_empty());
     }
 }

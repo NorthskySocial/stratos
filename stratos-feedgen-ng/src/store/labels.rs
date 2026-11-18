@@ -234,7 +234,8 @@ impl EncryptedStore {
         Ok(effects)
     }
 
-    pub fn is_taken_down(
+    #[cfg(test)]
+    pub(crate) fn is_taken_down(
         &self,
         authority_did: &str,
         subject_key: &str,
@@ -249,7 +250,8 @@ impl EncryptedStore {
             .map_err(StoreError::Open)
     }
 
-    pub fn reinstating_subjects(
+    #[cfg(test)]
+    pub(crate) fn reinstating_subjects(
         &self,
         authority_did: &str,
         limit: u16,

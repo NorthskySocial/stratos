@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use crate::{
     actor_event::{ActorEventError, parse_actor_commit},
@@ -48,6 +51,7 @@ pub struct ControlLifecycle {
     interrupt: StoreInterrupt,
     authority_did: Option<String>,
     telemetry: Arc<FeedTelemetry>,
+    labels_caught_up_at: Mutex<Option<Instant>>,
 }
 
 impl ControlLifecycle {
@@ -107,6 +111,7 @@ impl ControlLifecycle {
             interrupt,
             authority_did,
             telemetry,
+            labels_caught_up_at: Mutex::new(None),
         }
     }
 
@@ -368,6 +373,10 @@ impl ControlLifecycle {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
         let mut projection = self.projection.lock().expect("projection lock poisoned");
+        *self
+            .labels_caught_up_at
+            .lock()
+            .expect("label freshness lock poisoned") = Some(Instant::now());
         let changed = readiness.mark_labels_current();
         if changed && readiness.is_ready() {
             projection.establish_session();
@@ -375,10 +384,46 @@ impl ControlLifecycle {
         }
     }
 
-    pub fn mark_labels_stale(&self) {
+    #[cfg(test)]
+    pub(crate) fn mark_labels_stale(&self) {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.withdraw_labels_locked();
+    }
+
+    /// Closes reads once the label log has not been read to its head within
+    /// `max_staleness`. Returns whether this call closed them, so an outage is
+    /// reported once.
+    pub fn withdraw_stale_labels(&self, now: Instant, max_staleness: Duration) -> bool {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let caught_up_at = *self
+            .labels_caught_up_at
+            .lock()
+            .expect("label freshness lock poisoned");
+        let overdue =
+            caught_up_at.is_some_and(|at| now.saturating_duration_since(at) >= max_staleness);
+        if overdue {
+            self.withdraw_labels_locked();
+        }
+        overdue
+    }
+
+    /// When reads close unless the log is read to its head again first. `None`
+    /// means they are already closed for want of a catch-up.
+    pub fn labels_fresh_until(&self, max_staleness: Duration) -> Option<Instant> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.labels_caught_up_at
+            .lock()
+            .expect("label freshness lock poisoned")
+            .map(|at| at + max_staleness)
+    }
+
+    fn withdraw_labels_locked(&self) {
         let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
         let mut projection = self.projection.lock().expect("projection lock poisoned");
+        *self
+            .labels_caught_up_at
+            .lock()
+            .expect("label freshness lock poisoned") = None;
         readiness.mark_labels_stale();
         projection.close_session();
         self.telemetry.mark_unready();

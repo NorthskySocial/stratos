@@ -14,7 +14,9 @@ use stratos_feedgen_ng::{
     credential_issuer::HttpSpaceCredentialIssuer,
     credential_manager::SpaceCredentialManager,
     identity::HttpIdentityKeyResolver,
-    label_poller::{AccountEnforcement, LabelPoller, RecordEnforcement},
+    label_poller::{
+        ACCOUNT_REINSTATEMENT_BUDGET, AccountEnforcement, LabelPoller, RecordEnforcement,
+    },
     lifecycle::ControlLifecycle,
     membership_reconciler::MembershipReconciler,
     pds_space_scheduler::PdsSpaceScheduler,
@@ -175,6 +177,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
         AccountEnforcement {
             actors: Arc::clone(&actors),
             authority: Arc::clone(&authority),
+            reinstatement_budget: ACCOUNT_REINSTATEMENT_BUDGET,
         },
         RecordEnforcement {
             blobs: Arc::clone(&blob_service),

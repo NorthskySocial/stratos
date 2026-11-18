@@ -9,6 +9,7 @@ const CONTRACT_TESTS: Record<RustContractKind, readonly string[]> = {
     'store::tests::reopens_with_the_same_key_and_rejects_a_wrong_key',
     'store::tests::rejects_permissive_or_malformed_secret_files',
     'store::tests::redacts_storage_keys_in_debug_output',
+    'conformance::tests::reads_the_label_pages_stratos_serves_in_the_shared_fixture',
   ],
   recovery: [
     'store::tests::restarting_a_staged_page_requires_a_new_terminal_verification',

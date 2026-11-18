@@ -16,6 +16,7 @@ import {
   buildCallbackHarness,
   buildSetActiveHarness,
   defineCallbackHoldScenarios,
+  defineInFlightUnenrollScenarios,
   ED_DID,
   ENROLLMENT_DENIED_BODY,
   expectNothingProvisioned,
@@ -72,6 +73,10 @@ describe('re-enrolment never lifts a hold on SQLite', () => {
   })
 
   defineCallbackHoldScenarios(() => backend)
+
+  describe('an unenroll already in flight when a hold lands', () => {
+    defineInFlightUnenrollScenarios(() => backend)
+  })
 
   it('still enrolls a fresh DID as active', async () => {
     const harness = buildCallbackHarness(backend)
