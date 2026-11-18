@@ -6,7 +6,7 @@ use std::{
 use stratos_feedgen_ng::{
     actor_stream::{ActorPool, ActorStreamConfig},
     auth::FeedRequestVerifier,
-    authority::{AuthorityClient, HttpAuthorityClient},
+    authority::{AuthorityClient, HttpAuthorityClient, LabelLogClient},
     blob_cache::{BlobCache, BlobCacheSweeper, MAX_CACHE_BYTES},
     blob_service::BlobService,
     blob_upstream::HttpBlobUpstream,
@@ -14,6 +14,7 @@ use stratos_feedgen_ng::{
     credential_issuer::HttpSpaceCredentialIssuer,
     credential_manager::SpaceCredentialManager,
     identity::HttpIdentityKeyResolver,
+    label_poller::{AccountEnforcement, LabelPoller},
     lifecycle::ControlLifecycle,
     membership_reconciler::MembershipReconciler,
     pds_space_scheduler::PdsSpaceScheduler,
@@ -105,12 +106,14 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
         )?),
         2,
     )?);
-    let authority: Arc<dyn AuthorityClient> = Arc::new(HttpAuthorityClient::new(
+    let http_authority = Arc::new(HttpAuthorityClient::new(
         &config.stratos_service_url,
         config.stratos_service_did.clone(),
         config.service_did.clone(),
         config.signing_key.clone(),
     )?);
+    let authority: Arc<dyn AuthorityClient> = http_authority.clone();
+    let label_log: Arc<dyn LabelLogClient> = http_authority;
     let actors = ActorPool::start_with_telemetry(
         ActorStreamConfig {
             service_url: config.stratos_service_url.clone(),
@@ -167,6 +170,15 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
         config.retention.clone(),
         metrics.telemetry(),
     );
+    let label_poller = LabelPoller::start(
+        label_log,
+        AccountEnforcement {
+            actors: Arc::clone(&actors),
+            authority: Arc::clone(&authority),
+        },
+        Arc::clone(&lifecycle),
+        metrics.telemetry(),
+    );
     let result = axum::serve(
         listener,
         server::router_with_feed_with_pds_space_sync(
@@ -186,6 +198,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
     .with_graceful_shutdown(shutdown)
     .await;
     pds_scheduler.stop().await;
+    label_poller.stop().await;
     blob_sweeper.stop().await;
     compactor.stop().await;
     stream.stop().await;

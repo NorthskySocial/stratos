@@ -309,6 +309,7 @@ mod tests {
             .unwrap();
         let lifecycle = ControlLifecycle::new(ProjectionReader::new(store), Arc::clone(&readiness));
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let initial = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             initial,

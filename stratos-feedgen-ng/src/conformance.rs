@@ -133,6 +133,7 @@ mod tests {
 
         for case in fixture.cases {
             let mut gate = FeedReadinessGate::default();
+            gate.mark_labels_current();
             let mut generation = None;
             for event in case.events {
                 match event {

@@ -8,13 +8,14 @@ use crate::{
     },
     feeds::FeedRegistry,
     identifier::{Did, RecordUri},
+    moderation_label::{LabelPage, LabelSubject},
     readiness::{FeedReadinessGate, ReconciliationOutcome},
     service::ProjectionReader,
     service_event::{EnrollmentAction, EnrollmentEvent},
     space_sync::{PreparedSpacePage, SpaceSyncError, SpaceSyncTarget},
     store::{
-        ActorEnrollment, ActorPage, ActorSyncState, EnrollmentReconciliation, PdsSpaceMember,
-        StoreError, StoreInterrupt,
+        ActorEnrollment, ActorPage, ActorSyncState, EnrollmentReconciliation, LabelPageEffects,
+        PdsSpaceMember, StoreError, StoreInterrupt,
     },
     telemetry::FeedTelemetry,
 };
@@ -242,15 +243,103 @@ impl ControlLifecycle {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
         let mut projection = self.projection.lock().expect("projection lock poisoned");
-        let ready = readiness.complete_reconciliation(generation, outcome);
-        if ready {
+        let accepted = readiness.complete_reconciliation(generation, outcome);
+        if readiness.is_ready() {
             projection.establish_session();
             self.telemetry.mark_ready();
         } else {
             projection.close_session();
             self.telemetry.mark_unready();
         }
-        ready
+        accepted
+    }
+
+    pub fn label_cursor(&self) -> Result<u64, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .label_cursor(authority_did)
+    }
+
+    pub fn apply_label_page(
+        &self,
+        page: &LabelPage,
+        updated_at: &str,
+    ) -> Result<LabelPageEffects, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let effects = self
+            .projection
+            .lock()
+            .expect("projection lock poisoned")
+            .apply_label_page(authority_did, page, updated_at)?;
+        for subject in &effects.taken_down {
+            let LabelSubject::Account { did } = subject else {
+                continue;
+            };
+            if self.revoke_viewer_authorization_locked(did) {
+                self.projection
+                    .lock()
+                    .expect("projection lock poisoned")
+                    .invalidate_viewer(did);
+            }
+        }
+        Ok(effects)
+    }
+
+    pub fn reinstating_accounts(&self, limit: u16) -> Result<Vec<(String, u32)>, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .reinstating_accounts(authority_did, limit)
+    }
+
+    pub fn finish_reinstatement(&self, subject_key: &str) -> Result<(), StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .finish_reinstatement(authority_did, subject_key)
+    }
+
+    pub fn record_reinstatement_attempt(&self, subject_key: &str) -> Result<(), StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .record_reinstatement_attempt(authority_did, subject_key)
+    }
+
+    pub fn mark_labels_current(&self) {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
+        let mut projection = self.projection.lock().expect("projection lock poisoned");
+        let changed = readiness.mark_labels_current();
+        if changed && readiness.is_ready() {
+            projection.establish_session();
+            self.telemetry.mark_ready();
+        }
+    }
+
+    pub fn mark_labels_stale(&self) {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
+        let mut projection = self.projection.lock().expect("projection lock poisoned");
+        readiness.mark_labels_stale();
+        projection.close_session();
+        self.telemetry.mark_unready();
+    }
+
+    fn label_authority(&self) -> Result<&str, StoreError> {
+        self.authority_did
+            .as_deref()
+            .ok_or(StoreError::InvalidProjectionMutation)
     }
 
     pub fn mark_unavailable(&self) {
@@ -613,7 +702,7 @@ mod tests {
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         service::{ProjectionReader, ReadRequest},
         service_event::{EnrollmentAction, EnrollmentEvent},
-        store::{ActorPage, EncryptedStore, ProjectionPost, StorageKey},
+        store::{ActorEnrollment, ActorPage, EncryptedStore, ProjectionPost, StorageKey},
         telemetry::FeedTelemetry,
     };
 
@@ -640,6 +729,7 @@ mod tests {
         );
 
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         assert!(lifecycle.read(|projection| projection.prepare(request()).unwrap().is_none()));
 
         let generation = lifecycle.begin_reconciliation();
@@ -721,6 +811,7 @@ mod tests {
             readiness,
         );
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -798,6 +889,7 @@ mod tests {
             )
             .unwrap();
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -853,6 +945,7 @@ mod tests {
             Arc::new(FeedTelemetry::disabled()),
         );
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -901,6 +994,7 @@ mod tests {
         )
         .unwrap();
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -954,6 +1048,7 @@ mod tests {
             )
             .unwrap();
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -1008,6 +1103,7 @@ mod tests {
             })
             .unwrap();
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -1144,5 +1240,274 @@ mod tests {
             ),
             Ok(ActorFrameResult::NotEnrolled)
         ));
+    }
+
+    fn lifecycle_with_telemetry() -> (
+        ControlLifecycle,
+        Arc<Mutex<FeedReadinessGate>>,
+        Arc<FeedTelemetry>,
+    ) {
+        let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+        let telemetry = Arc::new(FeedTelemetry::disabled());
+        let lifecycle = ControlLifecycle::for_authority_with_telemetry(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::clone(&readiness),
+            "did:plc:spike",
+            Arc::clone(&telemetry),
+        )
+        .unwrap();
+        (lifecycle, readiness, telemetry)
+    }
+
+    fn reconcile_cleanly(lifecycle: &ControlLifecycle) {
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+    }
+
+    #[test]
+    fn reads_stay_closed_until_labels_and_reconciliation_are_both_current() {
+        let (lifecycle, readiness, telemetry) = lifecycle_with_telemetry();
+        lifecycle.session_established();
+        reconcile_cleanly(&lifecycle);
+        assert!(!readiness.lock().unwrap().is_ready());
+        assert!(!telemetry.is_ready());
+
+        lifecycle.mark_labels_current();
+        assert!(readiness.lock().unwrap().is_ready());
+        assert!(telemetry.is_ready());
+
+        let (lifecycle, readiness, telemetry) = lifecycle_with_telemetry();
+        lifecycle.mark_labels_current();
+        assert!(!readiness.lock().unwrap().is_ready());
+        assert!(!telemetry.is_ready());
+        lifecycle.session_established();
+        reconcile_cleanly(&lifecycle);
+        assert!(readiness.lock().unwrap().is_ready());
+        assert!(telemetry.is_ready());
+    }
+
+    #[test]
+    fn stale_labels_close_reads_until_the_log_catches_up_again() {
+        let (lifecycle, readiness, telemetry) = lifecycle_with_telemetry();
+        lifecycle.mark_labels_current();
+        lifecycle.session_established();
+        reconcile_cleanly(&lifecycle);
+        assert!(telemetry.is_ready());
+
+        lifecycle.mark_labels_stale();
+        assert!(!readiness.lock().unwrap().is_ready());
+        assert!(!telemetry.is_ready());
+
+        lifecycle.mark_labels_current();
+        assert!(readiness.lock().unwrap().is_ready());
+        assert!(telemetry.is_ready());
+    }
+
+    #[test]
+    fn a_service_reconnect_reopens_without_relearning_label_currency() {
+        let (lifecycle, readiness, _telemetry) = lifecycle_with_telemetry();
+        lifecycle.mark_labels_current();
+        lifecycle.session_established();
+        reconcile_cleanly(&lifecycle);
+        assert!(readiness.lock().unwrap().is_ready());
+
+        lifecycle.mark_unavailable();
+        assert!(!readiness.lock().unwrap().is_ready());
+
+        lifecycle.session_established();
+        reconcile_cleanly(&lifecycle);
+        assert!(readiness.lock().unwrap().is_ready());
+    }
+
+    #[test]
+    fn an_account_takedown_revokes_that_accounts_viewer_authorization() {
+        let (lifecycle, _readiness, _telemetry) = lifecycle_with_telemetry();
+        for did in ["did:plc:spike", "did:plc:faye"] {
+            lifecycle
+                .apply_viewer_authorization(
+                    ViewerAuthorization {
+                        did: did.to_owned(),
+                        boundaries: vec!["bebop".to_owned()],
+                        expires_at: 100,
+                    },
+                    1,
+                )
+                .unwrap();
+        }
+
+        lifecycle
+            .apply_label_page(
+                &crate::moderation_label::LabelPage {
+                    cursor: 1,
+                    labels: vec![crate::moderation_label::ModerationLabel {
+                        seq: 1,
+                        subject: crate::moderation_label::LabelSubject::Account {
+                            did: "did:plc:spike".to_owned(),
+                        },
+                        neg: false,
+                    }],
+                },
+                "2026-11-01T00:00:00.000Z",
+            )
+            .unwrap();
+
+        assert!(!lifecycle.has_current_viewer_authorization("did:plc:spike", 2));
+        assert!(lifecycle.has_current_viewer_authorization("did:plc:faye", 2));
+    }
+
+    const BEBOP_AUTHORITY: &str = "did:web:stratos.example.test";
+    const SPIKESPIEGEL: &str = "did:plc:spikespiegel";
+    const SPIKE_BLOB_POST: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop1";
+    const SPIKE_ENROLLED_AT: &str = "1998-04-03T00:00:00.000Z";
+    const BEFORE_RETENTION_ENDS: &str = "1998-04-03T12:00:00.000Z";
+    const TAKEDOWN_RECORDED_AT: &str = "2026-11-01T00:00:00.000Z";
+
+    fn bebop_feeds() -> FeedRegistry {
+        FeedRegistry::new([FeedDescription {
+            id: "bebop".to_owned(),
+            boundary: "bebop".to_owned(),
+            display_name: None,
+            description: None,
+        }])
+        .unwrap()
+    }
+
+    fn account_label_page(
+        cursor: u64,
+        sequence: u64,
+        negated: bool,
+    ) -> crate::moderation_label::LabelPage {
+        crate::moderation_label::LabelPage {
+            cursor,
+            labels: vec![crate::moderation_label::ModerationLabel {
+                seq: sequence,
+                subject: crate::moderation_label::LabelSubject::Account {
+                    did: SPIKESPIEGEL.to_owned(),
+                },
+                neg: negated,
+            }],
+        }
+    }
+
+    fn lifecycle_serving_a_member_with_a_blob_post() -> ControlLifecycle {
+        let lifecycle = ControlLifecycle::for_authority(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            BEBOP_AUTHORITY,
+        )
+        .unwrap();
+        lifecycle
+            .reconcile_actor_enrollment(
+                SPIKESPIEGEL,
+                SPIKE_ENROLLED_AT,
+                Some(ActorEnrollment {
+                    did: SPIKESPIEGEL.to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    observed_at: SPIKE_ENROLLED_AT.to_owned(),
+                }),
+            )
+            .unwrap();
+        lifecycle
+            .apply_actor_page(ActorPage {
+                authority_did: BEBOP_AUTHORITY.to_owned(),
+                actor_did: SPIKESPIEGEL.to_owned(),
+                sequence: 1,
+                upserts: vec![ProjectionPost {
+                    uri: SPIKE_BLOB_POST.to_owned(),
+                    author_did: SPIKESPIEGEL.to_owned(),
+                    cid: "bafyrecord".to_owned(),
+                    sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                    indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
+                    retained_at: "1998-04-04T00:00:00.000Z".to_owned(),
+                    record_json: b"{}".to_vec(),
+                    blob_refs_json: serde_json::to_vec(&serde_json::json!([
+                        { "cid": "bafkreiswordfish", "mimeType": "image/png" }
+                    ]))
+                    .unwrap(),
+                    boundaries: vec!["bebop".to_owned()],
+                }],
+                deletes: Vec::new(),
+                updated_at: "1998-04-03T00:00:02.000Z".to_owned(),
+            })
+            .unwrap();
+        lifecycle
+            .apply_viewer_authorization(
+                ViewerAuthorization {
+                    did: "did:plc:faye".to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    expires_at: 100,
+                },
+                1,
+            )
+            .unwrap();
+        lifecycle.session_established();
+        lifecycle.mark_labels_current();
+        reconcile_cleanly(&lifecycle);
+        lifecycle
+    }
+
+    fn blob_route_serves(lifecycle: &ControlLifecycle) -> bool {
+        lifecycle
+            .prepare_viewer_blob(
+                "did:plc:faye",
+                &bebop_feeds(),
+                SPIKE_BLOB_POST,
+                1,
+                BEFORE_RETENTION_ENDS,
+            )
+            .unwrap()
+            .is_some()
+    }
+
+    #[test]
+    fn the_blob_route_serves_no_post_of_a_taken_down_account() {
+        let lifecycle = lifecycle_serving_a_member_with_a_blob_post();
+        assert!(blob_route_serves(&lifecycle));
+
+        lifecycle
+            .apply_label_page(&account_label_page(1, 1, false), TAKEDOWN_RECORDED_AT)
+            .unwrap();
+
+        assert!(!blob_route_serves(&lifecycle));
+    }
+
+    #[test]
+    fn a_replayed_enroll_older_than_the_stored_observation_is_stale_while_reinstating() {
+        let lifecycle = lifecycle_serving_a_member_with_a_blob_post();
+        lifecycle
+            .apply_label_page(&account_label_page(1, 1, false), TAKEDOWN_RECORDED_AT)
+            .unwrap();
+        lifecycle
+            .apply_label_page(&account_label_page(2, 2, true), TAKEDOWN_RECORDED_AT)
+            .unwrap();
+        assert_eq!(
+            lifecycle.reinstating_accounts(10).unwrap(),
+            [(SPIKESPIEGEL.to_owned(), 0)]
+        );
+
+        let replay = lifecycle.apply_enrollment_event(EnrollmentEvent {
+            did: SPIKESPIEGEL.to_owned(),
+            action: EnrollmentAction::Enroll,
+            boundaries: vec!["bebop".to_owned()],
+            observed_at: "2026-10-31T00:00:00.000Z".to_owned(),
+        });
+
+        assert!(matches!(replay, Err(crate::store::StoreError::StaleCursor)));
+        assert_eq!(
+            lifecycle
+                .actor_sync_state(BEBOP_AUTHORITY, SPIKESPIEGEL)
+                .unwrap(),
+            None
+        );
     }
 }

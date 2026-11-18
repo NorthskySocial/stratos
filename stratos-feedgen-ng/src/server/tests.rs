@@ -250,6 +250,7 @@ fn authenticated_router_with_request_limit(
         )
         .unwrap();
     lifecycle.session_established();
+    lifecycle.mark_labels_current();
     let generation = lifecycle.begin_reconciliation();
     assert!(lifecycle.complete_reconciliation(
         generation,

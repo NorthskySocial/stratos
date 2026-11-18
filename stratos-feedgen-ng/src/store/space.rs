@@ -562,6 +562,13 @@ fn apply_verified_space_stage_row(
             .map_err(StoreError::Open)?;
         return Ok(());
     }
+    // A pds-custody member can still hold a verified page staged before the takedown.
+    if super::labels::account_taken_down(transaction, actor_did)? {
+        transaction
+            .execute("DELETE FROM post WHERE uri = ?1", [&stage.uri])
+            .map_err(StoreError::Open)?;
+        return Ok(());
+    }
     let Some(cid) = stage.cid else {
         return Err(StoreError::InvalidProjectionMutation);
     };

@@ -15,10 +15,13 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, pa
 
 mod actor;
 mod connection;
+mod labels;
 mod migrations;
 mod read;
 mod retention;
 mod space;
+
+pub use labels::LabelPageEffects;
 
 const STORAGE_KEY_BYTES: usize = 32;
 const MAX_ENCODED_KEY_BYTES: usize = STORAGE_KEY_BYTES * 2 + 1;
