@@ -27,6 +27,8 @@ export const parentBoundaryCache = new Map<
 const PARENT_BOUNDARY_TTL_MS = 60_000
 export const PARENT_BOUNDARY_CACHE_MAX = 1000
 
+const POST_COLLECTION = 'zone.stratos.feed.post'
+
 export function assertCollectionInHostedSpaceType(collection: string): void {
   if (!SPACE_TYPE_REGISTRY.allowsCollection(HOSTED_SPACE_TYPE, collection)) {
     throw new InvalidRequestError(
@@ -115,24 +117,113 @@ export async function authorizeRecordBoundary(
 }
 
 /**
- * Validates the record against the lexicon and Stratos record rules. It runs on
- * every legacy write; `validate: false` cannot skip it. Its `allowedDomains`
- * check is what rejects a boundary the catalog has just deactivated, while the
- * write cache still lists it for the member.
+ * Refuses a boundary whose catalog entry is not active. The write cache can
+ * list a boundary for up to its TTL after the catalog deactivated it, so
+ * membership alone does not say the boundary still accepts writes. It reads the
+ * store, which every process shares, rather than the in-memory allowed domains.
+ * @throws InvalidRequestError `BoundaryNotFound` when the boundary is absent, not active, or there is no catalog store to read
  */
-export async function validateRecordContent(
+export async function assertBoundaryInCatalog(
+  ctx: AppContext,
+  boundary: string,
+): Promise<void> {
+  // Without a catalog store the boundary cannot be shown to be active, so the
+  // write is refused rather than allowed unchecked.
+  const definition = await ctx.boundaryStore?.get(boundary)
+  if (definition?.status !== 'active') {
+    throw new InvalidRequestError(
+      `Boundary ${boundary} is not in the active catalog`,
+      'BoundaryNotFound',
+    )
+  }
+}
+
+/**
+ * Validates a legacy write against the lexicon and Stratos record rules, judging
+ * the boundary the body claims. It runs on every legacy write; `validate: false`
+ * cannot skip it. Its `allowedDomains` check is what rejects a boundary the
+ * catalog has just deactivated, while the write cache still lists it for the
+ * member.
+ */
+export async function validateLegacyRecordContent(
   ctx: AppContext,
   collection: string,
   record: unknown,
 ): Promise<void> {
   const rec = record as Record<string, unknown>
-
-  // Resolve parent boundaries when the record is a reply
   const parentBoundaries = await resolveParentBoundaries(ctx, rec)
 
-  const validator = new StratosValidator(ctx.cfg.stratos)
+  assertRulesHold(() =>
+    new StratosValidator(ctx.cfg.stratos).assertValid(
+      rec,
+      collection,
+      parentBoundaries,
+    ),
+  )
+}
+
+/**
+ * Validates a write into one named boundary. The rules judge that boundary and
+ * never the record's own claim.
+ */
+export async function validateRecordInBoundary(
+  ctx: AppContext,
+  collection: string,
+  record: unknown,
+  boundary: string,
+): Promise<void> {
+  const rec = record as Record<string, unknown>
+  assertReferenceUrisAreStrings(collection, rec)
+  const parentBoundaries = await resolveParentBoundaries(ctx, rec)
+
+  assertRulesHold(() =>
+    new StratosValidator(ctx.cfg.stratos).assertValidWithInput(
+      rec,
+      collection,
+      { boundaryClaim: { values: [{ value: boundary }] }, parentBoundaries },
+    ),
+  )
+}
+
+/**
+ * Refuses a record whose reply or embedded record references carry a uri that
+ * is not a string. The rules and the parent lookup call string methods on these
+ * uris and run even when lexicon validation is skipped, so they cannot rely on
+ * the lexicon's shapes.
+ * @throws InvalidRequestError `InvalidRecord` naming the collection, never the value
+ */
+function assertReferenceUrisAreStrings(
+  collection: string,
+  record: Record<string, unknown>,
+): void {
+  const reply = asObject(record.reply)
+  const uris = [asObject(reply?.parent)?.uri, asObject(reply?.root)?.uri]
+  if (collection === POST_COLLECTION) {
+    for (
+      let embed = asObject(record.embed);
+      embed;
+      embed = asObject(embed.media)
+    ) {
+      uris.push(asObject(embed.record)?.uri)
+    }
+  }
+  if (uris.some((uri) => uri !== undefined && typeof uri !== 'string')) {
+    throw new InvalidRequestError(
+      `Invalid ${collection} record: a reference uri must be a string`,
+      'InvalidRecord',
+    )
+  }
+}
+
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function assertRulesHold(validate: () => void): void {
   try {
-    validator.assertValid(rec, collection, parentBoundaries)
+    validate()
   } catch (err) {
     if (err instanceof StratosValidationError) {
       throw new InvalidRequestError(err.message, 'InvalidRecord')

@@ -15,7 +15,7 @@ import { signAndPersistCommit, StratosBlockStoreReader } from '../../features'
 import {
   assertCollectionInHostedSpaceType,
   authorizeRecordBoundary,
-  validateRecordContent,
+  validateLegacyRecordContent,
   withConcurrencyRetry,
 } from './validation.js'
 import {
@@ -97,7 +97,7 @@ async function calculatePrecomputed(
         }
       }
 
-      await validateRecordContent(ctx, op.collection, op.record)
+      await validateLegacyRecordContent(ctx, op.collection, op.record)
       const boundary = await authorizeRecordBoundary(
         ctx,
         callerDid,

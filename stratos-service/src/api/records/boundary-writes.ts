@@ -26,15 +26,25 @@ import {
   sequenceChange,
   type SequenceTrace,
 } from './types.js'
+import {
+  assertRecordTypeMatches,
+  type LexiconCheck,
+  type LexiconValidationStatus,
+  skipLexiconValidation,
+  validateIfKnown,
+} from './lexicon-validation.js'
 import { ensureActorStoreExists } from './util.js'
 import {
   assertCollectionInHostedSpaceType,
   authorizeBoundary,
-  validateRecordContent,
+  validateRecordInBoundary,
+  assertBoundaryInCatalog,
   withConcurrencyRetry,
 } from './validation.js'
 
 const DOMAINS_TYPE = 'zone.stratos.boundary.defs#Domains'
+
+export { assertRecordTypeMatches }
 
 export type BoundaryWrite =
   | { kind: 'create'; collection: string; rkey?: string; record: unknown }
@@ -64,6 +74,7 @@ interface PreparedRecordWrite {
   recordBytes: Uint8Array
   cid: Cid
   tempRev: string
+  validationStatus?: LexiconValidationStatus
 }
 
 type PreparedWrite = PreparedDelete | PreparedRecordWrite
@@ -115,24 +126,6 @@ export function assertBodyBoundaryMatches(
   }
 }
 
-/**
- * Checks that a record names the collection it is written to. A record
- * without a string `$type` cannot be decoded when it is read back.
- * @throws InvalidRequestError `InvalidRecord` when `$type` is missing or differs
- */
-export function assertRecordTypeMatches(
-  record: Record<string, unknown>,
-  collection: string,
-): void {
-  const { $type: recordType } = record
-  if (recordType === collection) return
-  const found = typeof recordType === 'string' ? recordType : 'none'
-  throw new InvalidRequestError(
-    `The record $type (${found}) must equal its collection ${collection}`,
-    'InvalidRecord',
-  )
-}
-
 function isSingleBoundaryClaim(claimed: unknown, boundary: string): boolean {
   if (typeof claimed !== 'object' || claimed === null) return false
   const { $type, values, ...rest } = claimed as Record<string, unknown>
@@ -148,7 +141,9 @@ function isSingleBoundaryClaim(claimed: unknown, boundary: string): boolean {
 /**
  * Applies writes to one boundary of the caller's repo as a single commit.
  * Every write is judged against the rows stored for its key inside the commit
- * transaction; any refusal stores and sequences nothing.
+ * transaction; any refusal stores and sequences nothing. Records are taken in
+ * lex form, as the XRPC server delivers them, so blobs are `BlobRef` instances.
+ * @param lexiconCheck - how each record's lexicon is checked; known lexicons by default
  * @throws InvalidRequestError for every refusal, named per rule
  */
 export async function applyBoundaryWrites(
@@ -156,6 +151,7 @@ export async function applyBoundaryWrites(
   callerDid: string,
   boundary: string,
   writes: BoundaryWrite[],
+  lexiconCheck: LexiconCheck = validateIfKnown,
 ): Promise<CommitResult> {
   const committed = await runBoundaryWrites(
     ctx,
@@ -163,6 +159,7 @@ export async function applyBoundaryWrites(
     boundary,
     writes,
     planBatchWrite,
+    lexiconCheck,
   )
   if (!committed) {
     throw new Error('A batch write was planned as a no-op')
@@ -188,6 +185,7 @@ export async function deleteRecordInBoundary(
     boundary,
     [{ kind: 'delete', collection, rkey }],
     planSingleDelete,
+    skipLexiconValidation,
   )
   return committed
     ? { deleted: true, commit: committed.commit }
@@ -200,6 +198,7 @@ async function runBoundaryWrites(
   boundary: string,
   writes: BoundaryWrite[],
   plan: WritePlanner,
+  lexiconCheck: LexiconCheck,
 ): Promise<CommitResult | null> {
   if (writes.length === 0) {
     throw new InvalidRequestError('At least one write is required')
@@ -217,14 +216,22 @@ async function runBoundaryWrites(
   assertWritableEnrollment(enrollment)
   assertStratosCustody(enrollment)
   await authorizeBoundary(ctx, callerDid, boundary)
+  await assertBoundaryInCatalog(ctx, boundary)
 
-  const prepared = await prepareWrites(ctx, callerDid, boundary, keyed)
+  const prepared = await prepareWrites(
+    ctx,
+    callerDid,
+    boundary,
+    keyed,
+    lexiconCheck,
+  )
   const actorSign = await ctx.actorSigner.getSignFn(callerDid)
 
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
   let committed: CommitResult | null
   try {
     await assertWriterStillAuthorized(ctx, callerDid, boundary)
+    await assertBoundaryInCatalog(ctx, boundary)
     await ensureActorStoreExists(ctx.actorStore, callerDid)
 
     const retry = await withConcurrencyRetry(
@@ -278,6 +285,7 @@ async function prepareWrites(
   callerDid: string,
   boundary: string,
   writes: KeyedWrite[],
+  lexiconCheck: LexiconCheck,
 ): Promise<PreparedWrite[]> {
   for (const write of writes) {
     if (write.kind !== 'delete') {
@@ -299,24 +307,43 @@ async function prepareWrites(
         }
       }
       const record = write.record as Record<string, unknown>
-      // The stored body keeps no boundary of its own, but the content rules
-      // (allowed domains, reply escalation) judge the boundary it will live in.
-      await validateRecordContent(ctx, write.collection, {
-        ...record,
-        boundary: { $type: DOMAINS_TYPE, values: [{ value: boundary }] },
-      })
+      // The lexicon check comes first so the rules only see a well-formed record.
+      const validationStatus = lexiconCheck(write.collection, record)
+      await validateRecordInBoundary(ctx, write.collection, record, boundary)
       return {
         kind: write.kind,
         collection: write.collection,
         rkey: write.rkey,
         uri,
         record,
-        recordBytes: encodeRecord(record),
-        cid: await computeCid(record),
+        ...(await encodeForStorage(write.collection, record)),
         tempRev: TID.nextStr(),
+        validationStatus,
       }
     }),
   )
+}
+
+/**
+ * Encodes a record to the bytes and CID that are stored. The encoder throws
+ * plain errors for values the data model forbids, such as fractions, which the
+ * caller sent and must hear about as a refusal of the record.
+ */
+async function encodeForStorage(
+  collection: string,
+  record: Record<string, unknown>,
+): Promise<{ recordBytes: Uint8Array; cid: Cid }> {
+  try {
+    return {
+      recordBytes: encodeRecord(record),
+      cid: await computeCid(record),
+    }
+  } catch {
+    throw new InvalidRequestError(
+      `Invalid ${collection} record: the record cannot be encoded`,
+      'InvalidRecord',
+    )
+  }
 }
 
 async function commitPlannedWrites(
@@ -465,7 +492,11 @@ async function applyPlannedWrite(
   for (const blobCid of StratosValidator.extractBlobs(write.record)) {
     await store.blob.associateBlobWithRecord(parseCid(blobCid), write.uri)
   }
-  return { uri: write.uri, cid: parseCid(write.cid).toString() }
+  return {
+    uri: write.uri,
+    cid: parseCid(write.cid).toString(),
+    ...(write.validationStatus && { validationStatus: write.validationStatus }),
+  }
 }
 
 async function sequencePlannedWrite(

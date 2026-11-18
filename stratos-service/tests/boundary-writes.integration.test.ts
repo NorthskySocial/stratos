@@ -10,6 +10,7 @@ import {
   vi,
 } from 'vitest'
 import * as fc from 'fast-check'
+import { jsonToLex } from '@atproto/lexicon'
 import { parseCid } from '@northskysocial/stratos-core'
 import {
   applyBoundaryWrites,
@@ -65,12 +66,12 @@ function postWithBlob(text: string) {
       images: [
         {
           alt: 'Unit-01 berserk',
-          image: {
+          image: jsonToLex({
             $type: 'blob',
             ref: { $link: BLOB_CID },
             mimeType: 'image/png',
             size: 1024,
-          },
+          }),
         },
       ],
     },
@@ -464,7 +465,11 @@ function defineBoundaryWriteScenarios(
       ])
 
       expect(outcome.results).toEqual([
-        { uri: uriOf('eva00'), cid: expect.any(String) },
+        {
+          uri: uriOf('eva00'),
+          cid: expect.any(String),
+          validationStatus: 'valid',
+        },
       ])
       expect(outcome.commit.rev).toEqual(expect.any(String))
       expect((await harness.recordRows(uriOf('eva00'))).record?.cid).toBe(
@@ -1540,18 +1545,21 @@ describe.each(SCENARIO_GROUPS)('boundary writes on sqlite: %s', (group) => {
   defineBoundaryWriteScenarios(() => harness, group)
 })
 
-// Each group gets its own container: a harness leaves connections open, and a
-// single container runs out of them after a few dozen harnesses.
+// The groups split the scenarios for readable reports; they share one container.
+let postgresConnection: Promise<string> | undefined
+const LAST_SCENARIO_GROUP = SCENARIO_GROUPS[SCENARIO_GROUPS.length - 1]
+
 describe.each(SCENARIO_GROUPS)('boundary writes on postgres: %s', (group) => {
   let connectionString: string
   let harness: WriteHarness
 
   beforeAll(async () => {
-    connectionString = await startPostgresContainer()
+    postgresConnection ??= startPostgresContainer()
+    connectionString = await postgresConnection
   }, 120_000)
 
   afterAll(async () => {
-    await stopPostgresContainer()
+    if (group === LAST_SCENARIO_GROUP) await stopPostgresContainer()
   })
 
   beforeEach(async () => {

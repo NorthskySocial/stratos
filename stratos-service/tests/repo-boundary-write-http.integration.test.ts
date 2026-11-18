@@ -140,6 +140,7 @@ function defineWriteScenarios(
     expect(response.body).toEqual({
       uri: uriOf('eva00'),
       cid: expect.any(String),
+      validationStatus: 'valid',
     })
     expect((await harness.recordRows(uriOf('eva00'))).boundaries).toEqual([
       HARNESS_ENGINEERING,
@@ -882,11 +883,13 @@ function defineApplyWritesScenarios(getHarness: () => WriteHarness) {
           $type: `${WRITE_TYPE}createResult`,
           uri: uriOf('eva-new'),
           cid: expect.any(String),
+          validationStatus: 'valid',
         },
         {
           $type: `${WRITE_TYPE}updateResult`,
           uri: uriOf('eva-old'),
           cid: expect.any(String),
+          validationStatus: 'valid',
         },
         { $type: `${WRITE_TYPE}deleteResult` },
       ],
@@ -1156,6 +1159,7 @@ describe('boundary record writes over http on postgres', () => {
       expect(response.body).toEqual({
         uri: uriOf('eva00'),
         cid: expect.any(String),
+        validationStatus: 'valid',
       })
       expect((await harness.recordRows(uriOf('eva00'))).boundaries).toEqual([
         HARNESS_ENGINEERING,
@@ -1222,6 +1226,7 @@ describe('boundary record writes over http on postgres', () => {
             $type: `${WRITE_TYPE}createResult`,
             uri: uriOf('eva00'),
             cid: expect.any(String),
+            validationStatus: 'valid',
           },
         ],
       })

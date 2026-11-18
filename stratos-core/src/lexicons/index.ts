@@ -12,6 +12,16 @@ import zoneStratosAdminListBoundaries from '../../../lexicons/zone/stratos/admin
 import zoneStratosServerListRooms from '../../../lexicons/zone/stratos/server/listRooms.json' with { type: 'json' }
 import type { LexiconDoc } from '@atproto/lexicon'
 import { atprotoLexicons } from './atproto.js'
+import appBskyRichtextFacet from './vendored/app/bsky/richtext/facet.json' with { type: 'json' }
+import appBskyEmbedImages from './vendored/app/bsky/embed/images.json' with { type: 'json' }
+import appBskyEmbedVideo from './vendored/app/bsky/embed/video.json' with { type: 'json' }
+import appBskyEmbedExternal from './vendored/app/bsky/embed/external.json' with { type: 'json' }
+import appBskyEmbedRecord from './vendored/app/bsky/embed/record.json' with { type: 'json' }
+import appBskyEmbedRecordWithMedia from './vendored/app/bsky/embed/recordWithMedia.json' with { type: 'json' }
+import appBskyEmbedGallery from './vendored/app/bsky/embed/gallery.json' with { type: 'json' }
+import appBskyEmbedDefs from './vendored/app/bsky/embed/defs.json' with { type: 'json' }
+import comAtprotoRepoStrongRef from './vendored/com/atproto/repo/strongRef.json' with { type: 'json' }
+import comAtprotoLabelDefs from './vendored/com/atproto/label/defs.json' with { type: 'json' }
 import zoneStratosActorEnrollment from '../../../lexicons/zone/stratos/actor/enrollment.json' with { type: 'json' }
 import zoneStratosAdminListEnrollments from '../../../lexicons/zone/stratos/admin/listEnrollments.json' with { type: 'json' }
 import zoneStratosAdminGetRepoHost from '../../../lexicons/zone/stratos/admin/getRepoHost.json' with { type: 'json' }
@@ -57,6 +67,16 @@ import zoneStratosSyncSubscribeRecords from '../../../lexicons/zone/stratos/sync
 
 export const stratosLexicons: LexiconDoc[] = [
   ...atprotoLexicons,
+  appBskyRichtextFacet as LexiconDoc,
+  appBskyEmbedImages as LexiconDoc,
+  appBskyEmbedVideo as LexiconDoc,
+  appBskyEmbedExternal as LexiconDoc,
+  appBskyEmbedRecord as LexiconDoc,
+  appBskyEmbedRecordWithMedia as LexiconDoc,
+  appBskyEmbedGallery as LexiconDoc,
+  appBskyEmbedDefs as LexiconDoc,
+  comAtprotoRepoStrongRef as LexiconDoc,
+  comAtprotoLabelDefs as LexiconDoc,
   zoneStratosBoundaryCheckpoint as LexiconDoc,
   zoneStratosBoundaryOperation as LexiconDoc,
   zoneStratosAdminGetBoundaryAuditState as LexiconDoc,

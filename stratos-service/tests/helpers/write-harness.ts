@@ -338,6 +338,9 @@ async function startWriteHarness(
         if (await ctx.actorStore.exists(did)) await ctx.actorStore.destroy(did)
       }
       await ctx.destroy()
+      // The context's own teardown ends only the service pool; the actor
+      // store owns two more pools it never closes.
+      await ctx.actorStore.close?.()
       await rm(dataDir, { recursive: true, force: true })
     },
   }

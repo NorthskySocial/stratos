@@ -64,6 +64,7 @@ export interface SequenceTrace {
 export interface BatchWriteResult {
   uri?: string
   cid?: string
+  validationStatus?: 'valid' | 'unknown'
 }
 
 export interface CommitResult {

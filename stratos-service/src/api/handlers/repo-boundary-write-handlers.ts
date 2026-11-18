@@ -6,6 +6,12 @@ import {
   type BoundaryWrite,
   deleteRecordInBoundary,
 } from '../records/index.js'
+import {
+  type LexiconCheck,
+  requireLexiconValidation,
+  skipLexiconValidation,
+  validateIfKnown,
+} from '../records/lexicon-validation.js'
 import { createXrpcHandler } from '../util.js'
 import { HANDLER_METHOD } from '../handlers.js'
 import { observeRecordOperation } from './repo-write-handlers.js'
@@ -22,6 +28,7 @@ interface BoundaryRecordInput {
 interface RecordWriteOutput {
   uri: string
   cid: string
+  validationStatus?: 'valid' | 'unknown'
 }
 
 interface BoundaryDeleteInput {
@@ -47,7 +54,7 @@ interface BoundaryApplyWritesInput {
 }
 
 type ApplyWritesResult =
-  | { $type: string; uri: string; cid: string }
+  | ({ $type: string } & RecordWriteOutput)
   | { $type: string }
 
 /**
@@ -69,6 +76,7 @@ export const createBoundaryRecordHandler = (ctx: AppContext) =>
           did!,
           input.boundary,
           { kind: 'create', collection, rkey, record },
+          lexiconCheckFor(input.validate),
         )
       },
     },
@@ -93,6 +101,7 @@ export const putBoundaryRecordHandler = (ctx: AppContext) =>
           did!,
           input.boundary,
           { kind: 'put', collection, rkey, record },
+          lexiconCheckFor(input.validate),
         )
       },
     },
@@ -153,7 +162,13 @@ export const applyBoundaryWritesHandler = (ctx: AppContext) =>
         const writes = input.writes.map(toBoundaryWrite)
         const startedAt = Date.now()
         const { results } = await observeRecordOperation(ctx, 'batch', () =>
-          applyBoundaryWrites(ctx, did!, input.boundary, writes),
+          applyBoundaryWrites(
+            ctx,
+            did!,
+            input.boundary,
+            writes,
+            lexiconCheckFor(input.validate),
+          ),
         )
         ctx.logger?.info(
           {
@@ -173,6 +188,13 @@ export const applyBoundaryWritesHandler = (ctx: AppContext) =>
     },
   )
 
+/** Reads the wire `validate` field once per request: false skips, absent checks what is known, true requires a known lexicon. */
+function lexiconCheckFor(validate: boolean | undefined): LexiconCheck {
+  if (validate === false) return skipLexiconValidation
+  if (validate === true) return requireLexiconValidation
+  return validateIfKnown
+}
+
 function assertRepoIsCaller(repo: string, callerDid: string): void {
   if (repo !== callerDid) {
     throw new AuthRequiredError('Cannot write a record for another user')
@@ -191,12 +213,13 @@ async function writeOne(
   callerDid: string,
   boundary: string,
   write: BoundaryWrite,
+  lexiconCheck: LexiconCheck,
 ): Promise<RecordWriteOutput> {
   const startedAt = Date.now()
   const { results } = await observeRecordOperation(
     ctx,
     telemetry.operation,
-    () => applyBoundaryWrites(ctx, callerDid, boundary, [write]),
+    () => applyBoundaryWrites(ctx, callerDid, boundary, [write], lexiconCheck),
   )
   const output = toRecordOutput(results[0])
   ctx.logger?.info(
@@ -245,5 +268,11 @@ function toRecordOutput(result: BatchWriteResult): RecordWriteOutput {
   if (result.uri === undefined || result.cid === undefined) {
     throw new Error('A record write returned no uri and cid')
   }
-  return { uri: result.uri, cid: result.cid }
+  return {
+    uri: result.uri,
+    cid: result.cid,
+    ...(result.validationStatus && {
+      validationStatus: result.validationStatus,
+    }),
+  }
 }

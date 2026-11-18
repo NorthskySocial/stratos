@@ -12,7 +12,7 @@ import type { ActorSignFn } from '../../infra/signing/index.js'
 import {
   assertCollectionInHostedSpaceType,
   authorizeRecordBoundary,
-  validateRecordContent,
+  validateLegacyRecordContent,
   withConcurrencyRetry,
 } from './validation.js'
 import {
@@ -101,7 +101,7 @@ export async function createRecord(
   performanceTimer = performance.now()
   // `validate: false` cannot loosen any Stratos rule on this path: lexicon
   // errors are never fatal, and the business rules run on every write.
-  await validateRecordContent(ctx, collection, record)
+  await validateLegacyRecordContent(ctx, collection, record)
   const boundary = await authorizeRecordBoundary(
     ctx,
     callerDid,

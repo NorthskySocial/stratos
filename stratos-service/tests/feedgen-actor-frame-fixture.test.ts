@@ -1,48 +1,36 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { mkdir, rm } from 'node:fs/promises'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { randomBytes } from 'node:crypto'
-import { EventEmitter } from 'node:events'
 import type http from 'node:http'
 import express from 'express'
 import WebSocket from 'ws'
 import { AtUri } from '@atproto/syntax'
 import { Lexicons } from '@atproto/lexicon'
 import { Secp256k1Keypair } from '@atproto/crypto'
-import { decode as cborDecode, decodeAll } from '@atproto/lex-cbor'
-import { isTypedLexMap } from '@atproto/lex-data'
-import type { IdResolver } from '@atproto/identity'
+import { decodeAll } from '@atproto/lex-cbor'
+import { IdResolver, MemoryCache } from '@atproto/identity'
 import { createServiceJwt, Server as XrpcServer } from '@atproto/xrpc-server'
 import {
+  type BoundarySettings,
   computeCid,
   encodeRecord,
   parseCid,
   stratosLexicons,
 } from '@northskysocial/stratos-core'
 
-import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
 import type { AppContext } from '../src/context.js'
-import type { ActorStore } from '../src/actor-store-types.js'
 import {
   applyBoundaryWrites,
   createRecord,
   deleteRecord,
 } from '../src/api/records/index.js'
 import { createRepoManager } from '../src/api/records/util.js'
-import {
-  closeServiceDb,
-  createServiceDb,
-  migrateServiceDb,
-  type ServiceDb,
-} from '../src/db/index.js'
-import { EnrollmentBoundaryResolver } from '../src/features/enrollment/index.js'
-import { SqliteLabelStore } from '../src/features/moderation/index.js'
 import { createSubscribeAuthVerifier } from '../src/infra/auth/verifiers.js'
-import { RepoWriteLocks } from '../src/shared/repo-write-lock.js'
 import { registerSubscribeRecords } from '../src/subscription/index.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  HARNESS_SERVICE_DID,
+  startSqliteWriteHarness,
+  type WriteHarness,
+} from './helpers/write-harness.js'
 
 // The Rust feed generator parses the same file in its conformance tests, so
 // the two sides cannot drift apart unnoticed. Set WRITE_ACTOR_FRAME_FIXTURE=1
@@ -53,7 +41,7 @@ const FIXTURE_URL = new URL(
 )
 const REGENERATE = process.env.WRITE_ACTOR_FRAME_FIXTURE === '1'
 
-const SERVICE_DID = 'did:web:nerv.tokyo.jp'
+const SERVICE_DID = HARNESS_SERVICE_DID
 const TOKYO3_NAME = 'tokyo-3'
 const GEOFRONT_NAME = 'geofront'
 const TOKYO3 = `${SERVICE_DID}/${TOKYO3_NAME}`
@@ -64,6 +52,18 @@ const SUBSCRIBER_DID = 'did:web:geofront.tokyo.jp'
 const SUBSCRIBE_METHOD = 'zone.stratos.sync.subscribeRecords'
 const FRAME_TIMEOUT_MS = 10_000
 const MAX_ACTOR_FRAME_BYTES = 32 * 1024
+
+function openBoundarySettings(displayName: string): BoundarySettings {
+  return {
+    displayName,
+    description: '',
+    listed: false,
+    joinable: false,
+    autoEnroll: false,
+    appAccess: 'open',
+    clientIds: [],
+  }
+}
 
 const uriOf = (rkey: string) => `at://${ACTOR_DID}/${COLLECTION}/${rkey}`
 
@@ -184,104 +184,48 @@ function opsOf(frame: Uint8Array): FrameOp[] {
 }
 
 describe('the shared actor commit frame fixture', () => {
-  let dataDir: string
-  let db: ServiceDb
-  let actorStore: ActorStore
-  let enrollmentStore: SqliteEnrollmentStore
-  let repoWriteLocks: RepoWriteLocks
+  let harness: WriteHarness
+  let actorStore: AppContext['actorStore']
   let ctx: AppContext
   let subscriberKey: Secp256k1Keypair
   let httpServer: http.Server
 
   beforeEach(async () => {
-    dataDir = join(
-      tmpdir(),
-      `stratos-actor-frames-${randomBytes(8).toString('hex')}`,
-    )
-    await mkdir(dataDir, { recursive: true })
-    db = createServiceDb(join(dataDir, 'service.sqlite'))
-    await migrateServiceDb(db)
-    enrollmentStore = new SqliteEnrollmentStore(db)
-    repoWriteLocks = new RepoWriteLocks()
-    actorStore = new StratosActorStore({
-      dataDir,
-      blobstore: () => createMockBlobStore(),
-      cborToRecord: (content) => {
-        const data = cborDecode(content)
-        if (isTypedLexMap(data)) return data
-        throw new Error('Expected record with $type property')
-      },
-    }) as unknown as ActorStore
-    const logger = {
-      debug: vi.fn(),
-      info: vi.fn(),
-      error: vi.fn(),
-      warn: vi.fn(),
-    }
-    const cfg = createTestConfig(dataDir)
-    cfg.stratos.serviceDid = SERVICE_DID
-    cfg.stratos.allowedDomains = [TOKYO3_NAME, GEOFRONT_NAME]
+    harness = await startSqliteWriteHarness()
+    ctx = harness.ctx
+    actorStore = ctx.actorStore
 
-    await enrollmentStore.enroll({
-      did: ACTOR_DID,
-      enrolledAt: new Date().toISOString(),
-      active: true,
-      signingKeyDid: ACTOR_DID,
-    })
-    await enrollmentStore.setBoundaries(ACTOR_DID, [TOKYO3, GEOFRONT])
-    await enrollmentStore.enroll({
-      did: SUBSCRIBER_DID,
-      enrolledAt: new Date().toISOString(),
-      active: true,
-      signingKeyDid: SUBSCRIBER_DID,
-      isService: true,
-    })
-    await enrollmentStore.setBoundaries(SUBSCRIBER_DID, [TOKYO3, GEOFRONT])
+    for (const name of [TOKYO3_NAME, GEOFRONT_NAME]) {
+      await ctx.boundaryManager!.create(name, openBoundarySettings(name))
+    }
+    await harness.enrollMember(ACTOR_DID, [TOKYO3, GEOFRONT])
+    await harness.enrollServiceIdentity(SUBSCRIBER_DID, [TOKYO3, GEOFRONT])
 
     subscriberKey = await Secp256k1Keypair.create()
-    const idResolver = {
-      did: {
-        resolve: async (did: string) =>
-          did === SUBSCRIBER_DID ? didDocumentFor(subscriberKey) : undefined,
-      },
-    } as unknown as IdResolver
+    const didCache = new MemoryCache()
+    await didCache.cacheDid(SUBSCRIBER_DID, didDocumentFor(subscriberKey))
+    const subscriberIdResolver = new IdResolver({ didCache })
 
-    ctx = {
-      cfg,
-      actorStore,
-      enrollmentStore,
-      boundaryResolver: new EnrollmentBoundaryResolver(enrollmentStore),
-      labelStore: new SqliteLabelStore(db, join(dataDir, 'service.sqlite')),
-      serviceDid: SERVICE_DID,
-      sequenceEvents: new EventEmitter(),
-      enrollmentEvents: new EventEmitter(),
-      writeRateLimiter: { assertWriteAllowed: vi.fn() },
-      actorSigner: {
-        getSignFn: vi
-          .fn()
-          .mockResolvedValue(() => Promise.resolve(new Uint8Array(64))),
-      },
-      repoWriteLocks,
-      logger,
+    const subscribeCtx = {
+      ...ctx,
       xrpcServer: new XrpcServer(stratosLexicons),
       authVerifier: {
-        subscribeAuth: createSubscribeAuthVerifier(idResolver, SERVICE_DID),
+        ...ctx.authVerifier,
+        subscribeAuth: createSubscribeAuthVerifier(
+          subscriberIdResolver,
+          SERVICE_DID,
+        ),
       },
-    } as unknown as AppContext
-    registerSubscribeRecords(ctx)
+    } as AppContext
+    registerSubscribeRecords(subscribeCtx)
     const app = express()
-    app.use(ctx.xrpcServer.router)
+    app.use(subscribeCtx.xrpcServer.router)
     httpServer = app.listen(0)
-
-    await actorStore.create(ACTOR_DID)
   })
 
   afterEach(async () => {
-    await actorStore.destroy(ACTOR_DID)
-    repoWriteLocks.destroy()
     await new Promise((resolve) => httpServer.close(resolve))
-    await closeServiceDb(db)
-    await rm(dataDir, { recursive: true, force: true })
+    await harness.close()
   })
 
   // Writes the way the generic write procedures will: the authority hands the

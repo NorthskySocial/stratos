@@ -1,0 +1,64 @@
+{
+  "docs": [
+    {
+      "path": "app/bsky/richtext/facet.json",
+      "nsid": "app.bsky.richtext.facet",
+      "sha256": "ef44635c7fc3ab095bc02d29ecc2af6c410b4d5a4a82fd3a971a93674092ff8f",
+      "sourceCommit": "98ef3a6b9"
+    },
+    {
+      "path": "app/bsky/embed/images.json",
+      "nsid": "app.bsky.embed.images",
+      "sha256": "06491ead4a1bec37271a517d3c8ff2baa47ab5996d25819df471a6f68dd5d912",
+      "sourceCommit": "98ef3a6b9"
+    },
+    {
+      "path": "app/bsky/embed/video.json",
+      "nsid": "app.bsky.embed.video",
+      "sha256": "789e2da1d249e7a05237885edf359387b8dcb863e007d5562a9a4166f70f1a31",
+      "sourceCommit": "98ef3a6b9"
+    },
+    {
+      "path": "app/bsky/embed/external.json",
+      "nsid": "app.bsky.embed.external",
+      "sha256": "0193c2f4704b4a1ad94e3c747b386530f4ec277c0d6336882e4ba5d8980c9ba1",
+      "sourceCommit": "98ef3a6b9"
+    },
+    {
+      "path": "app/bsky/embed/record.json",
+      "nsid": "app.bsky.embed.record",
+      "sha256": "17dcb9f3c9fd7ee9c9e5d10547e5ae8d1ffa5f3cf43f585b3930ad102ef279f1",
+      "sourceCommit": "98ef3a6b9"
+    },
+    {
+      "path": "app/bsky/embed/recordWithMedia.json",
+      "nsid": "app.bsky.embed.recordWithMedia",
+      "sha256": "2b1069ecf6d65a31668f1ecb1ba54b0decff0eec3c9250df31cd3920cf8e06c1",
+      "sourceCommit": "98ef3a6b9"
+    },
+    {
+      "path": "app/bsky/embed/gallery.json",
+      "nsid": "app.bsky.embed.gallery",
+      "sha256": "6348fe6355898f76b6e87fdee7e19e7aa158dec657a1612dff04247e18989083",
+      "sourceCommit": "98ef3a6b9"
+    },
+    {
+      "path": "app/bsky/embed/defs.json",
+      "nsid": "app.bsky.embed.defs",
+      "sha256": "c9db5f67269836b6f1c147eb507685548f0cdbe2ac6bbd31f1d0c9eb796fd42e",
+      "sourceCommit": "98ef3a6b9"
+    },
+    {
+      "path": "com/atproto/repo/strongRef.json",
+      "nsid": "com.atproto.repo.strongRef",
+      "sha256": "2d27ecc2a09a86b5065c36e36b987ef726a814023c5e198a1eda8e4c283714e0",
+      "sourceCommit": "98ef3a6b9"
+    },
+    {
+      "path": "com/atproto/label/defs.json",
+      "nsid": "com.atproto.label.defs",
+      "sha256": "b20ed39fa5530ff62a6b4bfbbd7a3648dd57896db7c9c7ac379e1bfc64d1f724",
+      "sourceCommit": "98ef3a6b9"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import {
   expect,
   it,
 } from 'vitest'
+import postgres from 'postgres'
 import {
   asMember,
   HARNESS_DESIGN,
@@ -166,4 +167,43 @@ describe('write harness on postgres', () => {
   })
 
   defineSmokeScenarios(() => harness)
+})
+
+describe('write harness connection release on postgres', () => {
+  const CYCLES = 60
+  const CONNECTION_TOLERANCE = 1
+  let connectionString: string
+
+  beforeAll(async () => {
+    connectionString = await startPostgresContainer()
+  }, 120_000)
+
+  afterAll(async () => {
+    await stopPostgresContainer()
+  })
+
+  async function openConnections(): Promise<number> {
+    const probe = postgres(connectionString, { max: 1 })
+    try {
+      const [row] = await probe<
+        { open: number }[]
+      >`SELECT count(*)::int AS open FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()`
+      return row.open
+    } finally {
+      await probe.end()
+    }
+  }
+
+  it('returns to the starting connection count after many start and stop cycles', async () => {
+    const before = await openConnections()
+
+    for (let cycle = 0; cycle < CYCLES; cycle++) {
+      const cycled = await startPostgresWriteHarness(connectionString)
+      await cycled.enrollMember(PILOT, [HARNESS_ENGINEERING])
+      await cycled.close()
+    }
+
+    const after = await openConnections()
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(CONNECTION_TOLERANCE)
+  }, 600_000)
 })

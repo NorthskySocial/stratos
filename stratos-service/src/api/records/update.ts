@@ -11,7 +11,7 @@ import type { AppContext } from '../../context-types.js'
 import {
   authorizeRecordBoundary,
   assertCollectionInHostedSpaceType,
-  validateRecordContent,
+  validateLegacyRecordContent,
   withConcurrencyRetry,
 } from './validation.js'
 import { createRepoManager } from './util.js'
@@ -70,7 +70,7 @@ async function prepareUpdatePhases(
   t0 = performance.now()
   // `validate: false` cannot loosen any Stratos rule on this path: lexicon
   // errors are never fatal, and the business rules run on every write.
-  await validateRecordContent(ctx, collection, record)
+  await validateLegacyRecordContent(ctx, collection, record)
   const boundary = await authorizeRecordBoundary(
     ctx,
     callerDid,

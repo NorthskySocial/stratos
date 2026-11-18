@@ -29,6 +29,10 @@ import {
   uploadBlobHandler,
 } from './handlers/index.js'
 
+// The most a boundary write request body may carry; legacy writes keep the
+// parser's default.
+const BOUNDARY_WRITE_JSON_LIMIT_BYTES = 1_000_000
+
 export enum HANDLER_METHOD {
   CREATE_RECORD = 'com.atproto.repo.createRecord',
   DELETE_RECORD = 'com.atproto.repo.deleteRecord',
@@ -106,24 +110,28 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
   xrpc.method(HANDLER_METHOD.CREATE_BOUNDARY_RECORD, {
     type: 'procedure',
     auth: authVerifier.standard,
+    opts: { jsonLimit: BOUNDARY_WRITE_JSON_LIMIT_BYTES },
     handler: createBoundaryRecordHandler(ctx),
   })
 
   xrpc.method(HANDLER_METHOD.PUT_BOUNDARY_RECORD, {
     type: 'procedure',
     auth: authVerifier.standard,
+    opts: { jsonLimit: BOUNDARY_WRITE_JSON_LIMIT_BYTES },
     handler: putBoundaryRecordHandler(ctx),
   })
 
   xrpc.method(HANDLER_METHOD.DELETE_BOUNDARY_RECORD, {
     type: 'procedure',
     auth: authVerifier.standard,
+    opts: { jsonLimit: BOUNDARY_WRITE_JSON_LIMIT_BYTES },
     handler: deleteBoundaryRecordHandler(ctx),
   })
 
   xrpc.method(HANDLER_METHOD.APPLY_BOUNDARY_WRITES, {
     type: 'procedure',
     auth: authVerifier.standard,
+    opts: { jsonLimit: BOUNDARY_WRITE_JSON_LIMIT_BYTES },
     handler: applyBoundaryWritesHandler(ctx),
   })
 
