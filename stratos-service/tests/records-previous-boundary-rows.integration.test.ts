@@ -6,14 +6,10 @@ import {
   describe,
   expect,
   it,
-  vi,
 } from 'vitest'
-import { mkdir, rm } from 'node:fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
+import { encodeRecord } from '@northskysocial/stratos-core'
 
-import { StratosActorStore } from '../src/context.js'
+import type { AppContext } from '../src/context.js'
 import {
   applyWritesBatch,
   createRecord,
@@ -22,15 +18,16 @@ import {
 import { parentBoundaryCache } from '../src/api/records/validation.js'
 import type { ActorStore } from '../src/actor-store-types.js'
 import { decodeEvent, type SeqEvent } from '../src/subscription/index.js'
-import { PostgresActorStore } from '../src/infra/storage/postgres/index.js'
 import {
-  cborToRecord,
   createCid,
-  createMockBlobStoreCreator,
   startPostgresContainer,
   stopPostgresContainer,
 } from './helpers/test-env.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  startPostgresWriteHarness,
+  startSqliteWriteHarness,
+  type WriteHarness,
+} from './helpers/write-harness.js'
 
 const SERVICE_DID = 'did:web:nerv.tokyo.jp'
 const ENGINEERING = `${SERVICE_DID}/engineering`
@@ -79,7 +76,7 @@ function boundaryNames(op: RawOp | undefined) {
 }
 
 interface StoreHarness {
-  actorStore: ActorStore
+  write: WriteHarness
   cleanup: () => Promise<void>
 }
 
@@ -89,10 +86,13 @@ function describeBoundaryRowsOnWrites(
 ) {
   describe(label, () => {
     let harness: StoreHarness
-    let ctx: any
+    let actorStore: ActorStore
+    let ctx: AppContext
 
     beforeAll(async () => {
       harness = await openStore()
+      ctx = harness.write.ctx
+      actorStore = ctx.actorStore
     }, 120_000)
 
     afterAll(async () => {
@@ -101,41 +101,12 @@ function describeBoundaryRowsOnWrites(
 
     beforeEach(async () => {
       parentBoundaryCache.clear()
-      ctx = {
-        cfg: createTestConfig('/unused-by-actor-store'),
-        actorStore: harness.actorStore,
-        enrollmentStore: {
-          getEnrollment: vi
-            .fn()
-            .mockResolvedValue({ active: true, isService: false }),
-        },
-        serviceDid: SERVICE_DID,
-        writeRateLimiter: { assertWriteAllowed: vi.fn() },
-        actorSigner: {
-          sign: vi.fn().mockResolvedValue(new Uint8Array(64)),
-          getSignFn: vi
-            .fn()
-            .mockResolvedValue(() => Promise.resolve(new Uint8Array(64))),
-          getPublicKey: vi.fn().mockResolvedValue('did:key:zDnaeTestKey'),
-          ensureKey: vi.fn().mockResolvedValue(undefined),
-        },
-        repoWriteLocks: { acquire: vi.fn().mockResolvedValue(() => {}) },
-        logger: {
-          debug: vi.fn(),
-          info: vi.fn(),
-          error: vi.fn(),
-          warn: vi.fn(),
-        },
-        sequenceEvents: { emit: vi.fn() },
-        boundaryResolver: {
-          getBoundaries: vi.fn().mockResolvedValue([ENGINEERING, DESIGN]),
-        },
-      }
-      await harness.actorStore.create(OWNER_DID)
+      await harness.write.enrollMember(OWNER_DID, [ENGINEERING, DESIGN])
     })
 
     afterEach(async () => {
-      await harness.actorStore.destroy(OWNER_DID)
+      await ctx.enrollmentStore.unenroll(OWNER_DID)
+      await actorStore.destroy(OWNER_DID)
     })
 
     async function seed(
@@ -143,9 +114,9 @@ function describeBoundaryRowsOnWrites(
       body: Record<string, unknown>,
       rowBoundary: string,
     ) {
-      const content = new TextEncoder().encode(JSON.stringify(body))
+      const content = encodeRecord(body)
       const cid = await createCid(content)
-      await harness.actorStore.transact(OWNER_DID, async (store) => {
+      await actorStore.transact(OWNER_DID, async (store) => {
         await store.record.putRecord({
           uri: uriOf(rkey),
           cid,
@@ -164,7 +135,7 @@ function describeBoundaryRowsOnWrites(
     }
 
     async function takeDown(rkey: string) {
-      await harness.actorStore.transact(OWNER_DID, async (store) => {
+      await actorStore.transact(OWNER_DID, async (store) => {
         await store.record.updateRecordTakedown(uriOf(rkey), {
           applied: true,
           ref: `case-${rkey}`,
@@ -173,27 +144,24 @@ function describeBoundaryRowsOnWrites(
     }
 
     async function storedBoundaries(rkey: string) {
-      return harness.actorStore.read(OWNER_DID, (store) =>
+      return actorStore.read(OWNER_DID, (store) =>
         store.record.getRecordBoundaries(uriOf(rkey)),
       )
     }
 
     async function sequencedOps(): Promise<RawOp[]> {
-      const events = await harness.actorStore.read(
-        OWNER_DID,
-        async (store: any) => {
-          const rows = await store.sequence.getEventsSince(0, 1000)
-          return rows.map(
-            (row: any): SeqEvent => ({
-              seq: row.seq,
-              did: row.did,
-              time: row.sequencedAt,
-              rev: row.rev ?? '',
-              event: row.event,
-            }),
-          )
-        },
-      )
+      const events = await actorStore.read(OWNER_DID, async (store: any) => {
+        const rows = await store.sequence.getEventsSince(0, 1000)
+        return rows.map(
+          (row: any): SeqEvent => ({
+            seq: row.seq,
+            did: row.did,
+            time: row.sequencedAt,
+            rev: row.rev ?? '',
+            event: row.event,
+          }),
+        )
+      })
       return events.flatMap(
         (event: SeqEvent) => decodeEvent(event).ops as unknown as RawOp[],
       )
@@ -325,28 +293,17 @@ function describeBoundaryRowsOnWrites(
 }
 
 describeBoundaryRowsOnWrites('SQLite store', async () => {
-  const dataDir = join(
-    tmpdir(),
-    `stratos-test-${randomBytes(8).toString('hex')}`,
-  )
-  await mkdir(dataDir, { recursive: true })
-  const actorStore = new StratosActorStore({
-    dataDir,
-    blobstore: () => createMockBlobStore(),
-    cborToRecord: (content) => JSON.parse(new TextDecoder().decode(content)),
-  })
-  return {
-    actorStore: actorStore as unknown as ActorStore,
-    cleanup: () => rm(dataDir, { recursive: true, force: true }),
-  }
+  const write = await startSqliteWriteHarness()
+  return { write, cleanup: () => write.close() }
 })
 
 describeBoundaryRowsOnWrites('runtime Postgres store', async () => {
-  const connectionString = await startPostgresContainer()
-  const actorStore = new PostgresActorStore({
-    connectionString,
-    blobstore: createMockBlobStoreCreator(),
-    cborToRecord,
-  })
-  return { actorStore, cleanup: () => stopPostgresContainer() }
+  const write = await startPostgresWriteHarness(await startPostgresContainer())
+  return {
+    write,
+    cleanup: async () => {
+      await write.close()
+      await stopPostgresContainer()
+    },
+  }
 })

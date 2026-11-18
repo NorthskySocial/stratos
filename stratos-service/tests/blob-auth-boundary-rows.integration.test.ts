@@ -6,26 +6,24 @@ import {
   describe,
   expect,
   it,
-  vi,
 } from 'vitest'
-import { mkdir, rm } from 'node:fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
 import type { Cid } from '@atproto/lex-data'
-
-import { StratosActorStore } from '../src/context.js'
-import { BlobAuthServiceImpl } from '../src/features/blob/adapter.js'
-import type { ActorStore } from '../src/actor-store-types.js'
-import { PostgresActorStore } from '../src/infra/storage/postgres/index.js'
 import {
-  cborToRecord,
+  encodeRecord,
+  type BlobAuthService,
+} from '@northskysocial/stratos-core'
+
+import type { ActorStore } from '../src/actor-store-types.js'
+import {
   createCid,
-  createMockBlobStoreCreator,
   startPostgresContainer,
   stopPostgresContainer,
 } from './helpers/test-env.js'
-import { createMockBlobStore } from './utils/index.js'
+import {
+  startPostgresWriteHarness,
+  startSqliteWriteHarness,
+  type WriteHarness,
+} from './helpers/write-harness.js'
 
 const SERVICE_DID = 'did:web:nerv.tokyo.jp'
 const ENGINEERING = `${SERVICE_DID}/engineering`
@@ -63,7 +61,7 @@ function bodyClaiming(text: string, boundaries: string[]) {
 }
 
 interface StoreHarness {
-  actorStore: ActorStore
+  write: WriteHarness
   cleanup: () => Promise<void>
 }
 
@@ -73,10 +71,16 @@ function describeBlobAccessFromBoundaryRows(
 ) {
   describe(label, () => {
     let harness: StoreHarness
-    let service: BlobAuthServiceImpl
+    let actorStore: ActorStore
+    let service: BlobAuthService
 
     beforeAll(async () => {
       harness = await openStore()
+      actorStore = harness.write.ctx.actorStore
+      service = harness.write.ctx.blobAuth
+      for (const [viewerDid, boundaries] of Object.entries(VIEWER_BOUNDARIES)) {
+        await harness.write.enrollBoundaryHolder(viewerDid, boundaries)
+      }
     }, 120_000)
 
     afterAll(async () => {
@@ -84,26 +88,17 @@ function describeBlobAccessFromBoundaryRows(
     })
 
     beforeEach(async () => {
-      service = new BlobAuthServiceImpl(
-        harness.actorStore,
-        {
-          getBoundaries: vi.fn(
-            async (did: string) => VIEWER_BOUNDARIES[did] ?? [],
-          ),
-        } as never,
-        { warn: vi.fn() } as never,
-      )
-      await harness.actorStore.create(OWNER_DID)
+      await actorStore.create(OWNER_DID)
     })
 
     afterEach(async () => {
-      await harness.actorStore.destroy(OWNER_DID)
+      await actorStore.destroy(OWNER_DID)
     })
 
     async function seedBlob(name: string): Promise<Cid> {
       const bytes = new TextEncoder().encode(`blob ${name}`)
       const cid = await createCid(bytes)
-      await harness.actorStore.transact(OWNER_DID, async (store) => {
+      await actorStore.transact(OWNER_DID, async (store) => {
         await store.blob.trackBlob({
           cid,
           mimeType: 'image/png',
@@ -119,9 +114,9 @@ function describeBlobAccessFromBoundaryRows(
       rowBoundary: string | null,
       blob: Cid,
     ) {
-      const content = new TextEncoder().encode(JSON.stringify(body))
+      const content = encodeRecord(body)
       const cid = await createCid(content)
-      await harness.actorStore.transact(OWNER_DID, async (store) => {
+      await actorStore.transact(OWNER_DID, async (store) => {
         await store.record.putRecord({
           uri: uriOf(rkey),
           cid,
@@ -143,7 +138,7 @@ function describeBlobAccessFromBoundaryRows(
     }
 
     async function takeDown(rkey: string) {
-      await harness.actorStore.transact(OWNER_DID, async (store) => {
+      await actorStore.transact(OWNER_DID, async (store) => {
         await store.record.updateRecordTakedown(uriOf(rkey), {
           applied: true,
           ref: `case-${rkey}`,
@@ -232,28 +227,17 @@ function describeBlobAccessFromBoundaryRows(
 }
 
 describeBlobAccessFromBoundaryRows('SQLite store', async () => {
-  const dataDir = join(
-    tmpdir(),
-    `stratos-test-${randomBytes(8).toString('hex')}`,
-  )
-  await mkdir(dataDir, { recursive: true })
-  const actorStore = new StratosActorStore({
-    dataDir,
-    blobstore: () => createMockBlobStore(),
-    cborToRecord: (content) => JSON.parse(new TextDecoder().decode(content)),
-  })
-  return {
-    actorStore: actorStore as unknown as ActorStore,
-    cleanup: () => rm(dataDir, { recursive: true, force: true }),
-  }
+  const write = await startSqliteWriteHarness()
+  return { write, cleanup: () => write.close() }
 })
 
 describeBlobAccessFromBoundaryRows('runtime Postgres store', async () => {
-  const connectionString = await startPostgresContainer()
-  const actorStore = new PostgresActorStore({
-    connectionString,
-    blobstore: createMockBlobStoreCreator(),
-    cborToRecord,
-  })
-  return { actorStore, cleanup: () => stopPostgresContainer() }
+  const write = await startPostgresWriteHarness(await startPostgresContainer())
+  return {
+    write,
+    cleanup: async () => {
+      await write.close()
+      await stopPostgresContainer()
+    },
+  }
 })

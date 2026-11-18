@@ -6,28 +6,23 @@ import {
   describe,
   expect,
   it,
-  vi,
 } from 'vitest'
-import { mkdir, rm } from 'node:fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
+import {
+  encodeRecord,
+  type HydrationService,
+} from '@northskysocial/stratos-core'
 
-import { StratosActorStore } from '../src/context.js'
-import {
-  ActorStoreRecordResolver,
-  HydrationServiceImpl,
-} from '../src/features/hydration/adapter.js'
 import type { ActorStore } from '../src/actor-store-types.js'
-import { PostgresActorStore } from '../src/infra/storage/postgres/index.js'
 import {
-  cborToRecord,
   createCid,
-  createMockBlobStoreCreator,
   startPostgresContainer,
   stopPostgresContainer,
 } from './helpers/test-env.js'
-import { createMockBlobStore } from './utils/index.js'
+import {
+  startPostgresWriteHarness,
+  startSqliteWriteHarness,
+  type WriteHarness,
+} from './helpers/write-harness.js'
 
 const SERVICE_DID = 'did:web:nerv.tokyo.jp'
 const ENGINEERING = `${SERVICE_DID}/engineering`
@@ -72,7 +67,7 @@ function boundaryRowEditor(record: unknown): BoundaryRowEditor {
 }
 
 interface StoreHarness {
-  actorStore: ActorStore
+  write: WriteHarness
   cleanup: () => Promise<void>
 }
 
@@ -82,10 +77,13 @@ function describeHydrationFromBoundaryRows(
 ) {
   describe(label, () => {
     let harness: StoreHarness
-    let service: HydrationServiceImpl
+    let actorStore: ActorStore
+    let service: HydrationService
 
     beforeAll(async () => {
       harness = await openStore()
+      actorStore = harness.write.ctx.actorStore
+      service = harness.write.ctx.hydrationService
     }, 120_000)
 
     afterAll(async () => {
@@ -93,16 +91,11 @@ function describeHydrationFromBoundaryRows(
     })
 
     beforeEach(async () => {
-      service = new HydrationServiceImpl(
-        new ActorStoreRecordResolver(harness.actorStore),
-        { getBoundaries: vi.fn().mockResolvedValue([]) } as never,
-        { warn: vi.fn() } as never,
-      )
-      await harness.actorStore.create(OWNER_DID)
+      await actorStore.create(OWNER_DID)
     })
 
     afterEach(async () => {
-      await harness.actorStore.destroy(OWNER_DID)
+      await actorStore.destroy(OWNER_DID)
     })
 
     async function seed(
@@ -110,9 +103,9 @@ function describeHydrationFromBoundaryRows(
       body: Record<string, unknown>,
       rowBoundary: string | null,
     ) {
-      const content = new TextEncoder().encode(JSON.stringify(body))
+      const content = encodeRecord(body)
       const cid = await createCid(content)
-      await harness.actorStore.transact(OWNER_DID, async (store) => {
+      await actorStore.transact(OWNER_DID, async (store) => {
         await store.record.putRecord({
           uri: uriOf(rkey),
           cid,
@@ -133,7 +126,7 @@ function describeHydrationFromBoundaryRows(
     }
 
     async function deleteRows(rkey: string) {
-      await harness.actorStore.transact(OWNER_DID, async (store) => {
+      await actorStore.transact(OWNER_DID, async (store) => {
         await boundaryRowEditor(store.record).replaceRecordBoundaries(
           uriOf(rkey),
           [],
@@ -284,7 +277,7 @@ function describeHydrationFromBoundaryRows(
     describe('taken-down record with a matching row', () => {
       beforeEach(async () => {
         await seed('leliel', bodyClaiming('Leliel', []), ENGINEERING)
-        await harness.actorStore.transact(OWNER_DID, async (store) => {
+        await actorStore.transact(OWNER_DID, async (store) => {
           await store.record.updateRecordTakedown(uriOf('leliel'), {
             applied: true,
             ref: 'case-leliel',
@@ -349,28 +342,17 @@ function describeHydrationFromBoundaryRows(
 }
 
 describeHydrationFromBoundaryRows('SQLite store', async () => {
-  const dataDir = join(
-    tmpdir(),
-    `stratos-test-${randomBytes(8).toString('hex')}`,
-  )
-  await mkdir(dataDir, { recursive: true })
-  const actorStore = new StratosActorStore({
-    dataDir,
-    blobstore: () => createMockBlobStore(),
-    cborToRecord: (content) => JSON.parse(new TextDecoder().decode(content)),
-  })
-  return {
-    actorStore: actorStore as unknown as ActorStore,
-    cleanup: () => rm(dataDir, { recursive: true, force: true }),
-  }
+  const write = await startSqliteWriteHarness()
+  return { write, cleanup: () => write.close() }
 })
 
 describeHydrationFromBoundaryRows('runtime Postgres store', async () => {
-  const connectionString = await startPostgresContainer()
-  const actorStore = new PostgresActorStore({
-    connectionString,
-    blobstore: createMockBlobStoreCreator(),
-    cborToRecord,
-  })
-  return { actorStore, cleanup: () => stopPostgresContainer() }
+  const write = await startPostgresWriteHarness(await startPostgresContainer())
+  return {
+    write,
+    cleanup: async () => {
+      await write.close()
+      await stopPostgresContainer()
+    },
+  }
 })

@@ -1,36 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, rm } from 'node:fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
 import { computeCid, encodeRecord } from '@northskysocial/stratos-core'
-import { decode } from '@atcute/cbor'
 
-import { StratosActorStore } from '../src/context.js'
-import {
-  closeServiceDb,
-  createServiceDb,
-  migrateServiceDb,
-  ServiceDb,
-} from '../src/db/index.js'
+import type { AppContext } from '../src/context.js'
 import { applyWritesBatch } from '../src/api/records/batch.js'
 import {
   createRecord,
   deleteRecord,
   updateRecord,
 } from '../src/api/records/index.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  startSqliteWriteHarness,
+  type WriteHarness,
+} from './helpers/write-harness.js'
 
 describe('Record writes against the hosted space type collections', () => {
-  let dataDir: string
-  let actorStore: StratosActorStore
-  let db: ServiceDb
-  let ctx: any
-  let getEnrollment: ReturnType<typeof vi.fn>
-  let getSignFn: ReturnType<typeof vi.fn>
+  let harness: WriteHarness
+  let ctx: AppContext
+  let actorStore: AppContext['actorStore']
+  let getEnrollment: ReturnType<typeof vi.spyOn>
+  let getSignFn: ReturnType<typeof vi.spyOn>
+  let emitted: ReturnType<typeof vi.spyOn>
 
   const testDid = 'did:plc:asuka-langley'
-  const serviceDid = 'did:web:nerv.tokyo.jp'
   const domain = 'did:web:nerv.tokyo.jp/engineering'
   const unlistedCollection = 'zone.stratos.graph.follow'
   const listedCollection = 'zone.stratos.feed.post'
@@ -60,51 +51,13 @@ describe('Record writes against the hosted space type collections', () => {
   }
 
   beforeEach(async () => {
-    dataDir = join(tmpdir(), `stratos-test-${randomBytes(8).toString('hex')}`)
-    await mkdir(dataDir, { recursive: true })
-
-    db = createServiceDb(join(dataDir, 'service.sqlite'))
-    await migrateServiceDb(db)
-
-    actorStore = new StratosActorStore({
-      dataDir,
-      blobstore: () => createMockBlobStore() as any,
-      cborToRecord: (content) => decode(content) as Record<string, unknown>,
-    })
-
-    getEnrollment = vi
-      .fn()
-      .mockResolvedValue({ active: true, isService: false })
-    getSignFn = vi
-      .fn()
-      .mockResolvedValue(() => Promise.resolve(new Uint8Array(64)))
-
-    ctx = {
-      cfg: createTestConfig(dataDir),
-      actorStore,
-      enrollmentStore: { getEnrollment },
-      serviceDid,
-      writeRateLimiter: { assertWriteAllowed: vi.fn() },
-      actorSigner: {
-        sign: vi.fn().mockResolvedValue(new Uint8Array(64)),
-        getSignFn,
-        getPublicKey: vi.fn().mockResolvedValue('did:key:zDnaeTestKey'),
-        ensureKey: vi.fn().mockResolvedValue(undefined),
-      },
-      repoWriteLocks: { acquire: vi.fn().mockResolvedValue(() => {}) },
-      logger: {
-        debug: vi.fn(),
-        info: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-      },
-      sequenceEvents: { emit: vi.fn() },
-      boundaryResolver: {
-        getBoundaries: vi.fn().mockResolvedValue([domain]),
-      },
-    }
-
-    await actorStore.create(testDid)
+    harness = await startSqliteWriteHarness()
+    ctx = harness.ctx
+    actorStore = ctx.actorStore
+    await harness.enrollMember(testDid, [domain])
+    getEnrollment = vi.spyOn(ctx.enrollmentStore, 'getEnrollment')
+    getSignFn = vi.spyOn(ctx.actorSigner, 'getSignFn')
+    emitted = vi.spyOn(ctx.sequenceEvents, 'emit')
     await actorStore.transact(testDid, async (store) => {
       const record = recordFor(unlistedCollection)
       await store.record.putRecord({
@@ -117,8 +70,7 @@ describe('Record writes against the hosted space type collections', () => {
   })
 
   afterEach(async () => {
-    await closeServiceDb(db)
-    await rm(dataDir, { recursive: true, force: true })
+    await harness.close()
   })
 
   it('rejects create, update and delete of an unlisted collection without writing', async () => {
@@ -165,7 +117,7 @@ describe('Record writes against the hosted space type collections', () => {
 
     expect(getEnrollment).not.toHaveBeenCalled()
     expect(getSignFn).not.toHaveBeenCalled()
-    expect(ctx.sequenceEvents.emit).not.toHaveBeenCalled()
+    expect(emitted).not.toHaveBeenCalled()
   })
 
   it('names the collection and the space type in the rejection', async () => {

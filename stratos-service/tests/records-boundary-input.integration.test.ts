@@ -9,23 +9,12 @@ import {
   vi,
 } from 'vitest'
 import * as fc from 'fast-check'
-import { mkdir, rm } from 'node:fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
-import { decode } from '@atcute/cbor'
 import {
   pgStratosRecordBoundary,
   stratosRecordBoundary,
 } from '@northskysocial/stratos-core'
 
-import { StratosActorStore } from '../src/context.js'
-import {
-  closeServiceDb,
-  createServiceDb,
-  migrateServiceDb,
-  ServiceDb,
-} from '../src/db/index.js'
+import type { AppContext } from '../src/context.js'
 import { createRecord } from '../src/api/records/index.js'
 import { authorizeRecordBoundary } from '../src/api/records/validation.js'
 import type { ActorStore } from '../src/actor-store-types.js'
@@ -37,7 +26,10 @@ import {
   startPostgresContainer,
   stopPostgresContainer,
 } from './helpers/test-env.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  startSqliteWriteHarness,
+  type WriteHarness,
+} from './helpers/write-harness.js'
 
 const SERVICE_DID = 'did:web:nerv.tokyo.jp'
 const ENGINEERING = `${SERVICE_DID}/engineering`
@@ -163,62 +155,22 @@ describe('Record indexing from an explicit boundary on the runtime Postgres stor
 })
 
 describe('Create indexes the authorized boundary', () => {
-  let dataDir: string
-  let actorStore: StratosActorStore
-  let db: ServiceDb
-  let ctx: any
+  let harness: WriteHarness
+  let ctx: AppContext
+  let actorStore: AppContext['actorStore']
 
   const testDid = 'did:plc:shinji-ikari'
 
   beforeEach(async () => {
-    dataDir = join(tmpdir(), `stratos-test-${randomBytes(8).toString('hex')}`)
-    await mkdir(dataDir, { recursive: true })
-
-    db = createServiceDb(join(dataDir, 'service.sqlite'))
-    await migrateServiceDb(db)
-
-    actorStore = new StratosActorStore({
-      dataDir,
-      blobstore: () => createMockBlobStore() as any,
-      cborToRecord: (content) => decode(content) as Record<string, unknown>,
-    })
-
-    ctx = {
-      cfg: createTestConfig(dataDir),
-      actorStore,
-      enrollmentStore: {
-        getEnrollment: vi
-          .fn()
-          .mockResolvedValue({ active: true, isService: false }),
-      },
-      serviceDid: SERVICE_DID,
-      writeRateLimiter: { assertWriteAllowed: vi.fn() },
-      actorSigner: {
-        sign: vi.fn().mockResolvedValue(new Uint8Array(64)),
-        getSignFn: vi
-          .fn()
-          .mockResolvedValue(() => Promise.resolve(new Uint8Array(64))),
-        getPublicKey: vi.fn().mockResolvedValue('did:key:zDnaeTestKey'),
-        ensureKey: vi.fn().mockResolvedValue(undefined),
-      },
-      repoWriteLocks: { acquire: vi.fn().mockResolvedValue(() => {}) },
-      logger: {
-        debug: vi.fn(),
-        info: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-      },
-      sequenceEvents: { emit: vi.fn() },
-      boundaryResolver: {
-        getBoundaries: vi.fn().mockResolvedValue([ENGINEERING]),
-      },
-    }
-    await actorStore.create(testDid)
+    harness = await startSqliteWriteHarness()
+    ctx = harness.ctx
+    actorStore = ctx.actorStore
+    await harness.enrollMember(testDid, [ENGINEERING])
   })
 
   afterEach(async () => {
-    await closeServiceDb(db)
-    await rm(dataDir, { recursive: true, force: true })
+    vi.restoreAllMocks()
+    await harness.close()
   })
 
   it('stores the body boundary as the single row and indexes through indexRecordInBoundary', async () => {
@@ -294,11 +246,21 @@ describe('authorizeRecordBoundary properties', () => {
     .filter((name) => name.length > 0)
   const boundaryArb = skeyArb.map((name) => `${SERVICE_DID}/${name}`)
 
-  function ctxHolding(held: string[]) {
-    return {
-      serviceDid: SERVICE_DID,
-      boundaryResolver: { getBoundaries: vi.fn().mockResolvedValue(held) },
-    } as any
+  let harness: WriteHarness
+  let callers = 0
+
+  beforeAll(async () => {
+    harness = await startSqliteWriteHarness()
+  })
+
+  afterAll(async () => {
+    await harness.close()
+  })
+
+  async function callerHolding(held: string[]) {
+    const caller = `${callerDid}-${callers++}`
+    await harness.enrollBoundaryHolder(caller, held)
+    return caller
   }
 
   it('returns the exact requested boundary when the caller holds it', async () => {
@@ -309,8 +271,8 @@ describe('authorizeRecordBoundary properties', () => {
         async (requested, otherHeld) => {
           const held = [...otherHeld, requested]
           const authorized = await authorizeRecordBoundary(
-            ctxHolding(held),
-            callerDid,
+            harness.ctx,
+            await callerHolding(held),
             COLLECTION,
             postWithBoundaries('Eva', [requested]),
           )
@@ -329,8 +291,8 @@ describe('authorizeRecordBoundary properties', () => {
           fc.pre(!held.includes(requested))
           await expect(
             authorizeRecordBoundary(
-              ctxHolding(held),
-              callerDid,
+              harness.ctx,
+              await callerHolding(held),
               COLLECTION,
               postWithBoundaries('Eva', [requested]),
             ),
@@ -347,8 +309,8 @@ describe('authorizeRecordBoundary properties', () => {
         async (requested) => {
           await expect(
             authorizeRecordBoundary(
-              ctxHolding(requested),
-              callerDid,
+              harness.ctx,
+              await callerHolding(requested),
               COLLECTION,
               postWithBoundaries('Eva', requested),
             ),

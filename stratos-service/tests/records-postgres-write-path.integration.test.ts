@@ -6,9 +6,7 @@ import {
   describe,
   expect,
   it,
-  vi,
 } from 'vitest'
-import { decode } from '@atcute/cbor'
 import { computeCid, encodeRecord } from '@northskysocial/stratos-core'
 
 import {
@@ -17,14 +15,15 @@ import {
   updateRecord,
 } from '../src/api/records/index.js'
 import { decodeEvent, type SeqEvent } from '../src/subscription/index.js'
-import type { ActorStore } from '../src/actor-store-types.js'
-import { PostgresActorStore } from '../src/infra/storage/postgres/index.js'
+import type { AppContext } from '../src/context.js'
 import {
-  createMockBlobStoreCreator,
   startPostgresContainer,
   stopPostgresContainer,
 } from './helpers/test-env.js'
-import { createTestConfig } from './utils/index.js'
+import {
+  startPostgresWriteHarness,
+  type WriteHarness,
+} from './helpers/write-harness.js'
 
 const SERVICE_DID = 'did:web:nerv.tokyo.jp'
 const ENGINEERING = `${SERVICE_DID}/engineering`
@@ -55,8 +54,9 @@ interface RawOp {
 }
 
 describe('Sequenced write ops carry their boundary on the runtime Postgres store', () => {
-  let actorStore: ActorStore
-  let ctx: any
+  let harness: WriteHarness
+  let ctx: AppContext
+  let actorStore: AppContext['actorStore']
 
   const testDid = 'did:plc:ryoji-kaji'
 
@@ -93,54 +93,22 @@ describe('Sequenced write ops carry their boundary on the runtime Postgres store
   }
 
   beforeAll(async () => {
-    const connectionString = await startPostgresContainer()
-    actorStore = new PostgresActorStore({
-      connectionString,
-      blobstore: createMockBlobStoreCreator(),
-      cborToRecord: (content) => decode(content) as Record<string, unknown>,
-    })
+    harness = await startPostgresWriteHarness(await startPostgresContainer())
+    ctx = harness.ctx
+    actorStore = ctx.actorStore
   }, 120_000)
 
   afterAll(async () => {
-    await actorStore.destroy(testDid).catch(() => undefined)
+    await harness.close()
     await stopPostgresContainer()
   })
 
   beforeEach(async () => {
-    ctx = {
-      cfg: createTestConfig('/unused-by-postgres'),
-      actorStore,
-      enrollmentStore: {
-        getEnrollment: vi
-          .fn()
-          .mockResolvedValue({ active: true, isService: false }),
-      },
-      serviceDid: SERVICE_DID,
-      writeRateLimiter: { assertWriteAllowed: vi.fn() },
-      actorSigner: {
-        sign: vi.fn().mockResolvedValue(new Uint8Array(64)),
-        getSignFn: vi
-          .fn()
-          .mockResolvedValue(() => Promise.resolve(new Uint8Array(64))),
-        getPublicKey: vi.fn().mockResolvedValue('did:key:zDnaeTestKey'),
-        ensureKey: vi.fn().mockResolvedValue(undefined),
-      },
-      repoWriteLocks: { acquire: vi.fn().mockResolvedValue(() => {}) },
-      logger: {
-        debug: vi.fn(),
-        info: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-      },
-      sequenceEvents: { emit: vi.fn() },
-      boundaryResolver: {
-        getBoundaries: vi.fn().mockResolvedValue([ENGINEERING, DESIGN]),
-      },
-    }
-    await actorStore.create(testDid)
+    await harness.enrollMember(testDid, [ENGINEERING, DESIGN])
   })
 
   afterEach(async () => {
+    await ctx.enrollmentStore.unenroll(testDid)
     await actorStore.destroy(testDid)
   })
 

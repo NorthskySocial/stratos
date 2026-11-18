@@ -1,32 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, rm } from 'node:fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
-import { decode } from '@atcute/cbor'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { StratosActorStore } from '../src/context.js'
-import {
-  closeServiceDb,
-  createServiceDb,
-  migrateServiceDb,
-  ServiceDb,
-} from '../src/db/index.js'
+import type { AppContext } from '../src/context.js'
 import {
   authorizeRecordBoundary,
   createRecord,
   updateRecord,
 } from '../src/api/records/index.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  startSqliteWriteHarness,
+  type WriteHarness,
+} from './helpers/write-harness.js'
 
 describe('Legacy writes with validate: false still apply the Stratos rules', () => {
-  let dataDir: string
-  let actorStore: StratosActorStore
-  let db: ServiceDb
-  let ctx: any
+  let harness: WriteHarness
+  let ctx: AppContext
 
   const testDid = 'did:plc:shinji-ikari'
-  const serviceDid = 'did:web:nerv.tokyo.jp'
   const heldDomain = 'did:web:nerv.tokyo.jp/engineering'
   const leadershipDomain = 'did:web:nerv.tokyo.jp/leadership'
   const unlistedDomain = 'did:web:nerv.tokyo.jp/instrumentality'
@@ -87,59 +76,9 @@ describe('Legacy writes with validate: false still apply the Stratos rules', () 
   }
 
   beforeEach(async () => {
-    dataDir = join(tmpdir(), `stratos-test-${randomBytes(8).toString('hex')}`)
-    await mkdir(dataDir, { recursive: true })
-
-    db = createServiceDb(join(dataDir, 'service.sqlite'))
-    await migrateServiceDb(db)
-
-    actorStore = new StratosActorStore({
-      dataDir,
-      blobstore: () => createMockBlobStore() as any,
-      cborToRecord: (content) => decode(content) as Record<string, unknown>,
-    })
-
-    const baseConfig = createTestConfig(dataDir)
-    ctx = {
-      cfg: {
-        ...baseConfig,
-        stratos: {
-          ...baseConfig.stratos,
-          allowedDomains: [heldDomain, leadershipDomain],
-        },
-      },
-      actorStore,
-      enrollmentStore: {
-        getEnrollment: vi
-          .fn()
-          .mockResolvedValue({ active: true, isService: false }),
-      },
-      serviceDid,
-      writeRateLimiter: { assertWriteAllowed: vi.fn() },
-      actorSigner: {
-        sign: vi.fn().mockResolvedValue(new Uint8Array(64)),
-        getSignFn: vi
-          .fn()
-          .mockResolvedValue(() => Promise.resolve(new Uint8Array(64))),
-        getPublicKey: vi.fn().mockResolvedValue('did:key:zDnaeTestKey'),
-        ensureKey: vi.fn().mockResolvedValue(undefined),
-      },
-      repoWriteLocks: { acquire: vi.fn().mockResolvedValue(() => {}) },
-      logger: {
-        debug: vi.fn(),
-        info: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-      },
-      sequenceEvents: { emit: vi.fn() },
-      boundaryResolver: {
-        getBoundaries: vi
-          .fn()
-          .mockResolvedValue([heldDomain, leadershipDomain]),
-      },
-    }
-
-    await actorStore.create(testDid)
+    harness = await startSqliteWriteHarness()
+    ctx = harness.ctx
+    await harness.enrollMember(testDid, [heldDomain, leadershipDomain])
     await createRecord(
       ctx,
       {
@@ -153,8 +92,7 @@ describe('Legacy writes with validate: false still apply the Stratos rules', () 
   })
 
   afterEach(async () => {
-    await closeServiceDb(db)
-    await rm(dataDir, { recursive: true, force: true })
+    await harness.close()
   })
 
   describe.each(Object.entries(writePaths))('%s', (_path, write) => {

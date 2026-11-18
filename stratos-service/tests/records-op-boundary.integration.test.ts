@@ -1,18 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, rm } from 'node:fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
 import { decode, encode } from '@atcute/cbor'
 import { computeCid, encodeRecord } from '@northskysocial/stratos-core'
 
-import { StratosActorStore } from '../src/context.js'
-import {
-  closeServiceDb,
-  createServiceDb,
-  migrateServiceDb,
-  ServiceDb,
-} from '../src/db/index.js'
+import type { AppContext } from '../src/context.js'
 import {
   applyWritesBatch,
   createRecord,
@@ -25,8 +15,10 @@ import {
   type SeqEvent,
 } from '../src/subscription/index.js'
 import { listRepoOps } from '../src/features/pull-sync/index.js'
-import { SqliteLabelStore } from '../src/features/moderation/index.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  startSqliteWriteHarness,
+  type WriteHarness,
+} from './helpers/write-harness.js'
 
 const SERVICE_DID = 'did:web:nerv.tokyo.jp'
 const ENGINEERING = `${SERVICE_DID}/engineering`
@@ -57,10 +49,9 @@ interface RawOp {
 }
 
 describe('Newly sequenced create and update ops carry the op-level boundary', () => {
-  let dataDir: string
-  let actorStore: StratosActorStore
-  let db: ServiceDb
-  let ctx: any
+  let harness: WriteHarness
+  let ctx: AppContext
+  let actorStore: AppContext['actorStore']
 
   const testDid = 'did:plc:misato-katsuragi'
 
@@ -115,57 +106,15 @@ describe('Newly sequenced create and update ops carry the op-level boundary', ()
   }
 
   beforeEach(async () => {
-    dataDir = join(tmpdir(), `stratos-test-${randomBytes(8).toString('hex')}`)
-    await mkdir(dataDir, { recursive: true })
-
-    db = createServiceDb(join(dataDir, 'service.sqlite'))
-    await migrateServiceDb(db)
-
-    actorStore = new StratosActorStore({
-      dataDir,
-      blobstore: () => createMockBlobStore() as any,
-      cborToRecord: (content) => decode(content) as Record<string, unknown>,
-    })
-
-    ctx = {
-      cfg: createTestConfig(dataDir),
-      actorStore,
-      enrollmentStore: {
-        getEnrollment: vi
-          .fn()
-          .mockResolvedValue({ active: true, isService: false }),
-      },
-      labelStore: new SqliteLabelStore(db, join(dataDir, 'service.sqlite')),
-      serviceDid: SERVICE_DID,
-      writeRateLimiter: { assertWriteAllowed: vi.fn() },
-      actorSigner: {
-        sign: vi.fn().mockResolvedValue(new Uint8Array(64)),
-        getSignFn: vi
-          .fn()
-          .mockResolvedValue(() => Promise.resolve(new Uint8Array(64))),
-        getPublicKey: vi.fn().mockResolvedValue('did:key:zDnaeTestKey'),
-        ensureKey: vi.fn().mockResolvedValue(undefined),
-      },
-      repoWriteLocks: { acquire: vi.fn().mockResolvedValue(() => {}) },
-      logger: {
-        debug: vi.fn(),
-        info: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-      },
-      sequenceEvents: { emit: vi.fn() },
-      boundaryResolver: {
-        getBoundaries: vi.fn().mockResolvedValue([ENGINEERING, DESIGN]),
-      },
-    }
-
-    await actorStore.create(testDid)
+    harness = await startSqliteWriteHarness()
+    ctx = harness.ctx
+    actorStore = ctx.actorStore
+    await harness.enrollMember(testDid, [ENGINEERING, DESIGN])
   })
 
   afterEach(async () => {
     vi.restoreAllMocks()
-    await closeServiceDb(db)
-    await rm(dataDir, { recursive: true, force: true })
+    await harness.close()
   })
 
   it('create sequences an op whose op-level boundary is the authorized boundary', async () => {

@@ -1,30 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, rm } from 'node:fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
-import { decode } from '@atcute/cbor'
 
-import { StratosActorStore } from '../src/context.js'
-import {
-  closeServiceDb,
-  createServiceDb,
-  migrateServiceDb,
-  ServiceDb,
-} from '../src/db/index.js'
+import type { AppContext } from '../src/context.js'
 import { applyWritesBatch } from '../src/api/records/batch.js'
 import { createRecord, updateRecord } from '../src/api/records/index.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  startSqliteWriteHarness,
+  type WriteHarness,
+} from './helpers/write-harness.js'
 
 describe('Legacy writes with validate: false still authorize the boundary', () => {
-  let dataDir: string
-  let actorStore: StratosActorStore
-  let db: ServiceDb
-  let ctx: any
-  let getBoundaries: ReturnType<typeof vi.fn>
+  let harness: WriteHarness
+  let ctx: AppContext
+  let actorStore: AppContext['actorStore']
+  let getBoundaries: ReturnType<typeof vi.spyOn>
+  let emitted: ReturnType<typeof vi.spyOn>
 
   const testDid = 'did:plc:shinji-ikari'
-  const serviceDid = 'did:web:nerv.tokyo.jp'
   const heldDomain = 'did:web:nerv.tokyo.jp/engineering'
   const leadershipDomain = 'did:web:nerv.tokyo.jp/leadership'
   const foreignDomain = 'did:web:seele.example/instrumentality'
@@ -78,66 +69,23 @@ describe('Legacy writes with validate: false still authorize the boundary', () =
 
   async function expectNothingWritten(attempt: Promise<unknown>, code: string) {
     const before = await snapshotStore()
-    ctx.sequenceEvents.emit.mockClear()
+    emitted.mockClear()
     await expect(attempt).rejects.toMatchObject({ error: code })
     expect(await snapshotStore()).toEqual(before)
-    expect(ctx.sequenceEvents.emit).not.toHaveBeenCalled()
+    expect(emitted).not.toHaveBeenCalled()
   }
 
   beforeEach(async () => {
-    dataDir = join(tmpdir(), `stratos-test-${randomBytes(8).toString('hex')}`)
-    await mkdir(dataDir, { recursive: true })
+    harness = await startSqliteWriteHarness()
+    ctx = harness.ctx
+    actorStore = ctx.actorStore
+    // leadership is a configured domain the caller does not hold, so only
+    // the authorization check can reject a write into it
+    await harness.enrollMember(testDid, [heldDomain])
 
-    db = createServiceDb(join(dataDir, 'service.sqlite'))
-    await migrateServiceDb(db)
+    getBoundaries = vi.spyOn(ctx.writeBoundaryResolver!, 'getBoundaries')
+    emitted = vi.spyOn(ctx.sequenceEvents, 'emit')
 
-    actorStore = new StratosActorStore({
-      dataDir,
-      blobstore: () => createMockBlobStore() as any,
-      cborToRecord: (content) => decode(content) as Record<string, unknown>,
-    })
-
-    getBoundaries = vi.fn().mockResolvedValue([heldDomain])
-
-    const baseConfig = createTestConfig(dataDir)
-    ctx = {
-      // leadership is a configured domain the caller does not hold, so only
-      // the authorization check can reject a write into it
-      cfg: {
-        ...baseConfig,
-        stratos: {
-          ...baseConfig.stratos,
-          allowedDomains: [heldDomain, leadershipDomain],
-        },
-      },
-      actorStore,
-      enrollmentStore: {
-        getEnrollment: vi
-          .fn()
-          .mockResolvedValue({ active: true, isService: false }),
-      },
-      serviceDid,
-      writeRateLimiter: { assertWriteAllowed: vi.fn() },
-      actorSigner: {
-        sign: vi.fn().mockResolvedValue(new Uint8Array(64)),
-        getSignFn: vi
-          .fn()
-          .mockResolvedValue(() => Promise.resolve(new Uint8Array(64))),
-        getPublicKey: vi.fn().mockResolvedValue('did:key:zDnaeTestKey'),
-        ensureKey: vi.fn().mockResolvedValue(undefined),
-      },
-      repoWriteLocks: { acquire: vi.fn().mockResolvedValue(() => {}) },
-      logger: {
-        debug: vi.fn(),
-        info: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-      },
-      sequenceEvents: { emit: vi.fn() },
-      boundaryResolver: { getBoundaries },
-    }
-
-    await actorStore.create(testDid)
     await createRecord(
       ctx,
       {
@@ -152,8 +100,8 @@ describe('Legacy writes with validate: false still authorize the boundary', () =
   })
 
   afterEach(async () => {
-    await closeServiceDb(db)
-    await rm(dataDir, { recursive: true, force: true })
+    vi.restoreAllMocks()
+    await harness.close()
   })
 
   it('rejects a create into a boundary the caller does not hold', async () => {

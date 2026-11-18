@@ -10,6 +10,7 @@ import { AtUri } from '@atproto/syntax'
 import {
   boundaryToSpaceUri,
   type EnrollmentStoreWriter,
+  type BoundaryDefinition,
   type Logger,
   type RecordWithMeta,
   type StatusAttr,
@@ -71,6 +72,12 @@ export interface WriteHarness {
   enrollMember(did: string, boundaries: string[]): Promise<void>
   enrollServiceIdentity(did: string, boundaries: string[]): Promise<void>
   enrollPdsCustodyMember(did: string, boundaries: string[]): Promise<void>
+  /**
+   * Enrolls an identity that has no repo in boundaries, listing in the catalog
+   * any the harness does not already know. For tests that need many distinct
+   * boundaries cheaply.
+   */
+  enrollBoundaryHolder(did: string, boundaries: string[]): Promise<void>
   holdMember(did: string): Promise<void>
   removeBoundary(did: string, boundary: string): Promise<CallResult>
   mintSpaceCredential(did: string, boundary: string): Promise<string>
@@ -236,6 +243,15 @@ async function startWriteHarness(
       )
     },
 
+    async enrollBoundaryHolder(did, boundaries) {
+      for (const boundary of boundaries) {
+        if (!(await ctx.boundaryStore?.get(boundary))) {
+          await ctx.boundaryStore?.create(activeDefinition(boundary))
+        }
+      }
+      await enroll(did, [...new Set(boundaries)], { custody: 'stratos' }, did)
+    },
+
     async holdMember(did) {
       await applyEnrollmentHolds(ctx, did, { operatorHold: true })
     },
@@ -324,6 +340,26 @@ async function startWriteHarness(
       await ctx.destroy()
       await rm(dataDir, { recursive: true, force: true })
     },
+  }
+}
+
+function activeDefinition(boundary: string): BoundaryDefinition {
+  const name = boundary.slice(boundary.lastIndexOf('/') + 1)
+  const now = new Date().toISOString()
+  return {
+    boundary,
+    roomId: name,
+    displayName: name,
+    description: '',
+    listed: false,
+    joinable: false,
+    autoEnroll: false,
+    appAccess: 'open',
+    clientIds: [],
+    status: 'active',
+    createdAt: now,
+    updatedAt: now,
+    revision: 1,
   }
 }
 
