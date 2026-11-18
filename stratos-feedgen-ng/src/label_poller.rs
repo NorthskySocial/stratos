@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use time::OffsetDateTime;
 use tokio::{sync::watch, task::JoinHandle};
@@ -17,6 +21,9 @@ use crate::{
 
 /// Bounds how long a takedown can stay unenforced after the authority records it.
 pub const LABEL_POLL_INTERVAL: Duration = Duration::from_secs(10);
+// Five missed polls tolerate a brief outage without serving on a log that may
+// already hold a takedown.
+pub const LABEL_MAX_STALENESS: Duration = LABEL_POLL_INTERVAL.saturating_mul(5);
 const MAX_LABEL_PAGES_PER_CYCLE: usize = 50;
 const REINSTATING_ACCOUNTS_PER_CYCLE: u16 = 64;
 const REINSTATING_RECORDS_PER_CYCLE: u16 = 64;
@@ -29,6 +36,40 @@ enum LabelCycle {
     CaughtUp,
     PageCapReached,
     Failed(LabelPollOutcome),
+}
+
+/// Withdraws read admission when the label log has not been read to its head for too long.
+struct LabelFreshness {
+    last_caught_up: Instant,
+    withdrawn: bool,
+}
+
+impl LabelFreshness {
+    fn new(started: Instant) -> Self {
+        Self {
+            last_caught_up: started,
+            withdrawn: false,
+        }
+    }
+
+    fn observe(&mut self, cycle: LabelCycle, now: Instant, lifecycle: &ControlLifecycle) {
+        match cycle {
+            LabelCycle::CaughtUp => {
+                self.last_caught_up = now;
+                self.withdrawn = false;
+            }
+            LabelCycle::Failed(_) => {
+                let silent_for = now.saturating_duration_since(self.last_caught_up);
+                // Withdrawn once per outage, so a long one does not repeat the log line.
+                if silent_for > LABEL_MAX_STALENESS && !self.withdrawn {
+                    lifecycle.mark_labels_stale();
+                    self.withdrawn = true;
+                    eprintln!("event=label_log_stale");
+                }
+            }
+            LabelCycle::PageCapReached => {}
+        }
+    }
 }
 
 /// What a label poller needs to stop and restart the workers of whole accounts.
@@ -103,9 +144,12 @@ async fn run_forever(
     interval: Duration,
     mut shutdown: watch::Receiver<bool>,
 ) {
+    let mut freshness = LabelFreshness::new(Instant::now());
     loop {
         tokio::select! {
-            _ = run_cycle(&lifecycle, client.as_ref(), &accounts, &records, &telemetry) => {}
+            cycle = run_cycle(&lifecycle, client.as_ref(), &accounts, &records, &telemetry) => {
+                freshness.observe(cycle, Instant::now(), &lifecycle);
+            }
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
                     return;
@@ -2159,5 +2203,122 @@ mod tests {
             ),
             None
         );
+    }
+
+    struct StalenessScene {
+        responder: Responder,
+        lifecycle: Arc<ControlLifecycle>,
+        accounts: AccountEnforcement,
+        freshness: super::LabelFreshness,
+        started: std::time::Instant,
+    }
+
+    impl StalenessScene {
+        async fn caught_up() -> Self {
+            let responder = respond_by_cursor(two_pages_then_no_progress()).await;
+            let (lifecycle, _) = lifecycle_with(Arc::new(FeedTelemetry::disabled()));
+            reconcile_session(&lifecycle);
+            let accounts = enforcement(&responder, &lifecycle);
+            let started = std::time::Instant::now();
+            let mut scene = Self {
+                responder,
+                lifecycle,
+                accounts,
+                freshness: super::LabelFreshness::new(started),
+                started,
+            };
+            assert_eq!(scene.cycle_at(Duration::ZERO).await, LabelCycle::CaughtUp);
+            assert!(serve_feed(&scene.lifecycle).is_ok());
+            scene
+        }
+
+        async fn cycle_at(&mut self, elapsed: Duration) -> LabelCycle {
+            let cycle = run_cycle(
+                &self.lifecycle,
+                client(&self.responder).as_ref(),
+                &self.accounts,
+                &record_enforcement(),
+                &FeedTelemetry::disabled(),
+            )
+            .await;
+            self.freshness
+                .observe(cycle, self.started + elapsed, &self.lifecycle);
+            cycle
+        }
+
+        fn log_is_down(&self) {
+            self.responder
+                .set_routes([(4, http_response("500 Internal Server Error", b"{}"))]);
+        }
+
+        fn serves(&self) -> bool {
+            serve_feed(&self.lifecycle).is_ok()
+        }
+    }
+
+    #[tokio::test]
+    async fn failures_shorter_than_the_bound_keep_feeds_open() {
+        let mut scene = StalenessScene::caught_up().await;
+        scene.log_is_down();
+
+        let cycle = scene.cycle_at(super::LABEL_POLL_INTERVAL * 4).await;
+
+        assert_eq!(cycle, LabelCycle::Failed(LabelPollOutcome::Unavailable));
+        assert!(scene.serves());
+    }
+
+    #[tokio::test]
+    async fn failures_past_the_bound_close_feeds() {
+        let mut scene = StalenessScene::caught_up().await;
+        scene.log_is_down();
+
+        scene
+            .cycle_at(super::LABEL_MAX_STALENESS + Duration::from_secs(1))
+            .await;
+
+        assert!(matches!(
+            serve_feed(&scene.lifecycle),
+            Err(FeedServiceError::FeedNotReady)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_after_the_bound_reopens_feeds_without_a_restart() {
+        let mut scene = StalenessScene::caught_up().await;
+        scene.log_is_down();
+        let outage = super::LABEL_MAX_STALENESS + Duration::from_secs(1);
+        scene.cycle_at(outage).await;
+        assert!(!scene.serves());
+
+        scene.responder.set_routes([(4, label_page(4, &[]))]);
+        let cycle = scene.cycle_at(outage + super::LABEL_POLL_INTERVAL).await;
+
+        assert_eq!(cycle, LabelCycle::CaughtUp);
+        assert!(scene.serves());
+    }
+
+    #[tokio::test]
+    async fn a_backlog_page_after_the_bound_does_not_reopen_feeds_before_the_log_is_drained() {
+        let mut scene = StalenessScene::caught_up().await;
+        scene.log_is_down();
+        let outage = super::LABEL_MAX_STALENESS + Duration::from_secs(1);
+        scene.cycle_at(outage).await;
+        assert!(!scene.serves());
+
+        scene.responder.set_routes([
+            (4, label_page(6, &[])),
+            (6, http_response("500 Internal Server Error", b"{}")),
+        ]);
+        let cycle = scene.cycle_at(outage + super::LABEL_POLL_INTERVAL).await;
+        assert_eq!(cycle, LabelCycle::Failed(LabelPollOutcome::Unavailable));
+        assert_eq!(scene.lifecycle.label_cursor().unwrap(), 6);
+        assert!(!scene.serves());
+
+        scene.responder.set_routes([(6, label_page(6, &[]))]);
+        let cycle = scene
+            .cycle_at(outage + super::LABEL_POLL_INTERVAL * 2)
+            .await;
+        assert_eq!(cycle, LabelCycle::CaughtUp);
+        assert!(scene.serves());
     }
 }
