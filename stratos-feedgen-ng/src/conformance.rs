@@ -3,11 +3,13 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use axum::{body::Body, http::Request};
+    use base64::{Engine, engine::general_purpose::STANDARD};
     use http_body_util::BodyExt;
     use serde::Deserialize;
     use tower::ServiceExt;
 
     use crate::{
+        actor_event::parse_actor_commit,
         config::{FeedgenConfig, StorageProfile},
         cursor::FeedCursor,
         feed_service::build_blob_url,
@@ -349,5 +351,76 @@ mod tests {
                 asuka,
             ]
         );
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ActorFrameFixture {
+        version: u8,
+        cases: Vec<ActorFrameCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ActorFrameCase {
+        name: String,
+        service_did: String,
+        actor_did: String,
+        authorized_boundaries: Vec<String>,
+        frame_base64: String,
+        expected: ActorFrameExpectation,
+    }
+
+    #[derive(Deserialize)]
+    struct ActorFrameExpectation {
+        upserts: Vec<ExpectedUpsert>,
+        deletes: Vec<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct ExpectedUpsert {
+        uri: String,
+        boundaries: Vec<String>,
+    }
+
+    #[test]
+    fn parses_the_actor_commit_frames_stratos_sends_in_the_shared_fixture() {
+        let fixture: ActorFrameFixture = serde_json::from_str(include_str!(
+            "../../stratos-feedgen/testdata/conformance/v1/actor-commit-frames.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture.version, 1);
+        assert!(!fixture.cases.is_empty());
+
+        let mut parsed = Vec::new();
+        let mut expected = Vec::new();
+        for case in fixture.cases {
+            let frame = STANDARD.decode(&case.frame_base64).unwrap();
+            let authorized = case.authorized_boundaries.into_iter().collect();
+            let page = parse_actor_commit(
+                &frame,
+                &case.service_did,
+                &case.actor_did,
+                &authorized,
+                "1998-05-03T00:00:00.000Z",
+            )
+            .unwrap_or_else(|_| panic!("case {} did not parse", case.name))
+            .unwrap_or_else(|| panic!("case {} was not a commit", case.name));
+
+            let upserts = page
+                .upserts
+                .into_iter()
+                .map(|post| (post.uri, post.boundaries))
+                .collect::<Vec<_>>();
+            parsed.push((case.name.clone(), upserts, page.deletes));
+            let expected_upserts = case
+                .expected
+                .upserts
+                .into_iter()
+                .map(|upsert| (upsert.uri, upsert.boundaries))
+                .collect::<Vec<_>>();
+            expected.push((case.name, expected_upserts, case.expected.deletes));
+        }
+        assert_eq!(parsed, expected);
     }
 }

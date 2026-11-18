@@ -10,6 +10,10 @@ const CONTRACT_TESTS: Record<RustContractKind, readonly string[]> = {
     'store::tests::rejects_permissive_or_malformed_secret_files',
     'store::tests::redacts_storage_keys_in_debug_output',
     'conformance::tests::reads_the_label_pages_stratos_serves_in_the_shared_fixture',
+    'actor_event::tests::the_operation_boundary_wins_over_a_disagreeing_body_claim',
+    'lifecycle::tests::serves_a_post_whose_boundary_is_only_on_the_operation_to_viewers_in_that_boundary',
+    'conformance::tests::parses_the_actor_commit_frames_stratos_sends_in_the_shared_fixture',
+    'actor_event::tests::the_body_fallback_is_still_limited_to_current_enrollment',
   ],
   recovery: [
     'store::tests::restarting_a_staged_page_requires_a_new_terminal_verification',

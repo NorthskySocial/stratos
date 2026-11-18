@@ -37,6 +37,11 @@ impl std::error::Error for ActorEventError {}
 /// Decodes one actor-scoped commit and keeps only posts authorized by the
 /// actor's current authority enrollment. Empty authorization becomes a delete
 /// in the same durable cursor transaction, preventing stale post retention.
+///
+/// A post's boundary comes from the operation when it has one: the authority
+/// sets that field, while the body boundary is only the author's claim. The
+/// body is read solely for operations recorded before the authority set the
+/// operation boundary. A null operation boundary counts as absent.
 pub fn parse_actor_commit(
     frame: &[u8],
     service_did: &str,
@@ -100,7 +105,11 @@ pub fn parse_actor_commit(
                         .as_ref()
                         .ok_or(ActorEventError::InvalidFrame)?,
                 )?;
-                let boundaries = match map_field(&record, "boundary") {
+                let boundary = operation
+                    .boundary
+                    .as_ref()
+                    .or_else(|| map_field(&record, "boundary"));
+                let boundaries = match boundary {
                     Some(boundary) => {
                         current_boundaries(boundary, service_did, authorized_boundaries)?
                     }
@@ -171,6 +180,7 @@ struct RawOperation {
     path: String,
     cid: Option<CborValue>,
     record: Option<CborValue>,
+    boundary: Option<CborValue>,
 }
 
 enum PostMutation {
@@ -389,6 +399,23 @@ mod tests {
     }
 
     #[derive(Serialize)]
+    struct CommitWithoutBoundaryKeys {
+        seq: u64,
+        did: &'static str,
+        time: &'static str,
+        rev: &'static str,
+        ops: Vec<OperationWithoutBoundaryKey>,
+    }
+
+    #[derive(Serialize)]
+    struct OperationWithoutBoundaryKey {
+        action: &'static str,
+        path: &'static str,
+        cid: Option<CborValue>,
+        record: Option<CborValue>,
+    }
+
+    #[derive(Serialize)]
     struct Operation {
         action: &'static str,
         path: &'static str,
@@ -415,7 +442,11 @@ mod tests {
     }
 
     fn record(created_at: &str, boundaries: &[&str]) -> CborValue {
-        CborValue::Map(BTreeMap::from([
+        record_with_body_boundary(created_at, Some(boundary(boundaries)))
+    }
+
+    fn record_with_body_boundary(created_at: &str, body_boundary: Option<CborValue>) -> CborValue {
+        let mut fields = BTreeMap::from([
             (
                 CborValue::Text("$type".to_owned()),
                 CborValue::Text(POST_COLLECTION.to_owned()),
@@ -424,8 +455,18 @@ mod tests {
                 CborValue::Text("createdAt".to_owned()),
                 CborValue::Text(created_at.to_owned()),
             ),
-            (CborValue::Text("boundary".to_owned()), boundary(boundaries)),
-        ]))
+        ]);
+        if let Some(body_boundary) = body_boundary {
+            fields.insert(CborValue::Text("boundary".to_owned()), body_boundary);
+        }
+        CborValue::Map(fields)
+    }
+
+    fn boundary_values_not_an_array() -> CborValue {
+        CborValue::Map(BTreeMap::from([(
+            CborValue::Text("values".to_owned()),
+            CborValue::Text("bebop".to_owned()),
+        )]))
     }
 
     fn frame(ops: Vec<Operation>) -> Vec<u8> {
@@ -496,13 +537,312 @@ mod tests {
         .unwrap();
 
         assert_eq!(parsed.sequence, 7);
-        assert_eq!(parsed.upserts.len(), 0);
+        assert_eq!(parsed.upserts.len(), 1);
+        assert_eq!(
+            parsed.upserts[0].uri,
+            "at://did:plc:faye/zone.stratos.feed.post/ed"
+        );
+        assert_eq!(
+            parsed.upserts[0].boundaries,
+            ["did:web:stratos.example.test/bebop"]
+        );
         assert_eq!(
             parsed.deletes,
-            [
-                "at://did:plc:faye/zone.stratos.feed.post/ed",
-                "at://did:plc:faye/zone.stratos.feed.post/see-you"
-            ]
+            ["at://did:plc:faye/zone.stratos.feed.post/see-you"]
+        );
+    }
+
+    const SERVICE: &str = "did:web:stratos.example.test";
+    const BEBOP: &str = "did:web:stratos.example.test/bebop";
+    const CREATED_AT: &str = "1998-04-02T00:00:00.000Z";
+
+    fn create_op(record: CborValue, op_boundary: Option<CborValue>) -> Operation {
+        Operation {
+            action: "create",
+            path: "zone.stratos.feed.post/ed",
+            cid: Some(CborValue::Text("bafyreie".to_owned())),
+            record: Some(record),
+            boundary: op_boundary,
+        }
+    }
+
+    fn parse_one(
+        op: Operation,
+        authorized: &BTreeSet<String>,
+    ) -> Result<crate::store::ActorPage, ActorEventError> {
+        parse_actor_commit(
+            &frame(vec![op]),
+            SERVICE,
+            "did:plc:faye",
+            authorized,
+            "1998-05-03T00:00:00.000Z",
+        )
+        .map(|page| page.unwrap())
+    }
+
+    fn authorized_for(boundaries: &[&str]) -> BTreeSet<String> {
+        boundaries.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    fn only_upsert_boundaries(page: &crate::store::ActorPage) -> Vec<String> {
+        assert_eq!(page.upserts.len(), 1);
+        assert!(page.deletes.is_empty());
+        page.upserts[0].boundaries.clone()
+    }
+
+    #[test]
+    fn takes_the_boundary_from_the_operation_when_the_body_has_none() {
+        let page = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, None),
+                Some(boundary(&["bebop"])),
+            ),
+            &authorized(),
+        )
+        .unwrap();
+
+        assert_eq!(only_upsert_boundaries(&page), [BEBOP]);
+        assert_eq!(
+            page.upserts[0].uri,
+            "at://did:plc:faye/zone.stratos.feed.post/ed"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_body_boundary_when_the_operation_has_none() {
+        let body_only = record(CREATED_AT, &["bebop"]);
+        let mut absent_key = serde_cbor::to_vec(&Header { kind: "#commit" }).unwrap();
+        absent_key.extend(
+            serde_cbor::to_vec(&CommitWithoutBoundaryKeys {
+                seq: 7,
+                did: "did:plc:faye",
+                time: "1998-04-03T00:00:00.000Z",
+                rev: "3jzfcijpj2z2a",
+                ops: vec![OperationWithoutBoundaryKey {
+                    action: "create",
+                    path: "zone.stratos.feed.post/ed",
+                    cid: Some(CborValue::Text("bafyreie".to_owned())),
+                    record: Some(body_only.clone()),
+                }],
+            })
+            .unwrap(),
+        );
+        let from_absent_key = parse_actor_commit(
+            &absent_key,
+            SERVICE,
+            "did:plc:faye",
+            &authorized(),
+            "1998-05-03T00:00:00.000Z",
+        )
+        .unwrap()
+        .unwrap();
+        let from_null = parse_one(create_op(body_only, None), &authorized()).unwrap();
+
+        for page in [&from_absent_key, &from_null] {
+            assert_eq!(only_upsert_boundaries(page), [BEBOP]);
+            let post = &page.upserts[0];
+            assert_eq!(post.uri, "at://did:plc:faye/zone.stratos.feed.post/ed");
+            assert_eq!(post.cid, "bafyreie");
+            assert_eq!(post.sort_at, CREATED_AT);
+            assert_eq!(post.indexed_at, "1998-04-03T00:00:00.000Z");
+        }
+        assert_eq!(
+            from_absent_key.upserts[0].record_json,
+            from_null.upserts[0].record_json
+        );
+    }
+
+    fn parse_with_absent_operation_boundary_key(body: CborValue) -> crate::store::ActorPage {
+        let mut bytes = serde_cbor::to_vec(&Header { kind: "#commit" }).unwrap();
+        bytes.extend(
+            serde_cbor::to_vec(&CommitWithoutBoundaryKeys {
+                seq: 7,
+                did: "did:plc:faye",
+                time: "1998-04-03T00:00:00.000Z",
+                rev: "3jzfcijpj2z2a",
+                ops: vec![OperationWithoutBoundaryKey {
+                    action: "create",
+                    path: "zone.stratos.feed.post/ed",
+                    cid: Some(CborValue::Text("bafyreie".to_owned())),
+                    record: Some(body),
+                }],
+            })
+            .unwrap(),
+        );
+        parse_actor_commit(
+            &bytes,
+            SERVICE,
+            "did:plc:faye",
+            &authorized(),
+            "1998-05-03T00:00:00.000Z",
+        )
+        .unwrap()
+        .unwrap()
+    }
+
+    #[test]
+    fn the_body_fallback_is_still_limited_to_current_enrollment() {
+        let ed = "at://did:plc:faye/zone.stratos.feed.post/ed";
+        let bodies = [("crew", vec!["crew"]), ("mixed", vec!["bebop", "crew"])];
+        for (label, claimed) in bodies {
+            let body = record(CREATED_AT, &claimed);
+            let pages = [
+                parse_with_absent_operation_boundary_key(body.clone()),
+                parse_one(create_op(body, None), &authorized()).unwrap(),
+            ];
+            for page in pages {
+                if label == "crew" {
+                    assert!(page.upserts.is_empty());
+                    assert_eq!(page.deletes, [ed]);
+                } else {
+                    assert_eq!(only_upsert_boundaries(&page), [BEBOP]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_operation_boundary_without_usable_values_is_a_delete_and_the_body_is_not_read() {
+        let map_without_values = CborValue::Map(BTreeMap::from([(
+            CborValue::Text("note".to_owned()),
+            CborValue::Text("bebop".to_owned()),
+        )]));
+        let not_a_map = CborValue::Text("bebop".to_owned());
+        for op_boundary in [map_without_values, not_a_map] {
+            let page = parse_one(
+                create_op(record(CREATED_AT, &["bebop"]), Some(op_boundary)),
+                &authorized(),
+            )
+            .unwrap();
+            assert!(page.upserts.is_empty());
+            assert_eq!(
+                page.deletes,
+                ["at://did:plc:faye/zone.stratos.feed.post/ed"]
+            );
+        }
+    }
+
+    #[test]
+    fn the_operation_boundary_wins_over_a_disagreeing_body_claim() {
+        let operation_authorized = parse_one(
+            create_op(record(CREATED_AT, &["crew"]), Some(boundary(&["bebop"]))),
+            &authorized(),
+        )
+        .unwrap();
+        assert_eq!(only_upsert_boundaries(&operation_authorized), [BEBOP]);
+
+        let operation_unauthorized = parse_one(
+            create_op(record(CREATED_AT, &["bebop"]), Some(boundary(&["crew"]))),
+            &authorized(),
+        )
+        .unwrap();
+        assert!(operation_unauthorized.upserts.is_empty());
+        assert_eq!(
+            operation_unauthorized.deletes,
+            ["at://did:plc:faye/zone.stratos.feed.post/ed"]
+        );
+    }
+
+    #[test]
+    fn the_operation_boundary_is_still_limited_to_current_enrollment() {
+        let mixed = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, None),
+                Some(boundary(&["bebop", "crew"])),
+            ),
+            &authorized(),
+        )
+        .unwrap();
+        assert_eq!(only_upsert_boundaries(&mixed), [BEBOP]);
+
+        let unauthorized_only = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, None),
+                Some(boundary(&["crew"])),
+            ),
+            &authorized(),
+        )
+        .unwrap();
+        assert!(unauthorized_only.upserts.is_empty());
+        assert_eq!(unauthorized_only.deletes.len(), 1);
+    }
+
+    #[test]
+    fn rejects_a_malformed_operation_boundary() {
+        let too_many = vec!["bebop"; super::MAX_BOUNDARIES + 1];
+        let oversized = "a".repeat(super::MAX_BOUNDARY_BYTES + 1);
+        let malformed = [
+            boundary_values_not_an_array(),
+            boundary(&too_many),
+            boundary(&[""]),
+            boundary(&[oversized.as_str()]),
+            boundary(&["bébop"]),
+        ];
+        for op_boundary in malformed {
+            let result = parse_one(
+                create_op(record(CREATED_AT, &["bebop"]), Some(op_boundary)),
+                &authorized(),
+            );
+            assert!(matches!(result, Err(ActorEventError::InvalidFrame)));
+        }
+    }
+
+    #[test]
+    fn does_not_read_the_body_boundary_when_the_operation_has_one() {
+        let page = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, Some(boundary_values_not_an_array())),
+                Some(boundary(&["bebop"])),
+            ),
+            &authorized(),
+        )
+        .unwrap();
+
+        assert_eq!(only_upsert_boundaries(&page), [BEBOP]);
+    }
+
+    #[test]
+    fn drops_operation_boundaries_that_belong_to_another_service() {
+        let other_service = "did:web:other.example.test/bebop";
+        let enrolled = authorized_for(&[BEBOP, other_service]);
+
+        let mixed = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, None),
+                Some(boundary(&[other_service, "bebop"])),
+            ),
+            &enrolled,
+        )
+        .unwrap();
+        assert_eq!(only_upsert_boundaries(&mixed), [BEBOP]);
+
+        let foreign_only = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, None),
+                Some(boundary(&[other_service])),
+            ),
+            &enrolled,
+        )
+        .unwrap();
+        assert!(foreign_only.upserts.is_empty());
+        assert_eq!(foreign_only.deletes.len(), 1);
+    }
+
+    #[test]
+    fn a_delete_with_an_operation_boundary_still_deletes() {
+        let scoped_removal = Operation {
+            action: "delete",
+            path: "zone.stratos.feed.post/ed",
+            cid: None,
+            record: None,
+            boundary: Some(boundary(&["crew"])),
+        };
+        let page = parse_one(scoped_removal, &authorized()).unwrap();
+
+        assert!(page.upserts.is_empty());
+        assert_eq!(
+            page.deletes,
+            ["at://did:plc:faye/zone.stratos.feed.post/ed"]
         );
     }
 

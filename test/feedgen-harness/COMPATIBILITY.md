@@ -78,6 +78,12 @@ not provide SQLCipher at-rest encryption. A Rust projection must use independent
 encrypted state and must never share a writer or database with the TypeScript
 projection.
 
+The Rust Feedgen takes a Stratos-custody post's boundary from the operation
+`boundary` the authority sets, and uses the record body only for operations
+recorded before the authority set it. When an operation carries a boundary the
+body boundary is not read. The result is still limited to the boundaries the
+actor currently holds.
+
 ## Moderation labels
 
 The Rust Feedgen applies Stratos moderation labels. It polls the authority's
@@ -117,3 +123,7 @@ durable path.
 
 The deprecated TypeScript Feedgen does not apply labels. It never reads the
 label log, so a takedown has no effect on what it serves.
+
+The deprecated TypeScript Feedgen reads only the record body's boundary for a
+Stratos-custody post and ignores the operation `boundary`. A post written
+without a body boundary does not appear after a rollback to it.

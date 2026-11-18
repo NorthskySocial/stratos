@@ -1335,6 +1335,131 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn serves_a_post_whose_boundary_is_only_on_the_operation_to_viewers_in_that_boundary() {
+        let authority = "did:web:stratos.example.test";
+        let bebop = "did:web:stratos.example.test/bebop";
+        let swordfish = "did:web:stratos.example.test/swordfish";
+        let lifecycle = ControlLifecycle::for_authority(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            authority,
+        )
+        .unwrap();
+        lifecycle
+            .reconcile_actor_enrollment(
+                "did:plc:faye",
+                "1998-04-03T00:00:00.000Z",
+                Some(crate::store::ActorEnrollment {
+                    did: "did:plc:faye".to_owned(),
+                    boundaries: vec![bebop.to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        for (viewer, boundary) in [
+            ("did:plc:spikespiegel", bebop),
+            ("did:plc:jetblack", swordfish),
+        ] {
+            lifecycle
+                .apply_viewer_authorization(
+                    ViewerAuthorization {
+                        did: viewer.to_owned(),
+                        boundaries: vec![boundary.to_owned()],
+                        expires_at: 100,
+                    },
+                    1,
+                )
+                .unwrap();
+        }
+        lifecycle.session_established();
+        lifecycle.mark_labels_current();
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+
+        let header = serde_cbor::to_vec(&serde_json::json!({"t":"#commit"})).unwrap();
+        let body = serde_cbor::to_vec(&serde_json::json!({
+            "seq":7,
+            "did":"did:plc:faye",
+            "time":"1998-04-03T00:00:00.000Z",
+            "rev":"3jzfcijpj2z2a",
+            "ops":[{
+                "action":"create",
+                "path":"zone.stratos.feed.post/see-you",
+                "cid":"bafyreia",
+                "record":{"$type":"zone.stratos.feed.post","createdAt":"1998-04-03T00:00:00.000Z","text":"see you space cowboy"},
+                "boundary":{"values":[{"value":"bebop"}]}
+            }]
+        }))
+        .unwrap();
+        let mut frame = header;
+        frame.extend(body);
+        assert!(matches!(
+            lifecycle.apply_actor_frame(
+                &frame,
+                authority,
+                "did:plc:faye",
+                "1998-05-03T00:00:00.000Z",
+            ),
+            Ok(ActorFrameResult::Applied)
+        ));
+
+        let feeds = FeedRegistry::new([
+            FeedDescription {
+                id: "bebop".to_owned(),
+                boundary: bebop.to_owned(),
+                display_name: None,
+                description: None,
+            },
+            FeedDescription {
+                id: "swordfish".to_owned(),
+                boundary: swordfish.to_owned(),
+                display_name: None,
+                description: None,
+            },
+        ])
+        .unwrap();
+        let query = |feed_id| crate::feed_service::FeedQuery {
+            feed_id,
+            cursor: None,
+            limit: 50,
+            now: 2,
+            as_of: "1998-04-03T00:00:00.000Z",
+            blob_base_url: "https://feedgen.example.test",
+        };
+
+        let (served, served_count) = lifecycle
+            .serve_viewer_feed("did:plc:spikespiegel", &feeds, query("bebop"))
+            .unwrap();
+        assert_eq!(served_count, 1);
+        let served: serde_json::Value = serde_json::from_slice(&served).unwrap();
+        assert_eq!(
+            served["feed"][0]["post"]["uri"],
+            "at://did:plc:faye/zone.stratos.feed.post/see-you"
+        );
+        assert_eq!(
+            served["feed"][0]["post"]["boundaries"],
+            serde_json::json!([bebop])
+        );
+
+        assert!(matches!(
+            lifecycle.serve_viewer_feed("did:plc:jetblack", &feeds, query("bebop")),
+            Err(crate::feed_service::FeedServiceError::BoundaryMismatch)
+        ));
+        let (_, other_boundary_count) = lifecycle
+            .serve_viewer_feed("did:plc:jetblack", &feeds, query("swordfish"))
+            .unwrap();
+        assert_eq!(other_boundary_count, 0);
+    }
+
     fn lifecycle_with_telemetry() -> (
         ControlLifecycle,
         Arc<Mutex<FeedReadinessGate>>,
