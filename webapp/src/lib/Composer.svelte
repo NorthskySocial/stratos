@@ -8,6 +8,8 @@
   import {configureAgent} from './stratos-agent'
   import {boundaryToSpaceUri} from '@northskysocial/stratos-core/spaces'
   import {getSpaceWriteScopeStatus, type SpaceWriteScopeStatus} from './auth'
+  import {createBoundaryRecord} from '@northskysocial/stratos-client'
+  import {stratosWriteClient} from './boundary-writes'
 
   interface Props {
     session: OAuthSession
@@ -235,21 +237,29 @@
           throw new Error(responseText || `PDS write failed (${response.status})`)
         }
       } else if (isPrivate && enrollment?.custody === 'stratos' && stratosAgent) {
-        await stratosAgent.com.atproto.repo.createRecord({
-          repo: session.sub,
-          collection: 'zone.stratos.feed.post',
-          record: {
-            $type: 'zone.stratos.feed.post',
-            text: text.trim(),
-            boundary: {
-              $type: 'zone.stratos.boundary.defs#Domains',
-              values: [{value: selectedDomain}],
+        const written = await createBoundaryRecord(
+          stratosWriteClient(session, enrollment),
+          {
+            boundary: selectedDomain,
+            repo: session.sub,
+            collection: 'zone.stratos.feed.post',
+            record: {
+              $type: 'zone.stratos.feed.post',
+              text: text.trim(),
+              // The service accepts a claim equal to the request boundary; the listRecords feed path reads boundaries from the body.
+              boundary: {
+                $type: 'zone.stratos.boundary.defs#Domains',
+                values: [{value: selectedDomain}],
+              },
+              ...(replyRef ? {reply: replyRef} : {}),
+              ...(embed ? {embed} : {}),
+              createdAt: now,
             },
-            ...(replyRef ? {reply: replyRef} : {}),
-            ...(embed ? {embed} : {}),
-            createdAt: now,
           },
-        })
+        )
+        if (!written.ok) {
+          throw new Error(`The Stratos service address cannot be trusted: ${written.reason}`)
+        }
       } else if (!isPrivate) {
         console.log('Creating public post with Atproto')
         const agent = configureAgent(new Agent(session))

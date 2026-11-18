@@ -202,7 +202,10 @@ for PDS custody. Neither field is covered by the current service attestation. Re
 write host from the live authority or the authenticated session before forwarding credentials.
 
 ```typescript
-import { resolveRepositoryTarget } from '@northskysocial/stratos-client'
+import {
+  createBoundaryRecord,
+  resolveRepositoryTarget,
+} from '@northskysocial/stratos-client'
 
 const target = resolveRepositoryTarget(enrollment, {
   authorityServiceUrl, // live authority endpoint for Stratos custody
@@ -211,31 +214,27 @@ const target = resolveRepositoryTarget(enrollment, {
 })
 if (target.kind === 'unresolved') throw new Error(target.reason)
 
-const handler = createServiceFetchHandler(authenticatedHandler, target.url)
-const rpc = new Client({ handler })
-if (target.kind === 'stratos') {
-  await rpc.post('com.atproto.repo.createRecord', {
-    input: {
-      repo: did,
-      collection: 'zone.stratos.feed.post',
-      record: stratosPost,
-    },
-  })
-} else {
-  await rpc.post('com.atproto.space.createRecord', {
-    input: {
-      space: `at://${authorityDid}/space/zone.stratos.space.feed/${spaceKey}`,
-      repo: did,
-      collection: 'zone.stratos.feed.post',
-      record: pdsPost,
-    },
-  })
-}
+const result = await createBoundaryRecord(
+  { handler: authenticatedHandler, resolveTarget: () => target },
+  {
+    boundary: 'did:web:stratos.example.com/general',
+    repo: did,
+    collection: 'zone.stratos.feed.post',
+    record: post,
+  },
+)
+if (!result.ok) throw new Error(result.reason)
 ```
+
+`createBoundaryRecord` calls `zone.stratos.repo.createRecord` on a `stratos` target. On a `pds`
+target it calls `com.atproto.space.createRecord` with the boundary's space URI. See
+[Write Path Integration](#5-write-path-integration) for the four helpers.
 
 The PDS result URI has seven segments:
 `at://{authorityDid}/space/{type}/{spaceKey}/{authorDid}/{collection}/{rkey}`.
-Changing only the origin of legacy repo CRUD does not write into the space.
+The legacy `com.atproto.repo.*` methods still serve `stratos` custody. They take the boundary
+from the record body and refuse likes and reposts. Changing only the origin of a legacy call does
+not write into the space.
 
 ### Routing applies to
 
@@ -247,6 +246,10 @@ Changing only the origin of legacy repo CRUD does not write into the space.
 | `com.atproto.repo.createRecord`         | Stratos custody only                                                  |
 | `com.atproto.repo.deleteRecord`         | Stratos custody only                                                  |
 | `com.atproto.repo.applyWrites`          | Stratos custody only                                                  |
+| `zone.stratos.repo.createRecord`        | Stratos custody only (boundary as a parameter)                        |
+| `zone.stratos.repo.putRecord`           | Stratos custody only (boundary as a parameter)                        |
+| `zone.stratos.repo.deleteRecord`        | Stratos custody only (boundary as a parameter)                        |
+| `zone.stratos.repo.applyWrites`         | Stratos custody only (boundary as a parameter)                        |
 | `com.atproto.sync.getRecord`            | Stratos custody only                                                  |
 | `zone.stratos.space.listBlobs`          | Yes (lists blob CIDs in a space)                                      |
 | `zone.stratos.sync.getRepo`             | Yes (full repo export as CAR)                                         |
@@ -463,12 +466,183 @@ retrieval via `com.atproto.sync.getBlob`.
 
 ## 5. Write Path Integration
 
-Select the repository target from custody before writing. `stratos` custody uses authority repo
-methods; `pds` custody uses PDS space methods. The complete request shape for each appears in
-[Service Routing](#2-service-routing).
+Write through the helpers. Each helper takes a boundary, picks the host from the member's custody,
+and sends the matching procedure.
 
-For `stratos` custody, batch operations use `com.atproto.repo.applyWrites` on the authority client.
-For `pds` custody, use the PDS space write methods.
+| Custody   | Procedure the helper calls                                             |
+| --------- | ---------------------------------------------------------------------- |
+| `stratos` | `zone.stratos.repo.*` on the Stratos service, with `boundary`          |
+| `pds`     | `com.atproto.space.*` on the member's PDS, with the boundary's `space` |
+
+### Helpers
+
+```typescript
+import {
+  applyBoundaryWrites,
+  createBoundaryRecord,
+  deleteBoundaryRecord,
+  putBoundaryRecord,
+  resolveRepositoryTarget,
+  ScopeUpgradeRequiredError,
+} from '@northskysocial/stratos-client'
+
+const client = {
+  handler: authenticatedHandler, // adds the DPoP proof and access token
+  resolveTarget: () => resolveRepositoryTarget(enrollment, hosts),
+}
+const boundary = 'did:web:stratos.example.com/general'
+
+const created = await createBoundaryRecord(client, {
+  boundary,
+  repo: did,
+  collection: 'app.bsky.feed.like',
+  record: { $type: 'app.bsky.feed.like', subject: { uri, cid }, createdAt },
+})
+if (!created.ok) throw new Error(created.reason)
+
+await deleteBoundaryRecord(client, {
+  boundary,
+  repo: did,
+  collection: 'app.bsky.feed.like',
+  rkey,
+})
+```
+
+| Helper                 | Input                                                                   | `value` on success                |
+| ---------------------- | ----------------------------------------------------------------------- | --------------------------------- |
+| `createBoundaryRecord` | `boundary`, `repo`, `collection`, `record`; optional `rkey`, `validate` | `{ uri, cid, validationStatus? }` |
+| `putBoundaryRecord`    | `boundary`, `repo`, `collection`, `rkey`, `record`; optional `validate` | `{ uri, cid, validationStatus? }` |
+| `deleteBoundaryRecord` | `boundary`, `repo`, `collection`, `rkey`                                | `{}`                              |
+| `applyBoundaryWrites`  | `boundary`, `repo`, `writes`; optional `validate`                       | `{ results }`                     |
+
+Each helper returns `{ ok: true, value }` or `{ ok: false, reason }`.
+
+`resolveRepositoryTarget` accepts only https origins. A service on a local `http` address, such as
+`http://127.0.0.1:3100`, is not resolved (`invalid-trusted-host`), so give the client its own
+`resolveTarget` that returns `{ kind: 'stratos', url }` for it.
+
+- `reason` is the reason of an `unresolved` target (see `resolveRepositoryTarget`), or
+  `invalid-boundary` when a `pds` write names a boundary that has no space URI.
+- When `ok` is `false`, the helper has sent no request.
+- Any error the service or the PDS returns is thrown as `BoundaryWriteError`. It has `status`,
+  `errorName` and `message`.
+- When several writes in one `applyBoundaryWrites` call fail validation, the error returned is that
+  of the first failing write, in order. The collection, duplicate-key and grant checks run for the whole batch first, then the checks on each record's `boundary` claim and `$type`, and only then the lexicon and subject checks.
+- A `writes` entry for `applyBoundaryWrites` is `{ action, collection, rkey?, value? }`, where
+  `action` is `create`, `update` or `delete`. The helper sets the `$type` that the chosen
+  procedure expects.
+- `boundaryToSpaceUri(boundary, spaceType)` is the function the `pds` path uses. It returns
+  `{ ok: true, value }` or `{ ok: false, reason }` and never throws.
+
+### The four procedures
+
+All four need a DPoP session. `repo` must be the caller's DID. `boundary` is
+`{serviceDid}/{domainName}`.
+
+| Procedure                        | Input                                                          | Output                                   |
+| -------------------------------- | -------------------------------------------------------------- | ---------------------------------------- |
+| `zone.stratos.repo.createRecord` | `boundary`, `repo`, `collection`, `record`; `rkey`, `validate` | `uri`, `cid`, `validationStatus`         |
+| `zone.stratos.repo.putRecord`    | `boundary`, `repo`, `collection`, `rkey`, `record`; `validate` | `uri`, `cid`, `validationStatus`         |
+| `zone.stratos.repo.deleteRecord` | `boundary`, `repo`, `collection`, `rkey`                       | `{}`                                     |
+| `zone.stratos.repo.applyWrites`  | `boundary`, `repo`, `writes` (1 to 200); `validate`            | `results`, one entry per write, in order |
+
+`applyWrites` is one commit. A `writes` entry has a `$type` of `zone.stratos.repo.applyWrites#create`,
+`#update` or `#delete`, plus `collection`, `rkey` and `value`. A `create` may leave out `rkey`. A
+`delete` has no `value`. Each result has the matching `#createResult`, `#updateResult` or
+`#deleteResult` type.
+
+Errors, by name:
+
+| Error                                                                                                                                            | Returned by                                | Meaning                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ | -------------------------------------------------------------------- |
+| `BoundaryNotFound`                                                                                                                               | all four                                   | The caller holds the boundary, but it is absent or inactive.         |
+| `BoundaryMismatch`                                                                                                                               | `createRecord`, `putRecord`, `applyWrites` | The record claims a boundary other than the one in the request.      |
+| `RecordAlreadyExists`                                                                                                                            | `createRecord`, `putRecord`, `applyWrites` | The key is taken, or the member already likes or reposts the post.   |
+| `RecordNotFound`                                                                                                                                 | `applyWrites`                              | An update or delete named a record that is not there.                |
+| `InvalidRecord`                                                                                                                                  | `createRecord`, `putRecord`, `applyWrites` | The record breaks a rule of its collection, or its subject is wrong. |
+| `InvalidCollection`                                                                                                                              | all four                                   | The collection is not allowed.                                       |
+| `ScopeUpgradeRequired`                                                                                                                           | `createRecord`, `putRecord`, `applyWrites` | The member must authorize again.                                     |
+| `NotEnrolled`, `ServiceWriteForbidden`, `PdsCustodyWriteForbidden`, `ForbiddenBoundary`, `InvalidDomain`, `ServiceMismatch`, `RateLimitExceeded` | all four                                   | As in the [error reference](../docs/guide/errors.md).                |
+
+### When `ScopeUpgradeRequired` is returned
+
+Stratos returns `ScopeUpgradeRequired` for a like or repost. It returns it only when the member's
+stored OAuth grant has a space grant for this service and that grant does not allow creating the
+collection. A grant from before likes and reposts were allowed is such a grant.
+
+The helpers throw `ScopeUpgradeRequiredError` (a `BoundaryWriteError` with `status` and
+`errorName`). The client should start OAuth authorization for the member again. It should not
+retry the write first.
+
+Stratos does not return it when the member has no stored session, when the stored scope has no
+space grant for this service, or when the scope cannot be read. Posts are never checked.
+
+### Likes and reposts
+
+The `zone.stratos.repo` procedures allow three collections: `zone.stratos.feed.post`,
+`app.bsky.feed.like` and `app.bsky.feed.repost`. A like or a repost is written with
+`createBoundaryRecord` into the boundary of the post.
+
+- The `subject` must be a post (`zone.stratos.feed.post`) in the same boundary.
+- `subject.uri` must be the post's `uri` exactly as the feed returns it. For a post that Stratos
+  holds, `subject.cid` must be the post's current CID.
+- A post by a member who hosts their own repo (`pds` custody) is not held by Stratos. For such a
+  post Stratos checks neither that the record exists nor its CID. It checks that the author is an
+  active member of the boundary who hosts their own repo, and that the URI is well formed for that
+  boundary.
+- A member has one like or repost per post. A second one is `RecordAlreadyExists`.
+- To remove one, call `deleteBoundaryRecord` with the rkey of the record in `viewer.like` or
+  `viewer.repost`.
+- Any wrong subject (not a post, another boundary, a URI that is not canonical, a wrong CID, a post
+  that Stratos holds but cannot find) returns one error: `InvalidRecord` with the message `The subject must be a
+post in this boundary`.
+- A record in a boundary does not need a `boundary` field. Leave it out of the body, because the
+  `boundary` parameter names it. If the body has one, it must name exactly that boundary. An
+  entry that carries its own `$type` is a `BoundaryMismatch`.
+
+A member who hosts their own repo (`pds` custody) cannot like or repost yet. The space type
+declaration `zone.stratos.space.feed` must be published with the like and repost collections, and
+the client's PDS space scope must list those collections.
+
+### Differences from the upstream `com.atproto.space` procedures
+
+The `zone.stratos.repo` procedures follow the upstream shapes, with `boundary` in place of
+`space`. These differences are on purpose.
+
+- `$type` is required, and must equal the collection. Upstream fills a missing `$type`.
+- Stratos does not require `tid` keys and has no slur check. It checks the record-key syntax only.
+- A record that breaks a rule is `InvalidRecord` (HTTP 400). Upstream answers `InvalidRequest`. The
+  message text is not the same.
+- The body limit is 1,000,000 bytes per request. There is no cap per record. Upstream has a size
+  cap for a space.
+- `applyWrites` takes 1 to 200 writes. The upstream lexicon does not declare a limit. The
+  reference PDS enforces 200. A batch that names the same record twice is refused.
+- `deleteRecord` of a record that is missing, or that is in another boundary, succeeds with `{}`.
+  It writes no commit and sends no event.
+- A boundary the caller does not hold returns `ForbiddenBoundary`, whether or not it exists.
+  `BoundaryNotFound` is returned only for a boundary the caller holds that is absent or inactive in
+  the catalog. `putRecord` returns
+  `RecordAlreadyExists` when the key holds a record in another boundary or a record that was
+  taken down.
+- A subject may be a space URI (`at://{authority}/space/{type}/{skey}/{author}/{collection}/{rkey}`)
+  where the lexicon says `at-uri`. Stratos parses it itself.
+- A subject URI must be canonical. A repo URI must have a DID authority and equal its re-parsed
+  form. A space URI must equal the URI rebuilt from its parts. Any other spelling is refused.
+- There is one like or repost per post for each member and collection. A like that was taken
+  down still blocks a second one. Upstream does not limit this.
+- `ScopeUpgradeRequired` exists only here. See [above](#when-scopeupgraderequired-is-returned).
+- `via` on a repost is not resolved and not indexed. When `validate` is not `false`, its shape is
+  checked.
+- A `boundary` claim in the record body must be `{ values: [{ value: <boundary> }] }`, with an
+  optional `$type` of `zone.stratos.boundary.defs#Domains`. An entry with its own `$type`
+  counts as a mismatch.
+
+### Deploy order
+
+Deploy the Rust feed generator (`stratos-feedgen-ng`) before any client calls the new
+procedures. It reads the boundary of each write from the sync stream and serves the like and
+repost view fields. After clients use the procedures, do not roll back to the TypeScript feed
+generator.
 
 ## 6. Blob Support
 
@@ -618,6 +792,12 @@ Send the call through the authenticated PDS proxy with `atproto-proxy: <feedgenD
 Render the response through a local object URL; a direct image URL cannot carry service auth.
 Missing blob views retain the existing custody-specific client path. PDS blob support is not added by this endpoint.
 See [Private feed attachments](../docs/client/feedgen-blobs.md) for the full contract and cache limits.
+
+Each post view also has `likeCount` and `repostCount`, the number of members who like or
+repost the post in the feed's boundary. The Rust feed generator always returns both, with `0`
+when there are none. `viewer` holds `like` and `repost`, the URIs of the viewer's own like and
+repost records. A key is absent when the viewer has no such record. Use the rkey at the end of
+that URI to delete it with `deleteBoundaryRecord`.
 
 ### Scope utilities
 
@@ -871,12 +1051,12 @@ and space methods. See [Service Routing](#2-service-routing) for the complete wr
 
 ### View integration
 
-| View            | Integration point                  | What changes                                            |
-| --------------- | ---------------------------------- | ------------------------------------------------------- |
-| Post thread     | `src/screens/PostThread/index.tsx` | Hydrate from Stratos when viewing boundary-scoped posts |
-| Feed            | `src/state/queries/post-feed.ts`   | Include Stratos records in feed via hydration           |
-| Settings        | `src/screens/Settings/`            | Stratos enrollment status, mode toggle                  |
-| Record creation | Post composer                      | Select repo or space `createRecord` by custody          |
+| View            | Integration point                  | What changes                                                |
+| --------------- | ---------------------------------- | ----------------------------------------------------------- |
+| Post thread     | `src/screens/PostThread/index.tsx` | Hydrate from Stratos when viewing boundary-scoped posts     |
+| Feed            | `src/state/queries/post-feed.ts`   | Include Stratos records in feed via hydration               |
+| Settings        | `src/screens/Settings/`            | Stratos enrollment status, mode toggle                      |
+| Record creation | Post composer                      | Call `createBoundaryRecord`; it selects the host by custody |
 
 ### Key differences from pdsls
 
@@ -904,8 +1084,8 @@ For apps that want to add basic Stratos support incrementally:
 
 ### Step 2: Write routing
 
-1. Select authority repo methods for `stratos` custody or PDS space methods for `pds` custody,
-   as shown in [Service Routing](#2-service-routing)
+1. Write through `createBoundaryRecord` and the other helpers in
+   [Write Path Integration](#5-write-path-integration). They select the host by custody
 2. Add scope declarations to OAuth metadata
 3. Add scope selector UI with dependency gating
 

@@ -1,8 +1,10 @@
 <script lang="ts">
   import {Agent} from '@atproto/api'
+  import type {OAuthSession} from '@atproto/oauth-client-browser'
   import type {FeedgenResult, FeedPost} from './feed'
   import {groupIntoThreads} from './feed'
   import PostCard from './PostCard.svelte'
+  import type {StratosEnrollment} from './stratos'
 
   interface Props {
     posts: FeedPost[]
@@ -13,11 +15,14 @@
     failure?: Extract<FeedgenResult, {ok: false}> | null
     onretry?: () => Promise<void>
     currentDid: string
+    session?: OAuthSession | null
+    enrollment?: StratosEnrollment | null
+    attestationVerified?: boolean | null
     onreply: (post: FeedPost) => void
     ondelete: (post: FeedPost) => Promise<void>
   }
 
-  let {posts, stratosAgent, publicAgent, serviceUrl, loading, failure, onretry, currentDid, onreply, ondelete}: Props = $props()
+  let {posts, stratosAgent, publicAgent, serviceUrl, loading, failure, onretry, currentDid, session, enrollment, attestationVerified, onreply, ondelete}: Props = $props()
 
   const failureMessages = {
     'not-ready': 'Your private feed is getting ready. Try again shortly.',
@@ -41,7 +46,7 @@
         {#if node.depth > 0}
             <div class="thread-line"></div>
         {/if}
-        <PostCard post={node.post} {stratosAgent} {publicAgent} {serviceUrl} {currentDid} {onreply} {ondelete}/>
+        <PostCard post={node.post} {stratosAgent} {publicAgent} {serviceUrl} {currentDid} {session} {enrollment} {attestationVerified} {onreply} {ondelete}/>
     </div>
     {#each node.replies as child (child.post.uri)}
         {@render threadNode(child)}

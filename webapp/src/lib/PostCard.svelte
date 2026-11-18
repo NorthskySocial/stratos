@@ -1,20 +1,26 @@
 <script lang="ts">
   import {Agent} from '@atproto/api'
+  import type {OAuthSession} from '@atproto/oauth-client-browser'
   import {authorFromUri, type FeedPost} from './feed'
   import {displayBoundary} from './boundary-display'
   import RecordInspector from './RecordInspector.svelte'
   import {getCid, type StratosImage} from './utils/cid'
+  import LikeButton from './LikeButton.svelte'
+  import type {StratosEnrollment} from './stratos'
 
   interface Props {
     post: FeedPost
     stratosAgent: Agent | null
     publicAgent?: Agent | null
     currentDid: string
+    session?: OAuthSession | null
+    enrollment?: StratosEnrollment | null
+    attestationVerified?: boolean | null
     onreply: (post: FeedPost) => void
     ondelete: (post: FeedPost) => Promise<void>
   }
 
-  let {post, stratosAgent, publicAgent, currentDid, onreply, ondelete}: Props = $props()
+  let {post, stratosAgent, publicAgent, currentDid, session, enrollment, attestationVerified = null, onreply, ondelete}: Props = $props()
 
   let inspectorOpen = $state(false)
   let imageUrls = $state<Record<string, string>>({})
@@ -330,6 +336,9 @@
 
     <div class="post-actions">
         <button class="reply-btn" onclick={() => onreply(post)}>Reply</button>
+        {#if post.isPrivate && session && enrollment}
+            <LikeButton {post} {session} {enrollment} {attestationVerified}/>
+        {/if}
         {#if canDelete}
             <button
                     class="delete-btn"

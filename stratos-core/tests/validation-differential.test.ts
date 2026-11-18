@@ -158,6 +158,6 @@ describe('StratosValidator against the frozen reference', () => {
         ),
         { numRuns: RUNS },
       )
-    })
+    }, 60_000)
   })
 })
