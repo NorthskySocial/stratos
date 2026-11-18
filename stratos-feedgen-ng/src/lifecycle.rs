@@ -298,6 +298,54 @@ impl ControlLifecycle {
             .reinstating_accounts(authority_did, limit)
     }
 
+    pub fn is_account_taken_down(&self, did: &str) -> Result<bool, StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .is_account_taken_down(did)
+    }
+
+    pub fn is_actor_enrolled(&self, did: &str) -> Result<bool, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .actor_sync_state(authority_did, did)
+            .map(|state| state.is_some())
+    }
+
+    pub fn reinstating_records(&self, limit: u16) -> Result<Vec<String>, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .reinstating_records(authority_did, limit)
+    }
+
+    pub fn reset_actor_cursor(&self, did: &str) -> Result<(), StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .reset_actor_cursor(authority_did, did)
+    }
+
+    pub fn reset_pds_member_space_state(
+        &self,
+        boundary: &str,
+        did: &str,
+    ) -> Result<(), StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .reset_pds_member_space_state(boundary, did)
+    }
+
     pub fn finish_reinstatement(&self, subject_key: &str) -> Result<(), StoreError> {
         let authority_did = self.label_authority()?;
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");

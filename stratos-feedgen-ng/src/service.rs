@@ -234,6 +234,9 @@ impl ProjectionReader {
         for boundary in &effects.unenrolled_boundaries {
             self.admission.invalidate_boundary(boundary);
         }
+        for boundary in &effects.removed_record_boundaries {
+            self.admission.invalidate_boundary(boundary);
+        }
         Ok(effects)
     }
     pub fn reinstating_accounts(
@@ -242,6 +245,26 @@ impl ProjectionReader {
         limit: u16,
     ) -> Result<Vec<(String, u32)>, StoreError> {
         self.store.reinstating_accounts(authority_did, limit)
+    }
+    pub fn is_account_taken_down(&self, did: &str) -> Result<bool, StoreError> {
+        self.store.is_account_taken_down(did)
+    }
+    pub fn reinstating_records(
+        &self,
+        authority_did: &str,
+        limit: u16,
+    ) -> Result<Vec<String>, StoreError> {
+        self.store.reinstating_records(authority_did, limit)
+    }
+    pub fn reset_actor_cursor(&mut self, authority_did: &str, did: &str) -> Result<(), StoreError> {
+        self.store.reset_actor_cursor(authority_did, did)
+    }
+    pub fn reset_pds_member_space_state(
+        &mut self,
+        boundary: &str,
+        did: &str,
+    ) -> Result<(), StoreError> {
+        self.store.reset_pds_member_space_state(boundary, did)
     }
     pub fn finish_reinstatement(
         &mut self,

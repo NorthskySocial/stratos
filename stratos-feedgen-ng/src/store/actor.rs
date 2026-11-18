@@ -143,6 +143,10 @@ impl EncryptedStore {
             return Err(StoreError::StaleCursor);
         }
         for post in &page.upserts {
+            // A replay or a later update must not re-admit a taken-down post.
+            if super::labels::record_taken_down(&transaction, &post.uri)? {
+                continue;
+            }
             transaction
                 .execute(
                     "INSERT INTO post (uri, author_did, cid, sort_at, indexed_at, retained_at, projection_bytes, record_json, blob_refs_json, row_version)
@@ -259,6 +263,16 @@ impl EncryptedStore {
             .map(|cursor| u64::try_from(cursor).map_err(|_| StoreError::InvalidProjectionMutation))
             .transpose()?;
         Ok(Some(ActorSyncState { boundaries, cursor }))
+    }
+
+    pub fn reset_actor_cursor(&mut self, authority_did: &str, did: &str) -> Result<(), StoreError> {
+        self.connection
+            .execute(
+                "DELETE FROM actor_cursor WHERE authority_did = ?1 AND did = ?2",
+                params![authority_did, did],
+            )
+            .map_err(StoreError::Open)?;
+        Ok(())
     }
 
     pub fn reconcile_actor_enrollment(

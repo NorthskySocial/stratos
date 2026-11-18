@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use time::OffsetDateTime;
 use tokio::{sync::watch, task::JoinHandle};
@@ -6,6 +6,9 @@ use tokio::{sync::watch, task::JoinHandle};
 use crate::{
     actor_stream::ActorPool,
     authority::{AuthorityClient, AuthorityError, LabelLogClient},
+    blob_service::BlobService,
+    credential_manager::boundary_to_space_uri,
+    identifier::RecordUri,
     lifecycle::ControlLifecycle,
     moderation_label::LabelSubject,
     store::ActorEnrollment,
@@ -16,6 +19,7 @@ use crate::{
 pub const LABEL_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const MAX_LABEL_PAGES_PER_CYCLE: usize = 50;
 const REINSTATING_ACCOUNTS_PER_CYCLE: u16 = 64;
+const REINSTATING_RECORDS_PER_CYCLE: u16 = 64;
 // An operator hold keeps a negated member out and the authority emits no event
 // when it lifts, so re-checking has to stop at some point.
 const MAX_REINSTATEMENT_ATTEMPTS: u32 = 6;
@@ -34,6 +38,12 @@ pub struct AccountEnforcement {
     pub authority: Arc<dyn AuthorityClient>,
 }
 
+/// What a label poller needs to drop cached blobs of removed records.
+#[derive(Clone)]
+pub struct RecordEnforcement {
+    pub blobs: Arc<BlobService>,
+}
+
 /// Follows the authority label log independently of the service session.
 pub struct LabelPoller {
     shutdown: watch::Sender<bool>,
@@ -44,22 +54,31 @@ impl LabelPoller {
     pub fn start(
         client: Arc<dyn LabelLogClient>,
         accounts: AccountEnforcement,
+        records: RecordEnforcement,
         lifecycle: Arc<ControlLifecycle>,
         telemetry: Arc<FeedTelemetry>,
     ) -> Self {
-        Self::start_with_interval(client, accounts, lifecycle, telemetry, LABEL_POLL_INTERVAL)
+        Self::start_with_interval(
+            client,
+            accounts,
+            records,
+            lifecycle,
+            telemetry,
+            LABEL_POLL_INTERVAL,
+        )
     }
 
     pub fn start_with_interval(
         client: Arc<dyn LabelLogClient>,
         accounts: AccountEnforcement,
+        records: RecordEnforcement,
         lifecycle: Arc<ControlLifecycle>,
         telemetry: Arc<FeedTelemetry>,
         interval: Duration,
     ) -> Self {
         let (shutdown, receiver) = watch::channel(false);
         let task = tokio::spawn(run_forever(
-            client, accounts, lifecycle, telemetry, interval, receiver,
+            client, accounts, records, lifecycle, telemetry, interval, receiver,
         ));
         Self {
             shutdown,
@@ -78,6 +97,7 @@ impl LabelPoller {
 async fn run_forever(
     client: Arc<dyn LabelLogClient>,
     accounts: AccountEnforcement,
+    records: RecordEnforcement,
     lifecycle: Arc<ControlLifecycle>,
     telemetry: Arc<FeedTelemetry>,
     interval: Duration,
@@ -85,7 +105,7 @@ async fn run_forever(
 ) {
     loop {
         tokio::select! {
-            _ = run_cycle(&lifecycle, client.as_ref(), &accounts, &telemetry) => {}
+            _ = run_cycle(&lifecycle, client.as_ref(), &accounts, &records, &telemetry) => {}
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
                     return;
@@ -107,11 +127,13 @@ async fn run_cycle(
     lifecycle: &ControlLifecycle,
     client: &dyn LabelLogClient,
     accounts: &AccountEnforcement,
+    records: &RecordEnforcement,
     telemetry: &FeedTelemetry,
 ) -> LabelCycle {
     // Before the pages, so a negation is acted on one cycle after it is seen.
     reinstate_accounts(lifecycle, accounts).await;
-    let result = poll_to_caught_up(lifecycle, client, accounts, telemetry).await;
+    reinstate_records(lifecycle, accounts).await;
+    let result = poll_to_caught_up(lifecycle, client, accounts, records, telemetry).await;
     if let LabelCycle::Failed(outcome) = result {
         telemetry.record_label_poll(outcome);
         eprintln!("{}", failure_line(outcome));
@@ -123,6 +145,7 @@ async fn poll_to_caught_up(
     lifecycle: &ControlLifecycle,
     client: &dyn LabelLogClient,
     accounts: &AccountEnforcement,
+    records: &RecordEnforcement,
     telemetry: &FeedTelemetry,
 ) -> LabelCycle {
     let mut cursor = match lifecycle.label_cursor() {
@@ -155,6 +178,9 @@ async fn poll_to_caught_up(
             {
                 eprintln!("{}", enforcement_failure_line("worker_stop"));
             }
+        }
+        for (author_did, cid) in &effects.removed_blobs {
+            records.blobs.remove(author_did, cid);
         }
         cursor = page.cursor;
         telemetry.record_label_poll(LabelPollOutcome::Ok);
@@ -241,6 +267,123 @@ fn keep_account_out(
     Ok(())
 }
 
+/// Where a negated record's author is re-read from, which depends on who hosts it.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum ReplayScope {
+    StratosActor { did: String },
+    PdsMember { boundary: String, did: String },
+}
+
+async fn reinstate_records(lifecycle: &ControlLifecycle, accounts: &AccountEnforcement) {
+    let pending = match lifecycle.reinstating_records(REINSTATING_RECORDS_PER_CYCLE) {
+        Ok(pending) => pending,
+        Err(_) => {
+            eprintln!("{}", enforcement_failure_line("store"));
+            return;
+        }
+    };
+    // One replay serves every negated record of the same author in this cycle.
+    let mut replays: BTreeMap<ReplayScope, bool> = BTreeMap::new();
+    for uri in pending {
+        let scope = match replay_scope(lifecycle, &uri) {
+            Ok(Some(scope)) => scope,
+            Ok(None) => {
+                if lifecycle.finish_reinstatement(&uri).is_err() {
+                    eprintln!("{}", enforcement_failure_line("store"));
+                }
+                continue;
+            }
+            Err(kind) => {
+                eprintln!("{}", enforcement_failure_line(kind));
+                continue;
+            }
+        };
+        let replayed = match replays.get(&scope) {
+            Some(replayed) => *replayed,
+            None => {
+                let replayed = match replay_author(lifecycle, accounts, &scope).await {
+                    Ok(()) => true,
+                    Err(kind) => {
+                        eprintln!("{}", enforcement_failure_line(kind));
+                        false
+                    }
+                };
+                replays.insert(scope, replayed);
+                replayed
+            }
+        };
+        // A failed replay leaves the row, so the next cycle tries again.
+        if replayed && lifecycle.finish_reinstatement(&uri).is_err() {
+            eprintln!("{}", enforcement_failure_line("store"));
+        }
+    }
+}
+
+/// `None` means nothing needs re-reading: the author is not held by this feed
+/// generator, or is held back by an account takedown.
+fn replay_scope(
+    lifecycle: &ControlLifecycle,
+    uri: &str,
+) -> Result<Option<ReplayScope>, &'static str> {
+    let Ok(parsed) = RecordUri::parse(uri) else {
+        return Ok(None);
+    };
+    let did = parsed.author().as_str().to_owned();
+    if lifecycle.is_account_taken_down(&did).map_err(|_| "store")? {
+        return Ok(None);
+    }
+    match member_boundary(uri) {
+        Some(boundary) => {
+            let current = lifecycle
+                .pds_member_generation(&boundary, &did)
+                .map_err(|_| "store")?
+                .is_some();
+            Ok(current.then_some(ReplayScope::PdsMember { boundary, did }))
+        }
+        None if matches!(parsed, RecordUri::Repo { .. }) => {
+            let enrolled = lifecycle.is_actor_enrolled(&did).map_err(|_| "store")?;
+            Ok(enrolled.then_some(ReplayScope::StratosActor { did }))
+        }
+        None => Ok(None),
+    }
+}
+
+async fn replay_author(
+    lifecycle: &ControlLifecycle,
+    accounts: &AccountEnforcement,
+    scope: &ReplayScope,
+) -> Result<(), &'static str> {
+    match scope {
+        ReplayScope::StratosActor { did } => accounts
+            .actors
+            .replay_actor(did)
+            .await
+            .map(|_| ())
+            .map_err(|_| "replay"),
+        ReplayScope::PdsMember { boundary, did } => lifecycle
+            .reset_pds_member_space_state(boundary, did)
+            .map_err(|_| "store"),
+    }
+}
+
+/// The boundary a space-form record belongs to, when it is the one boundary
+/// space type this feed generator syncs.
+fn member_boundary(uri: &str) -> Option<String> {
+    let Ok(RecordUri::Space {
+        authority,
+        space_type,
+        space_key,
+        ..
+    }) = RecordUri::parse(uri)
+    else {
+        return None;
+    };
+    let authority = authority.as_str();
+    let boundary = format!("{authority}/{space_key}");
+    let expected = boundary_to_space_uri(&boundary).ok()?;
+    (expected == format!("at://{authority}/space/{space_type}/{space_key}")).then_some(boundary)
+}
+
 fn enforcement_failure_line(kind: &'static str) -> String {
     format!("event=account_label_enforcement_failed kind={kind}")
 }
@@ -285,12 +428,18 @@ mod tests {
     };
 
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+    use sha2::Digest;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use super::{AccountEnforcement, LabelCycle, LabelPoller, failure_line, run_cycle};
+    use super::{
+        AccountEnforcement, LabelCycle, LabelPoller, RecordEnforcement, failure_line, run_cycle,
+    };
     use crate::{
         actor_stream::{ActorPool, ActorStreamConfig},
         authority::HttpAuthorityClient,
+        blob_cache::{BlobCache, MAX_CACHE_BYTES},
+        blob_service::BlobService,
+        blob_upstream::HttpBlobUpstream,
         feed_service::{FeedQuery, FeedServiceError},
         feeds::{FeedDescription, FeedRegistry},
         lifecycle::ControlLifecycle,
@@ -298,7 +447,10 @@ mod tests {
         service::ProjectionReader,
         service_auth::ServiceSigningKey,
         service_event::{EnrollmentAction, EnrollmentEvent},
-        store::{ActorEnrollment, ActorPage, EncryptedStore, ProjectionPost, StorageKey},
+        store::{
+            ActorEnrollment, ActorPage, EncryptedStore, PdsSpaceMember, ProjectionPost,
+            SpaceStageMutation, SpaceStagePage, StorageKey,
+        },
         telemetry::{FeedTelemetry, LabelPollOutcome},
     };
 
@@ -531,6 +683,7 @@ mod tests {
             &lifecycle,
             client(&responder).as_ref(),
             &enforcement(&responder, &lifecycle),
+            &record_enforcement(),
             &FeedTelemetry::disabled(),
         )
         .await;
@@ -561,6 +714,7 @@ mod tests {
             &lifecycle,
             client(&responder).as_ref(),
             &enforcement(&responder, &lifecycle),
+            &record_enforcement(),
             &FeedTelemetry::disabled(),
         )
         .await;
@@ -584,6 +738,7 @@ mod tests {
             &lifecycle,
             label_client.as_ref(),
             &accounts,
+            &record_enforcement(),
             &FeedTelemetry::disabled(),
         )
         .await;
@@ -597,6 +752,7 @@ mod tests {
             &lifecycle,
             label_client.as_ref(),
             &accounts,
+            &record_enforcement(),
             &FeedTelemetry::disabled(),
         )
         .await;
@@ -619,6 +775,7 @@ mod tests {
             &lifecycle,
             client(&responder).as_ref(),
             &enforcement(&responder, &lifecycle),
+            &record_enforcement(),
             &FeedTelemetry::disabled(),
         )
         .await;
@@ -641,6 +798,7 @@ mod tests {
         let poller = LabelPoller::start_with_interval(
             client(&responder),
             enforcement(&responder, &lifecycle),
+            record_enforcement(),
             Arc::clone(&lifecycle),
             Arc::new(FeedTelemetry::disabled()),
             Duration::from_millis(20),
@@ -687,12 +845,26 @@ mod tests {
         let label_client = client(&responder);
         let accounts = enforcement(&responder, &lifecycle);
         assert_eq!(
-            run_cycle(&lifecycle, label_client.as_ref(), &accounts, &telemetry).await,
+            run_cycle(
+                &lifecycle,
+                label_client.as_ref(),
+                &accounts,
+                &record_enforcement(),
+                &telemetry
+            )
+            .await,
             LabelCycle::CaughtUp
         );
         responder.set_routes([(4, http_response("500 Internal Server Error", b"{}"))]);
         assert_eq!(
-            run_cycle(&lifecycle, label_client.as_ref(), &accounts, &telemetry).await,
+            run_cycle(
+                &lifecycle,
+                label_client.as_ref(),
+                &accounts,
+                &record_enforcement(),
+                &telemetry
+            )
+            .await,
             LabelCycle::Failed(LabelPollOutcome::Unavailable)
         );
 
@@ -765,6 +937,29 @@ mod tests {
         AccountEnforcement {
             actors,
             authority: client(responder),
+        }
+    }
+
+    fn record_enforcement() -> RecordEnforcement {
+        RecordEnforcement {
+            blobs: Arc::new(
+                BlobService::new(
+                    Arc::new(Mutex::new(
+                        BlobCache::new(MAX_CACHE_BYTES, Duration::from_secs(60)).unwrap(),
+                    )),
+                    Arc::new(
+                        HttpBlobUpstream::new(
+                            "http://127.0.0.1:9",
+                            AUTHORITY_DID.to_owned(),
+                            "did:web:feedgen.example.test".to_owned(),
+                            ServiceSigningKey::from_hex(&"11".repeat(32)).unwrap(),
+                        )
+                        .unwrap(),
+                    ),
+                    1,
+                )
+                .unwrap(),
+            ),
         }
     }
 
@@ -853,6 +1048,7 @@ mod tests {
                 &self.lifecycle,
                 self.label_client.as_ref(),
                 &self.accounts,
+                &record_enforcement(),
                 &FeedTelemetry::disabled(),
             )
             .await
@@ -1147,5 +1343,821 @@ mod tests {
         );
         drop(reopened);
         let _ = std::fs::remove_file(&path);
+    }
+
+    const SPIKE_SECOND_POST: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop2";
+    const SPACE_BOUNDARY: &str = "did:web:stratos.example.test/bebop";
+    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const FAYE_VALENTINE: &str = "did:plc:fayevalentine";
+    const FAYE_SPACE_POST: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
+    const FAYE_SECOND_SPACE_POST: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/redtail";
+    const SWORDFISH_BYTES: &[u8] = b"swordfish";
+
+    fn swordfish_cid() -> String {
+        cid::Cid::new_v1(
+            0x55,
+            multihash::Multihash::<64>::wrap(0x12, &sha2::Sha256::digest(SWORDFISH_BYTES)).unwrap(),
+        )
+        .to_string()
+    }
+
+    fn spike_blob_post() -> ProjectionPost {
+        ProjectionPost {
+            blob_refs_json: format!(
+                r#"[{{"cid":"{}","mimeType":"image/png"}}]"#,
+                swordfish_cid()
+            )
+            .into_bytes(),
+            ..spike_post("bebop1")
+        }
+    }
+
+    fn store_with_spike_blob_post() -> EncryptedStore {
+        let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+        store
+            .reconcile_actor_enrollment(
+                SPIKE,
+                "1998-04-03T00:00:00.000Z",
+                Some(ActorEnrollment {
+                    did: SPIKE.to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        store.apply_actor_page(spike_blob_page()).unwrap();
+        store
+    }
+
+    fn spike_blob_page() -> ActorPage {
+        ActorPage {
+            authority_did: AUTHORITY_DID.to_owned(),
+            actor_did: SPIKE.to_owned(),
+            sequence: 3,
+            upserts: vec![spike_blob_post(), spike_post("bebop2")],
+            deletes: Vec::new(),
+            updated_at: "1998-04-03T00:00:00.000Z".to_owned(),
+        }
+    }
+
+    fn store_with_faye_space_posts() -> EncryptedStore {
+        let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+        store
+            .replace_pds_space_members(
+                SPACE_BOUNDARY,
+                vec![PdsSpaceMember {
+                    did: FAYE_VALENTINE.to_owned(),
+                }],
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap();
+        let upsert = |uri: &str| SpaceStageMutation::Upsert {
+            uri: uri.to_owned(),
+            cid: "bafyreia".to_owned(),
+            sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
+            record_json: br#"{"text":"Swordfish"}"#.to_vec(),
+            blob_refs_json: b"[]".to_vec(),
+        };
+        store
+            .stage_authorized_space_page(
+                SpaceStagePage {
+                    space_uri: SPACE.to_owned(),
+                    actor_did: FAYE_VALENTINE.to_owned(),
+                    boundary: SPACE_BOUNDARY.to_owned(),
+                    next_cursor: None,
+                    updated_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                },
+                vec![upsert(FAYE_SPACE_POST), upsert(FAYE_SECOND_SPACE_POST)],
+            )
+            .unwrap();
+        store
+            .promote_authorized_space_stage(
+                SPACE_BOUNDARY,
+                SPACE,
+                FAYE_VALENTINE,
+                "1998-04-04T00:00:00.000Z",
+            )
+            .unwrap();
+        store
+    }
+
+    struct RecordScene {
+        responder: Responder,
+        lifecycle: Arc<ControlLifecycle>,
+        label_client: Arc<HttpAuthorityClient>,
+        accounts: AccountEnforcement,
+        records: RecordEnforcement,
+        boundary: &'static str,
+    }
+
+    impl RecordScene {
+        async fn new(store: EncryptedStore, boundary: &'static str) -> Self {
+            let responder = respond_by_cursor([]).await;
+            let lifecycle = Arc::new(
+                ControlLifecycle::for_authority_with_telemetry(
+                    ProjectionReader::new(store),
+                    Arc::new(Mutex::new(FeedReadinessGate::default())),
+                    AUTHORITY_DID,
+                    Arc::new(FeedTelemetry::disabled()),
+                )
+                .unwrap(),
+            );
+            lifecycle
+                .apply_viewer_authorization(
+                    crate::authorization::ViewerAuthorization {
+                        did: "did:plc:faye".to_owned(),
+                        boundaries: vec![boundary.to_owned()],
+                        expires_at: u64::MAX,
+                    },
+                    1,
+                )
+                .unwrap();
+            lifecycle.session_established();
+            let generation = lifecycle.begin_reconciliation();
+            assert!(lifecycle.complete_reconciliation(
+                generation,
+                ReconciliationOutcome {
+                    errors: 0,
+                    truncated: false,
+                },
+            ));
+            Self {
+                label_client: client(&responder),
+                accounts: enforcement(&responder, &lifecycle),
+                records: record_enforcement(),
+                responder,
+                lifecycle,
+                boundary,
+            }
+        }
+
+        async fn cycle(&self) -> LabelCycle {
+            run_cycle(
+                &self.lifecycle,
+                self.label_client.as_ref(),
+                &self.accounts,
+                &self.records,
+                &FeedTelemetry::disabled(),
+            )
+            .await
+        }
+
+        async fn catch_up_on_an_empty_log(&self) {
+            self.responder.set_routes([(0, label_page(0, &[]))]);
+            assert_eq!(self.cycle().await, LabelCycle::CaughtUp);
+        }
+
+        async fn take_down(&self, uri: &str) {
+            let from = self.lifecycle.label_cursor().unwrap();
+            self.responder.set_routes([
+                (from, label_page(from + 1, &[(from + 1, uri)])),
+                (from + 1, label_page(from + 1, &[])),
+            ]);
+            assert_eq!(self.cycle().await, LabelCycle::CaughtUp);
+        }
+
+        fn feeds(&self) -> FeedRegistry {
+            FeedRegistry::new([FeedDescription {
+                id: "bebop".to_owned(),
+                boundary: self.boundary.to_owned(),
+                display_name: None,
+                description: None,
+            }])
+            .unwrap()
+        }
+
+        fn feed_text(&self) -> Result<String, FeedServiceError> {
+            self.lifecycle
+                .serve_viewer_feed(
+                    "did:plc:faye",
+                    &self.feeds(),
+                    FeedQuery {
+                        feed_id: "bebop",
+                        cursor: None,
+                        limit: 50,
+                        now: 2,
+                        as_of: BEFORE_RETENTION_ENDS,
+                        blob_base_url: "https://feedgen.example.test",
+                    },
+                )
+                .map(|(bytes, _)| String::from_utf8(bytes).unwrap())
+        }
+
+        fn feed_lists(&self, uri: &str) -> bool {
+            self.feed_text().unwrap().contains(uri)
+        }
+
+        fn prepare_blob(&self) -> Option<(crate::admission::ReadToken, crate::store::BlobPost)> {
+            self.lifecycle
+                .prepare_viewer_blob(
+                    "did:plc:faye",
+                    &self.feeds(),
+                    SPIKE_POST,
+                    2,
+                    BEFORE_RETENTION_ENDS,
+                )
+                .unwrap()
+        }
+
+        fn cached_blob(&self) -> Option<Arc<[u8]>> {
+            self.records
+                .blobs
+                .cache()
+                .lock()
+                .unwrap()
+                .get(SPIKE, &swordfish_cid())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_taken_down_stratos_post_leaves_the_feed_and_siblings_stay() {
+        let scene = RecordScene::new(store_with_spike_blob_post(), "bebop").await;
+        scene.catch_up_on_an_empty_log().await;
+        assert!(scene.feed_lists(SPIKE_POST));
+
+        scene.take_down(SPIKE_POST).await;
+
+        assert!(!scene.feed_lists(SPIKE_POST));
+        assert!(scene.feed_lists(SPIKE_SECOND_POST));
+    }
+
+    #[tokio::test]
+    async fn a_taken_down_space_post_leaves_the_feed_and_siblings_stay() {
+        let scene = RecordScene::new(store_with_faye_space_posts(), SPACE_BOUNDARY).await;
+        scene.catch_up_on_an_empty_log().await;
+        assert!(scene.feed_lists(FAYE_SPACE_POST));
+
+        scene.take_down(FAYE_SPACE_POST).await;
+
+        assert!(!scene.feed_lists(FAYE_SPACE_POST));
+        assert!(scene.feed_lists(FAYE_SECOND_SPACE_POST));
+    }
+
+    #[tokio::test]
+    async fn a_fresh_start_applies_labels_before_serving_and_refuses_the_post() {
+        let scene = RecordScene::new(
+            EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            "bebop",
+        )
+        .await;
+        assert!(matches!(
+            scene.feed_text(),
+            Err(FeedServiceError::FeedNotReady)
+        ));
+
+        scene.take_down(SPIKE_POST).await;
+        scene.lifecycle.apply_actor_page(spike_blob_page()).unwrap();
+
+        assert!(!scene.feed_lists(SPIKE_POST));
+        assert!(scene.feed_lists(SPIKE_SECOND_POST));
+    }
+
+    #[tokio::test]
+    async fn a_takedown_evicts_the_cached_blob_of_the_post() {
+        let scene = RecordScene::new(store_with_spike_blob_post(), "bebop").await;
+        scene.catch_up_on_an_empty_log().await;
+        scene
+            .records
+            .blobs
+            .cache()
+            .lock()
+            .unwrap()
+            .put(SPIKE, &swordfish_cid(), SWORDFISH_BYTES.to_vec())
+            .unwrap();
+        assert!(scene.cached_blob().is_some());
+        assert!(scene.prepare_blob().is_some());
+
+        scene.take_down(SPIKE_POST).await;
+
+        assert!(scene.cached_blob().is_none());
+        assert!(scene.prepare_blob().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_blob_token_prepared_before_a_takedown_is_not_released() {
+        let scene = RecordScene::new(store_with_spike_blob_post(), "bebop").await;
+        scene.catch_up_on_an_empty_log().await;
+        let (token, _) = scene
+            .prepare_blob()
+            .expect("the blob is served before takedown");
+
+        scene.take_down(SPIKE_POST).await;
+
+        assert!(scene.lifecycle.release_blob(token, (), 2).is_none());
+    }
+
+    use std::collections::VecDeque;
+
+    use async_trait::async_trait;
+    use serde_json::json;
+
+    use crate::{
+        credential_issuer::{
+            CredentialExpiry, CredentialMintError, IssuedSpaceCredential, SpaceCredentialIssuer,
+        },
+        credential_manager::SpaceCredentialManager,
+        membership_reconciler::PdsPollTarget,
+        pds_space_sync::{
+            PdsSpaceSynchronizer, SpaceCommitVerificationPort, SpacePageReader, SpacePageSource,
+        },
+        space_commit::CommitVerification,
+        space_host::{SpaceHostError, SpaceHostPage},
+        space_http_signature::SpaceHttpSignatureKey,
+        space_sync::{POST_COLLECTION, SpacePage, SpaceRepoOp},
+    };
+
+    #[derive(Clone, Copy)]
+    enum Sub<'a> {
+        Record(&'a str),
+        Account(&'a str),
+    }
+
+    fn label_log_page(cursor: u64, labels: &[(u64, Sub<'_>, bool)]) -> Vec<u8> {
+        let labels = labels
+            .iter()
+            .map(|(seq, subject, neg)| {
+                let subject = match subject {
+                    Sub::Record(uri) => format!(
+                        r##"{{"$type":"zone.stratos.moderation.defs#recordSubject","uri":"{uri}"}}"##
+                    ),
+                    Sub::Account(did) => format!(
+                        r##"{{"$type":"zone.stratos.moderation.defs#accountSubject","did":"{did}"}}"##
+                    ),
+                };
+                format!(
+                    r#"{{"seq":{seq},"subject":{subject},"val":"!takedown","neg":{neg},"createdAt":"1998-04-03T00:00:00Z"}}"#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        http_response(
+            "200 OK",
+            format!(r#"{{"cursor":"{cursor}","labels":[{labels}]}}"#).as_bytes(),
+        )
+    }
+
+    struct Issuer;
+
+    #[async_trait]
+    impl SpaceCredentialIssuer for Issuer {
+        async fn mint(
+            &self,
+            _: &str,
+            _: &SpaceHttpSignatureKey,
+            _: u64,
+        ) -> Result<IssuedSpaceCredential, CredentialMintError> {
+            Ok(IssuedSpaceCredential {
+                credential: "header.payload.signature".to_owned(),
+                expires_at: CredentialExpiry::from_epoch_seconds(10_000),
+            })
+        }
+    }
+
+    #[derive(Clone)]
+    struct HostPages {
+        pages: Arc<Mutex<VecDeque<SpaceHostPage>>>,
+        requested_cursors: Arc<Mutex<Vec<Option<String>>>>,
+    }
+
+    #[async_trait]
+    impl SpacePageReader for HostPages {
+        async fn list_page(
+            &self,
+            _: &PdsPollTarget,
+            cursor: Option<&str>,
+            _: usize,
+        ) -> Result<SpaceHostPage, SpaceHostError> {
+            self.requested_cursors
+                .lock()
+                .unwrap()
+                .push(cursor.map(str::to_owned));
+            self.pages
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or(SpaceHostError::Unreachable)
+        }
+    }
+
+    #[async_trait]
+    impl SpacePageSource for HostPages {
+        async fn connect(
+            &self,
+            _: &PdsPollTarget,
+            _: Arc<crate::space_credential::HeldSpaceCredential>,
+        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
+            Ok(Arc::new(self.clone()))
+        }
+    }
+
+    struct Verified;
+
+    #[async_trait]
+    impl SpaceCommitVerificationPort for Verified {
+        async fn verify(
+            &self,
+            _: &str,
+            _: &str,
+            _: Option<&serde_json::Value>,
+        ) -> CommitVerification {
+            CommitVerification::Verified
+        }
+    }
+
+    fn listing(cursor: Option<&str>, rkeys: &[&str]) -> SpaceHostPage {
+        SpaceHostPage {
+            page: SpacePage {
+                ops: rkeys
+                    .iter()
+                    .map(|rkey| SpaceRepoOp {
+                        collection: POST_COLLECTION.to_owned(),
+                        rkey: (*rkey).to_owned(),
+                        cid: Some(
+                            "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+                        ),
+                        value: Some(
+                            json!({ "$type": POST_COLLECTION, "createdAt": "1998-04-03T00:00:00.000Z" }),
+                        ),
+                    })
+                    .collect(),
+                next_cursor: cursor.map(str::to_owned),
+            },
+            commit: None,
+        }
+    }
+
+    fn fixed_credential_clock() -> u64 {
+        1_000
+    }
+
+    const FAR_RETENTION: &str = "2100-01-01T00:00:00.000Z";
+
+    fn faye_member() -> PdsSpaceMember {
+        PdsSpaceMember {
+            did: FAYE_VALENTINE.to_owned(),
+        }
+    }
+
+    async fn sync_faye(
+        lifecycle: &ControlLifecycle,
+        pages: Vec<SpaceHostPage>,
+    ) -> Vec<Option<String>> {
+        let host = HostPages {
+            pages: Arc::new(Mutex::new(pages.into())),
+            requested_cursors: Arc::new(Mutex::new(Vec::new())),
+        };
+        let synchronizer = PdsSpaceSynchronizer::new(
+            Arc::new(host.clone()),
+            Arc::new(SpaceCredentialManager::with_clock(
+                Arc::new(Issuer),
+                fixed_credential_clock,
+            )),
+            Arc::new(Verified),
+        );
+        let target = PdsPollTarget {
+            space_uri: SPACE.to_owned(),
+            boundary: SPACE_BOUNDARY.to_owned(),
+            did: FAYE_VALENTINE.to_owned(),
+            host: "https://pds.example.test/".to_owned(),
+            generation: lifecycle
+                .pds_member_generation(SPACE_BOUNDARY, FAYE_VALENTINE)
+                .unwrap()
+                .expect("faye is a current member"),
+        };
+        let observed_at = super::format_utc_millis(time::OffsetDateTime::now_utc());
+        let _ = synchronizer
+            .sync_target(lifecycle, &target, &observed_at, FAR_RETENTION)
+            .await;
+        host.requested_cursors.lock().unwrap().clone()
+    }
+
+    impl RecordScene {
+        fn publish(&self, labels: &[(Sub<'_>, bool)]) {
+            let from = self.lifecycle.label_cursor().unwrap();
+            let numbered = labels
+                .iter()
+                .enumerate()
+                .map(|(index, (subject, neg))| (from + 1 + index as u64, *subject, *neg))
+                .collect::<Vec<_>>();
+            let to = from + labels.len() as u64;
+            self.responder.set_routes([
+                (from, label_log_page(to, &numbered)),
+                (to, label_log_page(to, &[])),
+            ]);
+        }
+
+        async fn publish_and_cycle(&self, labels: &[(Sub<'_>, bool)]) {
+            self.publish(labels);
+            assert_eq!(self.cycle().await, LabelCycle::CaughtUp);
+        }
+
+        fn replays(&self) -> u64 {
+            self.accounts.actors.replays_completed()
+        }
+
+        fn spike_cursor(&self) -> Option<u64> {
+            self.lifecycle
+                .actor_sync_state(AUTHORITY_DID, SPIKE)
+                .unwrap()
+                .expect("spike is enrolled")
+                .cursor
+        }
+
+        fn faye_space_cursor(&self) -> Option<String> {
+            self.lifecycle
+                .pds_space_cursor(SPACE_BOUNDARY, SPACE, FAYE_VALENTINE)
+                .unwrap()
+        }
+
+        fn reinstating_records(&self) -> Vec<String> {
+            self.lifecycle.reinstating_records(10).unwrap()
+        }
+    }
+
+    async fn stratos_scene() -> RecordScene {
+        let scene = RecordScene::new(memory_store_with_spike_posts(), "bebop").await;
+        scene.accounts.actors.sync_from_store().await.unwrap();
+        scene.catch_up_on_an_empty_log().await;
+        scene
+    }
+
+    async fn pds_scene() -> RecordScene {
+        let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+        store
+            .replace_pds_space_members(
+                SPACE_BOUNDARY,
+                vec![faye_member()],
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap();
+        let scene = RecordScene::new(store, SPACE_BOUNDARY).await;
+        scene.catch_up_on_an_empty_log().await;
+        sync_faye(
+            &scene.lifecycle,
+            vec![
+                listing(Some("c1"), &["swordfish", "redtail"]),
+                listing(None, &[]),
+            ],
+        )
+        .await;
+        assert_eq!(scene.faye_space_cursor().as_deref(), Some("c1"));
+        scene
+    }
+
+    #[tokio::test]
+    async fn a_negated_stratos_post_returns_by_replay_while_another_takedown_stays_refused() {
+        let scene = stratos_scene().await;
+        scene
+            .publish_and_cycle(&[
+                (Sub::Record(SPIKE_POST), false),
+                (Sub::Record(SPIKE_SECOND_POST), false),
+            ])
+            .await;
+        assert!(!scene.feed_lists(SPIKE_POST));
+        scene
+            .publish_and_cycle(&[(Sub::Record(SPIKE_POST), true)])
+            .await;
+        assert_eq!(scene.spike_cursor(), Some(3));
+
+        assert_eq!(scene.cycle().await, LabelCycle::CaughtUp);
+
+        assert_eq!(scene.spike_cursor(), None);
+        assert!(scene.reinstating_records().is_empty());
+        scene
+            .lifecycle
+            .apply_actor_page(ActorPage {
+                authority_did: AUTHORITY_DID.to_owned(),
+                actor_did: SPIKE.to_owned(),
+                sequence: 1,
+                upserts: vec![spike_post("bebop1"), spike_post("bebop2")],
+                deletes: Vec::new(),
+                updated_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            })
+            .unwrap();
+        assert!(scene.feed_lists(SPIKE_POST));
+        assert!(!scene.feed_lists(SPIKE_SECOND_POST));
+    }
+
+    #[tokio::test]
+    async fn a_negated_space_post_returns_after_the_next_listing_from_the_start() {
+        let scene = pds_scene().await;
+        scene
+            .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), false)])
+            .await;
+        assert!(!scene.feed_lists(FAYE_SPACE_POST));
+        scene
+            .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), true)])
+            .await;
+        assert_eq!(scene.faye_space_cursor().as_deref(), Some("c1"));
+
+        assert_eq!(scene.cycle().await, LabelCycle::CaughtUp);
+
+        assert_eq!(scene.faye_space_cursor(), None);
+        assert!(scene.reinstating_records().is_empty());
+        let requested = sync_faye(
+            &scene.lifecycle,
+            vec![listing(None, &["swordfish", "redtail"])],
+        )
+        .await;
+        assert_eq!(requested, [None]);
+        assert!(scene.feed_lists(FAYE_SPACE_POST));
+        assert!(scene.feed_lists(FAYE_SECOND_SPACE_POST));
+    }
+
+    #[tokio::test]
+    async fn a_reset_member_is_listed_exactly_like_a_first_ingest() {
+        let fresh = {
+            let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+            store
+                .replace_pds_space_members(
+                    SPACE_BOUNDARY,
+                    vec![faye_member()],
+                    "1998-04-03T00:00:00.000Z",
+                )
+                .unwrap();
+            RecordScene::new(store, SPACE_BOUNDARY).await
+        };
+        fresh.catch_up_on_an_empty_log().await;
+        let first_ingest = sync_faye(
+            &fresh.lifecycle,
+            vec![listing(None, &["swordfish", "redtail"])],
+        )
+        .await;
+
+        let scene = pds_scene().await;
+        scene
+            .publish_and_cycle(&[
+                (Sub::Record(FAYE_SPACE_POST), false),
+                (Sub::Record(FAYE_SECOND_SPACE_POST), false),
+            ])
+            .await;
+        scene
+            .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), true)])
+            .await;
+        scene.cycle().await;
+        let after_reset = sync_faye(
+            &scene.lifecycle,
+            vec![listing(None, &["swordfish", "redtail"])],
+        )
+        .await;
+
+        assert_eq!(first_ingest, [None]);
+        assert_eq!(after_reset, first_ingest);
+        assert!(scene.feed_lists(FAYE_SPACE_POST));
+        assert!(!scene.feed_lists(FAYE_SECOND_SPACE_POST));
+    }
+
+    #[tokio::test]
+    async fn a_negation_seen_this_cycle_replays_only_on_the_next() {
+        let scene = stratos_scene().await;
+        scene
+            .publish_and_cycle(&[(Sub::Record(SPIKE_POST), false)])
+            .await;
+
+        scene
+            .publish_and_cycle(&[(Sub::Record(SPIKE_POST), true)])
+            .await;
+        assert_eq!(scene.replays(), 0);
+        assert_eq!(scene.spike_cursor(), Some(3));
+        assert_eq!(scene.reinstating_records(), [SPIKE_POST]);
+
+        scene.cycle().await;
+        assert_eq!(scene.replays(), 1);
+        assert_eq!(scene.spike_cursor(), None);
+    }
+
+    #[tokio::test]
+    async fn several_negated_posts_of_one_author_cost_one_replay() {
+        let scene = stratos_scene().await;
+        scene
+            .publish_and_cycle(&[
+                (Sub::Record(SPIKE_POST), false),
+                (Sub::Record(SPIKE_SECOND_POST), false),
+            ])
+            .await;
+        scene
+            .publish_and_cycle(&[
+                (Sub::Record(SPIKE_POST), true),
+                (Sub::Record(SPIKE_SECOND_POST), true),
+            ])
+            .await;
+        assert_eq!(scene.reinstating_records().len(), 2);
+
+        scene.cycle().await;
+
+        assert_eq!(scene.replays(), 1);
+        assert!(scene.reinstating_records().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_negated_post_of_an_account_under_takedown_is_not_replayed() {
+        let scene = pds_scene().await;
+        scene
+            .publish_and_cycle(&[
+                (Sub::Record(FAYE_SPACE_POST), false),
+                (Sub::Account(FAYE_VALENTINE), false),
+            ])
+            .await;
+        // A membership listing fetched before the hold can still name her.
+        scene
+            .lifecycle
+            .replace_pds_space_members(
+                SPACE_BOUNDARY,
+                vec![faye_member()],
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap();
+        sync_faye(
+            &scene.lifecycle,
+            vec![listing(Some("c2"), &[]), listing(None, &[])],
+        )
+        .await;
+        assert_eq!(scene.faye_space_cursor().as_deref(), Some("c2"));
+
+        scene
+            .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), true)])
+            .await;
+        assert_eq!(scene.reinstating_records(), [FAYE_SPACE_POST]);
+
+        scene.cycle().await;
+
+        assert!(scene.reinstating_records().is_empty());
+        assert_eq!(scene.faye_space_cursor().as_deref(), Some("c2"));
+    }
+
+    #[tokio::test]
+    async fn a_negated_post_of_an_author_that_is_not_enrolled_is_finished_without_a_replay() {
+        let scene = RecordScene::new(
+            EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            "bebop",
+        )
+        .await;
+        scene.catch_up_on_an_empty_log().await;
+        scene
+            .publish_and_cycle(&[(Sub::Record(SPIKE_POST), false)])
+            .await;
+        scene
+            .publish_and_cycle(&[(Sub::Record(SPIKE_POST), true)])
+            .await;
+        assert_eq!(scene.reinstating_records(), [SPIKE_POST]);
+
+        scene.cycle().await;
+
+        assert!(scene.reinstating_records().is_empty());
+        assert_eq!(scene.replays(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_negated_space_post_of_a_non_member_is_finished() {
+        let scene = RecordScene::new(
+            EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            SPACE_BOUNDARY,
+        )
+        .await;
+        scene.catch_up_on_an_empty_log().await;
+        scene
+            .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), false)])
+            .await;
+        scene
+            .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), true)])
+            .await;
+        assert_eq!(scene.reinstating_records(), [FAYE_SPACE_POST]);
+
+        scene.cycle().await;
+
+        assert!(scene.reinstating_records().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_replay_that_cannot_run_is_retried_on_a_later_cycle() {
+        let scene = stratos_scene().await;
+        scene
+            .publish_and_cycle(&[(Sub::Record(SPIKE_POST), false)])
+            .await;
+        scene
+            .publish_and_cycle(&[(Sub::Record(SPIKE_POST), true)])
+            .await;
+        scene.accounts.actors.stop().await;
+
+        scene.cycle().await;
+
+        assert_eq!(scene.reinstating_records(), [SPIKE_POST]);
+        assert_eq!(scene.spike_cursor(), Some(3));
+    }
+
+    #[test]
+    fn a_space_record_maps_to_the_boundary_of_its_space() {
+        assert_eq!(
+            super::member_boundary(FAYE_SPACE_POST).as_deref(),
+            Some(SPACE_BOUNDARY)
+        );
+        assert_eq!(super::member_boundary(SPIKE_POST), None);
+        assert_eq!(
+            super::member_boundary(
+                "at://did:web:stratos.example.test/space/zone.stratos.space.other/bebop/did:plc:fayevalentine/zone.stratos.feed.post/swordfish"
+            ),
+            None
+        );
     }
 }

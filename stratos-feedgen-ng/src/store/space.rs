@@ -569,6 +569,13 @@ fn apply_verified_space_stage_row(
             .map_err(StoreError::Open)?;
         return Ok(());
     }
+    // A replay or a later sync must not re-admit a taken-down post.
+    if super::labels::record_taken_down(transaction, &stage.uri)? {
+        transaction
+            .execute("DELETE FROM post WHERE uri = ?1", [&stage.uri])
+            .map_err(StoreError::Open)?;
+        return Ok(());
+    }
     let Some(cid) = stage.cid else {
         return Err(StoreError::InvalidProjectionMutation);
     };
@@ -859,6 +866,37 @@ impl EncryptedStore {
         }
         transaction.commit().map_err(StoreError::Open)?;
         Ok(generations)
+    }
+
+    pub fn reset_pds_member_space_state(
+        &mut self,
+        boundary: &str,
+        did: &str,
+    ) -> Result<(), StoreError> {
+        if boundary.is_empty() {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        crate::identifier::Did::parse(did.to_owned())
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        for table in [
+            "space_cursor",
+            "space_sync_stage_cursor",
+            "space_sync_pending_verification",
+            "space_sync_stage",
+            "space_sync_stage_lifetime",
+        ] {
+            transaction
+                .execute(
+                    &format!("DELETE FROM {table} WHERE did = ?1 AND boundary = ?2"),
+                    params![did, boundary],
+                )
+                .map_err(StoreError::Open)?;
+        }
+        transaction.commit().map_err(StoreError::Open)
     }
 
     pub fn is_current_pds_space_member(

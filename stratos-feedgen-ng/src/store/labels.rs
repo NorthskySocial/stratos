@@ -15,6 +15,8 @@ pub struct LabelPageEffects {
     pub taken_down: Vec<LabelSubject>,
     pub reinstating: Vec<LabelSubject>,
     pub unenrolled_boundaries: Vec<String>,
+    pub removed_blobs: Vec<(String, String)>,
+    pub removed_record_boundaries: Vec<String>,
 }
 
 pub(super) fn account_taken_down(connection: &Connection, did: &str) -> Result<bool, StoreError> {
@@ -26,6 +28,60 @@ pub(super) fn account_taken_down(connection: &Connection, did: &str) -> Result<b
             |row| row.get(0),
         )
         .map_err(StoreError::Open)
+}
+
+// Matches under any authority so a label cannot be outrun by a different issuer.
+pub(super) fn record_taken_down(connection: &Connection, uri: &str) -> Result<bool, StoreError> {
+    connection
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM label_subject
+             WHERE subject_kind = 'record' AND subject_key = ?1 AND state = ?2)",
+            params![uri, TAKEDOWN_STATE],
+            |row| row.get(0),
+        )
+        .map_err(StoreError::Open)
+}
+
+#[derive(Default)]
+struct RemovedPost {
+    blobs: Vec<(String, String)>,
+    boundaries: Vec<String>,
+}
+
+fn remove_taken_down_post(
+    transaction: &rusqlite::Transaction<'_>,
+    uri: &str,
+) -> Result<RemovedPost, StoreError> {
+    let stored: Option<(String, Vec<u8>)> = transaction
+        .query_row(
+            "SELECT author_did, blob_refs_json FROM post WHERE uri = ?1",
+            [uri],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(StoreError::Open)?;
+    let Some((author_did, blob_refs_json)) = stored else {
+        return Ok(RemovedPost::default());
+    };
+    let boundaries = transaction
+        .prepare("SELECT boundary FROM post_boundary WHERE uri = ?1")
+        .map_err(StoreError::Open)?
+        .query_map([uri], |row| row.get::<_, String>(0))
+        .map_err(StoreError::Open)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute("DELETE FROM post WHERE uri = ?1", [uri])
+        .map_err(StoreError::Open)?;
+    // A reference that cannot be read has nothing cached under a usable cid.
+    let references: Vec<serde_json::Value> =
+        serde_json::from_slice(&blob_refs_json).unwrap_or_default();
+    let blobs = references
+        .iter()
+        .filter_map(|reference| reference.get("cid")?.as_str())
+        .map(|cid| (author_did.clone(), cid.to_owned()))
+        .collect();
+    Ok(RemovedPost { blobs, boundaries })
 }
 
 fn subject_key(subject: &LabelSubject) -> &str {
@@ -141,6 +197,19 @@ impl EncryptedStore {
             unenrolled_boundaries.extend(unenrolled.removed_boundaries);
             unenrolled_boundaries.extend(unenrolled.pds_boundaries);
         }
+        let mut removed_blobs = Vec::new();
+        let mut removed_record_boundaries = BTreeSet::new();
+        for (subject, taken_down) in final_states.values() {
+            let LabelSubject::Record { uri, .. } = subject else {
+                continue;
+            };
+            if !*taken_down {
+                continue;
+            }
+            let removed = remove_taken_down_post(&transaction, uri)?;
+            removed_blobs.extend(removed.blobs);
+            removed_record_boundaries.extend(removed.boundaries);
+        }
         transaction
             .execute(
                 "INSERT INTO label_cursor (authority_did, sequence, updated_at) VALUES (?1, ?2, ?3)
@@ -151,6 +220,8 @@ impl EncryptedStore {
         transaction.commit().map_err(StoreError::Open)?;
         let mut effects = LabelPageEffects {
             unenrolled_boundaries: unenrolled_boundaries.into_iter().collect(),
+            removed_blobs,
+            removed_record_boundaries: removed_record_boundaries.into_iter().collect(),
             ..LabelPageEffects::default()
         };
         for (subject, taken_down) in final_states.into_values() {
@@ -237,6 +308,35 @@ impl EncryptedStore {
             .query_map(
                 params![authority_did, REINSTATING_STATE, i64::from(limit)],
                 |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(StoreError::Open)?;
+        rows.collect::<Result<_, _>>().map_err(StoreError::Open)
+    }
+
+    pub fn is_account_taken_down(&self, did: &str) -> Result<bool, StoreError> {
+        account_taken_down(&self.connection, did)
+    }
+
+    pub fn reinstating_records(
+        &self,
+        authority_did: &str,
+        limit: u16,
+    ) -> Result<Vec<String>, StoreError> {
+        if limit == 0 || limit > MAX_REINSTATING_PAGE {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT subject_key FROM label_subject
+                 WHERE authority_did = ?1 AND state = ?2 AND subject_kind = 'record'
+                 ORDER BY label_sequence, subject_key LIMIT ?3",
+            )
+            .map_err(StoreError::Open)?;
+        let rows = statement
+            .query_map(
+                params![authority_did, REINSTATING_STATE, i64::from(limit)],
+                |row| row.get(0),
             )
             .map_err(StoreError::Open)?;
         rows.collect::<Result<_, _>>().map_err(StoreError::Open)
@@ -715,5 +815,421 @@ mod tests {
         assert_eq!(upgraded.label_cursor(AUTHORITY).unwrap(), 0);
         drop(upgraded);
         let _ = std::fs::remove_file(&path);
+    }
+
+    const SPIKE_DID: &str = "did:plc:spikespiegel";
+    const SPIKE_SECOND_POST: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop2";
+    const SPIKE_BLOB_CID: &str = "bafkreiswordfish";
+
+    fn spike_post_at(uri: &str, blob_refs_json: &[u8]) -> ProjectionPost {
+        ProjectionPost {
+            uri: uri.to_owned(),
+            author_did: SPIKE_DID.to_owned(),
+            cid: "bafyreia".to_owned(),
+            sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
+            retained_at: "1998-04-04T00:00:00.000Z".to_owned(),
+            record_json: br#"{"text":"Bang"}"#.to_vec(),
+            blob_refs_json: blob_refs_json.to_vec(),
+            boundaries: vec!["bebop".to_owned()],
+        }
+    }
+
+    fn spike_blob_post() -> ProjectionPost {
+        spike_post_at(
+            SPIKE_POST,
+            format!(r#"[{{"cid":"{SPIKE_BLOB_CID}","mimeType":"image/png"}}]"#).as_bytes(),
+        )
+    }
+
+    fn spike_page(sequence: u64, upserts: Vec<ProjectionPost>, deletes: Vec<String>) -> ActorPage {
+        ActorPage {
+            authority_did: AUTHORITY.to_owned(),
+            actor_did: SPIKE_DID.to_owned(),
+            sequence,
+            upserts,
+            deletes,
+            updated_at: UPDATED_AT.to_owned(),
+        }
+    }
+
+    fn takedown_page(cursor: u64) -> LabelPage {
+        page(cursor, vec![label(cursor, spike_subject(), false)])
+    }
+
+    fn stored_posts(store: &EncryptedStore, uri: &str) -> i64 {
+        store
+            .connection
+            .query_row("SELECT COUNT(*) FROM post WHERE uri = ?1", [uri], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    }
+
+    fn stored_actor_cursor(store: &EncryptedStore) -> i64 {
+        store
+            .connection
+            .query_row(
+                "SELECT sequence FROM actor_cursor WHERE did = ?1",
+                [SPIKE_DID],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn a_record_takedown_removes_the_post_and_reports_its_blobs_and_boundaries() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .apply_actor_page(spike_page(
+                1,
+                vec![spike_blob_post(), spike_post_at(SPIKE_SECOND_POST, b"[]")],
+                Vec::new(),
+            ))
+            .unwrap();
+
+        let effects = store
+            .apply_label_page(AUTHORITY, &takedown_page(2), UPDATED_AT)
+            .unwrap();
+
+        assert_eq!(stored_posts(&store, SPIKE_POST), 0);
+        assert_eq!(stored_posts(&store, SPIKE_SECOND_POST), 1);
+        assert_eq!(
+            effects.removed_blobs,
+            [(SPIKE_DID.to_owned(), SPIKE_BLOB_CID.to_owned())]
+        );
+        assert_eq!(effects.removed_record_boundaries, ["bebop"]);
+        let boundary_rows: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM post_boundary WHERE uri = ?1",
+                [SPIKE_POST],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(boundary_rows, 0);
+    }
+
+    #[test]
+    fn a_takedown_negated_on_the_same_page_keeps_the_post() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .apply_actor_page(spike_page(1, vec![spike_blob_post()], Vec::new()))
+            .unwrap();
+
+        let effects = store
+            .apply_label_page(
+                AUTHORITY,
+                &page(
+                    3,
+                    vec![
+                        label(2, spike_subject(), false),
+                        label(3, spike_subject(), true),
+                    ],
+                ),
+                UPDATED_AT,
+            )
+            .unwrap();
+
+        assert_eq!(stored_posts(&store, SPIKE_POST), 1);
+        assert!(effects.removed_blobs.is_empty());
+        assert!(effects.removed_record_boundaries.is_empty());
+    }
+
+    #[test]
+    fn a_later_update_does_not_readmit_a_taken_down_post_but_advances_the_cursor() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .apply_actor_page(spike_page(
+                1,
+                vec![spike_blob_post(), spike_post_at(SPIKE_SECOND_POST, b"[]")],
+                Vec::new(),
+            ))
+            .unwrap();
+        store
+            .apply_label_page(AUTHORITY, &takedown_page(2), UPDATED_AT)
+            .unwrap();
+
+        store
+            .apply_actor_page(spike_page(
+                5,
+                vec![spike_blob_post()],
+                vec![SPIKE_SECOND_POST.to_owned()],
+            ))
+            .unwrap();
+
+        assert_eq!(stored_posts(&store, SPIKE_POST), 0);
+        assert_eq!(stored_posts(&store, SPIKE_SECOND_POST), 0);
+        assert_eq!(stored_actor_cursor(&store), 5);
+    }
+
+    #[test]
+    fn a_replay_from_the_start_does_not_readmit_a_taken_down_post() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .apply_actor_page(spike_page(1, vec![spike_blob_post()], Vec::new()))
+            .unwrap();
+        store
+            .apply_label_page(AUTHORITY, &takedown_page(2), UPDATED_AT)
+            .unwrap();
+        store
+            .connection
+            .execute("DELETE FROM actor_cursor WHERE did = ?1", [SPIKE_DID])
+            .unwrap();
+
+        store
+            .apply_actor_page(spike_page(1, vec![spike_blob_post()], Vec::new()))
+            .unwrap();
+
+        assert_eq!(stored_posts(&store, SPIKE_POST), 0);
+    }
+
+    #[test]
+    fn a_label_for_a_post_not_yet_projected_refuses_its_later_creation() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        let effects = store
+            .apply_label_page(AUTHORITY, &takedown_page(1), UPDATED_AT)
+            .unwrap();
+        assert!(store.is_taken_down(AUTHORITY, SPIKE_POST).unwrap());
+        assert!(effects.removed_blobs.is_empty());
+        assert!(effects.removed_record_boundaries.is_empty());
+
+        store
+            .apply_actor_page(spike_page(
+                1,
+                vec![spike_blob_post(), spike_post_at(SPIKE_SECOND_POST, b"[]")],
+                Vec::new(),
+            ))
+            .unwrap();
+
+        assert_eq!(stored_posts(&store, SPIKE_POST), 0);
+        assert_eq!(stored_posts(&store, SPIKE_SECOND_POST), 1);
+    }
+
+    #[test]
+    fn a_staged_space_page_does_not_readmit_a_taken_down_space_post() {
+        const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
+        const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+        const FAYE_SECOND_POST: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/redtail";
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        let faye = "did:plc:fayevalentine";
+        store
+            .replace_pds_space_members(
+                BOUNDARY,
+                vec![PdsSpaceMember {
+                    did: faye.to_owned(),
+                }],
+                UPDATED_AT,
+            )
+            .unwrap();
+        store
+            .apply_label_page(
+                AUTHORITY,
+                &page(
+                    1,
+                    vec![label(
+                        1,
+                        LabelSubject::Record {
+                            uri: FAYE_SPACE_POST.to_owned(),
+                            author_did: faye.to_owned(),
+                        },
+                        false,
+                    )],
+                ),
+                UPDATED_AT,
+            )
+            .unwrap();
+        let upsert = |uri: &str| SpaceStageMutation::Upsert {
+            uri: uri.to_owned(),
+            cid: "bafyreia".to_owned(),
+            sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
+            record_json: br#"{"text":"Swordfish"}"#.to_vec(),
+            blob_refs_json: b"[]".to_vec(),
+        };
+        store
+            .stage_authorized_space_page(
+                SpaceStagePage {
+                    space_uri: SPACE.to_owned(),
+                    actor_did: faye.to_owned(),
+                    boundary: BOUNDARY.to_owned(),
+                    next_cursor: None,
+                    updated_at: UPDATED_AT.to_owned(),
+                },
+                vec![upsert(FAYE_SPACE_POST), upsert(FAYE_SECOND_POST)],
+            )
+            .unwrap();
+
+        store
+            .promote_authorized_space_stage(BOUNDARY, SPACE, faye, "2026-11-02T00:00:00.000Z")
+            .unwrap();
+
+        assert_eq!(stored_posts(&store, FAYE_SPACE_POST), 0);
+        assert_eq!(stored_posts(&store, FAYE_SECOND_POST), 1);
+    }
+
+    const FAYE: &str = "did:plc:fayevalentine";
+    const JET: &str = "did:plc:jetblack";
+    const BEBOP_BOUNDARY: &str = "did:web:stratos.example.test/bebop";
+    const BEBOP_SPACE: &str =
+        "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+
+    fn second_spike_subject() -> LabelSubject {
+        LabelSubject::Record {
+            uri: SPIKE_SECOND_POST.to_owned(),
+            author_did: SPIKE_DID.to_owned(),
+        }
+    }
+
+    #[test]
+    fn reinstating_records_lists_only_record_subjects_oldest_negation_first() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        let faye = LabelSubject::Account {
+            did: FAYE.to_owned(),
+        };
+        store
+            .apply_label_page(
+                AUTHORITY,
+                &page(
+                    6,
+                    vec![
+                        label(1, spike_subject(), false),
+                        label(2, second_spike_subject(), false),
+                        label(3, faye.clone(), false),
+                        label(4, second_spike_subject(), true),
+                        label(5, faye, true),
+                        label(6, spike_subject(), true),
+                    ],
+                ),
+                UPDATED_AT,
+            )
+            .unwrap();
+
+        assert_eq!(
+            store.reinstating_records(AUTHORITY, 10).unwrap(),
+            [SPIKE_SECOND_POST.to_owned(), SPIKE_POST.to_owned()]
+        );
+        assert_eq!(store.reinstating_records(AUTHORITY, 1).unwrap().len(), 1);
+        assert!(store.reinstating_records(AUTHORITY, 0).is_err());
+    }
+
+    #[test]
+    fn a_record_that_is_still_taken_down_is_not_reinstating() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .apply_label_page(AUTHORITY, &takedown_page(1), UPDATED_AT)
+            .unwrap();
+
+        assert!(store.reinstating_records(AUTHORITY, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn resetting_an_actor_cursor_leaves_its_posts_and_other_actors_alone() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .apply_actor_page(spike_page(4, vec![spike_blob_post()], Vec::new()))
+            .unwrap();
+        store
+            .apply_actor_page(ActorPage {
+                actor_did: FAYE.to_owned(),
+                ..spike_page(9, Vec::new(), Vec::new())
+            })
+            .unwrap();
+
+        store.reset_actor_cursor(AUTHORITY, SPIKE_DID).unwrap();
+
+        let cursors = |did: &str| -> i64 {
+            store
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM actor_cursor WHERE did = ?1",
+                    [did],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(cursors(SPIKE_DID), 0);
+        assert_eq!(cursors(FAYE), 1);
+        assert_eq!(stored_posts(&store, SPIKE_POST), 1);
+    }
+
+    #[test]
+    fn resetting_a_pds_member_forgets_only_that_members_sync_position() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .replace_pds_space_members(
+                BEBOP_BOUNDARY,
+                vec![
+                    PdsSpaceMember {
+                        did: FAYE.to_owned(),
+                    },
+                    PdsSpaceMember {
+                        did: JET.to_owned(),
+                    },
+                ],
+                UPDATED_AT,
+            )
+            .unwrap();
+        let stage_page = |did: &str, next_cursor: Option<&str>| SpaceStagePage {
+            space_uri: BEBOP_SPACE.to_owned(),
+            actor_did: did.to_owned(),
+            boundary: BEBOP_BOUNDARY.to_owned(),
+            next_cursor: next_cursor.map(str::to_owned),
+            updated_at: UPDATED_AT.to_owned(),
+        };
+        let swordfish = SpaceStageMutation::Upsert {
+            uri: FAYE_SPACE_POST.to_owned(),
+            cid: "bafyreia".to_owned(),
+            sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
+            record_json: br#"{"text":"Swordfish"}"#.to_vec(),
+            blob_refs_json: b"[]".to_vec(),
+        };
+        store
+            .stage_authorized_space_page(stage_page(FAYE, Some("c1")), Vec::new())
+            .unwrap();
+        store
+            .stage_authorized_space_page(stage_page(FAYE, None), vec![swordfish])
+            .unwrap();
+        store
+            .promote_authorized_space_stage(
+                BEBOP_BOUNDARY,
+                BEBOP_SPACE,
+                FAYE,
+                "2026-11-02T00:00:00.000Z",
+            )
+            .unwrap();
+        store
+            .stage_authorized_space_page(stage_page(JET, Some("c1")), Vec::new())
+            .unwrap();
+        assert_eq!(
+            store
+                .space_sync_cursor(BEBOP_BOUNDARY, BEBOP_SPACE, FAYE)
+                .unwrap(),
+            Some("c1".to_owned())
+        );
+
+        store
+            .reset_pds_member_space_state(BEBOP_BOUNDARY, FAYE)
+            .unwrap();
+
+        assert_eq!(
+            store
+                .space_sync_cursor(BEBOP_BOUNDARY, BEBOP_SPACE, FAYE)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .space_sync_cursor(BEBOP_BOUNDARY, BEBOP_SPACE, JET)
+                .unwrap(),
+            Some("c1".to_owned())
+        );
+        assert_eq!(stored_posts(&store, FAYE_SPACE_POST), 1);
+        assert!(
+            store
+                .is_current_pds_space_member(BEBOP_BOUNDARY, FAYE)
+                .unwrap()
+        );
     }
 }
