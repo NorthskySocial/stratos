@@ -85,7 +85,7 @@ function describeBlobAccessFromBoundaryRows(
 
     afterAll(async () => {
       await harness.cleanup()
-    })
+    }, 60_000)
 
     beforeEach(async () => {
       await actorStore.create(OWNER_DID)

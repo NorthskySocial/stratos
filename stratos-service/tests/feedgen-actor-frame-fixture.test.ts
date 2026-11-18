@@ -93,7 +93,16 @@ interface FrameOp {
   record?: unknown
 }
 
-const EXPECTED: Array<{ name: string; expected: ExpectedProjection }> = [
+const LIKE_COLLECTION = 'app.bsky.feed.like'
+const REPOST_COLLECTION = 'app.bsky.feed.repost'
+
+// A case that is not a post write names its action, since a feed generator
+// reading only posts finds no change in it.
+const EXPECTED: Array<{
+  name: string
+  expected: ExpectedProjection
+  action?: 'create' | 'delete'
+}> = [
   {
     name: 'a legacy create whose body and operation boundaries agree',
     expected: {
@@ -126,7 +135,33 @@ const EXPECTED: Array<{ name: string; expected: ExpectedProjection }> = [
       deletes: [],
     },
   },
+  {
+    name: 'a like of a post, written through the generic write procedures',
+    expected: { upserts: [], deletes: [] },
+    action: 'create',
+  },
+  {
+    name: 'a repost of a post, written through the generic write procedures',
+    expected: { upserts: [], deletes: [] },
+    action: 'create',
+  },
+  {
+    name: 'a delete of the like',
+    expected: { upserts: [], deletes: [] },
+    action: 'delete',
+  },
 ]
+
+function countActions(cases: typeof EXPECTED) {
+  let creates = 0
+  let deletes = 0
+  for (const { expected, action } of cases) {
+    const isDelete = action === 'delete' || expected.deletes.length > 0
+    if (isDelete) deletes += 1
+    else creates += 1
+  }
+  return { creates, deletes }
+}
 
 function postBody(text: string, boundaries: string[]) {
   const body: Record<string, unknown> = {
@@ -291,13 +326,34 @@ describe('the shared actor commit frame fixture', () => {
       { repo: ACTOR_DID, collection: COLLECTION, rkey: 'sachiel' },
       ACTOR_DID,
     )
-    await applyBoundaryWrites(ctx, ACTOR_DID, GEOFRONT, [
+    const gaghiel = await applyBoundaryWrites(ctx, ACTOR_DID, GEOFRONT, [
       {
         kind: 'create',
         collection: COLLECTION,
         rkey: 'gaghiel',
         record: postBody('Gaghiel', []),
       },
+    ])
+    const subject = { uri: uriOf('gaghiel'), cid: gaghiel.results[0].cid }
+    for (const [collection, rkey] of [
+      [LIKE_COLLECTION, 'rei-like'],
+      [REPOST_COLLECTION, 'asuka-repost'],
+    ]) {
+      await applyBoundaryWrites(ctx, ACTOR_DID, GEOFRONT, [
+        {
+          kind: 'create',
+          collection,
+          rkey,
+          record: {
+            $type: collection,
+            subject,
+            createdAt: '1996-10-04T00:00:00.000Z',
+          },
+        },
+      ])
+    }
+    await applyBoundaryWrites(ctx, ACTOR_DID, GEOFRONT, [
+      { kind: 'delete', collection: LIKE_COLLECTION, rkey: 'rei-like' },
     ])
   }
 
@@ -419,6 +475,6 @@ describe('the shared actor commit frame fixture', () => {
         expect(() => validate(frame)).not.toThrow()
       }
     }
-    expect({ creates, deletes }).toEqual({ creates: 4, deletes: 1 })
+    expect({ creates, deletes }).toEqual(countActions(EXPECTED))
   })
 })

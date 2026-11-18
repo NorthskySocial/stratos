@@ -335,7 +335,7 @@ describe('boundary write rules on postgres', () => {
 
   afterAll(async () => {
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     harness = await startPostgresWriteHarness(connectionString)

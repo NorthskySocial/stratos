@@ -436,4 +436,56 @@ mod tests {
         );
         assert!(boundary_create.2.is_empty());
     }
+
+    fn frame_sequence(frame: &[u8]) -> u64 {
+        let mut deserializer = serde_cbor::de::Deserializer::from_slice(frame);
+        let _header = serde_cbor::Value::deserialize(&mut deserializer).unwrap();
+        let body = serde_cbor::Value::deserialize(&mut deserializer).unwrap();
+        let serde_cbor::Value::Map(fields) = body else {
+            panic!("the commit body is not a map");
+        };
+        let sequence = fields
+            .get(&serde_cbor::Value::Text("seq".to_string()))
+            .expect("the commit carries no seq");
+        match sequence {
+            serde_cbor::Value::Integer(value) => u64::try_from(*value).unwrap(),
+            _ => panic!("the commit seq is not an integer"),
+        }
+    }
+
+    #[test]
+    fn reads_no_post_change_in_the_like_and_repost_frames_stratos_sends() {
+        let fixture: ActorFrameFixture = serde_json::from_str(include_str!(
+            "../../stratos-feedgen/testdata/conformance/v1/actor-commit-frames.json"
+        ))
+        .unwrap();
+
+        let mut interactions = Vec::new();
+        for case in fixture.cases {
+            if !case.name.contains("like") && !case.name.contains("repost") {
+                continue;
+            }
+            let frame = STANDARD.decode(&case.frame_base64).unwrap();
+            let authorized = case.authorized_boundaries.into_iter().collect();
+            let page = parse_actor_commit(
+                &frame,
+                &case.service_did,
+                &case.actor_did,
+                &authorized,
+                "1998-05-03T00:00:00.000Z",
+            )
+            .unwrap_or_else(|_| panic!("case {} did not parse", case.name))
+            .unwrap_or_else(|| panic!("case {} was not a commit", case.name));
+
+            assert!(page.upserts.is_empty(), "case {} upserted", case.name);
+            assert!(page.deletes.is_empty(), "case {} deleted", case.name);
+            assert_eq!(page.sequence, frame_sequence(&frame), "case {}", case.name);
+            interactions.push(case.name);
+        }
+        assert_eq!(
+            interactions.len(),
+            3,
+            "the shared fixture must hold a like, a repost and a like delete"
+        );
+    }
 }

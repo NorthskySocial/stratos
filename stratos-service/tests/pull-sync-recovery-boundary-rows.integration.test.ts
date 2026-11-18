@@ -87,7 +87,7 @@ function describeRecoveryFromBoundaryRows(
 
     afterAll(async () => {
       await harness.cleanup()
-    })
+    }, 60_000)
 
     beforeEach(async () => {
       await harness.actorStore.create(OWNER_DID)

@@ -68,7 +68,7 @@ describe('PostgreSQL Backend Integration', () => {
   afterAll(async () => {
     await cleanupClient.end()
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   afterEach(async () => {
     for (const did of [testDid, testDid2]) {

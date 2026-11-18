@@ -59,7 +59,7 @@ describe('Record indexing backlinks and boundaries on the runtime Postgres store
   afterAll(async () => {
     await actorStore.destroy(testDid).catch(() => undefined)
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     await actorStore.create(testDid)

@@ -117,7 +117,11 @@ describe('zone.stratos.space.feed declaration', () => {
       expect(main?.type).toBe('space')
       expect(main?.key).toBe('any')
       expect(main?.name).toBe('Stratos Feed')
-      expect(main?.collections).toEqual(['zone.stratos.feed.post'])
+      expect(main?.collections).toEqual([
+        'zone.stratos.feed.post',
+        'app.bsky.feed.like',
+        'app.bsky.feed.repost',
+      ])
       expect(main?.description).toBe('A members-only Stratos post feed')
     })
 

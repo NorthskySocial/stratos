@@ -12,7 +12,7 @@ describe('space scope built from the registry', () => {
 
   it('keeps the enrolment scope byte-identical to the baseline', () => {
     expect(buildOAuthScope('did:web:tokyo-3.example')).toBe(
-      'atproto repo:zone.stratos.actor.enrollment space:zone.stratos.space.feed?authority=did%3Aweb%3Atokyo-3.example&collection=zone.stratos.feed.post&action=create&action=read',
+      'atproto repo:zone.stratos.actor.enrollment space:zone.stratos.space.feed?authority=did%3Aweb%3Atokyo-3.example&collection=zone.stratos.feed.post&collection=app.bsky.feed.like&collection=app.bsky.feed.repost&action=create&action=read',
     )
   })
 })

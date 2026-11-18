@@ -82,7 +82,7 @@ function describeReadsFromBoundaryRows(
 
     afterAll(async () => {
       await harness.cleanup()
-    })
+    }, 60_000)
 
     beforeEach(async () => {
       ctx = { actorStore: harness.actorStore, logger: { warn: vi.fn() } }

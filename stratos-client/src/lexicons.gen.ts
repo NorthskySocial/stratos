@@ -2140,6 +2140,10 @@ export const stratosLexicons: LexiconDoc[] = [
         {
           "name": "RateLimitExceeded",
           "description": "The caller has exceeded the write rate limit."
+        },
+        {
+          "name": "ScopeUpgradeRequired",
+          "description": "The member's grant predates this collection. Authorize again."
         }
       ]
     },
@@ -2353,6 +2357,10 @@ export const stratosLexicons: LexiconDoc[] = [
         {
           "name": "RateLimitExceeded",
           "description": "The caller has exceeded the write rate limit."
+        },
+        {
+          "name": "ScopeUpgradeRequired",
+          "description": "The member's grant predates this collection. Authorize again."
         }
       ]
     }
@@ -2727,6 +2735,10 @@ export const stratosLexicons: LexiconDoc[] = [
         {
           "name": "RateLimitExceeded",
           "description": "The caller has exceeded the write rate limit."
+        },
+        {
+          "name": "ScopeUpgradeRequired",
+          "description": "The member's grant predates this collection. Authorize again."
         }
       ]
     }
@@ -2837,7 +2849,11 @@ export const stratosLexicons: LexiconDoc[] = [
       "description": "A members-only Stratos post feed",
       "key": "any",
       "name": "Stratos Feed",
-      "collections": ["zone.stratos.feed.post"]
+      "collections": [
+        "zone.stratos.feed.post",
+        "app.bsky.feed.like",
+        "app.bsky.feed.repost"
+      ]
     }
   }
 },

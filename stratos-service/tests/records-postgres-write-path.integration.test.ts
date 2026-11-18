@@ -101,7 +101,7 @@ describe('Sequenced write ops carry their boundary on the runtime Postgres store
   afterAll(async () => {
     await harness.close()
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     await harness.enrollMember(testDid, [ENGINEERING, DESIGN])

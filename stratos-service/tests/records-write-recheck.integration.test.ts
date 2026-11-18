@@ -348,7 +348,7 @@ describe('write recheck under the repo lock on postgres', () => {
 
   afterAll(async () => {
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     harness = await startPostgresWriteHarness(connectionString)

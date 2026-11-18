@@ -50,7 +50,7 @@ describe('admin setActive and callback holds on Postgres', () => {
     await closeServicePgDb(db)
     await rawClient.end()
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     await rawClient`DELETE FROM enrollment`

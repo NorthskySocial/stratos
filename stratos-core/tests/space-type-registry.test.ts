@@ -236,6 +236,8 @@ describe('buildSpaceTypeRegistry', () => {
     const registry = buildSpaceTypeRegistry([feed])
     expect(registry.collections('zone.stratos.space.feed')).toEqual([
       'zone.stratos.feed.post',
+      'app.bsky.feed.like',
+      'app.bsky.feed.repost',
     ])
   })
 })

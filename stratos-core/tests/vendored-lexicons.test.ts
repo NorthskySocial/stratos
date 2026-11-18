@@ -130,6 +130,8 @@ describe('vendored lexicon documents', () => {
         'app.bsky.embed.record',
         'app.bsky.embed.recordWithMedia',
         'app.bsky.embed.video',
+        'app.bsky.feed.like',
+        'app.bsky.feed.repost',
         'app.bsky.richtext.facet',
         'com.atproto.label.defs',
         'com.atproto.repo.strongRef',

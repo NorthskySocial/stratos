@@ -59,6 +59,18 @@
       "nsid": "com.atproto.label.defs",
       "sha256": "b20ed39fa5530ff62a6b4bfbbd7a3648dd57896db7c9c7ac379e1bfc64d1f724",
       "sourceCommit": "98ef3a6b9"
+    },
+    {
+      "path": "app/bsky/feed/like.json",
+      "nsid": "app.bsky.feed.like",
+      "sha256": "4a231472b92d83030962cb9f10f2d0dcc7814e625763720fe48ecbb134ace554",
+      "sourceCommit": "98ef3a6b9"
+    },
+    {
+      "path": "app/bsky/feed/repost.json",
+      "nsid": "app.bsky.feed.repost",
+      "sha256": "ad7a400ee3bf3b2fc0f370e28d38871fa0a7f376fe5b2d9f773c8d8838a5afd2",
+      "sourceCommit": "98ef3a6b9"
     }
   ]
 }

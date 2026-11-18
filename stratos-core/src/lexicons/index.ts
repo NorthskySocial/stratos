@@ -20,6 +20,8 @@ import appBskyEmbedRecord from './vendored/app/bsky/embed/record.json' with { ty
 import appBskyEmbedRecordWithMedia from './vendored/app/bsky/embed/recordWithMedia.json' with { type: 'json' }
 import appBskyEmbedGallery from './vendored/app/bsky/embed/gallery.json' with { type: 'json' }
 import appBskyEmbedDefs from './vendored/app/bsky/embed/defs.json' with { type: 'json' }
+import appBskyFeedLike from './vendored/app/bsky/feed/like.json' with { type: 'json' }
+import appBskyFeedRepost from './vendored/app/bsky/feed/repost.json' with { type: 'json' }
 import comAtprotoRepoStrongRef from './vendored/com/atproto/repo/strongRef.json' with { type: 'json' }
 import comAtprotoLabelDefs from './vendored/com/atproto/label/defs.json' with { type: 'json' }
 import zoneStratosActorEnrollment from '../../../lexicons/zone/stratos/actor/enrollment.json' with { type: 'json' }
@@ -75,6 +77,8 @@ export const stratosLexicons: LexiconDoc[] = [
   appBskyEmbedRecordWithMedia as LexiconDoc,
   appBskyEmbedGallery as LexiconDoc,
   appBskyEmbedDefs as LexiconDoc,
+  appBskyFeedLike as LexiconDoc,
+  appBskyFeedRepost as LexiconDoc,
   comAtprotoRepoStrongRef as LexiconDoc,
   comAtprotoLabelDefs as LexiconDoc,
   zoneStratosBoundaryCheckpoint as LexiconDoc,

@@ -1136,7 +1136,7 @@ describe('boundary record writes over http on postgres', () => {
 
   afterAll(async () => {
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     harness = await startPostgresWriteHarness(connectionString)

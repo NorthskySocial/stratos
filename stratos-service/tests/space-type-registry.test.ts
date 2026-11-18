@@ -11,6 +11,8 @@ describe('SPACE_TYPE_REGISTRY', () => {
   it('lists the feed space collections from the shipped declaration', () => {
     expect(SPACE_TYPE_REGISTRY.collections(FEED_SPACE)).toEqual([
       'zone.stratos.feed.post',
+      'app.bsky.feed.like',
+      'app.bsky.feed.repost',
     ])
   })
 

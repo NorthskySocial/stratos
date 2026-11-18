@@ -88,9 +88,14 @@ const DECLARED_DIFFERENCES = {
   // A delete holds no record body, so it can neither disagree with the
   // boundary nor break a content rule.
   addedErrorsByProcedure: {
-    createRecord: ['BoundaryMismatch', 'InvalidRecord'],
-    putRecord: ['RecordAlreadyExists', 'BoundaryMismatch', 'InvalidRecord'],
-    applyWrites: ['BoundaryMismatch', 'InvalidRecord'],
+    createRecord: ['BoundaryMismatch', 'InvalidRecord', 'ScopeUpgradeRequired'],
+    putRecord: [
+      'RecordAlreadyExists',
+      'BoundaryMismatch',
+      'InvalidRecord',
+      'ScopeUpgradeRequired',
+    ],
+    applyWrites: ['BoundaryMismatch', 'InvalidRecord', 'ScopeUpgradeRequired'],
   } as Record<string, string[]>,
 }
 

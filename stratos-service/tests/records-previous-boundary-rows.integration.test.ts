@@ -97,7 +97,7 @@ function describeBoundaryRowsOnWrites(
 
     afterAll(async () => {
       await harness.cleanup()
-    })
+    }, 60_000)
 
     beforeEach(async () => {
       parentBoundaryCache.clear()

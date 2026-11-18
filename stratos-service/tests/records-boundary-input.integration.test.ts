@@ -65,7 +65,7 @@ describe('Record indexing from an explicit boundary on the runtime Postgres stor
   afterAll(async () => {
     await actorStore.destroy(testDid).catch(() => undefined)
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     await actorStore.create(testDid)

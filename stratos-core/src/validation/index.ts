@@ -19,6 +19,17 @@ export {
 } from './registry.js'
 
 export {
+  isEligibleSubject,
+  parseCanonicalRepoUri,
+  parseCanonicalSpaceRecordUri,
+  type ExpectedSubject,
+  type RepoSubjectFacts,
+  type SpaceSubjectFacts,
+  type SubjectFacts,
+  type UnresolvableSubjectFacts,
+} from './subject.js'
+
+export {
   qualifyBoundary,
   qualifyBoundaries,
   isQualifiedBoundary,

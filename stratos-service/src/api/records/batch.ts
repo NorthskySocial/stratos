@@ -407,6 +407,15 @@ function computeRemovedDomains(pre: PrecomputedBatchOp): string[] {
   return pre.previousDomains.filter((domain) => domain !== newBoundary)
 }
 
+function assertStratosNamespaceCollection(collection: string): void {
+  if (!collection.startsWith('zone.stratos.')) {
+    throw new InvalidRequestError(
+      'Only zone.stratos.* collections are supported',
+      'InvalidCollection',
+    )
+  }
+}
+
 /**
  * Apply batch write operations to the actor store
  * @param ctx - Application context
@@ -428,6 +437,12 @@ export async function applyWritesBatch(
   ctx.writeRateLimiter.assertWriteAllowed(callerDid, ops.length)
   for (const op of ops) {
     assertCollectionInHostedSpaceType(op.collection)
+  }
+  // After the type check, so a collection the type does not list keeps the
+  // message it always had; only a listed collection outside zone.stratos.*
+  // (the interactions of the boundary procedures) reaches this gate.
+  for (const op of ops) {
+    assertStratosNamespaceCollection(op.collection)
   }
 
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)

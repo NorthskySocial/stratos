@@ -4,10 +4,16 @@ import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import {
   assertBoundaryMatchesService,
   BoundaryServiceMismatchError,
+  buildRecordRules,
+  findRecordRule,
+  isEligibleSubject,
   isValidSkey,
   parseRecordUri,
   parseQualifiedBoundary,
   qualifyBoundary,
+  type RecordRule,
+  type RecordRuleInput,
+  type StratosConfig,
   StratosValidationError,
   StratosValidator,
 } from '@northskysocial/stratos-core'
@@ -17,6 +23,7 @@ import {
   HOSTED_SPACE_TYPE,
   SPACE_TYPE_REGISTRY,
 } from '../../shared/space-type-registry.js'
+import { resolveReferencedRecord } from './references.js'
 
 // Cache the boundaries in case a post gets _really_ popular.
 // Exported for tests: they clear the cache and check its insertion order.
@@ -28,6 +35,23 @@ const PARENT_BOUNDARY_TTL_MS = 60_000
 export const PARENT_BOUNDARY_CACHE_MAX = 1000
 
 const POST_COLLECTION = 'zone.stratos.feed.post'
+
+const recordRulesByConfig = new WeakMap<
+  StratosConfig,
+  ReadonlyMap<string, RecordRule>
+>()
+
+/** The record rules of one service configuration, built the first time they are asked for. */
+export function recordRulesFor(
+  config: StratosConfig,
+): ReadonlyMap<string, RecordRule> {
+  let rules = recordRulesByConfig.get(config)
+  if (!rules) {
+    rules = buildRecordRules(config)
+    recordRulesByConfig.set(config, rules)
+  }
+  return rules
+}
 
 export function assertCollectionInHostedSpaceType(collection: string): void {
   if (!SPACE_TYPE_REGISTRY.allowsCollection(HOSTED_SPACE_TYPE, collection)) {
@@ -174,15 +198,54 @@ export async function validateRecordInBoundary(
 ): Promise<void> {
   const rec = record as Record<string, unknown>
   assertReferenceUrisAreStrings(collection, rec)
-  const parentBoundaries = await resolveParentBoundaries(ctx, rec)
+  const subjectRule = findRecordRule(
+    recordRulesFor(ctx.cfg.stratos),
+    collection,
+  )?.subject
+  // A record that points at a subject has no use for a reply parent, and the
+  // parent's actor store may not exist: a stray reply field must not decide
+  // its outcome.
+  const parentBoundaries = subjectRule
+    ? undefined
+    : await resolveParentBoundaries(ctx, rec)
+  const subject = subjectRule
+    ? await judgeSubject(ctx, subjectRule, rec, boundary)
+    : undefined
 
   assertRulesHold(() =>
     new StratosValidator(ctx.cfg.stratos).assertValidWithInput(
       rec,
       collection,
-      { boundaryClaim: { values: [{ value: boundary }] }, parentBoundaries },
+      {
+        boundaryClaim: { values: [{ value: boundary }] },
+        parentBoundaries,
+        subject,
+      },
     ),
   )
+}
+
+/**
+ * Looks up the subject of a record whose rule names one and decides whether
+ * the record may point at it.
+ */
+async function judgeSubject(
+  ctx: AppContext,
+  subjectRule: NonNullable<RecordRule['subject']>,
+  record: Record<string, unknown>,
+  boundary: string,
+): Promise<NonNullable<RecordRuleInput['subject']>> {
+  const claimedCid = asObject(record.subject)?.cid
+  const facts = await resolveReferencedRecord(ctx, record.subject)
+  return {
+    eligible: isEligibleSubject(facts, {
+      boundary,
+      serviceDid: ctx.serviceDid,
+      spaceType: HOSTED_SPACE_TYPE,
+      collections: subjectRule.collections,
+      cid: typeof claimedCid === 'string' ? claimedCid : undefined,
+    }),
+  }
 }
 
 /**

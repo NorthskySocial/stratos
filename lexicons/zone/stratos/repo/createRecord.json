@@ -113,6 +113,10 @@
         {
           "name": "RateLimitExceeded",
           "description": "The caller has exceeded the write rate limit."
+        },
+        {
+          "name": "ScopeUpgradeRequired",
+          "description": "The member's grant predates this collection. Authorize again."
         }
       ]
     }

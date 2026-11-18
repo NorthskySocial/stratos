@@ -156,7 +156,7 @@ describe('write harness on postgres', () => {
 
   afterAll(async () => {
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     harness = await startPostgresWriteHarness(connectionString)
@@ -180,7 +180,7 @@ describe('write harness connection release on postgres', () => {
 
   afterAll(async () => {
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   async function openConnections(): Promise<number> {
     const probe = postgres(connectionString, { max: 1 })

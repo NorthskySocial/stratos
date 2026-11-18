@@ -5,6 +5,44 @@ import { HOSTED_SPACE_COLLECTIONS } from '../shared/space-type-registry.js'
 import { SPACE_TYPE } from './client.js'
 
 /**
+ * Whether a granted scope lets the member create records of one collection in
+ * this authority's space type, in any boundary.
+ */
+export function grantAllowsCreate(
+  scope: string,
+  collection: string,
+  serviceDid: string,
+): boolean {
+  return new ScopePermissions(scope).allowsSpace({
+    type: SPACE_TYPE,
+    authority: serviceDid,
+    skey: '*',
+    collection,
+    action: 'create',
+  })
+}
+
+/**
+ * Whether a granted scope carries a read grant, or a create grant on a hosted
+ * collection, in this authority's space type. A scope without one was never
+ * issued a space grant at all, as when the member's PDS does not support spaces.
+ */
+export function holdsSpaceGrant(scope: string, serviceDid: string): boolean {
+  const permissions = new ScopePermissions(scope)
+  return (
+    permissions.allowsSpace({
+      type: SPACE_TYPE,
+      authority: serviceDid,
+      skey: '*',
+      action: 'read',
+    }) ||
+    HOSTED_SPACE_COLLECTIONS.some((collection) =>
+      grantAllowsCreate(scope, collection, serviceDid),
+    )
+  )
+}
+
+/**
  * Enrollment always requests this authority's space scope. A missing grant
  * cannot distinguish an unsupported PDS from withheld consent, so it leaves
  * capability unknown. Reauthorization must never move custody on that basis.
@@ -27,13 +65,17 @@ export async function detectSpacesCapability(
       return 'unknown'
     }
     const permissions = new ScopePermissions(scope)
-    const space = { type: SPACE_TYPE, authority: serviceDid, skey: '*' }
     // Check create as well as read. Custody decides where this user's records
     // are written, so a grant that reads but cannot create is not capable of
     // the flow we would put them in.
-    const canRead = permissions.allowsSpace({ ...space, action: 'read' })
+    const canRead = permissions.allowsSpace({
+      type: SPACE_TYPE,
+      authority: serviceDid,
+      skey: '*',
+      action: 'read',
+    })
     const canCreate = HOSTED_SPACE_COLLECTIONS.every((collection) =>
-      permissions.allowsSpace({ ...space, collection, action: 'create' }),
+      grantAllowsCreate(scope, collection, serviceDid),
     )
     if (canRead && canCreate) return 'capable'
   } catch (err) {

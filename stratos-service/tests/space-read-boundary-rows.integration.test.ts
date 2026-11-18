@@ -107,7 +107,7 @@ function describeSpaceReadFromBoundaryRows(
 
     afterAll(async () => {
       await harness.cleanup()
-    })
+    }, 60_000)
 
     beforeEach(async () => {
       dataDir = join(

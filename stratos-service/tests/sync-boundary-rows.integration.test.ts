@@ -102,7 +102,7 @@ function describeSyncGating(
       await harness.cleanup()
       await closeServiceDb(serviceDb)
       await rm(labelDir, { recursive: true, force: true })
-    })
+    }, 60_000)
 
     beforeEach(async () => {
       revCounter = 0

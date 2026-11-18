@@ -26,6 +26,7 @@ import {
   stratosRecordBoundary,
   stratosRepoBlock,
 } from '../db'
+import { formatRecordUri, parseRecordUri } from '../spaces/domain.js'
 import { Logger, StatusAttr } from '../types.js'
 
 /**
@@ -548,18 +549,29 @@ export function getStratosBacklinks(
     subject &&
     typeof (subject as Record<string, unknown>)['uri'] === 'string'
   ) {
-    try {
-      const subjectUri = (subject as Record<string, unknown>)['uri'] as string
-      syntax.ensureValidAtUri(subjectUri)
-      backlinks.push({
-        uri: uri.toString(),
-        path: 'subject.uri',
-        linkTo: subjectUri,
-      })
-    } catch {
-      // Not a valid AT-URI
+    const subjectUri = (subject as Record<string, unknown>)['uri'] as string
+    const linkTo = subjectLinkTarget(subjectUri)
+    if (linkTo !== null) {
+      backlinks.push({ uri: uri.toString(), path: 'subject.uri', linkTo })
     }
   }
 
   return backlinks
+}
+
+/**
+ * The string a `subject.uri` is indexed under: an at-uri as written, or a
+ * space record uri in its canonical form (the installed at-uri syntax rejects
+ * the space form, so it needs its own parser).
+ */
+function subjectLinkTarget(subjectUri: string): string | null {
+  try {
+    syntax.ensureValidAtUri(subjectUri)
+    return subjectUri
+  } catch {
+    const space = parseRecordUri(subjectUri)
+    if (!space.ok) return null
+    const canonical = formatRecordUri(space.value)
+    return canonical.ok ? canonical.value : null
+  }
 }

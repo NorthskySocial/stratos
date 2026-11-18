@@ -18,6 +18,7 @@ export type StratosValidationErrorCode =
   | 'CrossNamespaceReply'
   | 'ReplyBoundaryEscalation'
   | 'CrossNamespaceEmbed'
+  | 'InvalidSubject'
 
 /**
  * Validates stratos records for domain boundaries and cross-namespace isolation.

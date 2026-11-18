@@ -6,6 +6,7 @@ import {
   buildCommit,
   computeCid,
   encodeRecord,
+  getStratosBacklinks,
   type MstWriteOp,
   parseCid,
   StratosValidator,
@@ -33,12 +34,14 @@ import {
   skipLexiconValidation,
   validateIfKnown,
 } from './lexicon-validation.js'
+import { assertCollectionGranted } from './scope-check.js'
 import { ensureActorStoreExists } from './util.js'
 import {
   assertCollectionInHostedSpaceType,
   authorizeBoundary,
   validateRecordInBoundary,
   assertBoundaryInCatalog,
+  recordRulesFor,
   withConcurrencyRetry,
 } from './validation.js'
 
@@ -218,12 +221,15 @@ async function runBoundaryWrites(
   await authorizeBoundary(ctx, callerDid, boundary)
   await assertBoundaryInCatalog(ctx, boundary)
 
+  const subjectCollections = collectionsNamingASubject(ctx)
+  await assertInteractionsGranted(ctx, callerDid, writes, subjectCollections)
   const prepared = await prepareWrites(
     ctx,
     callerDid,
     boundary,
     keyed,
     lexiconCheck,
+    subjectCollections,
   )
   const actorSign = await ctx.actorSigner.getSignFn(callerDid)
 
@@ -245,6 +251,7 @@ async function runBoundaryWrites(
             plan,
             actorSign,
             sequenceTrace,
+            subjectCollections,
           ),
         ),
       ctx.logger,
@@ -279,6 +286,31 @@ function assertNoDuplicateKeys(writes: KeyedWrite[], callerDid: string): void {
   }
 }
 
+/** The collections whose records name a subject, of which a member keeps one per subject. */
+function collectionsNamingASubject(ctx: AppContext): ReadonlySet<string> {
+  const rules = [...recordRulesFor(ctx.cfg.stratos).values()]
+  return new Set(
+    rules.filter((rule) => rule.subject).map((rule) => rule.collection),
+  )
+}
+
+/** Posts are not checked: some members' grants never covered them. */
+async function assertInteractionsGranted(
+  ctx: AppContext,
+  callerDid: string,
+  writes: BoundaryWrite[],
+  subjectCollections: ReadonlySet<string>,
+): Promise<void> {
+  const written = writes
+    .filter((write) => write.kind !== 'delete')
+    .map((write) => write.collection)
+  for (const collection of new Set(written)) {
+    if (subjectCollections.has(collection)) {
+      await assertCollectionGranted(ctx, callerDid, collection)
+    }
+  }
+}
+
 /** Validation and encoding that need no lock; deletes carry no record. */
 async function prepareWrites(
   ctx: AppContext,
@@ -286,6 +318,7 @@ async function prepareWrites(
   boundary: string,
   writes: KeyedWrite[],
   lexiconCheck: LexiconCheck,
+  subjectCollections: ReadonlySet<string>,
 ): Promise<PreparedWrite[]> {
   for (const write of writes) {
     if (write.kind !== 'delete') {
@@ -293,7 +326,10 @@ async function prepareWrites(
       assertRecordTypeMatches(write.record, write.collection)
     }
   }
-  return Promise.all(
+  // Every write settles and the refusal of the lowest index is reported, so the
+  // answer does not depend on which lookup happens to finish first. Running
+  // them one by one instead would add up to 200 sequential reads.
+  const settled = await Promise.allSettled(
     writes.map(async (write): Promise<PreparedWrite> => {
       const uri = new AtUriSyntax(
         `at://${callerDid}/${write.collection}/${write.rkey}`,
@@ -322,6 +358,37 @@ async function prepareWrites(
       }
     }),
   )
+  const prepared = settled.map((outcome) => {
+    if (outcome.status === 'rejected') throw outcome.reason
+    return outcome.value
+  })
+  assertNoDuplicateSubjects(prepared, subjectCollections)
+  return prepared
+}
+
+/**
+ * Refuses a batch that names one subject twice in one collection. The stored
+ * rows the transaction compares against cannot show it, because the batch is
+ * indexed only after every write is planned.
+ */
+function assertNoDuplicateSubjects(
+  writes: PreparedWrite[],
+  subjectCollections: ReadonlySet<string>,
+): void {
+  const seen = new Set<string>()
+  for (const write of writes) {
+    if (write.kind === 'delete' || !subjectCollections.has(write.collection)) {
+      continue
+    }
+    for (const { path, linkTo } of getStratosBacklinks(
+      write.uri,
+      write.record,
+    )) {
+      const key = JSON.stringify([write.collection, path, linkTo])
+      if (seen.has(key)) throw interactionAlreadyExists()
+      seen.add(key)
+    }
+  }
 }
 
 /**
@@ -354,6 +421,7 @@ async function commitPlannedWrites(
   plan: WritePlanner,
   actorSign: ActorSignFn,
   sequenceTrace: SequenceTrace,
+  subjectCollections: ReadonlySet<string>,
 ): Promise<CommitResult | null> {
   // The root lock comes first: every stored-state read below and the writes
   // after it then belong to one serialized step of this repo.
@@ -368,6 +436,7 @@ async function commitPlannedWrites(
     }
   }
   if (planned.length === 0) return null
+  await assertNoSubjectConflicts(store, planned, subjectCollections)
 
   const rootCid = currentRoot?.cid ? parseCid(currentRoot.cid).toString() : null
   const unsigned = await buildCommit(
@@ -398,6 +467,34 @@ async function commitPlannedWrites(
     )
   }
   return { results, commit: { cid: commitCid, rev: commit.rev } }
+}
+
+/**
+ * A member keeps one like and one repost per subject. The check reads what the
+ * repo stores, so it runs here, after the root lock and in the transaction
+ * that writes: the lock is what makes a concurrent write of the same subject
+ * wait and then see this one. Rows of records this batch rewrites or removes
+ * do not count; the batch's own subjects were already compared among
+ * themselves.
+ */
+async function assertNoSubjectConflicts(
+  store: ActorTransactor,
+  planned: PlannedWrite[],
+  subjectCollections: ReadonlySet<string>,
+): Promise<void> {
+  const rewritten = new Set(planned.map((write) => write.uri))
+  for (const write of planned) {
+    if (write.kind === 'delete' || !subjectCollections.has(write.collection)) {
+      continue
+    }
+    const conflicts = await store.record.getBacklinkConflicts(
+      write.uri,
+      write.record,
+    )
+    if (conflicts.some((conflict) => !rewritten.has(conflict.toString()))) {
+      throw interactionAlreadyExists()
+    }
+  }
 }
 
 async function readStoredState(
@@ -451,6 +548,13 @@ const planSingleDelete: WritePlanner = (_write, stored, boundary) =>
 
 function recordAlreadyExists(): InvalidRequestError {
   return new InvalidRequestError('Record already exists', 'RecordAlreadyExists')
+}
+
+function interactionAlreadyExists(): InvalidRequestError {
+  return new InvalidRequestError(
+    'The member already has this interaction with the subject',
+    'RecordAlreadyExists',
+  )
 }
 
 function recordNotFound(): InvalidRequestError {

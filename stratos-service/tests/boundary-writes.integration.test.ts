@@ -1560,7 +1560,7 @@ describe.each(SCENARIO_GROUPS)('boundary writes on postgres: %s', (group) => {
 
   afterAll(async () => {
     if (group === LAST_SCENARIO_GROUP) await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     harness = await startPostgresWriteHarness(connectionString)

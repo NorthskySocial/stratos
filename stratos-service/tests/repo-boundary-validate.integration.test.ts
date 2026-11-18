@@ -1090,6 +1090,268 @@ function defineNeverServerError(getHarness: () => WriteHarness) {
   })
 }
 
+const INTERACTION_COLLECTIONS = ['app.bsky.feed.like', 'app.bsky.feed.repost']
+const PDS_MEMBER = 'did:plc:asuka-langley'
+const SERVICE_OF_BOUNDARY = HARNESS_ENGINEERING.split('/')[0]
+const SPACE_FORM_URI = `at://${SERVICE_OF_BOUNDARY}/space/zone.stratos.space.feed/engineering/${PDS_MEMBER}/${COLLECTION}/eva02`
+
+function interactionRecord(
+  collection: string,
+  subject: unknown,
+  via: unknown,
+  createdAt: unknown,
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    ...extra,
+    $type: collection,
+    subject,
+    createdAt,
+    ...(via === undefined ? {} : { via }),
+  }
+}
+
+const interactionStrongRef = fc.record({
+  uri: fc.oneof(
+    fc.constantFrom(uriOf('eva-op'), SPACE_FORM_URI, `${uriOf('eva-op')}/`),
+    arbitraryJson,
+  ),
+  cid: fc.oneof(fc.constant(POST_CID), arbitraryJson),
+})
+
+const interactionSubject = fc.oneof(interactionStrongRef, arbitraryJson)
+
+const interactionVia = fc.option(
+  fc.oneof(interactionStrongRef, arbitraryJson),
+  { nil: undefined },
+)
+
+const MISSING_STORE_URI = `at://did:plc:gendo-ikari/${COLLECTION}/eva00`
+
+const replyAuthorUri = fc.oneof(
+  fc.constantFrom(
+    uriOf('eva-op'),
+    MISSING_STORE_URI,
+    SPACE_FORM_URI,
+    'at://not-a-did/zone.stratos.feed.post/eva00',
+    'not a uri',
+    '',
+  ),
+  arbitraryJson,
+)
+
+const replyStrongRef = fc.record({
+  uri: replyAuthorUri,
+  cid: fc.oneof(fc.constant(POST_CID), arbitraryJson),
+})
+
+const replyOf = fc.oneof(
+  fc.record({ root: replyStrongRef, parent: replyStrongRef }),
+  fc.record({ parent: replyStrongRef }),
+  arbitraryJson,
+)
+
+// Fields a like or repost does not declare. A reply naming a parent no actor
+// store backs must be answered like any other extra field.
+const interactionExtras = fc
+  .tuple(
+    fc.dictionary(
+      fc.oneof(fc.constantFrom('embed', 'langs', 'text'), fc.string()),
+      arbitraryJson,
+      { maxKeys: 3 },
+    ),
+    fc.option(replyOf, { nil: undefined }),
+  )
+  .map(([fields, reply]) =>
+    reply === undefined ? fields : { ...fields, reply },
+  )
+
+const interactionCreatedAt = fc.oneof(
+  fc.constant('1996-10-04T00:00:00.000Z'),
+  arbitraryJson,
+)
+
+function defineInteractionNeverServerError(getHarness: () => WriteHarness) {
+  describe('a like or repost never answers 5xx', () => {
+    let harness: WriteHarness
+    let counter = 0
+    const enrolledWriters = new Set<string>()
+    const REQUESTS_PER_MEMBER = 100
+
+    beforeEach(async () => {
+      harness = getHarness()
+      counter = 0
+      enrolledWriters.clear()
+      await enrollPilot(harness)
+      await harness.enrollPdsCustodyMember(PDS_MEMBER, [HARNESS_ENGINEERING])
+      await seedPost(harness, 'eva-op')
+    })
+
+    // The write limit counts every attempt, so the requests are spread over
+    // members to keep a rate limit from standing in for the answer under test.
+    async function nextWriter() {
+      const request = counter++
+      const writer = `did:plc:pilot-${Math.floor(request / REQUESTS_PER_MEMBER)}`
+      if (!enrolledWriters.has(writer)) {
+        await harness.enrollMember(writer, [HARNESS_ENGINEERING])
+        enrolledWriters.add(writer)
+      }
+      return { writer, rkey: `eva-i${request}` }
+    }
+
+    const SENDERS: Array<{
+      name: string
+      send(
+        collection: string,
+        record: unknown,
+        fields: ValidateField,
+      ): Promise<CallResult>
+    }> = [
+      {
+        name: 'createRecord',
+        send: async (collection, record, fields) => {
+          const { writer, rkey } = await nextWriter()
+          return harness.call(CREATE, asMember(writer), {
+            boundary: HARNESS_ENGINEERING,
+            repo: writer,
+            collection,
+            rkey,
+            record,
+            ...fields,
+          })
+        },
+      },
+      {
+        name: 'putRecord',
+        send: async (collection, record, fields) => {
+          const { writer, rkey } = await nextWriter()
+          return harness.call(PUT, asMember(writer), {
+            boundary: HARNESS_ENGINEERING,
+            repo: writer,
+            collection,
+            rkey,
+            record,
+            ...fields,
+          })
+        },
+      },
+      {
+        name: 'applyWrites create',
+        send: async (collection, record, fields) => {
+          const { writer, rkey } = await nextWriter()
+          return harness.call(APPLY_WRITES, asMember(writer), {
+            boundary: HARNESS_ENGINEERING,
+            repo: writer,
+            writes: [
+              {
+                $type: `${WRITE_TYPE}create`,
+                collection,
+                rkey,
+                value: record,
+              },
+            ],
+            ...fields,
+          })
+        },
+      },
+      {
+        name: 'applyWrites update',
+        send: async (collection, record, fields) => {
+          const { writer, rkey } = await nextWriter()
+          await harness.call(CREATE, asMember(writer), {
+            boundary: HARNESS_ENGINEERING,
+            repo: writer,
+            collection,
+            rkey,
+            record: interactionRecord(
+              collection,
+              strongRef('eva-op'),
+              undefined,
+              '1996-10-04T00:00:00.000Z',
+            ),
+            validate: false,
+          })
+          return harness.call(APPLY_WRITES, asMember(writer), {
+            boundary: HARNESS_ENGINEERING,
+            repo: writer,
+            writes: [
+              {
+                $type: `${WRITE_TYPE}update`,
+                collection,
+                rkey,
+                value: record,
+              },
+            ],
+            ...fields,
+          })
+        },
+      },
+    ]
+
+    it.each(SENDERS)(
+      'through $name for any subject, via, createdAt and extra fields',
+      async (sender) => {
+        await fc.assert(
+          fc.asyncProperty(
+            fc.constantFrom(...INTERACTION_COLLECTIONS),
+            interactionSubject,
+            interactionVia,
+            interactionCreatedAt,
+            interactionExtras,
+            fc.constantFrom<ValidateField>(
+              {},
+              { validate: true },
+              { validate: false },
+            ),
+            async (collection, subject, via, createdAt, extra, fields) => {
+              const record = interactionRecord(
+                collection,
+                subject,
+                via,
+                createdAt,
+                extra,
+              )
+
+              const response = await sender.send(collection, record, fields)
+
+              expect(response.status).toBeLessThan(500)
+              expect(response.status).not.toBe(429)
+            },
+          ),
+          { numRuns: 60 },
+        )
+      },
+    )
+
+    it('through deleteRecord for any rkey', async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.constantFrom(...INTERACTION_COLLECTIONS),
+          arbitraryJson,
+          async (collection, rkey) => {
+            const { writer } = await nextWriter()
+
+            const response = await harness.call(
+              'zone.stratos.repo.deleteRecord',
+              asMember(writer),
+              {
+                boundary: HARNESS_ENGINEERING,
+                repo: writer,
+                collection,
+                rkey,
+              },
+            )
+
+            expect(response.status).toBeLessThan(500)
+            expect(response.status).not.toBe(429)
+          },
+        ),
+        { numRuns: 60 },
+      )
+    })
+  })
+}
+
 describe('lexicon strategies on an unlisted collection', () => {
   const record = { $type: UNLISTED_COLLECTION, text: 'Sortie' }
 
@@ -1186,6 +1448,7 @@ describe('boundary record validation on sqlite', () => {
   defineUnreadableReferences(() => harness)
   defineRulesWithValidateFalse(() => harness)
   defineNeverServerError(() => harness)
+  defineInteractionNeverServerError(() => harness)
 })
 
 describe('boundary record validation on postgres', () => {
@@ -1198,7 +1461,7 @@ describe('boundary record validation on postgres', () => {
 
   afterAll(async () => {
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     harness = await startPostgresWriteHarness(connectionString)

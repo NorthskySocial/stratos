@@ -5,9 +5,13 @@ import {
   Lexicons,
   ValidationError,
 } from '@atproto/lexicon'
-import { stratosLexicons } from '@northskysocial/stratos-core'
+import { parseRecordUri, stratosLexicons } from '@northskysocial/stratos-core'
 
 const DOMAINS_TYPE = 'zone.stratos.boundary.defs#Domains'
+
+// References sit near the top of a record; the bound keeps a hostile nesting
+// from exhausting the stack.
+const MAX_REFERENCE_DEPTH = 16
 
 export type LexiconValidationStatus = 'valid' | 'unknown'
 
@@ -86,7 +90,10 @@ function assertMatchesLexicon(
   record: Record<string, unknown>,
 ): void {
   try {
-    lexicons.assertValidRecord(collection, withTypedBoundaryClaim(record))
+    lexicons.assertValidRecord(
+      collection,
+      withTypedBoundaryClaim(withRepoFormUris(record)),
+    )
   } catch (err) {
     // A missing or invalid definition means the provider itself is broken, not
     // the record, so it stays a server error instead of blaming the caller.
@@ -124,4 +131,43 @@ function withTypedBoundaryClaim(
     return record
   }
   return { ...record, boundary: { $type: DOMAINS_TYPE, ...claim } }
+}
+
+// The lexicon library's at-uri format does not know space record URIs yet, so
+// the check sees a copy in which each `uri` property holding one names the same
+// record in repo form. Only this copy is changed; the stored record keeps the
+// URI the client sent.
+function withRepoFormUris(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  return rewriteUris(record, 0) as Record<string, unknown>
+}
+
+function rewriteUris(value: unknown, depth: number): unknown {
+  if (depth > MAX_REFERENCE_DEPTH) return value
+  if (Array.isArray(value)) {
+    return value.map((item) => rewriteUris(item, depth + 1))
+  }
+  if (!isPlainObject(value)) return value
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [
+      key,
+      key === 'uri' && typeof child === 'string'
+        ? repoFormOf(child)
+        : rewriteUris(child, depth + 1),
+    ]),
+  )
+}
+
+function repoFormOf(uri: string): string {
+  const parsed = parseRecordUri(uri)
+  if (!parsed.ok) return uri
+  const { authorDid, collection, rkey } = parsed.value
+  return `at://${authorDid}/${collection}/${rkey}`
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
 }

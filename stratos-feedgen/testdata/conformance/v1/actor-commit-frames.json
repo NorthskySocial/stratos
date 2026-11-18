@@ -92,6 +92,48 @@
         ],
         "deletes": []
       }
+    },
+    {
+      "name": "a like of a post, written through the generic write procedures",
+      "serviceDid": "did:web:nerv.tokyo.jp",
+      "actorDid": "did:plc:misato-katsuragi",
+      "authorizedBoundaries": [
+        "did:web:nerv.tokyo.jp/tokyo-3",
+        "did:web:nerv.tokyo.jp/geofront"
+      ],
+      "frameBase64": "omF0ZyNjb21taXRib3ABpWNkaWR4GGRpZDpwbGM6bWlzYXRvLWthdHN1cmFnaWNvcHOBqGNjaWR4O2JhZnlyZWljbjdvbmRpZXVydHJ3cHhpam54b2cyZms2eW9rcHA0bjYybm0zM3h3NmlyaW9xMmtjNnl5Y3Jldm0zbjJsaG1paGtnYzJwZHBhdGh4G2FwcC5ic2t5LmZlZWQubGlrZS9yZWktbGlrZWV0cmFjZaFqcXVldWVkQXRNcxsAAAGh7m/YwGZhY3Rpb25mY3JlYXRlZmNvbW1pdHg7YmFmeXJlaWE1em5nemQ0M3o1ZWprMnVicXNrcHFnMmpkZ3doYTJrZnZoZTdodmd3eW1sY3A3azZrZHFmcmVjb3Jko2UkdHlwZXJhcHAuYnNreS5mZWVkLmxpa2Vnc3ViamVjdKJjY2lkeDtiYWZ5cmVpYXZyenlreWlnbngyb3JhM3NzeDVidmhlMmhrNXhleXp6NXpoMmd4bGVkeWdmZ3RycGF0ZWN1cml4PGF0Oi8vZGlkOnBsYzptaXNhdG8ta2F0c3VyYWdpL3pvbmUuc3RyYXRvcy5mZWVkLnBvc3QvZ2FnaGllbGljcmVhdGVkQXR4GDE5OTYtMTAtMDRUMDA6MDA6MDAuMDAwWmhib3VuZGFyeaFmdmFsdWVzgaFldmFsdWV4HmRpZDp3ZWI6bmVydi50b2t5by5qcC9nZW9mcm9udGNyZXZtM24ybGhtaWhrZ2MycGNzZXEHZHRpbWV4GDIwMjYtMTEtMThUMTE6MzQ6MjkuODMxWg==",
+      "expected": {
+        "upserts": [],
+        "deletes": []
+      }
+    },
+    {
+      "name": "a repost of a post, written through the generic write procedures",
+      "serviceDid": "did:web:nerv.tokyo.jp",
+      "actorDid": "did:plc:misato-katsuragi",
+      "authorizedBoundaries": [
+        "did:web:nerv.tokyo.jp/tokyo-3",
+        "did:web:nerv.tokyo.jp/geofront"
+      ],
+      "frameBase64": "omF0ZyNjb21taXRib3ABpWNkaWR4GGRpZDpwbGM6bWlzYXRvLWthdHN1cmFnaWNvcHOBqGNjaWR4O2JhZnlyZWlkdmd5NzZkdXl6NXV6c2Rvbm02eDVid3B3ZDdqd25lZ2tyNHVlaGRubW5za28zNHJvNmhxY3Jldm0zbjJsaG1paHFiczJwZHBhdGh4IWFwcC5ic2t5LmZlZWQucmVwb3N0L2FzdWthLXJlcG9zdGV0cmFjZaFqcXVldWVkQXRNcxsAAAGh7m/Yx2ZhY3Rpb25mY3JlYXRlZmNvbW1pdHg7YmFmeXJlaWFncmVtbWlraGN2czd5YmxoYTRoMmt1YXJ4MmZmcHF0eHBqcWc3bmdpZ2x2anF5cDV3N3lmcmVjb3Jko2UkdHlwZXRhcHAuYnNreS5mZWVkLnJlcG9zdGdzdWJqZWN0omNjaWR4O2JhZnlyZWlhdnJ6eWt5aWdueDJvcmEzc3N4NWJ2aGUyaGs1eGV5eno1emgyZ3hsZWR5Z2ZndHJwYXRlY3VyaXg8YXQ6Ly9kaWQ6cGxjOm1pc2F0by1rYXRzdXJhZ2kvem9uZS5zdHJhdG9zLmZlZWQucG9zdC9nYWdoaWVsaWNyZWF0ZWRBdHgYMTk5Ni0xMC0wNFQwMDowMDowMC4wMDBaaGJvdW5kYXJ5oWZ2YWx1ZXOBoWV2YWx1ZXgeZGlkOndlYjpuZXJ2LnRva3lvLmpwL2dlb2Zyb250Y3Jldm0zbjJsaG1paHFiczJwY3NlcQhkdGltZXgYMjAyNi0xMS0xOFQxMTozNDoyOS44MzZa",
+      "expected": {
+        "upserts": [],
+        "deletes": []
+      }
+    },
+    {
+      "name": "a delete of the like",
+      "serviceDid": "did:web:nerv.tokyo.jp",
+      "actorDid": "did:plc:misato-katsuragi",
+      "authorizedBoundaries": [
+        "did:web:nerv.tokyo.jp/tokyo-3",
+        "did:web:nerv.tokyo.jp/geofront"
+      ],
+      "frameBase64": "omF0ZyNjb21taXRib3ABpWNkaWR4GGRpZDpwbGM6bWlzYXRvLWthdHN1cmFnaWNvcHOBpmNyZXZtM24ybGhtaWh1NnMycGRwYXRoeBthcHAuYnNreS5mZWVkLmxpa2UvcmVpLWxpa2VldHJhY2WhanF1ZXVlZEF0TXMbAAABoe5v2M1mYWN0aW9uZmRlbGV0ZWZjb21taXR4O2JhZnlyZWlhcXZvbTM2bHVhZXlzZXN5dTRxNGV1M2p5dGdsbmZteGZuZjQ3cGd1M2xwem94aG1obmJpaGJvdW5kYXJ5oWZ2YWx1ZXOBoWV2YWx1ZXgeZGlkOndlYjpuZXJ2LnRva3lvLmpwL2dlb2Zyb250Y3Jldm0zbjJsaG1paHU2czJwY3NlcQpkdGltZXgYMjAyNi0xMS0xOFQxMTozNDoyOS44NDBa",
+      "expected": {
+        "upserts": [],
+        "deletes": []
+      }
     }
   ]
 }
