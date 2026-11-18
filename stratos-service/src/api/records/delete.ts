@@ -1,11 +1,11 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
-import { RepoWrite } from '@northskysocial/stratos-core'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context.js'
 import { createRepoManager } from './util.js'
 import { assertStratosCustody } from './custody.js'
 import {
   sequenceChange,
+  type RecordHandlerWrite,
   type SequenceTrace,
   type WritePhases,
 } from './types.js'
@@ -89,7 +89,7 @@ export async function deleteRecord(
         // carries no boundary and is dropped by the fail-closed scope gate for
         // every subscriber, so without this the deletion would never propagate.
         // The stored rows are the boundary; the body only claims one.
-        // true: a taken-down record still needs its boundaries and swap check.
+        // true keeps the taken-down record readable for the swap check and the delete.
         const existing = await store.record.getRecord(uri, null, true)
         if (
           input.swapRecord !== undefined &&
@@ -102,7 +102,9 @@ export async function deleteRecord(
         }
         const deletedDomains = await store.record.getRecordBoundaries(uri)
 
-        const repoWrites: RepoWrite[] = [{ action: 'delete', collection, rkey }]
+        const repoWrites: RecordHandlerWrite[] = [
+          { action: 'delete', collection, rkey },
+        ]
 
         const writeResult = await manager.applyWrites(
           callerDid,

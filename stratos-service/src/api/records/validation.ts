@@ -37,15 +37,10 @@ export function assertCollectionInHostedSpaceType(collection: string): void {
 }
 
 /**
- * Authorizes the caller to write the record's single boundary and returns it.
- * @throws InvalidRequestError if the boundary is not exactly one, is malformed, targets another service, or is not held by the caller
+ * Reads the one boundary a record claims.
+ * @throws InvalidRequestError if the record does not claim exactly one boundary
  */
-export async function authorizeRecordBoundary(
-  ctx: AppContext,
-  callerDid: string,
-  collection: string,
-  record: unknown,
-): Promise<string> {
+export function extractRecordBoundary(record: unknown): string {
   const requestedDomains = StratosValidator.extractBoundaryDomains(
     record as Record<string, unknown>,
   )
@@ -58,47 +53,65 @@ export async function authorizeRecordBoundary(
       'InvalidDomainCount',
     )
   }
+  return requestedDomains[0]
+}
 
+/**
+ * Authorizes the caller to write to a boundary and returns it.
+ * @throws InvalidRequestError if the boundary is malformed, targets another service, or is not held by the caller
+ */
+export async function authorizeBoundary(
+  ctx: AppContext,
+  callerDid: string,
+  boundary: string,
+): Promise<string> {
   // The bare domain name is the space skey; validate it as such.
-  const [onlyDomain] = requestedDomains
-  const bareName = parseQualifiedBoundary(onlyDomain)?.name ?? onlyDomain
+  const bareName = parseQualifiedBoundary(boundary)?.name ?? boundary
   if (!isValidSkey(bareName)) {
     throw new InvalidRequestError(
-      `Domain "${onlyDomain}" is not a valid domain skey`,
+      `Domain "${boundary}" is not a valid domain skey`,
       'InvalidDomain',
     )
   }
 
-  // Reject records whose boundaries target a different Stratos service
-  for (const domain of requestedDomains) {
-    try {
-      assertBoundaryMatchesService(domain, ctx.serviceDid)
-    } catch (err) {
-      if (err instanceof BoundaryServiceMismatchError) {
-        throw new InvalidRequestError(err.message, 'ServiceMismatch')
-      }
-      throw err
+  // Reject boundaries that target a different Stratos service
+  try {
+    assertBoundaryMatchesService(boundary, ctx.serviceDid)
+  } catch (err) {
+    if (err instanceof BoundaryServiceMismatchError) {
+      throw new InvalidRequestError(err.message, 'ServiceMismatch')
     }
+    throw err
   }
 
   // a hand-built context without a write cache falls back to the live resolver
   const callerDomains = await (
     ctx.writeBoundaryResolver ?? ctx.boundaryResolver
   ).getBoundaries(callerDid)
-  const missingDomains = requestedDomains.filter(
-    (domain) => !callerDomains.includes(domain),
-  )
 
-  if (missingDomains.length > 0) {
+  if (!callerDomains.includes(boundary)) {
     const availableDomains =
       callerDomains.length > 0 ? callerDomains.join(', ') : '(none)'
     throw new InvalidRequestError(
-      `You do not have access to boundary domain(s): ${missingDomains.join(', ')}. Your enrolled domains: ${availableDomains}`,
+      `You do not have access to boundary domain(s): ${boundary}. Your enrolled domains: ${availableDomains}`,
       'ForbiddenBoundary',
     )
   }
 
-  return onlyDomain
+  return boundary
+}
+
+/**
+ * Authorizes the caller to write the record's single boundary and returns it.
+ * @throws InvalidRequestError if the boundary is not exactly one, is malformed, targets another service, or is not held by the caller
+ */
+export async function authorizeRecordBoundary(
+  ctx: AppContext,
+  callerDid: string,
+  collection: string,
+  record: unknown,
+): Promise<string> {
+  return authorizeBoundary(ctx, callerDid, extractRecordBoundary(record))
 }
 
 /**

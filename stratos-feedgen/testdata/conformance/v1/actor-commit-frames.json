@@ -73,6 +73,25 @@
           "at://did:plc:misato-katsuragi/zone.stratos.feed.post/sachiel"
         ]
       }
+    },
+    {
+      "name": "a post written through the boundary create procedure with no body boundary",
+      "serviceDid": "did:web:nerv.tokyo.jp",
+      "actorDid": "did:plc:misato-katsuragi",
+      "authorizedBoundaries": [
+        "did:web:nerv.tokyo.jp/tokyo-3",
+        "did:web:nerv.tokyo.jp/geofront"
+      ],
+      "frameBase64": "omF0ZyNjb21taXRib3ABpWNkaWR4GGRpZDpwbGM6bWlzYXRvLWthdHN1cmFnaWNvcHOBqGNjaWR4O2JhZnlyZWlhdnJ6eWt5aWdueDJvcmEzc3N4NWJ2aGUyaGs1eGV5eno1emgyZ3hsZWR5Z2ZndHJwYXRlY3Jldm0zbjJsMmhwcHJ3czJrZHBhdGh4HnpvbmUuc3RyYXRvcy5mZWVkLnBvc3QvZ2FnaGllbGV0cmFjZaFqcXVldWVkQXRNcxsAAAGh7ZhpLGZhY3Rpb25mY3JlYXRlZmNvbW1pdHg7YmFmeXJlaWYzZG0yb2VvNGJhazR0NjZ5dWR1ZjZha2ZxYzMydWljbm51eWo3anJoZmtwZ3J2Y2dib2lmcmVjb3Jko2R0ZXh0Z0dhZ2hpZWxlJHR5cGV2em9uZS5zdHJhdG9zLmZlZWQucG9zdGljcmVhdGVkQXR4GDE5OTYtMTAtMDRUMDA6MDA6MDAuMDAwWmhib3VuZGFyeaFmdmFsdWVzgaFldmFsdWV4HmRpZDp3ZWI6bmVydi50b2t5by5qcC9nZW9mcm9udGNyZXZtM24ybDJocHByd3Mya2NzZXEGZHRpbWV4GDIwMjYtMTEtMThUMDc6Mzk6MTEuMDI0Wg==",
+      "expected": {
+        "upserts": [
+          {
+            "uri": "at://did:plc:misato-katsuragi/zone.stratos.feed.post/gaghiel",
+            "boundaries": ["did:web:nerv.tokyo.jp/geofront"]
+          }
+        ],
+        "deletes": []
+      }
     }
   ]
 }

@@ -36,6 +36,10 @@ import zoneStratosIdentityResolveEnrollments from '../../../lexicons/zone/strato
 import zoneStratosRepoHydrateRecord from '../../../lexicons/zone/stratos/repo/hydrateRecord.json' with { type: 'json' }
 import zoneStratosRepoHydrateRecords from '../../../lexicons/zone/stratos/repo/hydrateRecords.json' with { type: 'json' }
 import zoneStratosRepoImportRepo from '../../../lexicons/zone/stratos/repo/importRepo.json' with { type: 'json' }
+import zoneStratosRepoCreateRecord from '../../../lexicons/zone/stratos/repo/createRecord.json' with { type: 'json' }
+import zoneStratosRepoPutRecord from '../../../lexicons/zone/stratos/repo/putRecord.json' with { type: 'json' }
+import zoneStratosRepoDeleteRecord from '../../../lexicons/zone/stratos/repo/deleteRecord.json' with { type: 'json' }
+import zoneStratosRepoApplyWrites from '../../../lexicons/zone/stratos/repo/applyWrites.json' with { type: 'json' }
 import zoneStratosRepoUploadBlob from '../../../lexicons/zone/stratos/sync/uploadBlob.json' with { type: 'json' }
 import zoneStratosModerationCreateLabel from '../../../lexicons/zone/stratos/moderation/createLabel.json' with { type: 'json' }
 import zoneStratosModerationDefs from '../../../lexicons/zone/stratos/moderation/defs.json' with { type: 'json' }
@@ -90,6 +94,10 @@ export const stratosLexicons: LexiconDoc[] = [
   zoneStratosRepoHydrateRecord as LexiconDoc,
   zoneStratosRepoHydrateRecords as LexiconDoc,
   zoneStratosRepoImportRepo as LexiconDoc,
+  zoneStratosRepoCreateRecord as LexiconDoc,
+  zoneStratosRepoPutRecord as LexiconDoc,
+  zoneStratosRepoDeleteRecord as LexiconDoc,
+  zoneStratosRepoApplyWrites as LexiconDoc,
   zoneStratosRepoUploadBlob as LexiconDoc,
   zoneStratosModerationCreateLabel as LexiconDoc,
   zoneStratosModerationDefs as LexiconDoc,

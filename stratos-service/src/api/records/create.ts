@@ -5,7 +5,6 @@ import {
   computeCid,
   encodeRecord,
   parseCid,
-  RepoWrite,
   StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
@@ -17,6 +16,7 @@ import {
   withConcurrencyRetry,
 } from './validation.js'
 import {
+  type RecordHandlerWrite,
   type RecordWriteInput,
   type SequenceTrace,
   type WritePhases,
@@ -26,7 +26,11 @@ import {
   createRepoManager,
   ensureActorStoreExists as ensureStoreExists,
 } from './util.js'
-import { assertStratosCustody, assertWritableEnrollment } from './custody.js'
+import {
+  assertStratosCustody,
+  assertWritableEnrollment,
+  assertWriterStillAuthorized,
+} from './custody.js'
 
 export interface CreateRecordInput {
   repo: string
@@ -197,6 +201,7 @@ async function performCreateTransaction(
   const t0 = performance.now()
   const unlock = await ctx.repoWriteLocks.acquire(input.callerDid)
   try {
+    await assertWriterStillAuthorized(ctx, input.callerDid, input.boundary)
     await ensureStoreExists(ctx.actorStore, input.callerDid)
 
     const retry = await withConcurrencyRetry(async () => {
@@ -243,7 +248,7 @@ async function executeTransaction(
       sequenceTrace,
     )
 
-    const repoWrites: RepoWrite[] = [
+    const repoWrites: RecordHandlerWrite[] = [
       { action: 'create', collection, rkey, record, cid, boundary },
     ]
 

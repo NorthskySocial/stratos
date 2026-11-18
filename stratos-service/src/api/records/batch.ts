@@ -21,12 +21,17 @@ import {
 import {
   type BatchWriteResult,
   type CommitResult,
+  opBoundary,
   type RecordWriteInput,
   sequenceChange,
   type SequenceTrace,
 } from './types.js'
 import { ensureActorStoreExists } from './util.js'
-import { assertStratosCustody, assertWritableEnrollment } from './custody.js'
+import {
+  assertStratosCustody,
+  assertWritableEnrollment,
+  assertWriterStillAuthorized,
+} from './custody.js'
 
 export type BatchAction = 'create' | 'update' | 'delete'
 
@@ -37,23 +42,33 @@ export interface BatchWriteOp {
   record?: unknown
 }
 
-export interface PrecomputedBatchOp {
+interface PrecomputedBatchOpBase {
   op: BatchWriteOp
   rkey: string
   uriStr: string
   uri: string
-  action: BatchAction
-  /** Authorized input for create and update ops; absent for deletes. */
-  writeInput?: RecordWriteInput
-  recordBytes?: Uint8Array
-  cid?: CID
-  tempRev?: string
   /**
    * Domains the record held BEFORE this op, captured inside the transaction for
-   * update ops so a domain change (move) can emit a boundary-carrying removal.
+   * update ops so a domain change (move) can emit a boundary-carrying removal,
+   * and for delete ops so a scoped removal can be sequenced.
    */
   previousDomains?: string[]
 }
+
+export interface PrecomputedDeleteOp extends PrecomputedBatchOpBase {
+  action: 'delete'
+}
+
+/** A create or update; every op that is not a delete is treated as one. */
+export interface PrecomputedWriteOp extends PrecomputedBatchOpBase {
+  action: 'create' | 'update'
+  writeInput: RecordWriteInput
+  recordBytes: Uint8Array
+  cid: CID
+  tempRev: string
+}
+
+export type PrecomputedBatchOp = PrecomputedDeleteOp | PrecomputedWriteOp
 
 /**
  * Pre-compute CPU-bound work outside the transaction
@@ -124,7 +139,7 @@ function buildMstOps(precomputed: PrecomputedBatchOp[]): MstWriteOp[] {
     action: pre.action,
     collection: pre.op.collection,
     rkey: pre.rkey,
-    cid: pre.action === 'delete' ? null : parseCid(pre.cid!).toString(),
+    cid: pre.action === 'delete' ? null : parseCid(pre.cid).toString(),
   }))
 }
 
@@ -159,19 +174,28 @@ async function prepareWriteResults(
       await store.record.deleteRecord(new AtUriSyntax(pre.uriStr))
       results.push({})
     } else {
-      const { record, boundary } = pre.writeInput!
+      const { record, boundary } = pre.writeInput
       await store.record.indexRecordInBoundary(
         new AtUriSyntax(pre.uriStr),
-        pre.cid!,
+        pre.cid,
         record,
         boundary,
         pre.action,
         rev,
       )
-      results.push({ uri: pre.uriStr, cid: parseCid(pre.cid!).toString() })
+      results.push({ uri: pre.uriStr, cid: parseCid(pre.cid).toString() })
     }
   }
   return results
+}
+
+/** The distinct boundaries the batch writes into; deletes name none. */
+function writeBoundaries(precomputed: PrecomputedBatchOp[]): Set<string> {
+  return new Set(
+    precomputed.flatMap((pre) =>
+      pre.action === 'delete' ? [] : [pre.writeInput.boundary],
+    ),
+  )
 }
 
 /**
@@ -195,6 +219,9 @@ async function buildCommitWithRetry(
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
   let result: CommitResult
   try {
+    for (const boundary of writeBoundaries(precomputed)) {
+      await assertWriterStillAuthorized(ctx, callerDid, boundary)
+    }
     // Ensure actor store exists (inside mutex to prevent creation race)
     await ensureActorStoreExists(ctx.actorStore, callerDid)
 
@@ -287,7 +314,7 @@ async function persistBatchBlocks(
           new AtUriSyntax(pre.uri),
         )
       }
-      await store.repo.putBlock(pre.cid!, pre.recordBytes!, pre.tempRev!)
+      await store.repo.putBlock(pre.cid, pre.recordBytes, pre.tempRev)
     }
   }
 }
@@ -309,20 +336,14 @@ async function sequenceBatchChanges(
 ): Promise<void> {
   // Sequence all changes inline (same connection)
   for (const pre of precomputed) {
-    await sequenceChange(store, {
-      action: pre.action,
-      uri: pre.uri,
-      cid: pre.action !== 'delete' ? pre.cid!.toString() : undefined,
-      record: pre.action !== 'delete' ? pre.op.record : undefined,
-      boundary: pre.writeInput
-        ? { values: [{ value: pre.writeInput.boundary }] }
-        : undefined,
-      commitCid,
-      rev,
-      trace: sequenceTrace,
-    })
-
     if (pre.action === 'delete') {
+      await sequenceChange(store, {
+        action: 'delete',
+        uri: pre.uri,
+        commitCid,
+        rev,
+        trace: sequenceTrace,
+      })
       // A plain delete op carries no boundary, so the event above is dropped by
       // the fail-closed scope gate for every subscriber. Emit a boundary-carrying
       // removal scoped to the record's domains so members that could see the
@@ -341,19 +362,29 @@ async function sequenceBatchChanges(
       continue
     }
 
+    await sequenceChange(store, {
+      action: pre.action,
+      uri: pre.uri,
+      cid: pre.cid.toString(),
+      record: pre.op.record,
+      boundary: opBoundary(pre.writeInput.boundary),
+      commitCid,
+      rev,
+      trace: sequenceTrace,
+    })
+
     // A move (update that changes domains) emits a boundary-carrying removal
     // scoped to each domain the record left, sharing this op's rev. See
     // update.ts:sequenceMoveRemovals for the full rationale.
     const removedDomains = computeRemovedDomains(pre)
     if (removedDomains.length > 0) {
-      const newDomains = [pre.writeInput!.boundary]
       await sequenceChange(store, {
         action: 'delete',
         uri: pre.uri,
         boundary: { values: removedDomains.map((value) => ({ value })) },
         // Suppress the removal for subscribers who still see the record via its
         // new domain(s) — they must observe the update, not a deletion.
-        excludeBoundary: { values: newDomains.map((value) => ({ value })) },
+        excludeBoundary: opBoundary(pre.writeInput.boundary),
         commitCid,
         rev,
         trace: sequenceTrace,
@@ -372,7 +403,7 @@ async function sequenceBatchChanges(
  */
 function computeRemovedDomains(pre: PrecomputedBatchOp): string[] {
   if (pre.action !== 'update' || !pre.previousDomains?.length) return []
-  const newBoundary = pre.writeInput!.boundary
+  const newBoundary = pre.writeInput.boundary
   return pre.previousDomains.filter((domain) => domain !== newBoundary)
 }
 

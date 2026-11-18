@@ -4,7 +4,6 @@ import {
   computeCid,
   encodeRecord,
   parseCid,
-  RepoWrite,
   StratosValidator,
 } from '@northskysocial/stratos-core'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
@@ -16,9 +15,15 @@ import {
   withConcurrencyRetry,
 } from './validation.js'
 import { createRepoManager } from './util.js'
-import { assertStratosCustody, assertWritableEnrollment } from './custody.js'
 import {
+  assertStratosCustody,
+  assertWritableEnrollment,
+  assertWriterStillAuthorized,
+} from './custody.js'
+import {
+  opBoundary,
   sequenceChange,
+  type RecordHandlerWrite,
   type RecordWriteInput,
   type SequenceTrace,
   type WritePhases,
@@ -147,6 +152,7 @@ export async function updateRecord(
   }
   let retries: number
   try {
+    await assertWriterStillAuthorized(ctx, callerDid, writeInput.boundary)
     const retry = await withConcurrencyRetry(async () => {
       const attemptT0 = performance.now()
       // See create.ts for why we use transact() and pass store.repo directly.
@@ -204,7 +210,7 @@ async function performUpdate(
   // removal scoped to the OLD domain. Read before applyWrites overwrites it.
   const previousDomains = await store.record.getRecordBoundaries(uri)
 
-  const repoWrites: RepoWrite[] = [
+  const repoWrites: RecordHandlerWrite[] = [
     {
       action: 'update',
       collection,
@@ -292,8 +298,7 @@ async function sequenceMoveRemovals(
   } = args
   if (previousDomains.length === 0) return
 
-  const newDomains = new Set([newBoundary])
-  const removedDomains = previousDomains.filter((d) => !newDomains.has(d))
+  const removedDomains = previousDomains.filter((d) => d !== newBoundary)
   if (removedDomains.length === 0) return
 
   await sequenceChange(store, {
@@ -302,7 +307,7 @@ async function sequenceMoveRemovals(
     boundary: { values: removedDomains.map((value) => ({ value })) },
     // The record still exists in its new domain(s): a subscriber enrolled in
     // both the old and new domain must observe the UPDATE, not this removal.
-    excludeBoundary: { values: [...newDomains].map((value) => ({ value })) },
+    excludeBoundary: opBoundary(newBoundary),
     commitCid,
     rev,
     trace: sequenceTrace,

@@ -226,7 +226,7 @@ describe('Single-domain write enforcement', () => {
     })
   })
 
-  // Direct checks of the shared enforcement helper. `validateWritableRecord`
+  // Direct checks of the shared enforcement helper. `validateRecordContent`
   // runs the record-shape validator (`assertValid`) first, which also rejects
   // zero-boundary and disallowed domains; these assertions pin the distinct
   // exactly-one and skey errors the helper itself raises.

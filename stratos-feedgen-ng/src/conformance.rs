@@ -422,5 +422,18 @@ mod tests {
             expected.push((case.name, expected_upserts, case.expected.deletes));
         }
         assert_eq!(parsed, expected);
+
+        let boundary_create = parsed
+            .iter()
+            .find(|(name, _, _)| name.contains("boundary create procedure"))
+            .expect("the shared fixture lacks the boundary create case");
+        assert_eq!(
+            boundary_create.1,
+            [(
+                "at://did:plc:misato-katsuragi/zone.stratos.feed.post/gaghiel".to_string(),
+                vec!["did:web:nerv.tokyo.jp/geofront".to_string()],
+            )]
+        );
+        assert!(boundary_create.2.is_empty());
     }
 }

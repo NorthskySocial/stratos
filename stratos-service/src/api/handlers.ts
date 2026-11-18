@@ -14,13 +14,17 @@ import {
 import { type XrpcServerInternal } from './types.js'
 
 import {
+  applyBoundaryWritesHandler,
   applyWritesHandler,
+  createBoundaryRecordHandler,
   createRecordHandler,
+  deleteBoundaryRecordHandler,
   deleteRecordHandler,
   describeRepoHandler,
   getRecordHandler,
   getRepoHandler,
   listRecordsHandler,
+  putBoundaryRecordHandler,
   stratosUploadBlobHandler,
   uploadBlobHandler,
 } from './handlers/index.js'
@@ -37,6 +41,10 @@ export enum HANDLER_METHOD {
   SYNC_GET_REPO = 'zone.stratos.sync.getRepo',
   STRATOS_UPLOAD_BLOB = 'zone.stratos.repo.uploadBlob',
   IMPORT_REPO = 'zone.stratos.repo.importRepo',
+  CREATE_BOUNDARY_RECORD = 'zone.stratos.repo.createRecord',
+  PUT_BOUNDARY_RECORD = 'zone.stratos.repo.putRecord',
+  DELETE_BOUNDARY_RECORD = 'zone.stratos.repo.deleteRecord',
+  APPLY_BOUNDARY_WRITES = 'zone.stratos.repo.applyWrites',
 }
 
 /**
@@ -93,6 +101,30 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
     type: 'procedure',
     auth: authVerifier.standard,
     handler: applyWritesHandler(ctx),
+  })
+
+  xrpc.method(HANDLER_METHOD.CREATE_BOUNDARY_RECORD, {
+    type: 'procedure',
+    auth: authVerifier.standard,
+    handler: createBoundaryRecordHandler(ctx),
+  })
+
+  xrpc.method(HANDLER_METHOD.PUT_BOUNDARY_RECORD, {
+    type: 'procedure',
+    auth: authVerifier.standard,
+    handler: putBoundaryRecordHandler(ctx),
+  })
+
+  xrpc.method(HANDLER_METHOD.DELETE_BOUNDARY_RECORD, {
+    type: 'procedure',
+    auth: authVerifier.standard,
+    handler: deleteBoundaryRecordHandler(ctx),
+  })
+
+  xrpc.method(HANDLER_METHOD.APPLY_BOUNDARY_WRITES, {
+    type: 'procedure',
+    auth: authVerifier.standard,
+    handler: applyBoundaryWritesHandler(ctx),
   })
 
   xrpc.method(HANDLER_METHOD.SYNC_GET_REPO, {

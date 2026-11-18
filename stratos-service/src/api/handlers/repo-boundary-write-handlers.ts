@@ -1,0 +1,249 @@
+import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
+import type { AppContext } from '../../context-types.js'
+import {
+  applyBoundaryWrites,
+  type BatchWriteResult,
+  type BoundaryWrite,
+  deleteRecordInBoundary,
+} from '../records/index.js'
+import { createXrpcHandler } from '../util.js'
+import { HANDLER_METHOD } from '../handlers.js'
+import { observeRecordOperation } from './repo-write-handlers.js'
+
+interface BoundaryRecordInput {
+  boundary: string
+  repo: string
+  collection: string
+  rkey?: string
+  validate?: boolean
+  record: unknown
+}
+
+interface RecordWriteOutput {
+  uri: string
+  cid: string
+}
+
+interface BoundaryDeleteInput {
+  boundary: string
+  repo: string
+  collection: string
+  rkey: string
+}
+
+// A literal: HANDLER_METHOD is not initialised yet while this module loads.
+const APPLY_WRITES_TYPE_PREFIX = 'zone.stratos.repo.applyWrites#'
+
+interface BoundaryApplyWritesInput {
+  boundary: string
+  repo: string
+  validate?: boolean
+  writes: Array<{
+    $type: string
+    collection: string
+    rkey?: string
+    value?: unknown
+  }>
+}
+
+type ApplyWritesResult =
+  | { $type: string; uri: string; cid: string }
+  | { $type: string }
+
+/**
+ * Handler for `zone.stratos.repo.createRecord`: one create in a boundary.
+ * @param ctx - Application Context
+ * @returns XRPC handler for creating a record in a boundary
+ */
+export const createBoundaryRecordHandler = (ctx: AppContext) =>
+  createXrpcHandler<BoundaryRecordInput>(
+    ctx,
+    HANDLER_METHOD.CREATE_BOUNDARY_RECORD,
+    {
+      handler: async ({ input, did, requestId }) => {
+        assertRepoIsCaller(input.repo, did!)
+        const { collection, rkey, record } = input
+        return writeOne(
+          ctx,
+          { operation: 'create', logMessage: 'record created', requestId },
+          did!,
+          input.boundary,
+          { kind: 'create', collection, rkey, record },
+        )
+      },
+    },
+  )
+
+/**
+ * Handler for `zone.stratos.repo.putRecord`: a create or an update in a boundary.
+ * @param ctx - Application Context
+ * @returns XRPC handler for putting a record in a boundary
+ */
+export const putBoundaryRecordHandler = (ctx: AppContext) =>
+  createXrpcHandler<BoundaryRecordInput & { rkey: string }>(
+    ctx,
+    HANDLER_METHOD.PUT_BOUNDARY_RECORD,
+    {
+      handler: async ({ input, did, requestId }) => {
+        assertRepoIsCaller(input.repo, did!)
+        const { collection, rkey, record } = input
+        return writeOne(
+          ctx,
+          { operation: 'update', logMessage: 'record written', requestId },
+          did!,
+          input.boundary,
+          { kind: 'put', collection, rkey, record },
+        )
+      },
+    },
+  )
+
+/**
+ * Handler for `zone.stratos.repo.deleteRecord`. A record that is not in the
+ * boundary answers like one that does not exist.
+ * @param ctx - Application Context
+ * @returns XRPC handler for deleting a record from a boundary
+ */
+export const deleteBoundaryRecordHandler = (ctx: AppContext) =>
+  createXrpcHandler<BoundaryDeleteInput>(
+    ctx,
+    HANDLER_METHOD.DELETE_BOUNDARY_RECORD,
+    {
+      handler: async ({ input, did, requestId }) => {
+        assertRepoIsCaller(input.repo, did!)
+        const startedAt = Date.now()
+        const outcome = await observeRecordOperation(ctx, 'delete', () =>
+          deleteRecordInBoundary(
+            ctx,
+            did!,
+            input.boundary,
+            input.collection,
+            input.rkey,
+          ),
+        )
+        if (outcome.deleted) {
+          ctx.logger?.info(
+            {
+              requestId,
+              repo: input.repo,
+              collection: input.collection,
+              rkey: input.rkey,
+              durationMs: Date.now() - startedAt,
+            },
+            'record deleted',
+          )
+        }
+        return {}
+      },
+    },
+  )
+
+/**
+ * Handler for `zone.stratos.repo.applyWrites`: one commit in one boundary.
+ * @param ctx - Application Context
+ * @returns XRPC handler for applying a batch of writes to a boundary
+ */
+export const applyBoundaryWritesHandler = (ctx: AppContext) =>
+  createXrpcHandler<BoundaryApplyWritesInput>(
+    ctx,
+    HANDLER_METHOD.APPLY_BOUNDARY_WRITES,
+    {
+      handler: async ({ input, did, requestId }) => {
+        assertRepoIsCaller(input.repo, did!)
+        const writes = input.writes.map(toBoundaryWrite)
+        const startedAt = Date.now()
+        const { results } = await observeRecordOperation(ctx, 'batch', () =>
+          applyBoundaryWrites(ctx, did!, input.boundary, writes),
+        )
+        ctx.logger?.info(
+          {
+            requestId,
+            count: writes.length,
+            durationMs: Date.now() - startedAt,
+          },
+          'records applied',
+        )
+        return {
+          results: results.map(
+            (result, index): ApplyWritesResult =>
+              toTypedResult(writes[index], result),
+          ),
+        }
+      },
+    },
+  )
+
+function assertRepoIsCaller(repo: string, callerDid: string): void {
+  if (repo !== callerDid) {
+    throw new AuthRequiredError('Cannot write a record for another user')
+  }
+}
+
+interface SingleWriteTelemetry {
+  operation: 'create' | 'update'
+  logMessage: string
+  requestId: string
+}
+
+async function writeOne(
+  ctx: AppContext,
+  telemetry: SingleWriteTelemetry,
+  callerDid: string,
+  boundary: string,
+  write: BoundaryWrite,
+): Promise<RecordWriteOutput> {
+  const startedAt = Date.now()
+  const { results } = await observeRecordOperation(
+    ctx,
+    telemetry.operation,
+    () => applyBoundaryWrites(ctx, callerDid, boundary, [write]),
+  )
+  const output = toRecordOutput(results[0])
+  ctx.logger?.info(
+    {
+      requestId: telemetry.requestId,
+      uri: output.uri,
+      durationMs: Date.now() - startedAt,
+    },
+    telemetry.logMessage,
+  )
+  return output
+}
+
+function toBoundaryWrite(
+  write: BoundaryApplyWritesInput['writes'][number],
+): BoundaryWrite {
+  const { collection, rkey, value } = write
+  switch (write.$type) {
+    case `${APPLY_WRITES_TYPE_PREFIX}create`:
+      return { kind: 'create', collection, rkey, record: value }
+    case `${APPLY_WRITES_TYPE_PREFIX}update`:
+      return { kind: 'update', collection, rkey: rkey!, record: value }
+    case `${APPLY_WRITES_TYPE_PREFIX}delete`:
+      return { kind: 'delete', collection, rkey: rkey! }
+    default:
+      throw new InvalidRequestError(`Unknown write type ${write.$type}`)
+  }
+}
+
+function toTypedResult(
+  write: BoundaryWrite,
+  result: BatchWriteResult,
+): ApplyWritesResult {
+  if (write.kind === 'delete') {
+    return { $type: `${APPLY_WRITES_TYPE_PREFIX}deleteResult` }
+  }
+  const resultType = write.kind === 'create' ? 'createResult' : 'updateResult'
+  return {
+    $type: `${APPLY_WRITES_TYPE_PREFIX}${resultType}`,
+    ...toRecordOutput(result),
+  }
+}
+
+/** A create or update result always names the record it wrote. */
+function toRecordOutput(result: BatchWriteResult): RecordWriteOutput {
+  if (result.uri === undefined || result.cid === undefined) {
+    throw new Error('A record write returned no uri and cid')
+  }
+  return { uri: result.uri, cid: result.cid }
+}

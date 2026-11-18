@@ -15,7 +15,8 @@ function buildInput() {
       text: 'hello shinji',
       createdAt: new Date().toISOString(),
     },
-    // Skips validateWritableRecord so the test isolates the custody gate.
+    // validate: false cannot skip record validation, so the body above is valid
+    // and the test isolates the custody gate.
     validate: false,
   }
 }

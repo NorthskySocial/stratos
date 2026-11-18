@@ -25,7 +25,11 @@ import {
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
 import type { AppContext } from '../src/context.js'
 import type { ActorStore } from '../src/actor-store-types.js'
-import { createRecord, deleteRecord } from '../src/api/records/index.js'
+import {
+  applyBoundaryWrites,
+  createRecord,
+  deleteRecord,
+} from '../src/api/records/index.js'
 import { createRepoManager } from '../src/api/records/util.js'
 import {
   closeServiceDb,
@@ -114,6 +118,13 @@ const EXPECTED: Array<{ name: string; expected: ExpectedProjection }> = [
   {
     name: 'a legacy delete of the first record',
     expected: { upserts: [], deletes: [uriOf('sachiel')] },
+  },
+  {
+    name: 'a post written through the boundary create procedure with no body boundary',
+    expected: {
+      upserts: [{ uri: uriOf('gaghiel'), boundaries: [GEOFRONT] }],
+      deletes: [],
+    },
   },
 ]
 
@@ -336,6 +347,14 @@ describe('the shared actor commit frame fixture', () => {
       { repo: ACTOR_DID, collection: COLLECTION, rkey: 'sachiel' },
       ACTOR_DID,
     )
+    await applyBoundaryWrites(ctx, ACTOR_DID, GEOFRONT, [
+      {
+        kind: 'create',
+        collection: COLLECTION,
+        rkey: 'gaghiel',
+        record: postBody('Gaghiel', []),
+      },
+    ])
   }
 
   async function receiveRawFrames(): Promise<Uint8Array[]> {
@@ -354,7 +373,7 @@ describe('the shared actor commit frame fixture', () => {
       })
       const timer = setTimeout(() => {
         socket.terminate()
-        reject(new Error('timed out waiting for the delete frame'))
+        reject(new Error('timed out waiting for the commit frames'))
       }, FRAME_TIMEOUT_MS)
       socket.on('message', (data: Buffer, isBinary: boolean) => {
         if (!isBinary) return
@@ -363,7 +382,7 @@ describe('the shared actor commit frame fixture', () => {
         // are actor frames.
         if (decodeFrame(frame).header.t !== '#commit') return
         received.push(frame)
-        if (opsOf(frame).some((op) => op.action === 'delete')) {
+        if (received.length === EXPECTED.length) {
           clearTimeout(timer)
           socket.close()
           resolve(received)
@@ -456,6 +475,6 @@ describe('the shared actor commit frame fixture', () => {
         expect(() => validate(frame)).not.toThrow()
       }
     }
-    expect({ creates, deletes }).toEqual({ creates: 3, deletes: 1 })
+    expect({ creates, deletes }).toEqual({ creates: 4, deletes: 1 })
   })
 })

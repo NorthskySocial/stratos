@@ -7,7 +7,7 @@ import type { AppContext } from '../src/context-types.js'
 const CALLER_DID = 'did:plc:motoko-kusanagi'
 
 function buildOps(): BatchWriteOp[] {
-  // A delete op skips validateWritableRecord inside calculatePrecomputed, so
+  // A delete op skips validateRecordContent inside calculatePrecomputed, so
   // the test isolates the custody gate instead of wiring up record validation.
   return [
     { action: 'delete', collection: 'zone.stratos.feed.post', rkey: 'abc123' },

@@ -237,7 +237,8 @@ describe('Legacy writes with validate: false still authorize the boundary', () =
     )) as { uri: string }
 
     expect(result.uri).toContain('lenient-post')
-    expect(getBoundaries).toHaveBeenCalledTimes(1)
+    // Read once before the write lock and once under it, so a boundary removed in between refuses the write.
+    expect(getBoundaries).toHaveBeenCalledTimes(2)
   })
 
   it('still runs record validation when validate is true', async () => {
