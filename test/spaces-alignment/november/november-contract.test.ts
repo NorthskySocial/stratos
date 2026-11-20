@@ -132,6 +132,11 @@ const URI_INVENTORY_IDS = [
   'uri-rust-record-uri-callers',
   'uri-service-emitters',
   'uri-service-credential-consumers',
+  'uri-clubhouse-topic-route',
+  'uri-room-post-references',
+  'uri-feed-read-predicates',
+  'uri-rust-space-host-requests',
+  'uri-lexicon-uri-fields',
   'text-lexicon-legacy-uri-spelling',
   'text-client-and-docs-legacy-uri-spelling',
   'tests-package-uri-literals',
@@ -161,6 +166,13 @@ const SWEEP_TEXT_FILE = /\.(ts|tsx|js|mjs|svelte|rs|json|md|sql|toml)$/
 // /space/ segment but is not a URI, so the legacy form is matched only after
 // an at:// scheme. The case-insensitive spaceuri marker also catches
 // spaceUri, SpaceUri, parseSpaceUri, formatSpaceUri and boundaryToSpaceUri.
+//
+// The generic markers find code that handles a space URI under a plain name.
+// The at:// prefix check is matched only on a value named as a URI: the
+// alsoKnownAs handle readers name theirs aka or atHandle, and they read a
+// handle, not a record. A bare startsWith('at://') is not a marker for that
+// reason. The column markers name columns that hold record URIs in the
+// projection, the backlink index and the label log.
 const SPACE_URI_MARKERS = [
   /at:\/\/[^\s'"`]*\/space\//,
   /spaceuri/i,
@@ -168,7 +180,62 @@ const SPACE_URI_MARKERS = [
   /parseRecordUri/,
   /boundary_to_space_uri/,
   /RecordUri::/,
+  /[Uu]ri\??\.(?:startsWith|replace|slice)\(\s*['"`]at:\/\//,
+  /(?:strip_prefix|starts_with|trim_start_matches)\("at:\/\/"\)/,
+  /ORDER BY[^"\n]*\b(?:[a-z]+\.)?(?:uri|subject_uri|subject_key)\b/,
+  /\bsubject_uri\b/,
+  /\bsubject_key\b|\bsubjectKey\b/,
+  /\blinkTo\b/,
 ]
+
+// Files that read, compare or carry a record or space URI. Each must stay
+// under the paths of the named row, whether or not a marker matches it, so a
+// consumer that uses only generic names cannot drop out of the ledger.
+const KNOWN_URI_CONSUMERS: Record<string, string> = {
+  'clubhouse/src/lib/route.ts': 'uri-clubhouse-topic-route',
+  'clubhouse/src/App.svelte': 'uri-clubhouse-topic-route',
+  'clubhouse/src/lib/components/RoomFeed.svelte': 'uri-clubhouse-topic-route',
+  'clubhouse/src/lib/feed-authors.ts': 'uri-clubhouse-topic-route',
+  'clubhouse/src/lib/post-writer.ts': 'uri-clubhouse-space-map',
+  'stratos-service/src/oauth/handlers/room-post.ts': 'uri-room-post-references',
+  'stratos-feedgen-ng/src/store/read.rs': 'uri-feed-read-predicates',
+  'stratos-feedgen-ng/src/cursor.rs': 'uri-feed-pagination-cursors',
+  'stratos-feedgen-ng/src/server/feed.rs': 'uri-feed-pagination-cursors',
+  'stratos-feedgen-ng/src/space_host.rs': 'uri-rust-space-host-requests',
+  'stratos-feedgen-ng/src/pds_space_sync.rs': 'uri-rust-space-host-requests',
+  'stratos-feedgen-ng/src/space_commit.rs': 'uri-rust-space-host-requests',
+  'stratos-feedgen-ng/src/service_auth.rs': 'uri-rust-space-host-requests',
+  'stratos-feedgen-ng/src/label_poller.rs': 'uri-label-page-parsing',
+  'stratos-core/src/validation/post-validator.ts':
+    'uri-reply-and-embed-strings',
+  'stratos-service/src/infra/storage/postgres/actor-store.ts':
+    'uri-backlink-keys',
+  'stratos-service/src/infra/storage/postgres/record-store.ts':
+    'uri-backlink-keys',
+  'stratos-service/src/storage/sqlite/actor-store.ts': 'uri-backlink-keys',
+  'stratos-service/src/api/records/boundary-writes.ts': 'uri-backlink-keys',
+  'stratos-service/src/features/moderation/wire-label.ts':
+    'uri-label-log-subjects',
+  'stratos-service/src/features/moderation/query-handler.ts':
+    'uri-label-log-subjects',
+  'webapp/src/lib/feed.ts': 'uri-webapp-feed-targets',
+  'lexicons/zone/stratos/feedgen/getFeed.json': 'uri-lexicon-uri-fields',
+  'lexicons/zone/stratos/feedgen/getBlob.json': 'uri-lexicon-uri-fields',
+  'stratos-core/src/lexicons/vendored/com/atproto/repo/strongRef.json':
+    'uri-lexicon-uri-fields',
+  'stratos-core/src/lexicons/vendored/app/bsky/embed/record.json':
+    'uri-lexicon-uri-fields',
+  'test/scripts/test-clubhouse-public-alpha.ts': 'tests-e2e-scripts',
+  'test/scripts/lib/mixed-mode-pds.ts': 'tests-e2e-scripts',
+  'test/feedgen-harness/compare.ts': 'tests-spike-and-harness',
+}
+
+// A cited line is written as path:line or path:start-end, and a later
+// ":line" after a space, as in ", :12" or "at :12", continues the last path.
+// A bare file name is resolved against the row's own paths, and only when
+// one path matches it. A colon after a space never occurs inside a DID.
+const LINE_REFERENCE =
+  /(?:([\w./-]+\.(?:ts|rs|json|svelte|mjs|lock))|\s):(\d+)(?:-(\d+))?/g
 
 const DEPENDENCY_IMPORTER_IDS = [
   'dependency-oauth-scopes-importer',
@@ -212,10 +279,57 @@ function sweepFiles(directory: string): string[] {
 
 function isCoveredByRowPath(file: string, rows: LedgerRow[]): boolean {
   return rows.some((row) =>
-    (row.paths ?? []).some(
-      (path) => file === path || file.startsWith(`${path.replace(/\/$/, '')}/`),
-    ),
+    (row.paths ?? []).some((path) => coversPath(path, file)),
   )
+}
+
+function coversPath(rowPath: string, file: string): boolean {
+  return file === rowPath || file.startsWith(`${rowPath.replace(/\/$/, '')}/`)
+}
+
+function lineCountOf(file: string): number {
+  return readFileSync(resolve(REPO_ROOT, file), 'utf8')
+    .replace(/\n$/, '')
+    .split('\n').length
+}
+
+function resolveCitedFile(cited: string, row: LedgerRow): string | undefined {
+  if (cited.includes('/') && existsSync(resolve(REPO_ROOT, cited))) {
+    return cited
+  }
+  const matches = (row.paths ?? []).filter(
+    (path) => path === cited || path.endsWith(`/${cited}`),
+  )
+  return matches.length === 1 ? matches[0] : undefined
+}
+
+function lineReferenceProblems(row: LedgerRow): string[] {
+  const problems: string[] = []
+  for (const text of [row.decision, row.evidence]) {
+    let lastFile: string | undefined
+    for (const match of text.matchAll(LINE_REFERENCE)) {
+      const [, citedFile, startText, endText] = match
+      const lines =
+        endText === undefined ? startText : `${startText}-${endText}`
+      if (citedFile !== undefined) {
+        lastFile = resolveCitedFile(citedFile, row)
+        if (lastFile === undefined) {
+          problems.push(`${row.id}: ${citedFile}:${lines} names no unique file`)
+          continue
+        }
+      }
+      if (lastFile === undefined) continue
+      const start = Number(startText)
+      const end = endText === undefined ? start : Number(endText)
+      const length = lineCountOf(lastFile)
+      if (start < 1 || end < start || end > length) {
+        problems.push(
+          `${row.id}: ${lastFile}:${lines} is outside the file (${length} lines)`,
+        )
+      }
+    }
+  }
+  return problems
 }
 
 function loadRows(): LedgerRow[] {
@@ -385,6 +499,43 @@ describe('november applicability ledger', () => {
       })
       .filter((file) => !isCoveredByRowPath(file, rows))
     expect(uncovered.join('\n')).toBe('')
+  })
+
+  it('keeps every known uri consumer under the paths of its row', () => {
+    const byId = rowsById(rows)
+    const lost = Object.entries(KNOWN_URI_CONSUMERS)
+      .filter(
+        ([file, id]) =>
+          !existsSync(resolve(REPO_ROOT, file)) ||
+          !(byId.get(id)?.paths ?? []).some((path) => coversPath(path, file)),
+      )
+      .map(([file, id]) => `${file} -> ${id}`)
+    expect(lost).toEqual([])
+  })
+
+  it('cites only lines that exist in the cited file', () => {
+    const problems = rows.flatMap(lineReferenceProblems)
+    expect(problems).toEqual([])
+  })
+
+  it('reads both citation forms and their continuations', () => {
+    const cursor = 'stratos-feedgen-ng/src/cursor.rs'
+    const past = lineCountOf(cursor) + 1
+    const citing: LedgerRow = {
+      id: 'citation-probe',
+      promptSection: 'base',
+      surface: 'Spike, Faye and Jet on the Bebop',
+      ownership: 'test-owned',
+      paths: [cursor],
+      workstream: 'none',
+      decision: `${cursor}:1-2, :3 and at :${past}`,
+      evidence: `cursor.rs:${past}-${past + 1}; bebop/swordfish.rs:1`,
+    }
+    expect(lineReferenceProblems(citing)).toEqual([
+      `citation-probe: ${cursor}:${past} is outside the file (${past - 1} lines)`,
+      `citation-probe: ${cursor}:${past}-${past + 1} is outside the file (${past - 1} lines)`,
+      'citation-probe: bebop/swordfish.rs:1 names no unique file',
+    ])
   })
 
   it('finds the known consumers the sweep must never lose', () => {

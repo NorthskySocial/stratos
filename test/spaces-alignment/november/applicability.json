@@ -13,7 +13,7 @@
       ],
       "workstream": "interop-cutover",
       "decision": "Only reference-host drivers and spikes call the upstream names; update them when the reference host is selected, production never calls them.",
-      "evidence": "rg -l 'com\\.atproto\\.space\\.(getSpaceCredential|listRepos|notifyWrite)' stratos-core/src stratos-service/src stratos-client/src stratos-feedgen-ng/src webapp/src clubhouse/src returns nothing; the same pattern hits only the listed test files."
+      "evidence": "rg -l 'com\\.atproto\\.space\\.(getSpaceCredential|listRepos|notifyWrite)' stratos-core/src stratos-service/src stratos-client/src stratos-feedgen-ng/src webapp/src clubhouse/src finds only descriptions and comments (stratos-client/src/lexicons.gen.ts:3109, stratos-core/src/spaces/host-discovery.ts:5, stratos-service/src/features/space-read/handler.ts:38), no call; the same pattern hits only the listed test files among the tests."
     },
     {
       "id": "prompt-1b-field-renames",
@@ -36,7 +36,7 @@
       "paths": [],
       "workstream": "none",
       "decision": "No production or test code matches on an upstream Spaces error name, so the renames need no change here.",
-      "evidence": "rg -n 'NotSpaceOwner|UserNotAuthorized|BadSpaceMac|MalformedCursor' over production source, test/spaces-alignment and test/spike returns nothing."
+      "evidence": "rg -n 'NotSpaceOwner|UserNotAuthorized|BadSpaceMac|MalformedCursor' over production source, test/spaces-alignment and test/spike finds only this ledger's own evidence text."
     },
     {
       "id": "prompt-1d-star-content-type",
@@ -59,7 +59,7 @@
       "paths": [],
       "workstream": "none",
       "decision": "No exporter or importer of space meta archives exists in this repository; nothing to migrate.",
-      "evidence": "rg -n 'exportSpaceMeta|importSpaceMeta|space-meta' stratos-core stratos-service stratos-client stratos-feedgen-ng webapp clubhouse test/spaces-alignment returns nothing."
+      "evidence": "rg -n 'exportSpaceMeta|importSpaceMeta|space-meta' stratos-core stratos-service stratos-client stratos-feedgen-ng webapp clubhouse test/spaces-alignment finds only the id of this row in the ledger test."
     },
     {
       "id": "prompt-2a-member-lists",
@@ -69,7 +69,7 @@
       "paths": [],
       "workstream": "none",
       "decision": "Membership is Stratos enrollment, not a PDS member list; no caller of putMember or removeMember exists.",
-      "evidence": "rg -n 'putMember|removeMember|memberspace' production source finds only removeMembership in stratos-service/src/features/boundary/manager.ts:17, an unrelated enrollment hook."
+      "evidence": "rg -n 'putMember|removeMember|memberspace' production source finds only removeMembership, an unrelated enrollment hook, in stratos-service/src/features/boundary/manager.ts:17 and :145 and stratos-service/src/context.ts:192."
     },
     {
       "id": "prompt-2b-managing-apps",
@@ -202,7 +202,7 @@
       "paths": [],
       "workstream": "response-authentication",
       "decision": "Stratos serves no MAC-bearing space responses.",
-      "evidence": "rg -n -i 'atproto-space-commit|atproto-space-record|Signature-Input' stratos-service/src returns only the credential-signature verifier."
+      "evidence": "rg -n -i 'atproto-space-commit|atproto-space-record|Signature-Input' stratos-service/src finds only request-signature handling for credentials: the verifier (stratos-service/src/infra/auth/space-http-signature.ts:52 and :107), the proof check in stratos-service/src/infra/auth/verifiers.ts:546, the credential handler's header probe at stratos-service/src/features/space-credential/handler.ts:289 and the CORS header list at stratos-service/src/index.ts:204."
     },
     {
       "id": "prompt-6d-mac-verification",
@@ -250,8 +250,8 @@
         "stratos-feedgen-ng/src/pds_space_sync.rs"
       ],
       "workstream": "sync-recovery",
-      "decision": "Verify only against a commit on the terminal page and map RepoNotFound to an empty repo.",
-      "evidence": "stratos-feedgen-ng/src/space_host.rs:173 requests com.atproto.space.listRepoOps; pds_space_sync.rs:256-268 terminal handling."
+      "decision": "Today the consumer verifies only against the commit of the terminal page and has no RepoNotFound handling, so a RepoNotFound answer surfaces as a host error. Later work verifies the commit on every page and maps RepoNotFound to an empty repo.",
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:173 requests com.atproto.space.listRepoOps; stratos-feedgen-ng/src/pds_space_sync.rs:257-268 verifies after the terminal page; rg -n 'RepoNotFound' stratos-feedgen-ng/src returns nothing."
     },
     {
       "id": "prompt-7c-garbage-collection",
@@ -365,7 +365,7 @@
       "paths": [],
       "workstream": "none",
       "decision": "Neither package is a dependency; CAR export and MST code are Stratos-owned.",
-      "evidence": "rg -n '@atproto/(repo|car)\"' */package.json returns nothing."
+      "evidence": "rg -n '@atproto/(repo|car)\"' */package.json finds only stratos-indexer/package.json:21, the deprecated indexer."
     },
     {
       "id": "prompt-9-lex-space",
@@ -618,11 +618,20 @@
       "paths": [
         "stratos-core/src/record/reader.ts",
         "stratos-core/src/record/transactor.ts",
-        "stratos-core/src/db/schema/tables.ts"
+        "stratos-core/src/db/schema/tables.ts",
+        "stratos-core/src/db/schema/pg-tables.ts",
+        "stratos-core/src/db/index.ts",
+        "stratos-core/src/db/pg.ts",
+        "stratos-core/src/types.ts",
+        "stratos-service/src/actor-store-types.ts",
+        "stratos-service/src/storage/sqlite/actor-store.ts",
+        "stratos-service/src/infra/storage/postgres/actor-store.ts",
+        "stratos-service/src/infra/storage/postgres/record-store.ts",
+        "stratos-service/src/api/records/boundary-writes.ts"
       ],
       "workstream": "canonical-uri",
-      "decision": "Authoritative per-actor index: a space-form subject is stored in its canonical spelling as linkTo, written by StratosRecordTransactor.addBacklinks; the key is never rewritten in place.",
-      "evidence": "stratos-core/src/record/reader.ts:513-580 getStratosBacklinks and subjectLinkTarget; transactor.ts:124-129; schema table stratos_backlink at db/schema/tables.ts:110-121."
+      "decision": "Authoritative per-actor index of what a like or repost points at. getStratosBacklinks keeps a subject.uri as written when ensureValidAtUri accepts it, and otherwise stores the canonical form subjectLinkTarget builds with parseRecordUri and formatRecordUri. The installed ensureValidAtUri rejects both space spellings, so every space-form subject.uri takes the second path. A string subject is kept only when it is a DID or passes ensureValidAtUri, so a space-form string subject gets no backlink. Both runtime writers use getStratosBacklinks: StratosRecordTransactor behind the sqlite actor store, and PgActorRecordTransactor in the postgres actor store that storage-context.ts builds. The checks that allow one like or repost per subject match linkTo by string equality, and boundary-writes.ts also refuses a batch that names one subject twice by comparing linkTo strings. PgRecordStoreWriter.putRecord has its own getBacklinks, which keeps a subject.uri only when ensureValidAtUri accepts it and so drops every space-form subject; its only constructor is PostgresStorageFactory, which stratos-service/src never instantiates. The key is never rewritten in place, so a like stored under one spelling does not conflict with a like of the same post written in the other.",
+      "evidence": "stratos-core/src/record/reader.ts:519-560 getStratosBacklinks, :567-577 subjectLinkTarget, :456-481 selectBacklinkRows and :489-509 getBacklinkConflicts; stratos-core/src/record/transactor.ts:119-130; stratos-service/src/storage/sqlite/actor-store.ts:255-267; stratos-service/src/infra/storage/postgres/actor-store.ts:425-453 and :462-482 conflicts, :612-622 and :683-692 writes; stratos-service/src/storage-context.ts:164 builds PostgresActorStore; stratos-service/src/api/records/boundary-writes.ts:372-396 and :484-502; stratos-service/src/infra/storage/postgres/record-store.ts:234-276 getBacklinks, used at :328; stratos-service/src/infra/storage/postgres/factory.ts:131; the stratos_backlink table at stratos-core/src/db/schema/tables.ts:110-121, stratos-core/src/db/schema/pg-tables.ts:91-101, stratos-core/src/db/index.ts:186-199 and stratos-core/src/db/pg.ts:137-150; Backlink and BacklinkOpts at stratos-core/src/types.ts:240-256; stratos-service/src/actor-store-types.ts:102 and :136."
     },
     {
       "id": "uri-label-log-subjects",
@@ -632,11 +641,21 @@
       "paths": [
         "stratos-service/src/features/moderation/label-store.ts",
         "stratos-service/src/features/moderation/handler.ts",
-        "stratos-core/src/moderation/domain.ts"
+        "stratos-core/src/moderation/domain.ts",
+        "stratos-service/src/features/moderation/query-handler.ts",
+        "stratos-service/src/features/moderation/wire-label.ts",
+        "stratos-core/src/moderation/port.ts",
+        "stratos-core/src/moderation/types.ts",
+        "stratos-service/src/subscription/takedown-filter.ts",
+        "stratos-service/src/db/schema.ts",
+        "stratos-service/src/db/pg-schema.ts",
+        "stratos-service/src/db/index.ts",
+        "stratos-service/src/db/pg.ts",
+        "lexicons/zone/stratos/moderation/queryLabels.json"
       ],
       "workstream": "canonical-uri",
-      "decision": "Authoritative append-only log: moderation_label.subjectKey holds the submitted record URI string for a space-record subject, written by the label handler through labelSubjectKey.",
-      "evidence": "stratos-core/src/moderation/domain.ts:88-110 parseRecordSubject and :192 labelSubjectKey; label-store.ts inserts subjectKey."
+      "decision": "Authoritative append-only log: moderation_label.subjectKey holds the submitted record URI string for a record subject, because labelSubjectKey returns subject.uri unchanged; the label handler writes it. The store matches subjectKey by string equality in latestForSubject, in the subjects filter of queryLabels and in latestTakedowns. parseSubjectFilter turns each requested subject into its key the same way, and the sync takedown filter asks latestTakedowns about repo-form URIs of Stratos-custody records. toWireLabel emits subjectKey as the subject uri of each served label, which the feed generator label poller parses (see uri-label-page-parsing). A label stored under one spelling is not found by a lookup in the other, and the log is never rewritten. The comment on labelSubjectKey relies on record URIs starting with at://, which an at:space/ key also keeps apart from a did: key.",
+      "evidence": "stratos-core/src/moderation/domain.ts:191-194 labelSubjectKey and :237-253 parseSubjectFilter; stratos-service/src/features/moderation/label-store.ts:84-133; stratos-service/src/features/moderation/query-handler.ts:82-87; stratos-service/src/features/moderation/wire-label.ts:10-17; stratos-service/src/subscription/takedown-filter.ts:23-30; the moderation_label table at stratos-service/src/db/schema.ts:113-130, stratos-service/src/db/pg-schema.ts:80-99, stratos-service/src/db/index.ts:112-129 and stratos-service/src/db/pg.ts:341-366; lexicons/zone/stratos/moderation/queryLabels.json:21-28."
     },
     {
       "id": "uri-moderation-subject-parser",
@@ -645,8 +664,8 @@
       "ownership": "production-owned",
       "paths": ["stratos-core/src/moderation/domain.ts"],
       "workstream": "canonical-uri",
-      "decision": "Detects the space form by position of the space marker segment; retarget with the grammar.",
-      "evidence": "stratos-core/src/moderation/domain.ts:93 SPACE_MARKER_INDEX check."
+      "decision": "parseRecordSubject treats a URI as space form only when it starts with at:// and the literal space marker sits at the marker index; anything else goes to parseHostedRecordUri, which refuses a URI that does not start with at://. An at:space/ subject is therefore refused as invalid today. Retarget with the grammar.",
+      "evidence": "stratos-core/src/moderation/domain.ts:91-93 SPACE_MARKER_INDEX check and :64-66 the at:// prefix check in parseHostedRecordUri."
     },
     {
       "id": "uri-service-credential-subjects",
@@ -669,8 +688,8 @@
       "ownership": "production-owned",
       "paths": ["stratos-feedgen-ng/src/identifier.rs"],
       "workstream": "canonical-uri",
-      "decision": "The shared Rust parser for repo and space record URIs, called by the projection store, labels, interactions and sync. It is not the only Rust reader of the space form: space_membership.rs, credential_manager.rs and store/space.rs strip, match or format the literal space segment themselves (see uri-rust-space-uri-checks and uri-rust-credential-cache), so every one of them must move with the grammar.",
-      "evidence": "stratos-feedgen-ng/src/identifier.rs:67-99 RecordUri::parse and parse_space_record."
+      "decision": "The shared Rust parser for repo and space record URIs, called by the projection store, labels, interactions and sync. It is not the only Rust reader of the space form: space_membership.rs, credential_manager.rs, store/space.rs and label_poller.rs strip, match or format the literal space segment themselves (see uri-rust-space-uri-checks, uri-rust-credential-cache and uri-label-page-parsing), so every one of them must move with the grammar.",
+      "evidence": "stratos-feedgen-ng/src/identifier.rs:67-99 RecordUri::parse and parse_space_record; stratos-feedgen-ng/src/label_poller.rs:459-473 member_boundary."
     },
     {
       "id": "uri-rust-space-uri-checks",
@@ -722,8 +741,8 @@
         "stratos-feedgen-ng/src/label_poller.rs"
       ],
       "workstream": "canonical-uri",
-      "decision": "Rejects a whole page when one subject fails RecordUri::parse, which would stall the cursor on an old-form label.",
-      "evidence": "stratos-feedgen-ng/src/moderation_label.rs:132 and :71-72; label_poller.rs:416, :465."
+      "decision": "Rejects a whole page when one subject fails RecordUri::parse, which would stall the cursor on an old-form label. label_poller.rs member_boundary formats at://{authority}/space/{type}/{key} itself and compares it with the output of boundary_to_space_uri to decide which boundary a space-form label subject belongs to, so it holds its own copy of the legacy spelling.",
+      "evidence": "stratos-feedgen-ng/src/moderation_label.rs:132 and :71-72; label_poller.rs:416, :465 and :459-473 member_boundary."
     },
     {
       "id": "uri-feedgen-migration-v1-projection-core",
@@ -732,8 +751,8 @@
       "ownership": "production-owned",
       "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
       "workstream": "verified-state",
-      "decision": "Derived projection: post.uri, post_boundary.uri, space_cursor.space_uri, space_sync_stage.uri and space_uri, pending_verification.space_uri and suppression_marker.uri hold URI strings and are rebuilt from the sources.",
-      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:10-120."
+      "decision": "Derived projection: post.uri, post_boundary.uri, space_cursor.space_uri, space_sync_stage.uri and space_uri, pending_verification.space_uri and suppression_marker.uri hold URI strings. Nothing rebuilds them by itself: the actor stream resumes from actor_cursor, and each PDS-custody target resumes from its stage or space cursor, which space_sync_cursor looks up by exact space_uri. A lookup under another spelling finds no cursor row, so that target is polled again from its first page.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:10-120; stratos-feedgen-ng/src/store/space.rs:980-999 space_sync_cursor, reached through stratos-feedgen-ng/src/lifecycle.rs:637-648."
     },
     {
       "id": "uri-feedgen-migration-v2-boundary-columns",
@@ -818,8 +837,8 @@
         "stratos-feedgen-ng/src/store/interactions.rs"
       ],
       "workstream": "verified-state",
-      "decision": "Interaction rows hold space-form uri and subject_uri for both custody classes; the stratos-custody rows come from the actor stream and are not replayed after a purge.",
-      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:262-287."
+      "decision": "interaction.uri is the like or repost record URI: repo form for Stratos-custody rows from the actor stream, space form for PDS-custody rows from space sync. subject_uri is the liked or reposted post URI and can be space form for both custody classes. Stratos-custody rows come only from the actor stream, which resumes from actor_cursor, so rows purged without resetting that cursor are not sent again.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:262-287; stratos-feedgen-ng/src/actor_event.rs:218-241 builds the repo-form interaction URI and reads the subject; stratos-feedgen-ng/src/space_sync.rs:172-176 builds space-form record URIs; stratos-feedgen-ng/src/store/actor.rs:275-283 reset_actor_cursor."
     },
     {
       "id": "uri-feed-pagination-cursors",
@@ -828,11 +847,13 @@
       "ownership": "production-owned",
       "paths": [
         "stratos-feedgen-ng/src/cursor.rs",
-        "stratos-feedgen-ng/src/feed_service.rs"
+        "stratos-feedgen-ng/src/feed_service.rs",
+        "stratos-feedgen-ng/src/store/read.rs",
+        "stratos-feedgen-ng/src/server/feed.rs"
       ],
       "workstream": "canonical-uri",
-      "decision": "Opaque client state of the form sort_at::uri; a malformed or stale cursor is treated as the first page, so it needs no migration.",
-      "evidence": "stratos-feedgen-ng/src/cursor.rs:1-25; feed_service.rs:203 decode and :489 malformed-cursor test."
+      "decision": "Opaque client state of the form {sort_at}::{uri}, taken from the last post of a full page. A malformed cursor and a well-formed stale cursor behave differently. decode splits on the first :: and accepts any two non-empty parts without checking that either is a timestamp or a URI; only a value with no :: or with an empty part decodes to None, and the feed service then serves the first page. A well-formed cursor is forwarded unchanged, and the store applies it as the predicate sort_at < cursor sort_at, or equal sort_at and uri > cursor uri; the uri part is never looked up. A cursor that names a deleted post, or a post URI in the old spelling, therefore keeps filtering: the page continues after its timestamp, and its URI decides by string order only which posts with exactly that timestamp follow. Nothing resets such a cursor to the first page. The feed generator stores no feed cursor, so its database holds nothing to migrate or invalidate for them. A cursor a client holds stays usable after the spelling change; only the tie-break among posts that share its sort_at depends on how the two spellings compare as strings.",
+      "evidence": "stratos-feedgen-ng/src/cursor.rs:11-13 encode and :15-24 decode; stratos-feedgen-ng/src/store/read.rs:19-26 builds the next cursor and :127-152 list_posts_after_cursor, with the predicate at :140; stratos-feedgen-ng/src/feed_service.rs:203 decodes and :205-215 forwards it, :489-507 test with the malformed cursor not-a-cursor; stratos-feedgen-ng/src/server/feed.rs:88-101 refuses a cursor longer than MAX_CURSOR_BYTES, 4096 at stratos-feedgen-ng/src/server.rs:64, with InvalidRequest."
     },
     {
       "id": "uri-rust-credential-cache",
@@ -857,8 +878,8 @@
         "clubhouse/src/lib/post-writer.ts"
       ],
       "workstream": "canonical-uri",
-      "decision": "Operator-supplied map accepted when a value starts with at://; the check changes with the grammar. post-writer.ts reads the configured string and sends it unchanged as the space parameter of the member PDS create call, so it holds no parser of its own.",
-      "evidence": "clubhouse/src/lib/config.ts:54-70 parseSpaceUris and :115; clubhouse/src/lib/post-writer.ts:85-95 sends pdsSpaceUriByRoom[roomId]."
+      "decision": "Operator-supplied map accepted when a value starts with at://; the check changes with the grammar. post-writer.ts reads the configured string and sends it unchanged as the space parameter of the member PDS create call, so it holds no parser of its own. Its ownPostRkey accepts a post for deletion only when the URI is at://{did}/zone.stratos.feed.post/{rkey}, so deleting a post whose URI is a space record URI, a PDS-custody post, throws 'You can only delete your own posts.' today in either spelling.",
+      "evidence": "clubhouse/src/lib/config.ts:54-70 parseSpaceUris and :115; clubhouse/src/lib/post-writer.ts:85-95 sends pdsSpaceUriByRoom[roomId] and :54-64 ownPostRkey."
     },
     {
       "id": "uri-webapp-inspector",
@@ -884,8 +905,8 @@
         "webapp/src/lib/post-deletion.ts"
       ],
       "workstream": "canonical-uri",
-      "decision": "Parse and format space URIs through the core helpers; follow the core grammar.",
-      "evidence": "webapp/src/lib/feed.ts:203-222; Composer.svelte:125."
+      "decision": "authorFromUri and postDeleteTargetFromUri try the core parseRecordUri first and otherwise read the URI as at://{did}/{collection}/{rkey}. authorFromUri strips an at:// prefix and takes the first segment, so a URI the core parser does not accept yields a wrong author, the string at:space for the new spelling. postDeleteTargetFromUri returns null for a URI that does not start with at://, and post-deletion.ts then refuses with 'The post URI is invalid.'. groupIntoThreads attaches a reply to its parent by string equality of reply.parent.uri and the parent's post URI, so a reply whose stored parent URI is spelled differently from the served post shows as a top-level post. Composer.svelte copies the parent's URI into the reply reference and formats the space through the core helpers. All follow the core grammar except the at:// fallbacks.",
+      "evidence": "webapp/src/lib/feed.ts:202-206 authorFromUri, :214-244 postDeleteTargetFromUri and :719-754 groupIntoThreads; webapp/src/lib/post-deletion.ts:24-27; webapp/src/lib/Composer.svelte:118-130."
     },
     {
       "id": "uri-reply-and-embed-strings",
@@ -894,11 +915,12 @@
       "ownership": "production-owned",
       "paths": [
         "stratos-service/src/api/records/validation.ts",
-        "stratos-core/src/validation/post-rules.ts"
+        "stratos-core/src/validation/post-rules.ts",
+        "stratos-core/src/validation/post-validator.ts"
       ],
       "workstream": "canonical-uri",
-      "decision": "Today a space-form reply.parent.uri is parsed with parseRecordUri in resolveParentBoundaries and its boundary is derived from the space DID and key without reading the parent record; a repo-form parent is looked up in the actor store instead. post-rules.ts isStratosUri accepts a space-form reply.parent.uri, reply.root.uri and embed record.uri when the collection starts with zone.stratos., and isBskyUri reads such a URI with AtUri, which sees the collection as space, so a space-form embed never counts as bsky. These strings are authoritative record content stored inside signed post records: they are never rewritten, so a post stored in the old spelling keeps it, and the parser change must either keep reading that spelling or say how those posts are handled.",
-      "evidence": "stratos-service/src/api/records/validation.ts:317-330 resolveParentBoundaries; stratos-core/src/validation/post-rules.ts:19-30 isStratosUri, :54-82 assertNoCrossNamespaceEmbed, :148 embed check, :209-226 assertReplyIsolation; AtUri on a space-form URI returns collection space."
+      "decision": "Today a space-form reply.parent.uri is parsed with parseRecordUri in resolveParentBoundaries and its boundary is derived from the space DID and key without reading the parent record; a repo-form parent is looked up in the actor store instead. post-rules.ts isStratosUri accepts a space-form reply.parent.uri, reply.root.uri and embed record.uri when the collection starts with zone.stratos., and isBskyUri reads such a URI with AtUri, which sees the collection as space, so a space-form embed never counts as bsky. These strings are authoritative record content stored inside signed post records: they are never rewritten, so a post stored in the old spelling keeps it, and the parser change must either keep reading that spelling or say how those posts are handled. PostValidator in post-validator.ts is exported from stratos-core but constructed only by ValidatorFactory, which nothing outside stratos-core/tests uses; it reads reply.parent.uri, reply.root.uri and embed record.uri with AtUri, which sees the collection of a legacy space URI as space, so it refuses a space-form reply as CrossNamespaceReply and a space-form embed as CrossNamespaceEmbed, and AtUri throws on at:space/.",
+      "evidence": "stratos-service/src/api/records/validation.ts:317-330 resolveParentBoundaries; stratos-core/src/validation/post-rules.ts:19-30 isStratosUri, :54-82 assertNoCrossNamespaceEmbed, :148 embed check, :209-226 assertReplyIsolation; AtUri on a space-form URI returns collection space. stratos-core/src/validation/post-validator.ts:45-58 and :91-112; stratos-core/src/validation/factory.ts:14; rg -l 'ValidatorFactory|PostValidator' outside stratos-core/src finds only stratos-core/tests."
     },
     {
       "id": "uri-rust-record-uri-callers",
@@ -915,8 +937,8 @@
         "stratos-feedgen-ng/src/store/retention.rs"
       ],
       "workstream": "canonical-uri",
-      "decision": "actor_event.rs builds repo-form URIs for the actor stream and requires RecordUri::Repo, and accepts a like or repost subject in either form through RecordUri::parse; store.rs validate_actor_page requires the repo form for actor pages; feed_service.rs blob_views and lifecycle.rs blob lookup return nothing for a URI that is not repo form, so space-form posts get no blobs on those paths; membership_reconciler.rs calls boundary_to_space_uri per boundary and carries the string into the poll targets; service.rs and lifecycle.rs pass space_uri strings to the store unparsed; store/retention.rs selects and deletes expired stage rows by space_uri equality. Derived state, rebuilt from the sources.",
-      "evidence": "rg -n 'RecordUri::|space_uri|boundary_to_space_uri' on each listed file; actor_event.rs:109-115 and :223-241, store.rs:487-525, feed_service.rs:270, lifecycle.rs:165, membership_reconciler.rs:108-142, store/retention.rs:124-145."
+      "decision": "actor_event.rs builds repo-form URIs for the actor stream and requires RecordUri::Repo, and accepts a like or repost subject in either form through RecordUri::parse; store.rs validate_actor_page requires the repo form for actor pages; feed_service.rs blob_views and lifecycle.rs blob lookup return nothing for a URI that is not repo form, so space-form posts get no blobs on those paths; membership_reconciler.rs calls boundary_to_space_uri per boundary and carries the string into the poll targets; service.rs and lifecycle.rs pass space_uri strings to the store unparsed; store/retention.rs selects and deletes expired stage rows by space_uri equality and breaks retained_at ties by uri when it purges posts. Derived state.",
+      "evidence": "rg -n 'RecordUri::|space_uri|boundary_to_space_uri' on each listed file; actor_event.rs:109-115 and :223-241, store.rs:487-525, feed_service.rs:270, lifecycle.rs:165, membership_reconciler.rs:108-142, store/retention.rs:124-145, :13 and :152."
     },
     {
       "id": "uri-service-emitters",
@@ -950,6 +972,74 @@
       "workstream": "canonical-uri",
       "decision": "space-read/handler.ts maps the requested space to a boundary with spaceUriToBoundary and admits a credential only when its spaceUri equals the requested space string, so a differently spelled equivalent URI is refused; credential-scope.ts and boundary-credential access map the verified credential's spaceUri to a boundary with spaceUriToBoundary; verifiers.ts passes the verified spaceUri through as auth credentials; host-discovery.ts treats the space URI as an opaque lookup key for host overrides. All follow the core parser; none stores the string.",
       "evidence": "space-read/handler.ts:150 and :458; credential-scope.ts:69-82; features/boundary/credential-access.ts:13; verifiers.ts:605; stratos-core/src/spaces/host-discovery.ts:34 and :70-75."
+    },
+    {
+      "id": "uri-clubhouse-topic-route",
+      "promptSection": "base",
+      "surface": "Clubhouse topic route and thread matching on post URIs",
+      "ownership": "production-owned",
+      "paths": [
+        "clubhouse/src/lib/route.ts",
+        "clubhouse/src/App.svelte",
+        "clubhouse/src/lib/components/RoomFeed.svelte",
+        "clubhouse/src/lib/feed-authors.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "A topic is the URI of a feed post, which is a space record URI for a post on a member's own PDS. topicPath throws 'A topic AT URI is required' unless the URI starts with at://, and topicUriFromPath returns null for a topic query value that does not. Today a legacy space-form topic opens and round-trips through the URL; a topic starting at:space/ would make openTopic in App.svelte throw and would be dropped when the URL is read back. RoomFeed.svelte finds the open topic and its thread by string equality of post.uri and reply.root.uri with the topic URI, and builds a reply reference from the served post.uri, so a reply whose stored root.uri keeps the old spelling no longer joins a topic served in the new spelling. App.svelte closes a deleted topic by comparing the topic URI with post.uri, and feed-authors.ts keys profile data by post.uri; both compare strings from the same feed response, so the two sides share one spelling.",
+      "evidence": "clubhouse/src/lib/route.ts:23-27 topicPath and :30-35 topicUriFromPath; clubhouse/src/App.svelte:84 currentTopicUri, :297-302 openTopic and :484; clubhouse/src/lib/components/RoomFeed.svelte:30-41; clubhouse/src/lib/feed-authors.ts:8-10."
+    },
+    {
+      "id": "uri-room-post-references",
+      "promptSection": "base",
+      "surface": "Service room-post endpoint reply and delete references",
+      "ownership": "production-owned",
+      "paths": ["stratos-service/src/oauth/handlers/room-post.ts"],
+      "workstream": "canonical-uri",
+      "decision": "Clubhouse sends a reply's root and parent as the served post URIs, which are space record URIs for posts on a member's own PDS. parseStrongRef accepts a reference only when its uri starts with at:// and contains /zone.stratos.feed.post/. Today a legacy space-form reference passes and is handed unchanged to createRecord through createApprovedRoomPost, where resolveParentBoundaries reads it (see uri-reply-and-embed-strings). A reference starting at:space/ fails parseStrongRef, and the whole request is answered 400 InvalidRoomPost. parseRoomPostDeleteRequest reads the URI with AtUri and requires the collection zone.stratos.feed.post and an rkey; the installed AtUri reads a legacy space URI with the collection space and throws on at:space/, so a space record URI is refused with 400 InvalidRoomPostDelete in either spelling. Room-post deletion serves only Stratos-custody posts, which keep the repo form.",
+      "evidence": "stratos-service/src/oauth/handlers/room-post.ts:29-39 parseStrongRef, :41-48 parseReply, :63-83 parseRoomPostDeleteRequest and :192-197 the createApprovedRoomPost call; stratos-service/src/index.ts:494-513 passes the reply into createRecord unchanged; clubhouse/src/lib/components/RoomFeed.svelte:36-41 builds the references; a node probe of @atproto/syntax 0.7.4 shows new AtUri throwing 'Invalid DID or handle' on at:space/ and reading the legacy form with collection space."
+    },
+    {
+      "id": "uri-feed-read-predicates",
+      "promptSection": "base",
+      "surface": "Feedgen feed page reads: URI ordering, cursor comparison and interaction summary joins",
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen-ng/src/store/read.rs"],
+      "workstream": "canonical-uri",
+      "decision": "list_initial_posts and list_posts_after_cursor join post_boundary to post on uri and order a page by sort_at descending, then uri ascending, so among posts with the same sort_at the order is the byte order of the URI strings. That order differs between at:// and at:space/ URIs, and the cursor comparison uses the same string order (see uri-feed-pagination-cursors). interaction_summaries matches interaction.subject_uri against the served post URIs with IN and returns the counts keyed by subject_uri; ProjectionReader::prepare passes the page's post URIs, and feed_service.rs joins the summaries back by post.uri, so an interaction whose subject_uri is spelled differently from the stored post URI is not counted. blob_post finds a post by exact uri equality for the getBlob uri parameter. All of this is derived projection state.",
+      "evidence": "stratos-feedgen-ng/src/store/read.rs:105-125 list_initial_posts with its ORDER BY at :117, :127-152 list_posts_after_cursor, :37-81 interaction_summaries with the IN filter at :62, and :83-103 blob_post with p.uri = ?1 at :91; stratos-feedgen-ng/src/service.rs:361-371 passes the page URIs; stratos-feedgen-ng/src/feed_service.rs:227 summaries.remove(&post.uri)."
+    },
+    {
+      "id": "uri-rust-space-host-requests",
+      "promptSection": "base",
+      "surface": "Rust space host requests, commit verification context and delegation subject",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/space_host.rs",
+        "stratos-feedgen-ng/src/pds_space_sync.rs",
+        "stratos-feedgen-ng/src/space_commit.rs",
+        "stratos-feedgen-ng/src/service_auth.rs"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "space_host.rs sends the target space URI as the space query parameter of listRepoOps after validate_request checks only that it is non-empty and at most 2048 bytes. pds_space_sync.rs carries target.space_uri unchanged: it looks the cursor up and stages and discards pages by it, keys the per-target lock on it and passes it to commit verification. space_commit.rs commit_context puts the space URI bytes, length-prefixed, into the context that the commit MAC and signature are checked against, so a commit verifies only when the space URI string is byte for byte the one the commit was made over. service_auth.rs mint_space_delegation signs the space URI as the delegation sub claim, and a signed claim is never rewritten. The space URI itself comes from boundary_to_space_uri (see uri-rust-credential-cache and uri-rust-record-uri-callers).",
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:165-201 repo_request and :281-298 validate_request; stratos-feedgen-ng/src/pds_space_sync.rs:200-202 cursor lookup, :229 and :247 stage, :257-268 verify and :320 lock key; stratos-feedgen-ng/src/space_commit.rs:45-93 verify and :228-250 commit_context; stratos-feedgen-ng/src/service_auth.rs:95-126 mint_space_delegation."
+    },
+    {
+      "id": "uri-lexicon-uri-fields",
+      "promptSection": "base",
+      "surface": "Lexicon fields that carry a space record URI",
+      "ownership": "production-owned",
+      "paths": [
+        "lexicons/zone/stratos/feed/post.json",
+        "lexicons/zone/stratos/feedgen/getFeed.json",
+        "lexicons/zone/stratos/feedgen/getBlob.json",
+        "stratos-core/src/lexicons/vendored/com/atproto/repo/strongRef.json",
+        "stratos-core/src/lexicons/vendored/app/bsky/embed/record.json",
+        "stratos-core/src/lexicons/vendored/app/bsky/feed/like.json",
+        "stratos-core/src/lexicons/vendored/app/bsky/feed/repost.json"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "A post's reply.root and reply.parent and a like's or repost's subject are com.atproto.repo.strongRef, and an embedded record is app.bsky.embed.record; their uri fields declare format at-uri. The installed @atproto/syntax 0.7.4 rejects both space spellings as at-uri: the legacy form has more than two path segments, and the new one lacks at://. A record carrying a space record URI therefore passes lexicon validation on boundary writes only through the validation-copy rewrite (see uri-validation-copy-rewrite), and on the legacy write path StratosValidator discards lexicon errors. The vendored com.atproto and app.bsky files are copies and are never edited. The feed generator's getFeed post uri, its viewer like and repost, and getBlob's uri parameter are plain strings described as AT URI or space record URI, so no format check applies to them. The other Stratos fields declared at-uri (repo write outputs, the space getRecord output, hydrateRecord and hydrateRecords, the zone.stratos.defs subject reference) name Stratos-custody records, which keep the repo form.",
+      "evidence": "lexicons/zone/stratos/feed/post.json:76-77 replyRef; stratos-core/src/lexicons/vendored/com/atproto/repo/strongRef.json:10; stratos-core/src/lexicons/vendored/app/bsky/embed/record.json:36; app/bsky/feed/like.json:13 and repost.json:13; lexicons/zone/stratos/feedgen/getFeed.json:69-72 and :122-129; lexicons/zone/stratos/feedgen/getBlob.json:12-15; stratos-core/src/validation/stratos-validation.ts:216-242 discards lexicon errors; a node probe of @atproto/syntax 0.7.4 shows ensureValidAtUri rejecting both spellings."
     },
     {
       "id": "text-lexicon-legacy-uri-spelling",
@@ -1058,8 +1148,8 @@
       "ownership": "test-owned",
       "paths": ["test/spike/spaces", "test/feedgen-harness"],
       "workstream": "interop-cutover",
-      "decision": "Probe scripts and a comparison harness; refresh with the reference host.",
-      "evidence": "ls test/spike/spaces test/feedgen-harness."
+      "decision": "Probe scripts and a comparison harness; refresh with the reference host. compare.ts identifies each served post as {uri}#{cid} and compares the two feed generators' lists, so a spelling difference between the implementations reads as a parity failure.",
+      "evidence": "ls test/spike/spaces test/feedgen-harness; test/feedgen-harness/compare.ts:105-117."
     },
     {
       "id": "tests-e2e-scripts",
@@ -1071,11 +1161,13 @@
         "test/scripts/test-mixed-mode.ts",
         "test/scripts/lib/stratos.ts",
         "test/scripts/lib/tamper-space-commit.mjs",
-        "test/scripts/lib/config.ts"
+        "test/scripts/lib/config.ts",
+        "test/scripts/test-clubhouse-public-alpha.ts",
+        "test/scripts/lib/mixed-mode-pds.ts"
       ],
       "workstream": "interop-cutover",
-      "decision": "Run against a live PDS and service; they follow the URI and wire changes. test/scripts/lib/config.ts spaceUriFor formats the legacy at://{did}/space/{type}/{skey} form for the scripts.",
-      "evidence": "rg -l 'listRepoOps|getSpaceCredential' test/scripts; test/scripts/lib/config.ts:80-85 spaceUriFor."
+      "decision": "Run against a live PDS and service; they follow the URI and wire changes. test/scripts/lib/config.ts spaceUriFor formats the legacy at://{did}/space/{type}/{skey} form for the scripts. test-clubhouse-public-alpha.ts asserts that the reply URI returned by the member PDS starts with at://, which a space record URI in the new spelling fails. lib/mixed-mode-pds.ts parseSpaceRecordUri requires a record URI to be the space URI followed by /{did}/{collection}/{rkey}, so it holds only while the PDS answers in the spelling the script formats.",
+      "evidence": "rg -l 'listRepoOps|getSpaceCredential' test/scripts; test/scripts/lib/config.ts:80-85 spaceUriFor; test/scripts/test-clubhouse-public-alpha.ts:387; test/scripts/lib/mixed-mode-pds.ts:178-196."
     },
     {
       "id": "deprecated-stratos-feedgen",
