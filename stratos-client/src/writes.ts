@@ -1,16 +1,9 @@
 import type { FetchHandler } from '@atcute/client'
 import { createServiceFetchHandler, type RepositoryTarget } from './routing.js'
+import { boundaryToSpaceUri } from './space-uri.js'
 
 /** The space type every Stratos boundary is hosted as on a member's PDS. */
 const BOUNDARY_SPACE_TYPE = 'zone.stratos.space.feed'
-
-const DID_PATTERN = /^did:[a-z]+:[a-zA-Z0-9._:%-]*[a-zA-Z0-9._-]$/
-const NSID_PATTERN =
-  /^[a-zA-Z](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+(?:\.[a-zA-Z](?:[a-zA-Z0-9]{0,62})?)$/
-const SPACE_KEY_PATTERN = /^[a-zA-Z0-9_~.:-]{1,512}$/
-const MAX_DID_LENGTH = 2048
-const MAX_NSID_LENGTH = 253 + 1 + 63
-const MIN_NSID_LENGTH = 5
 
 export type UnresolvedReason = Extract<
   RepositoryTarget,
@@ -19,48 +12,9 @@ export type UnresolvedReason = Extract<
 
 export type BoundaryWriteRefusal = UnresolvedReason | 'invalid-boundary'
 
-export type BoundarySpaceUriResult =
-  | { ok: true; value: string }
-  | { ok: false; reason: string }
-
 export type BoundaryWriteResult<T> =
   | { ok: true; value: T }
   | { ok: false; reason: BoundaryWriteRefusal }
-
-/**
- * Formats the space URI of a boundary, `at://{serviceDid}/space/{spaceType}/{name}`
- * for the boundary `{serviceDid}/{name}`. Same output as the stratos-core
- * function of the same name; the client cannot import core, so a test in
- * stratos-service keeps the two in step.
- */
-export const boundaryToSpaceUri = (
-  boundary: string,
-  spaceType: string,
-): BoundarySpaceUriResult => {
-  const slash = boundary.indexOf('/')
-  if (slash === -1) {
-    return {
-      ok: false,
-      reason: `boundary must be "{serviceDid}/{domainName}", got "${boundary}"`,
-    }
-  }
-  const serviceDid = boundary.slice(0, slash)
-  const name = boundary.slice(slash + 1)
-  if (serviceDid.length > MAX_DID_LENGTH || !DID_PATTERN.test(serviceDid)) {
-    return { ok: false, reason: `invalid service DID: "${serviceDid}"` }
-  }
-  if (
-    spaceType.length > MAX_NSID_LENGTH ||
-    spaceType.length < MIN_NSID_LENGTH ||
-    !NSID_PATTERN.test(spaceType)
-  ) {
-    return { ok: false, reason: `invalid space type NSID: "${spaceType}"` }
-  }
-  if (name === '.' || name === '..' || !SPACE_KEY_PATTERN.test(name)) {
-    return { ok: false, reason: `invalid boundary name: "${name}"` }
-  }
-  return { ok: true, value: `at://${serviceDid}/space/${spaceType}/${name}` }
-}
 
 /** What a write helper needs: an authenticated handler and where to send. */
 export interface BoundaryWriteClient {

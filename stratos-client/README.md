@@ -230,8 +230,8 @@ if (!result.ok) throw new Error(result.reason)
 target it calls `com.atproto.space.createRecord` with the boundary's space URI. See
 [Write Path Integration](#5-write-path-integration) for the four helpers.
 
-The PDS result URI has seven segments:
-`at://{authorityDid}/space/{type}/{spaceKey}/{authorDid}/{collection}/{rkey}`.
+The PDS result URI has six parts after `at:space/`:
+`at:space/{authorityDid}/{type}/{spaceKey}/{authorDid}/{collection}/{rkey}`.
 The legacy `com.atproto.repo.*` methods still serve `stratos` custody. They take the boundary
 from the record body and refuse likes and reposts. Changing only the origin of a legacy call does
 not write into the space.
@@ -532,7 +532,13 @@ Each helper returns `{ ok: true, value }` or `{ ok: false, reason }`.
   `action` is `create`, `update` or `delete`. The helper sets the `$type` that the chosen
   procedure expects.
 - `boundaryToSpaceUri(boundary, spaceType)` is the function the `pds` path uses. It returns
-  `{ ok: true, value }` or `{ ok: false, reason }` and never throws.
+  `{ ok: true, value }` or `{ ok: false, reason }` and never throws. The value is
+  `at:space/{serviceDid}/{spaceType}/{name}`.
+- `parseSpaceUri(uri)` and `parseSpaceRecordUri(uri)` read the same grammar back, with the same
+  result shape. A space URI is `at:space/{spaceDid}/{spaceType}/{skey}`; a record URI adds
+  `/{authorDid}/{collection}/{rkey}`. The record parser returns `spaceDid` (the space authority)
+  and `authorDid` (the member who wrote the record) as separate fields. Any other string,
+  including an `at://` URI, is refused. Never give a space URI to a parser for `at://` URIs.
 
 ### The four procedures
 
@@ -625,7 +631,7 @@ The `zone.stratos.repo` procedures follow the upstream shapes, with `boundary` i
   the catalog. `putRecord` returns
   `RecordAlreadyExists` when the key holds a record in another boundary or a record that was
   taken down.
-- A subject may be a space URI (`at://{authority}/space/{type}/{skey}/{author}/{collection}/{rkey}`)
+- A subject may be a space URI (`at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey}`)
   where the lexicon says `at-uri`. Stratos parses it itself.
 - A subject URI must be canonical. A repo URI must have a DID authority and equal its re-parsed
   form. A space URI must equal the URI rebuilt from its parts. Any other spelling is refused.
@@ -1131,7 +1137,7 @@ be `!takedown`. Set `neg: true` to lift a takedown.
   stays hidden. Repeat the same request to finish it. A negation records its
   label first and lifts the hiding after, so a failed negation also leaves the
   record hidden.
-- **Member's PDS record:** use the seven-segment space-form URI. Stratos records
+- **Member's PDS record:** use the six-part space-form URI. Stratos records
   the label. Stratos cannot hide a record that it does not host.
 - **Account subject:** use `{ "$type": "zone.stratos.moderation.defs#accountSubject", "did": "{did}" }`.
   A takedown deactivates the member's enrollment. A negation reactivates it only

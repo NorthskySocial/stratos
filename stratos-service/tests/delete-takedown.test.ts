@@ -656,7 +656,7 @@ describe('deleting a taken-down record', () => {
       await removePost('ayanami')
       await appendLabelOnStore(AUTHOR_DID, 'account', false)
       await appendLabelOnStore(
-        `at://${SERVICE_DID}/space/zone.stratos.space.feed/${NERV_NAME}/${AUTHOR_DID}/${POST}/ayanami`,
+        `at:space/${SERVICE_DID}/zone.stratos.space.feed/${NERV_NAME}/${AUTHOR_DID}/${POST}/ayanami`,
         'record',
         false,
       )

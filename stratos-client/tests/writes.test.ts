@@ -27,7 +27,7 @@ interface CapturedRequest {
 const MEMBER_DID = 'did:plc:shinji1stunit'
 const SERVICE_DID = 'did:web:nerv.example'
 const BOUNDARY = `${SERVICE_DID}/geofront`
-const SPACE_URI = `at://${SERVICE_DID}/space/zone.stratos.space.feed/geofront`
+const SPACE_URI = `at:space/${SERVICE_DID}/zone.stratos.space.feed/geofront`
 const POST_COLLECTION = 'zone.stratos.feed.post'
 const POST = {
   $type: POST_COLLECTION,
@@ -404,7 +404,7 @@ describe('pds space URI', () => {
       })
 
       const space = (captured[0].body as { space: string }).space
-      const match = /^at:\/\/([^/]+)\/space\/([^/]+)\/([^/]+)$/.exec(space)
+      const match = /^at:space\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(space)
       expect(match, space).not.toBeNull()
       expect(`${match![1]}/${match![3]}`).toBe(`${did}/${skey}`)
       expect(match![2]).toBe('zone.stratos.space.feed')

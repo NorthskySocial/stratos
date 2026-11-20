@@ -1093,7 +1093,7 @@ function defineNeverServerError(getHarness: () => WriteHarness) {
 const INTERACTION_COLLECTIONS = ['app.bsky.feed.like', 'app.bsky.feed.repost']
 const PDS_MEMBER = 'did:plc:asuka-langley'
 const SERVICE_OF_BOUNDARY = HARNESS_ENGINEERING.split('/')[0]
-const SPACE_FORM_URI = `at://${SERVICE_OF_BOUNDARY}/space/zone.stratos.space.feed/engineering/${PDS_MEMBER}/${COLLECTION}/eva02`
+const SPACE_FORM_URI = `at:space/${SERVICE_OF_BOUNDARY}/zone.stratos.space.feed/engineering/${PDS_MEMBER}/${COLLECTION}/eva02`
 
 function interactionRecord(
   collection: string,

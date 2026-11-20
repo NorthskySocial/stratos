@@ -25,7 +25,7 @@ const ACCOUNT_SUBJECT = 'zone.stratos.moderation.defs#accountSubject'
 
 const SPIKE_DID = 'did:plc:spikespiegel7777'
 const REPO_URI = `at://${SPIKE_DID}/zone.stratos.feed.post/3kbebop`
-const SPACE_URI = `at://did:web:bebop.example/space/zone.stratos.space.feed/3kswordfish/${SPIKE_DID}/zone.stratos.feed.post/3kbebop`
+const SPACE_URI = `at:space/did:web:bebop.example/zone.stratos.space.feed/3kswordfish/${SPIKE_DID}/zone.stratos.feed.post/3kbebop`
 
 describe('zone.stratos.moderation lexicons', () => {
   let lex: Lexicons

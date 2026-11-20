@@ -1007,7 +1007,7 @@ mod tests {
             .prepare_viewer_blob(
                 "did:plc:faye",
                 &feeds,
-                "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spike/zone.stratos.feed.post/see-you",
+                "at:space/did:web:stratos.example/zone.stratos.space.feed/bebop/did:plc:spike/zone.stratos.feed.post/see-you",
                 1,
                 "1998-04-03T00:00:00.000Z",
             )
@@ -1573,6 +1573,7 @@ mod tests {
                         },
                         neg: false,
                     }],
+                    skipped_subjects: 0,
                 },
                 "2026-11-01T00:00:00.000Z",
             )
@@ -1613,6 +1614,7 @@ mod tests {
                 },
                 neg: negated,
             }],
+            skipped_subjects: 0,
         }
     }
 
@@ -1940,6 +1942,7 @@ mod tests {
                         },
                         neg: false,
                     }],
+                    skipped_subjects: 0,
                 },
                 "1998-04-03T00:00:00.000Z",
             )

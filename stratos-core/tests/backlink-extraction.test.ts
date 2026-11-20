@@ -10,7 +10,7 @@ import {
 const LIKE_URI = 'at://did:plc:misato-katsuragi/app.bsky.feed.like/eva-like'
 const SHINJI = 'did:plc:shinji-ikari'
 const ASUKA = 'did:plc:asuka-langley'
-const SPACE_POST = `at://did:web:nerv.tokyo.jp/space/zone.stratos.space.feed/engineering/${ASUKA}/zone.stratos.feed.post/eva02`
+const SPACE_POST = `at:space/did:web:nerv.tokyo.jp/zone.stratos.space.feed/engineering/${ASUKA}/zone.stratos.feed.post/eva02`
 const REPO_POST = `at://${SHINJI}/zone.stratos.feed.post/eva01`
 
 type Backlink = ReturnType<typeof getStratosBacklinks>[number]
@@ -65,7 +65,7 @@ describe('getStratosBacklinks', () => {
   it('indexes nothing for a uri that is neither form, and never throws', () => {
     const subjects = [
       { uri: `${SPACE_POST}/extra` },
-      { uri: 'at://did:web:nerv.tokyo.jp/space/zone.stratos.space.feed' },
+      { uri: 'at:space/did:web:nerv.tokyo.jp/zone.stratos.space.feed' },
       { uri: 7 },
       { uri: null },
       { uri: '' },

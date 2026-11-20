@@ -1,7 +1,11 @@
 import express from 'express'
 import { XRPCError } from '@atproto/xrpc-server'
 import { AtUri } from '@atproto/syntax'
-import { StratosError } from '@northskysocial/stratos-core'
+import {
+  parseCanonicalRepoUri,
+  parseRecordUri,
+  StratosError,
+} from '@northskysocial/stratos-core'
 import type { OAuthRoutesConfig } from '../routes.js'
 
 interface RoomPostRequest {
@@ -26,12 +30,17 @@ interface ReplyRef {
   parent: StrongRef
 }
 
+function isPostRecordUri(uri: string): boolean {
+  const spaceRecord = parseRecordUri(uri)
+  if (spaceRecord.ok) return spaceRecord.value.collection === POST_COLLECTION
+  return parseCanonicalRepoUri(uri)?.collection === POST_COLLECTION
+}
+
 function parseStrongRef(value: unknown): StrongRef | null {
   if (typeof value !== 'object' || value === null) return null
   const ref = value as Record<string, unknown>
   return typeof ref.uri === 'string' &&
-    ref.uri.startsWith('at://') &&
-    ref.uri.includes('/zone.stratos.feed.post/') &&
+    isPostRecordUri(ref.uri) &&
     typeof ref.cid === 'string' &&
     ref.cid.length > 0
     ? { uri: ref.uri, cid: ref.cid }

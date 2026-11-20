@@ -3,10 +3,12 @@ import { InvalidRequestError } from '@atproto/xrpc-server'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import {
   assertBoundaryMatchesService,
+  AT_SCHEME,
   BoundaryServiceMismatchError,
   buildRecordRules,
   findRecordRule,
   isEligibleSubject,
+  isSyntacticDid,
   isValidSkey,
   parseRecordUri,
   parseQualifiedBoundary,
@@ -308,6 +310,21 @@ function assertRulesHold(validate: () => void): void {
   }
 }
 
+const CUSTODY_URI_PART_COUNT = 3
+
+function isCustodyRecordUri(uri: string): boolean {
+  if (!uri.startsWith(AT_SCHEME)) return false
+  const parts = uri.slice(AT_SCHEME.length).split('/')
+  return parts.length === CUSTODY_URI_PART_COUNT && isSyntacticDid(parts[0])
+}
+
+function unreadableParentError(): InvalidRequestError {
+  return new InvalidRequestError(
+    'The reply parent is not a record URI',
+    'InvalidRecord',
+  )
+}
+
 /**
  * Validates that the record has valid parent boundaries.
  * @param ctx - Application context
@@ -318,24 +335,29 @@ export async function resolveParentBoundaries(
   ctx: AppContext,
   record: Record<string, unknown>,
 ): Promise<string[] | undefined> {
-  const reply = record.reply as { parent?: { uri?: string } } | undefined
-  if (!reply?.parent?.uri) {
+  const reply = record.reply as { parent?: { uri?: unknown } } | undefined
+  const parentUri = reply?.parent?.uri
+  if (!parentUri) {
     return undefined
   }
+  if (typeof parentUri !== 'string') throw unreadableParentError()
 
-  const spaceRecord = parseRecordUri(reply.parent.uri)
+  const spaceRecord = parseRecordUri(parentUri)
   if (spaceRecord.ok) {
     return [qualifyBoundary(spaceRecord.value.spaceDid, spaceRecord.value.skey)]
   }
 
-  let parentUri: AtUriSyntax
+  // Only a custody record names an actor store to read; for any other string
+  // the first segment is not an author, so no store is opened.
+  if (!isCustodyRecordUri(parentUri)) throw unreadableParentError()
+  let parentRecord: AtUriSyntax
   try {
-    parentUri = new AtUriSyntax(reply.parent.uri)
+    parentRecord = new AtUriSyntax(parentUri)
   } catch {
-    return undefined
+    throw unreadableParentError()
   }
 
-  const cacheKey = reply.parent.uri
+  const cacheKey = parentUri
   const cached = parentBoundaryCache.get(cacheKey)
   if (cached) {
     if (Date.now() - cached.cachedAt < PARENT_BOUNDARY_TTL_MS) {
@@ -345,10 +367,10 @@ export async function resolveParentBoundaries(
   }
 
   const boundaries = await ctx.actorStore.read(
-    parentUri.hostname,
+    parentRecord.hostname,
     async (store) => {
       const parent =
-        await store.record.getVisibleRecordWithBoundaries(parentUri)
+        await store.record.getVisibleRecordWithBoundaries(parentRecord)
       return parent?.boundaries
     },
   )

@@ -600,7 +600,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let space = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+        let space = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
         let rei = client
             .repo_request(space, "did:plc:rei", None, 10)
             .await
@@ -650,6 +650,44 @@ mod tests {
                 .repo_request(space, "https://pds.example.test", None, 10)
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn sends_the_space_a_boundary_maps_to_as_the_space_parameter() {
+        use crate::{
+            space_credential::GrantedSpaceCredential, space_http_signature::SpaceHttpSignatureKey,
+        };
+        let grant = Arc::new(
+            GrantedSpaceCredential::new("rei".to_owned(), SpaceHttpSignatureKey::generate())
+                .unwrap(),
+        );
+        let client = PinnedSpaceHostClient::connect_with_resolver(
+            "https://pds.example.test",
+            grant,
+            &FixedResolver(vec!["1.1.1.1:443".parse().unwrap()]),
+        )
+        .await
+        .unwrap();
+        let space =
+            crate::credential_manager::boundary_to_space_uri("did:web:stratos.example.test/bebop")
+                .unwrap();
+        let request = client
+            .repo_request(&space, "did:plc:rei", None, 10)
+            .await
+            .unwrap()
+            .build()
+            .unwrap();
+        let sent: Vec<_> = request
+            .url()
+            .query_pairs()
+            .filter(|(name, _)| name == "space")
+            .map(|(_, value)| value.into_owned())
+            .collect();
+        assert_eq!(sent, [space]);
+        assert_eq!(
+            sent[0],
+            "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop"
         );
     }
 }

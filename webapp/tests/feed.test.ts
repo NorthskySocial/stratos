@@ -29,7 +29,7 @@ describe('feed logic', () => {
     it('extracts authors from custody and space record URIs', () => {
       expect(
         authorFromUri(
-          'at://did:web:stratos.example/space/zone.stratos.space.feed/engineering/did:plc:faye/zone.stratos.feed.post/1',
+          'at:space/did:web:stratos.example/zone.stratos.space.feed/engineering/did:plc:faye/zone.stratos.feed.post/1',
         ),
       ).toBe('did:plc:faye')
       expect(authorFromUri('at://did:plc:spike/zone.stratos.feed.post/1')).toBe(
@@ -52,11 +52,10 @@ describe('feed logic', () => {
     it('extracts the space and target for a PDS-hosted record', () => {
       expect(
         postDeleteTargetFromUri(
-          'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/two',
+          'at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/two',
         ),
       ).toEqual({
-        space:
-          'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve',
+        space: 'at:space/did:web:stratos.example/zone.stratos.space.feed/nerve',
         repo: 'did:plc:asuka',
         collection: 'zone.stratos.feed.post',
         rkey: 'two',

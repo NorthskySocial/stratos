@@ -25,6 +25,14 @@ pub struct ModerationLabel {
 pub struct LabelPage {
     pub cursor: u64,
     pub labels: Vec<ModerationLabel>,
+    /// Record subjects whose URI is no record URI, so no stored row can name them.
+    pub skipped_subjects: usize,
+}
+
+enum ParsedSubject {
+    Subject(LabelSubject),
+    Ignored,
+    UnparseableRecordUri,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -69,7 +77,8 @@ struct RawLabel {
 }
 
 /// The whole page is rejected on any structural fault so a consumer never
-/// advances its cursor past labels it could not read.
+/// advances its cursor past labels it could not read. A record subject whose
+/// URI is within bounds but is no record URI is skipped and counted instead.
 pub fn parse_label_page(
     body: &[u8],
     request_cursor: u64,
@@ -85,6 +94,7 @@ pub fn parse_label_page(
     }
     let mut previous_seq = request_cursor;
     let mut labels = Vec::new();
+    let mut skipped_subjects = 0;
     for raw_label in raw.labels {
         let seq = raw_label.seq.ok_or(LabelPageError::InvalidSequence)?;
         if seq <= previous_seq || seq > cursor {
@@ -97,8 +107,13 @@ pub fn parse_label_page(
         if raw_label.val.as_deref() != Some(TAKEDOWN_VALUE) {
             continue;
         }
-        let Some(subject) = parse_subject(raw_label.subject.as_ref())? else {
-            continue;
+        let subject = match parse_subject(raw_label.subject.as_ref())? {
+            ParsedSubject::Subject(subject) => subject,
+            ParsedSubject::Ignored => continue,
+            ParsedSubject::UnparseableRecordUri => {
+                skipped_subjects += 1;
+                continue;
+            }
         };
         labels.push(ModerationLabel {
             seq,
@@ -106,7 +121,11 @@ pub fn parse_label_page(
             neg: raw_label.neg.unwrap_or(false),
         });
     }
-    Ok(LabelPage { cursor, labels })
+    Ok(LabelPage {
+        cursor,
+        labels,
+        skipped_subjects,
+    })
 }
 
 fn parse_decimal_cursor(cursor: Option<&str>) -> Result<u64, LabelPageError> {
@@ -117,7 +136,7 @@ fn parse_decimal_cursor(cursor: Option<&str>) -> Result<u64, LabelPageError> {
     cursor.parse().map_err(|_| LabelPageError::InvalidCursor)
 }
 
-fn parse_subject(subject: Option<&Value>) -> Result<Option<LabelSubject>, LabelPageError> {
+fn parse_subject(subject: Option<&Value>) -> Result<ParsedSubject, LabelPageError> {
     let Some(subject) = subject else {
         return Err(LabelPageError::InvalidSubject);
     };
@@ -129,8 +148,10 @@ fn parse_subject(subject: Option<&Value>) -> Result<Option<LabelSubject>, LabelP
                 .and_then(Value::as_str)
                 .filter(|uri| uri.len() <= MAX_SUBJECT_URI_BYTES)
                 .ok_or(LabelPageError::InvalidSubject)?;
-            let parsed = RecordUri::parse(uri).map_err(|_| LabelPageError::InvalidSubject)?;
-            Ok(Some(LabelSubject::Record {
+            let Ok(parsed) = RecordUri::parse(uri) else {
+                return Ok(ParsedSubject::UnparseableRecordUri);
+            };
+            Ok(ParsedSubject::Subject(LabelSubject::Record {
                 uri: uri.to_owned(),
                 author_did: parsed.author().as_str().to_owned(),
             }))
@@ -141,13 +162,13 @@ fn parse_subject(subject: Option<&Value>) -> Result<Option<LabelSubject>, LabelP
                 .and_then(Value::as_str)
                 .ok_or(LabelPageError::InvalidSubject)?;
             Did::parse(did).map_err(|_| LabelPageError::InvalidSubject)?;
-            Ok(Some(LabelSubject::Account {
+            Ok(ParsedSubject::Subject(LabelSubject::Account {
                 did: did.to_owned(),
             }))
         }
         // Skipping an unreadable takedown would advance the cursor past it.
         None => Err(LabelPageError::InvalidSubject),
-        Some(_) => Ok(None),
+        Some(_) => Ok(ParsedSubject::Ignored),
     }
 }
 
@@ -156,7 +177,7 @@ mod tests {
     use super::{LabelPageError, LabelSubject, parse_label_page};
 
     const REPO_URI: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop1";
-    const SPACE_URI: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
+    const SPACE_URI: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
 
     fn record_label(seq: u64, uri: &str) -> String {
         format!(
@@ -220,6 +241,8 @@ mod tests {
         let scalar_subject_takedown = r##"{"seq":1,"subject":"did:plc:spikespiegel","val":"!takedown","createdAt":"2026-11-01T00:00:00Z"}"##;
         let subjectless_takedown =
             r##"{"seq":1,"val":"!takedown","createdAt":"2026-11-01T00:00:00Z"}"##;
+        let uriless_record_subject = r##"{"seq":1,"subject":{"$type":"zone.stratos.moderation.defs#recordSubject"},"val":"!takedown","createdAt":"2026-11-01T00:00:00Z"}"##;
+        let numeric_uri_record_subject = r##"{"seq":1,"subject":{"$type":"zone.stratos.moderation.defs#recordSubject","uri":7},"val":"!takedown","createdAt":"2026-11-01T00:00:00Z"}"##;
         let cases: Vec<(&str, Vec<u8>, u64, u16)> = vec![
             ("invalid json", b"{".to_vec(), 0, 100),
             ("missing cursor", br#"{"labels":[]}"#.to_vec(), 0, 100),
@@ -270,8 +293,14 @@ mod tests {
                 100,
             ),
             (
-                "unparseable record uri",
-                page("1", &[record_label(1, "https://example.test/x")]),
+                "record subject without a uri",
+                page("1", &[uriless_record_subject.to_owned()]),
+                0,
+                100,
+            ),
+            (
+                "record subject with a numeric uri",
+                page("1", &[numeric_uri_record_subject.to_owned()]),
                 0,
                 100,
             ),
@@ -367,11 +396,89 @@ mod tests {
 
     #[test]
     fn errors_carry_no_input_text() {
-        let body = page("1", &[record_label(1, "https://leak.example.test/ed")]);
+        let untyped = r##"{"seq":1,"subject":{"uri":"https://leak.example.test/ed"},"val":"!takedown","createdAt":"2026-11-01T00:00:00Z"}"##;
+        let body = page("1", &[untyped.to_owned()]);
         let error = parse_label_page(&body, 0, 100).unwrap_err();
         assert_eq!(error, LabelPageError::InvalidSubject);
         for text in [error.to_string(), format!("{error:?}")] {
             assert!(!text.contains("leak.example.test"));
         }
+    }
+
+    const LEGACY_SPACE_URI: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
+
+    fn negated_record_label(seq: u64, uri: &str) -> String {
+        record_label(seq, uri).replace(r#""val":"!takedown""#, r#""val":"!takedown","neg":true"#)
+    }
+
+    #[test]
+    fn skips_and_counts_a_takedown_whose_uri_is_no_record_uri() {
+        for unparseable in [
+            "https://example.test/x",
+            LEGACY_SPACE_URI,
+            "at://did:plc:spikespiegel/zone.stratos.feed.post/",
+        ] {
+            let body = page(
+                "3",
+                &[
+                    record_label(1, REPO_URI),
+                    record_label(2, unparseable),
+                    record_label(3, SPACE_URI),
+                ],
+            );
+            let parsed = parse_label_page(&body, 0, 100).unwrap();
+            assert_eq!(parsed.cursor, 3, "{unparseable}");
+            assert_eq!(
+                parsed
+                    .labels
+                    .iter()
+                    .map(|label| label.seq)
+                    .collect::<Vec<_>>(),
+                [1, 3],
+                "{unparseable}"
+            );
+            assert_eq!(parsed.skipped_subjects, 1, "{unparseable}");
+        }
+    }
+
+    #[test]
+    fn skips_and_counts_a_negation_whose_uri_is_no_record_uri() {
+        let body = page(
+            "3",
+            &[
+                record_label(1, REPO_URI),
+                negated_record_label(2, LEGACY_SPACE_URI),
+                negated_record_label(3, SPACE_URI),
+            ],
+        );
+        let parsed = parse_label_page(&body, 0, 100).unwrap();
+        assert_eq!(parsed.cursor, 3);
+        assert_eq!(
+            parsed
+                .labels
+                .iter()
+                .map(|label| (label.seq, label.neg))
+                .collect::<Vec<_>>(),
+            [(1, false), (3, true)]
+        );
+        assert_eq!(parsed.skipped_subjects, 1);
+    }
+
+    #[test]
+    fn counts_only_takedowns_it_could_not_read() {
+        let spam = record_label(1, LEGACY_SPACE_URI).replace("!takedown", "spam");
+        let body = page("2", &[spam, record_label(2, REPO_URI)]);
+        let parsed = parse_label_page(&body, 0, 100).unwrap();
+        assert_eq!(parsed.labels.len(), 1);
+        assert_eq!(parsed.skipped_subjects, 0);
+    }
+
+    #[test]
+    fn a_page_of_readable_subjects_skips_nothing() {
+        let body = page(
+            "2",
+            &[record_label(1, REPO_URI), record_label(2, SPACE_URI)],
+        );
+        assert_eq!(parse_label_page(&body, 0, 100).unwrap().skipped_subjects, 0);
     }
 }

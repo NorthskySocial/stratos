@@ -73,7 +73,8 @@ export const getFeedLexicon: LexiconDoc = {
       properties: {
         uri: {
           type: 'string',
-          description: 'AT URI or permissioned space record URI.',
+          description:
+            'Record URI: at://{did}/{collection}/{rkey} for a Stratos-hosted post, or at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey} for a permissioned space record.',
         },
         cid: {
           type: 'string',
@@ -233,7 +234,8 @@ export const getBlobLexicon: LexiconDoc = {
         properties: {
           uri: {
             type: 'string',
-            description: 'Exact indexed post URI, including space record URIs.',
+            description:
+              'Exact indexed post URI: at://{did}/{collection}/{rkey}, or at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey} for a space record.',
           },
           cid: {
             type: 'string',

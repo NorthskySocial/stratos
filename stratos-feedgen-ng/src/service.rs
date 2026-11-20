@@ -632,6 +632,7 @@ mod tests {
                         },
                         neg: false,
                     }],
+                    skipped_subjects: 0,
                 },
                 "2026-11-01T00:00:00.000Z",
             )

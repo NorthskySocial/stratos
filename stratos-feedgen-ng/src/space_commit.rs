@@ -279,7 +279,9 @@ mod tests {
     };
     use crate::auth::{IdentityKeyResolver, IdentityResolutionError};
 
-    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
+    #[rustfmt::skip]
+    const LEGACY_SPACE_URI: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
     const AUTHOR: &str = "did:plc:spike";
 
     #[test]
@@ -385,6 +387,23 @@ mod tests {
                 .verify(SPACE, AUTHOR, Some(&commit(&key)))
                 .await,
             CommitVerification::Verified
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_a_commit_checked_against_the_legacy_spelling_of_its_space() {
+        let key = SigningKey::from_slice(&[9; 32]).unwrap();
+        let signed = commit(&key);
+        let verifier = verifier(did_key(&key));
+        assert_eq!(
+            verifier.verify(SPACE, AUTHOR, Some(&signed)).await,
+            CommitVerification::Verified
+        );
+        assert_eq!(
+            verifier
+                .verify(LEGACY_SPACE_URI, AUTHOR, Some(&signed))
+                .await,
+            CommitVerification::Rejected(CommitVerificationFailure::MacMismatch)
         );
     }
 

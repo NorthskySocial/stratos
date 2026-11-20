@@ -331,7 +331,7 @@ mod tests {
     use serde_json::{Value, json};
 
     const AUTHORITY: &str = "did:web:stratos.example.test";
-    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
     const KEY: &str = "did:key:rei";
 
     fn claims() -> Value {

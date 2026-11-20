@@ -248,7 +248,7 @@ describe('feed extended logic', () => {
             feed: [
               {
                 post: {
-                  uri: 'at://did:web:section-9.test/space/zone.stratos.space.feed/section-9/did:plc:motoko/zone.stratos.feed.post/1',
+                  uri: 'at:space/did:web:section-9.test/zone.stratos.space.feed/section-9/did:plc:motoko/zone.stratos.feed.post/1',
                   cid: 'cid1',
                   record: {
                     text: 'Motoko posts from the PDS space.',

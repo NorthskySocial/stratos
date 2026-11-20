@@ -11,10 +11,11 @@ mod tests {
     use crate::{
         actor_event::parse_actor_commit,
         config::{FeedgenConfig, StorageProfile},
+        credential_manager::boundary_to_space_uri,
         cursor::FeedCursor,
         feed_service::build_blob_url,
         feeds::FeedRegistry,
-        identifier::RecordUri,
+        identifier::{Did, FEED_SPACE_TYPE, RecordUri, SpaceUri},
         moderation_label::{LabelSubject, parse_label_page},
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         server,
@@ -88,10 +89,78 @@ mod tests {
     }
 
     #[derive(Deserialize)]
-    struct SpaceRecordFixture {
-        version: u8,
-        valid: Vec<ValidSpaceRecordCase>,
-        invalid: Vec<InvalidSpaceRecordCase>,
+    #[serde(rename_all = "camelCase")]
+    struct SpaceUriCorpus {
+        spaces: Vec<CorpusSpace>,
+        records: Vec<CorpusSpaceRecord>,
+        repo_records: Vec<CorpusRepoRecord>,
+        boundaries: Vec<CorpusBoundary>,
+        invalid: Vec<CorpusInvalid>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CorpusSpace {
+        name: String,
+        uri: String,
+        authority: String,
+        space_type: String,
+        skey: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CorpusSpaceRecord {
+        name: String,
+        uri: String,
+        authority: String,
+        space_type: String,
+        skey: String,
+        author: String,
+        collection: String,
+        rkey: String,
+    }
+
+    #[derive(Deserialize)]
+    struct CorpusRepoRecord {
+        name: String,
+        uri: String,
+        author: String,
+        collection: String,
+        rkey: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CorpusBoundary {
+        name: String,
+        boundary: String,
+        space_type: String,
+        uri: String,
+    }
+
+    #[derive(Deserialize)]
+    struct CorpusInvalid {
+        name: String,
+        input: String,
+        #[serde(rename = "as")]
+        refused_as: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BlobUrlSpaceRecordFixture {
+        cases: Vec<BlobUrlSpaceRecordCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BlobUrlSpaceRecordCase {
+        name: String,
+        base_url: String,
+        uri: String,
+        blob_ref: String,
+        expected_url: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -109,30 +178,6 @@ mod tests {
         uri: String,
         cid: String,
         expected_url: Option<String>,
-    }
-
-    #[derive(Deserialize)]
-    struct ValidSpaceRecordCase {
-        name: String,
-        input: String,
-        expected: SpaceRecordValue,
-    }
-
-    #[derive(Deserialize)]
-    struct InvalidSpaceRecordCase {
-        name: String,
-        input: String,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct SpaceRecordValue {
-        space_did: String,
-        space_type: String,
-        skey: String,
-        author_did: String,
-        collection: String,
-        rkey: String,
     }
 
     #[test]
@@ -197,15 +242,22 @@ mod tests {
     }
 
     #[test]
-    fn follows_the_shared_space_record_uri_fixture() {
-        let fixture: SpaceRecordFixture = serde_json::from_str(include_str!(
-            "../../stratos-feedgen/testdata/conformance/v1/space-record-uri.json"
+    fn follows_the_space_uri_corpus() {
+        let corpus: SpaceUriCorpus = serde_json::from_str(include_str!(
+            "../../test/spaces-alignment/november/fixtures/space-uri-conformance.json"
         ))
         .unwrap();
-        assert_eq!(fixture.version, 1);
 
-        for case in fixture.valid {
-            let uri = RecordUri::parse_space_record(&case.input)
+        for case in corpus.spaces {
+            let space = SpaceUri::parse(&case.uri).unwrap_or_else(|_| panic!("{}", case.name));
+            assert_eq!(space.authority().as_str(), case.authority, "{}", case.name);
+            assert_eq!(space.space_type(), case.space_type, "{}", case.name);
+            assert_eq!(space.space_key(), case.skey, "{}", case.name);
+            assert_eq!(space.to_string(), case.uri, "{}", case.name);
+            assert!(RecordUri::parse(&case.uri).is_err(), "{}", case.name);
+        }
+        for case in corpus.records {
+            let uri = RecordUri::parse_space_record(&case.uri)
                 .unwrap_or_else(|_| panic!("{}", case.name));
             let RecordUri::Space {
                 authority,
@@ -218,19 +270,64 @@ mod tests {
             else {
                 panic!("{}", case.name);
             };
-            assert_eq!(authority.as_str(), case.expected.space_did, "{}", case.name);
-            assert_eq!(space_type, case.expected.space_type, "{}", case.name);
-            assert_eq!(space_key, case.expected.skey, "{}", case.name);
-            assert_eq!(author.as_str(), case.expected.author_did, "{}", case.name);
-            assert_eq!(collection, case.expected.collection, "{}", case.name);
-            assert_eq!(rkey, case.expected.rkey, "{}", case.name);
-        }
-        for case in fixture.invalid {
-            assert!(
-                RecordUri::parse_space_record(&case.input).is_err(),
+            assert_eq!(authority.as_str(), case.authority, "{}", case.name);
+            assert_eq!(space_type, case.space_type, "{}", case.name);
+            assert_eq!(space_key, case.skey, "{}", case.name);
+            assert_eq!(author.as_str(), case.author, "{}", case.name);
+            assert_eq!(collection, case.collection, "{}", case.name);
+            assert_eq!(rkey, case.rkey, "{}", case.name);
+            let space = SpaceUri::parse(&format!(
+                "at:space/{}/{}/{}",
+                case.authority, case.space_type, case.skey
+            ))
+            .unwrap();
+            let author = Did::parse(case.author.as_str()).unwrap();
+            assert_eq!(
+                space.record_uri(&author, &case.collection, &case.rkey),
+                case.uri,
                 "{}",
                 case.name
             );
+            assert!(SpaceUri::parse(&case.uri).is_err(), "{}", case.name);
+        }
+        for case in corpus.repo_records {
+            let Ok(RecordUri::Repo {
+                author,
+                collection,
+                rkey,
+            }) = RecordUri::parse(&case.uri)
+            else {
+                panic!("{}", case.name);
+            };
+            assert_eq!(author.as_str(), case.author, "{}", case.name);
+            assert_eq!(collection, case.collection, "{}", case.name);
+            assert_eq!(rkey, case.rkey, "{}", case.name);
+            assert!(
+                RecordUri::parse_space_record(&case.uri).is_err(),
+                "{}",
+                case.name
+            );
+        }
+        for case in corpus.invalid {
+            let refused_as_space = SpaceUri::parse(&case.input).is_err();
+            let refused_as_record = RecordUri::parse_space_record(&case.input).is_err();
+            match case.refused_as.as_str() {
+                "space" => assert!(refused_as_space, "{}", case.name),
+                "record" => assert!(refused_as_record, "{}", case.name),
+                "both" => assert!(refused_as_space && refused_as_record, "{}", case.name),
+                other => panic!("{}: unknown refusal {other}", case.name),
+            }
+        }
+        for case in corpus.boundaries {
+            let expected = SpaceUri::parse(&case.uri).unwrap_or_else(|_| panic!("{}", case.name));
+            assert_eq!(expected.space_type(), case.space_type, "{}", case.name);
+            assert_eq!(expected.to_string(), case.uri, "{}", case.name);
+            let produced = boundary_to_space_uri(&case.boundary).unwrap();
+            if case.space_type == FEED_SPACE_TYPE {
+                assert_eq!(produced, case.uri, "{}", case.name);
+            } else {
+                assert_ne!(produced, case.uri, "{}", case.name);
+            }
         }
     }
 
@@ -246,6 +343,30 @@ mod tests {
             let actual = match RecordUri::parse(&case.uri) {
                 Ok(RecordUri::Repo { .. }) => {
                     build_blob_url(&case.base_url, &case.uri, &case.cid).ok()
+                }
+                _ => None,
+            };
+            assert_eq!(actual, case.expected_url, "{}", case.name);
+        }
+    }
+
+    #[test]
+    fn never_projects_the_blob_of_a_space_record_in_the_current_spelling() {
+        let fixture: BlobUrlSpaceRecordFixture = serde_json::from_str(include_str!(
+            "../../test/spaces-alignment/november/fixtures/blob-url-space-record.json"
+        ))
+        .unwrap();
+        assert!(!fixture.cases.is_empty());
+
+        for case in fixture.cases {
+            assert!(
+                RecordUri::parse_space_record(&case.uri).is_ok(),
+                "{}",
+                case.name
+            );
+            let actual = match RecordUri::parse(&case.uri) {
+                Ok(RecordUri::Repo { .. }) => {
+                    build_blob_url(&case.base_url, &case.uri, &case.blob_ref).ok()
                 }
                 _ => None,
             };
@@ -304,7 +425,7 @@ mod tests {
     #[test]
     fn reads_the_label_pages_stratos_serves_in_the_shared_fixture() {
         const REI_POST: &str = "at://did:plc:rei-ayanami/zone.stratos.feed.post/eva-00";
-        const ASUKA_SPACE_POST: &str = "at://did:web:stratos.test/space/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/eva-02";
+        const ASUKA_SPACE_POST: &str = "at:space/did:web:stratos.test/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/eva-02";
         const GEOFRONT_POST: &str = "at://did:plc:shinji-ikari/zone.stratos.feed.post/eva-01";
         let fixture: ModerationLabelFixture = serde_json::from_str(include_str!(
             "../../stratos-feedgen/testdata/conformance/v1/moderation-labels.json"

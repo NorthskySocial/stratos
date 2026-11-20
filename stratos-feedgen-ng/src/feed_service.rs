@@ -707,7 +707,7 @@ mod tests {
     fn likes_in_another_boundary_of_likes_and_in_the_other_uri_form_count_for_nothing() {
         let lifecycle = serving_lifecycle(&[FAYE]);
         publish_post(&lifecycle, 1);
-        let space_form = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:spike/zone.stratos.feed.post/see-you";
+        let space_form = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:spike/zone.stratos.feed.post/see-you";
         apply_interactions(&lifecycle, JET, 1, upserting(vec![like(JET, "counted")]));
         apply_interactions(
             &lifecycle,

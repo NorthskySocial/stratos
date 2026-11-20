@@ -8,15 +8,13 @@ use tokio::sync::Notify;
 
 use crate::{
     credential_issuer::{CredentialExpiry, CredentialMintError, SpaceCredentialIssuer},
-    identifier::RecordUri,
+    identifier::{FEED_SPACE_TYPE, SpaceUri},
     space_credential::HeldSpaceCredential,
     space_http_signature::SpaceHttpSignatureKey,
 };
 
 const MAX_CREDENTIALS: usize = 128;
 const REFRESH_MARGIN_SECONDS: u64 = 5 * 60;
-const SPACE_TYPE: &str = "zone.stratos.space.feed";
-const POST_COLLECTION: &str = "zone.stratos.feed.post";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CredentialManagerError {
@@ -218,15 +216,9 @@ pub(crate) fn boundary_to_space_uri(boundary: &str) -> Result<String, Credential
     let Some((authority, key)) = boundary.split_once('/') else {
         return Err(CredentialManagerError::InvalidBoundary);
     };
-    let probe =
-        format!("at://{authority}/space/{SPACE_TYPE}/{key}/{authority}/{POST_COLLECTION}/probe");
-    if !matches!(
-        RecordUri::parse_space_record(&probe),
-        Ok(RecordUri::Space { .. })
-    ) {
-        return Err(CredentialManagerError::InvalidBoundary);
-    }
-    Ok(format!("at://{authority}/space/{SPACE_TYPE}/{key}"))
+    SpaceUri::new(authority, FEED_SPACE_TYPE, key)
+        .map(|space| space.to_string())
+        .map_err(|_| CredentialManagerError::InvalidBoundary)
 }
 
 fn current_epoch_seconds() -> u64 {
@@ -240,7 +232,7 @@ fn current_epoch_seconds() -> u64 {
 mod tests {
     use std::{
         sync::{
-            Arc,
+            Arc, Mutex,
             atomic::{AtomicUsize, Ordering},
         },
         time::Duration,
@@ -284,11 +276,41 @@ mod tests {
     fn derives_only_a_valid_authority_owned_feed_space() {
         assert_eq!(
             boundary_to_space_uri("did:web:stratos.example.test/crew").unwrap(),
-            "at://did:web:stratos.example.test/space/zone.stratos.space.feed/crew"
+            "at:space/did:web:stratos.example.test/zone.stratos.space.feed/crew"
         );
         assert_eq!(
             boundary_to_space_uri("not-a-boundary"),
             Err(CredentialManagerError::InvalidBoundary)
+        );
+    }
+
+    struct RecordingIssuer(Mutex<Vec<String>>);
+
+    #[async_trait]
+    impl SpaceCredentialIssuer for RecordingIssuer {
+        async fn mint(
+            &self,
+            space_uri: &str,
+            _: &SpaceHttpSignatureKey,
+            _: u64,
+        ) -> Result<IssuedSpaceCredential, CredentialMintError> {
+            self.0.lock().unwrap().push(space_uri.to_owned());
+            Ok(IssuedSpaceCredential {
+                credential: "header.payload.signature".to_owned(),
+                expires_at: CredentialExpiry::from_epoch_seconds(10_000),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn mints_for_the_space_the_boundary_maps_to() {
+        let issuer = Arc::new(RecordingIssuer(Mutex::new(Vec::new())));
+        let manager = SpaceCredentialManager::with_clock(issuer.clone(), fixed_now);
+        let boundary = "did:web:stratos.example.test/crew";
+        manager.get(boundary).await.unwrap();
+        assert_eq!(
+            issuer.0.lock().unwrap().as_slice(),
+            [boundary_to_space_uri(boundary).unwrap()]
         );
     }
 

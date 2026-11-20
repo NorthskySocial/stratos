@@ -1097,7 +1097,8 @@ mod tests {
     }
 
     const FAYE_LIKE_SUBJECT: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
-    const FAYE_SPACE_SUBJECT: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+    const FAYE_SPACE_SUBJECT: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+    const LEGACY_SPACE_SUBJECT: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
     const LIKE: &str = "app.bsky.feed.like";
     const REPOST: &str = "app.bsky.feed.repost";
     const CREW: &str = "did:web:stratos.example.test/crew";
@@ -1268,6 +1269,20 @@ mod tests {
                     Some(boundary(&["bebop"])),
                 ),
                 Outcome::Upsert(expected_interaction(LIKE, "one", FAYE_SPACE_SUBJECT, BEBOP)),
+            ),
+            (
+                "a subject in the previous space spelling is skipped like any unparseable subject",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text(LEGACY_SPACE_SUBJECT))),
+                        None,
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
             ),
             (
                 "an unauthorized boundary becomes a delete",

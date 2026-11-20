@@ -42,10 +42,11 @@ upstream alpha PDS rather than read from the spec.
 2. **Membership decides whose repo the syncer reads.** It is the only write-side
    control that exists. Removing a member does not stop them writing; it stops us
    reading. The syncer iterates the member list. Do not add writer discovery.
-3. **A space record URI has seven segments and starts with the authority**:
-   `at://{authorityDid}/space/{type}/{skey}/{authorDid}/{collection}/{rkey}`.
+3. **A space record URI has six parts after `at:space/` and starts with the authority**:
+   `at:space/{authorityDid}/{type}/{skey}/{authorDid}/{collection}/{rkey}`.
+   Nothing recognises the earlier `at://{authorityDid}/space/...` spelling.
    A custody record keeps the familiar `at://{authorDid}/{collection}/{rkey}`.
-   Code that takes the first segment as the author is wrong for a space record.
+   Code that takes the first part as the author is wrong for a space record.
 
 `zone.stratos.space.feed` must stay published as a `com.atproto.lexicon.schema`
 record with `defs.main.type` of `space`. A user's PDS resolves that NSID before
@@ -148,7 +149,7 @@ into one large module.
 | `blob`        | Reader/Transactor | Blob metadata and content read/write operations                                                                                                                        |
 | `mst`         | Utility           | Merkle Search Tree commit builder (`builder.ts`)                                                                                                                       |
 | `validation`  | Utility           | Stratos-specific validation rules for boundaries and records, including the like, repost and subject rules (`like-rule.ts`, `repost-rule.ts`, `subject.ts`)            |
-| `spaces`      | Utility           | Pure parsing, validation, and formatting of space/record `at://` URIs, plus boundary-to-space-URI mapping (`domain.ts`)                                                |
+| `spaces`      | Utility           | Pure parsing, validation, and formatting of space/record `at:space/` URIs, plus boundary-to-space-URI mapping (`domain.ts`)                                            |
 | `atproto`     | Utility           | CBOR record encoding, CID computation/parsing, CAR block reading, commit-op decoding, and boundary extraction (`index.ts`)                                             |
 | `config`      | Infrastructure    | Zod schemas for storage backend, logging, and Redis env config, plus comma-list helpers (`parseCommaList`, `commaListSchema`) (`index.ts`)                             |
 | `lexicons`    | Infrastructure    | `DefaultLexiconProvider` bundling Stratos + embedded `com.atproto.*` lexicons, plus vendored `app.bsky.feed.like` and `app.bsky.feed.repost` (`index.ts`, `vendored/`) |

@@ -19,7 +19,7 @@ import type { ReplayStore } from './replay-store.js'
  *   - Header `typ` MUST be {@link DELEGATION_TYP}.
  *   - Header `alg` MUST be one of {@link ALLOWED_ALGS} (`ES256K`, `ES256`).
  *   - Header `kid` MUST be exactly {@link ATPROTO_KID} (`"#atproto"`).
- *   - Payload `sub` MUST parse as an `at://` space URI whose
+ *   - Payload `sub` MUST parse as an `at:space/` space URI whose
  *     `spaceDid` equals our configured service DID (we are the authority).
  *   - Payload `aud` MUST be `${serviceDid}#atproto_space_host`.
  *   - Payload `iat`/`exp` MUST be present and currently valid (with skew).

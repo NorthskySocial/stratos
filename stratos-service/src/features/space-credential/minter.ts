@@ -22,7 +22,7 @@ import {
  *     (`"#atproto_space"` OR `"#atproto"`) makes a dedicated `#atproto_space`
  *     entry unnecessary, so we always emit `#atproto`.
  *   - Payload `iss` = the space-authority DID (this service's DID).
- *   - Payload `sub` = the space's `at://` URI.
+ *   - Payload `sub` = the space's `at:space/` URI.
  *   - Payload `iat` = issuance time (unix seconds).
  *   - Payload `exp` = `iat + ttlSeconds` (2h default).
  *   - Payload `jti` = a unique nonce.
@@ -76,7 +76,7 @@ export interface MintSpaceCredentialInput {
   signingKey: Keypair
   /** The space-authority DID → `iss`. */
   issuerDid: string
-  /** The space's `at://` URI → `sub`. */
+  /** The space's `at:space/` URI → `sub`. */
   spaceUri: string
   /** Credential lifetime in seconds → `exp = iat + ttlSeconds`. */
   ttlSeconds: number

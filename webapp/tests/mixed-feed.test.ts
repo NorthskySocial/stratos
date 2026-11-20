@@ -30,7 +30,7 @@ describe('Feed.svelte', () => {
             },
             {
               post: {
-                uri: 'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/two',
+                uri: 'at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/two',
                 cid: 'asuka-cid',
                 author: { did: 'did:plc:asuka' },
                 indexedAt: '1998-04-04T00:00:00.000Z',
@@ -76,7 +76,7 @@ describe('Feed.svelte', () => {
         isPrivate: true,
       },
       {
-        uri: 'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/two',
+        uri: 'at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/two',
         isPrivate: true,
       },
     ])

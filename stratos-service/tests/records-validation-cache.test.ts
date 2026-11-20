@@ -77,7 +77,7 @@ describe('resolveParentBoundaries cache', () => {
 
   it('derives a space-record boundary without opening an authority actor store', async () => {
     const parentUri =
-      'at://did:web:stratos.example/space/zone.stratos.space.feed/general/did:plc:asuka/zone.stratos.feed.post/topic-1'
+      'at:space/did:web:stratos.example/zone.stratos.space.feed/general/did:plc:asuka/zone.stratos.feed.post/topic-1'
     const { ctx, readCount } = await ctxWithParents([])
 
     await expect(

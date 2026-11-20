@@ -403,7 +403,7 @@ mod tests {
 
     const AUTHORITY: &str = "did:web:stratos.example.test";
     const SPIKE_POST: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop1";
-    const FAYE_SPACE_POST: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
+    const FAYE_SPACE_POST: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
     const UPDATED_AT: &str = "2026-11-01T00:00:00.000Z";
 
     fn key() -> StorageKey {
@@ -422,7 +422,11 @@ mod tests {
     }
 
     fn page(cursor: u64, labels: Vec<ModerationLabel>) -> LabelPage {
-        LabelPage { cursor, labels }
+        LabelPage {
+            cursor,
+            labels,
+            skipped_subjects: 0,
+        }
     }
 
     fn database_path(name: &str) -> PathBuf {
@@ -638,7 +642,7 @@ mod tests {
     #[test]
     fn a_staged_page_of_a_taken_down_member_is_not_promoted() {
         const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
-        const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+        const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
         let mut store = EncryptedStore::open_memory(key()).unwrap();
         let faye = "did:plc:fayevalentine";
         store
@@ -1034,8 +1038,8 @@ mod tests {
     #[test]
     fn a_staged_space_page_does_not_readmit_a_taken_down_space_post() {
         const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
-        const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
-        const FAYE_SECOND_POST: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/redtail";
+        const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
+        const FAYE_SECOND_POST: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/redtail";
         let mut store = EncryptedStore::open_memory(key()).unwrap();
         let faye = "did:plc:fayevalentine";
         store
@@ -1096,8 +1100,7 @@ mod tests {
     const FAYE: &str = "did:plc:fayevalentine";
     const JET: &str = "did:plc:jetblack";
     const BEBOP_BOUNDARY: &str = "did:web:stratos.example.test/bebop";
-    const BEBOP_SPACE: &str =
-        "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const BEBOP_SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
 
     fn second_spike_subject() -> LabelSubject {
         LabelSubject::Record {

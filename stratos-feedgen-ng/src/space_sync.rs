@@ -4,7 +4,7 @@ use cid::Cid;
 use serde_json::Value;
 
 use crate::{
-    identifier::{Did, RecordUri},
+    identifier::{Did, FEED_SPACE_TYPE, RecordUri, SpaceUri},
     store::{
         EncryptedStore, InteractionKind, MAX_SUBJECT_URI_BYTES, SpaceStageMutation, SpaceStagePage,
         StoreError, is_utc_timestamp,
@@ -126,7 +126,7 @@ pub fn prepare_space_page(
     page: SpacePage,
     updated_at: &str,
 ) -> Result<PreparedSpacePage, SpaceSyncError> {
-    validate_target(&target)?;
+    let (space, actor) = validate_target(&target)?;
     if !is_utc_timestamp(updated_at) {
         return Err(SpaceSyncError::InvalidTimestamp);
     }
@@ -170,10 +170,7 @@ pub fn prepare_space_page(
     let mut indexed = 0;
     let mut deleted = 0;
     for (_, op) in latest {
-        let uri = format!(
-            "{}/{}/{}/{}",
-            target.space_uri, target.actor_did, op.collection, op.rkey
-        );
+        let uri = space.record_uri(&actor, &op.collection, &op.rkey);
         if !matches!(
             RecordUri::parse_space_record(&uri),
             Ok(RecordUri::Space { .. })
@@ -254,39 +251,28 @@ pub fn stage_space_page(
         })
 }
 
-fn validate_target(target: &SpaceSyncTarget) -> Result<(), SpaceSyncError> {
+fn validate_target(target: &SpaceSyncTarget) -> Result<(SpaceUri, Did), SpaceSyncError> {
     if target.space_uri.len() > MAX_SPACE_URI_BYTES
         || target.boundary.is_empty()
         || target.boundary.len() > 256
         || !target.boundary.is_ascii()
         || target.actor_did.len() > MAX_DID_BYTES
-        || Did::parse(target.actor_did.to_owned()).is_err()
     {
         return Err(SpaceSyncError::InvalidTarget);
     }
-    let probe = format!(
-        "{}/{}/{}/probe",
-        target.space_uri, target.actor_did, POST_COLLECTION
-    );
+    let actor =
+        Did::parse(target.actor_did.to_owned()).map_err(|_| SpaceSyncError::InvalidTarget)?;
+    let space = SpaceUri::parse(&target.space_uri).map_err(|_| SpaceSyncError::InvalidTarget)?;
     let Some((boundary_authority, boundary_key)) = target.boundary.split_once('/') else {
         return Err(SpaceSyncError::InvalidTarget);
     };
-    match RecordUri::parse_space_record(&probe) {
-        Ok(RecordUri::Space {
-            authority,
-            space_type,
-            space_key,
-            author,
-            ..
-        }) if authority.as_str() == boundary_authority
-            && space_type == "zone.stratos.space.feed"
-            && space_key == boundary_key
-            && author.as_str() == target.actor_did =>
-        {
-            Ok(())
-        }
-        _ => Err(SpaceSyncError::InvalidTarget),
+    if space.authority().as_str() != boundary_authority
+        || space.space_type() != FEED_SPACE_TYPE
+        || space.space_key() != boundary_key
+    {
+        return Err(SpaceSyncError::InvalidTarget);
     }
+    Ok((space, actor))
 }
 
 fn has_record_type(value: &Value, collection: &str) -> bool {
@@ -347,7 +333,7 @@ mod tests {
     use crate::store::MAX_SUBJECT_URI_BYTES;
     use crate::store::{EncryptedStore, InteractionKind, PdsSpaceMember, StorageKey};
 
-    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
     const ACTOR: &str = "did:plc:fayevalentine";
     const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
     const NOW: &str = "2026-09-22T00:00:00.000Z";
@@ -798,6 +784,7 @@ mod tests {
                         },
                         neg: false,
                     }],
+                    skipped_subjects: 0,
                 },
                 NOW,
             )
@@ -830,6 +817,7 @@ mod tests {
                         },
                         neg: false,
                     }],
+                    skipped_subjects: 0,
                 },
                 NOW,
             )

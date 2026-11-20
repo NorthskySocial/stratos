@@ -91,7 +91,7 @@ describe('PostCard.svelte', () => {
         reply: {
           root: { uri: mockPost.uri, cid: mockPost.cid },
           parent: {
-            uri: 'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/two',
+            uri: 'at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/two',
             cid: 'asuka-cid',
           },
         },

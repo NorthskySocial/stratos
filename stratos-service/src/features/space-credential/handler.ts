@@ -33,7 +33,7 @@ export const GET_SPACE_CREDENTIAL_METHOD =
  * Input body for {@link GET_SPACE_CREDENTIAL_METHOD}.
  */
 interface GetSpaceCredentialInput {
-  /** The space's `at://` URI to issue a credential for. */
+  /** The space's `at:space/` URI to issue a credential for. */
   space?: string
   /** Optional space-delegation JWT (spec-shaped identity path). */
   delegationToken?: string
@@ -103,7 +103,7 @@ interface MintRequest {
  *
  * Steps:
  *   1. Require a `space` input.
- *   2. Parse `space` as an `at://` space URI; its `spaceDid` MUST equal
+ *   2. Parse `space` as an `at:space/` space URI; its `spaceDid` MUST equal
  *      our configured service DID → else {@link UnknownSpace}.
  *   3. Resolve identity: if a delegation is present, verify it
  *      (its target space MUST equal `space`) and take identity from it; else use
@@ -145,7 +145,7 @@ async function handleGetSpaceCredential(
   }
   const space = input.space
 
-  // Space URI must be a valid `at://` space URI targeting THIS service.
+  // Space URI must be a valid `at:space/` space URI targeting THIS service.
   const parsed = parseSpaceUri(space)
   if (!parsed.ok || parsed.value.spaceDid !== ctx.serviceDid) {
     throw new InvalidRequestError(

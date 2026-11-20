@@ -418,7 +418,7 @@ mod tests {
     use super::{PdsSpacePass, PdsSpaceScheduler, PdsSpaceSyncStatus, run_pass};
 
     const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
-    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
     const DID: &str = "did:plc:fayevalentine";
 
     struct Issuer;

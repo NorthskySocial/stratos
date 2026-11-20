@@ -392,7 +392,7 @@ mod tests {
     };
 
     const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
-    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
     const DID: &str = "did:plc:fayevalentine";
     const NOW: &str = "2026-09-22T00:00:00.000Z";
 

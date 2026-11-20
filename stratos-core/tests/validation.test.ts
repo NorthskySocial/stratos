@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import * as fc from 'fast-check'
+import { AtUri } from '@atproto/syntax'
 import { jsonToLex } from '@atproto/lexicon'
 import {
   parseCid,
@@ -155,7 +158,7 @@ describe('stratos-validation', () => {
 
     it('should pass for a stratos post replying to a PDS-hosted space record', () => {
       const spacePostUri =
-        'at://did:web:stratos.atverkackt.de/space/zone.stratos.space.feed/general/did:plc:or5elrbod5l4vq66ol4gy2eb/zone.stratos.feed.post/3mup74hqt3w25'
+        'at:space/did:web:stratos.atverkackt.de/zone.stratos.space.feed/general/did:plc:or5elrbod5l4vq66ol4gy2eb/zone.stratos.feed.post/3mup74hqt3w25'
       const record = {
         text: "I'm on a non-space PDS and yet this is all private?!",
         boundary: {
@@ -794,5 +797,201 @@ describe('stratos-validation', () => {
 
       expect(StratosValidator.extractBlobs(record)).toEqual([])
     })
+  })
+})
+
+describe('post rule record URIs of both custodies', () => {
+  const config: StratosConfig = {
+    serviceDid: 'did:web:nerv.tokyo.jp',
+    allowedDomains: ['did:web:nerv.tokyo.jp/example-com'],
+    retentionDays: 90,
+  }
+  const validator = new StratosValidator(config)
+  const corpus = JSON.parse(
+    readFileSync(
+      new URL(
+        '../../test/spaces-alignment/november/fixtures/space-uri-conformance.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+  ) as { invalid: Array<{ name: string; input: string }> }
+  const LEGACY_SPACE_RECORD_URI = corpus.invalid.find(
+    (entry) => entry.name === 'the old spelling of a record',
+  )?.input as string
+  const space = 'at:space/did:web:bebop.example/zone.stratos.space.feed/crew'
+  const author = 'did:plc:fayevalentine'
+  const rows: Array<{
+    name: string
+    uri: string
+    stratos: boolean
+    bsky: boolean
+  }> = [
+    {
+      name: 'a custody stratos post',
+      uri: `at://${author}/zone.stratos.feed.post/3k`,
+      stratos: true,
+      bsky: false,
+    },
+    {
+      name: 'a custody bsky post',
+      uri: `at://${author}/app.bsky.feed.post/3k`,
+      stratos: false,
+      bsky: true,
+    },
+    {
+      name: 'a space record of a stratos collection',
+      uri: `${space}/${author}/zone.stratos.feed.post/3k`,
+      stratos: true,
+      bsky: false,
+    },
+    {
+      name: 'a space record of a bsky collection',
+      uri: `${space}/${author}/app.bsky.feed.post/3k`,
+      stratos: false,
+      bsky: true,
+    },
+    {
+      name: 'a legacy space record',
+      uri: LEGACY_SPACE_RECORD_URI,
+      stratos: false,
+      bsky: false,
+    },
+    {
+      name: 'a string that is no URI',
+      uri: 'hello',
+      stratos: false,
+      bsky: false,
+    },
+    {
+      name: 'a seven-part at:// URI',
+      uri: `at://${author}/zone.stratos.feed.post/3k/a/b/c`,
+      stratos: false,
+      bsky: false,
+    },
+    {
+      name: 'a bsky record URI with a trailing part',
+      uri: `at://${author}/app.bsky.feed.post/3k/extra`,
+      stratos: false,
+      bsky: true,
+    },
+    {
+      name: 'a bsky collection URI without a record key',
+      uri: `at://${author}/app.bsky.feed.post`,
+      stratos: false,
+      bsky: true,
+    },
+    {
+      name: 'a bsky record URI with an upper-case scheme',
+      uri: `AT://${author}/app.bsky.feed.post/3k`,
+      stratos: false,
+      bsky: true,
+    },
+    {
+      name: 'a bsky record URI without a scheme',
+      uri: `${author}/app.bsky.feed.post/3k`,
+      stratos: false,
+      bsky: true,
+    },
+  ]
+  const boundary = { values: [{ value: 'did:web:nerv.tokyo.jp/example-com' }] }
+  const assertPost = (extra: Record<string, unknown>) =>
+    validator.assertValid(
+      { text: 'Sortie', boundary, ...extra },
+      'zone.stratos.feed.post',
+    )
+
+  it.each(rows)('classifies $name', ({ uri, stratos, bsky }) => {
+    expect(StratosValidator.isStratosUri(uri)).toBe(stratos)
+    expect(StratosValidator.isBskyUri(uri)).toBe(bsky)
+  })
+
+  it.each(rows)('reply to $name', ({ uri, stratos }) => {
+    const run = () =>
+      assertPost({
+        reply: { parent: { uri, cid: 'c' }, root: { uri, cid: 'c' } },
+      })
+    if (stratos) expect(run).not.toThrow()
+    else
+      expect(run).toThrow(
+        expect.objectContaining({ code: 'CrossNamespaceReply' }),
+      )
+  })
+
+  it.each(rows)('embed of $name', ({ uri, bsky }) => {
+    const run = () => assertPost({ embed: { record: { uri, cid: 'c' } } })
+    if (bsky)
+      expect(run).toThrow(
+        expect.objectContaining({ code: 'CrossNamespaceEmbed' }),
+      )
+    else expect(run).not.toThrow()
+  })
+
+  it.each(['parent', 'root'] as const)(
+    'refuses a legacy space record as the reply %s alone',
+    (field) => {
+      const good = { uri: `at://${author}/zone.stratos.feed.post/3k`, cid: 'c' }
+      const bad = { uri: LEGACY_SPACE_RECORD_URI, cid: 'c' }
+      const reply =
+        field === 'parent'
+          ? { parent: bad, root: good }
+          : { parent: good, root: bad }
+      expect(() => assertPost({ reply })).toThrow(
+        expect.objectContaining({ code: 'CrossNamespaceReply' }),
+      )
+    },
+  )
+
+  it('treats a legacy space record in a media embed as any string that names no collection', () => {
+    expect(() =>
+      assertPost({
+        embed: {
+          media: { record: { uri: LEGACY_SPACE_RECORD_URI, cid: 'c' } },
+        },
+      }),
+    ).not.toThrow()
+  })
+})
+
+describe('isBskyUri against the upstream parser', () => {
+  const refusedBefore = (uri: string): boolean => {
+    try {
+      return new AtUri(uri).collection.startsWith('app.bsky.')
+    } catch {
+      return false
+    }
+  }
+  const scheme = fc.constantFrom('at://', 'AT://', 'At://', '')
+  const repo = fc.constantFrom('did:plc:spikespiegel', 'did:web:bebop.example')
+  const collection = fc.constantFrom(
+    'app.bsky.feed.post',
+    'app.bsky.actor.profile',
+    'zone.stratos.feed.post',
+    'com.example.misc',
+  )
+  const tail = fc.array(fc.constantFrom('3k', 'self', 'faye', 'ein'), {
+    maxLength: 4,
+  })
+
+  it('refuses every string with an upstream-readable bsky collection that it refused before', () => {
+    fc.assert(
+      fc.property(scheme, repo, collection, tail, (head, did, nsid, rest) => {
+        const uri = `${head}${[did, nsid, ...rest].join('/')}`
+        fc.pre(refusedBefore(uri))
+        expect(StratosValidator.isBskyUri(uri)).toBe(true)
+      }),
+      { numRuns: 500 },
+    )
+  })
+
+  it('refuses a bsky collection at any path depth from one to six parts', () => {
+    fc.assert(
+      fc.property(scheme, fc.integer({ min: 1, max: 6 }), (head, depth) => {
+        const parts = ['did:plc:rei', 'app.bsky.feed.post', 'a', 'b', 'c', 'd']
+        const uri = `${head}${parts.slice(0, depth).join('/')}`
+        fc.pre(refusedBefore(uri))
+        expect(StratosValidator.isBskyUri(uri)).toBe(true)
+      }),
+    )
   })
 })

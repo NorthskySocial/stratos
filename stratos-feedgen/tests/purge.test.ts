@@ -23,7 +23,7 @@ const SPACE_BOUNDARY = `${STRATOS_DID}/space`
 const OTHER_BOUNDARY = `${STRATOS_DID}/other`
 
 function spaceUriFor(boundary: string): string {
-  return `at://${STRATOS_DID}/space/zone.stratos.space.feed/${boundary.split('/')[1]}`
+  return `at:space/${STRATOS_DID}/zone.stratos.space.feed/${boundary.split('/')[1]}`
 }
 
 let store: FeedgenStore & ProjectionCompactionStore

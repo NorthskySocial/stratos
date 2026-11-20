@@ -87,6 +87,11 @@
   },
   "fixtures": [
     {
+      "path": "blob-url-space-record.json",
+      "sha256": "d420e8d0b0105fa926fe11f4aaf6c49a2856ef7ed88431b3fa2d2649b16054dc",
+      "classification": "target-uri-conformance"
+    },
+    {
       "path": "commit-and-ops.json",
       "sha256": "f2009d7e0f0461788f1e3f3bbf1f44312f20dfa0786d1985b6fa8d415c5eac16",
       "classification": "upstream-legacy-uri"
@@ -110,6 +115,11 @@
       "path": "lthash.json",
       "sha256": "6a844c5135ac5814a7aa417ba10fbb121c8fd40400372135a56f30039f3f47eb",
       "classification": "upstream-uri-free"
+    },
+    {
+      "path": "space-uri-conformance.json",
+      "sha256": "e93d3aee3a8c785f26a3ece5619dd0f1b500316d59561ee1e1a5504d5c425161",
+      "classification": "target-uri-conformance"
     },
     {
       "path": "star-framing.json",

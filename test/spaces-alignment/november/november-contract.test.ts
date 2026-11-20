@@ -139,6 +139,7 @@ const URI_INVENTORY_IDS = [
   'uri-lexicon-uri-fields',
   'text-lexicon-legacy-uri-spelling',
   'text-client-and-docs-legacy-uri-spelling',
+  'text-docs-legacy-uri-spelling',
   'tests-package-uri-literals',
   'tests-rust-uri-literals',
 ]
@@ -163,9 +164,10 @@ const SWEEP_ROOTS = [
 const SWEEP_SKIPPED_DIRECTORY = /^(node_modules|target|dist|build|\..*)$/
 const SWEEP_TEXT_FILE = /\.(ts|tsx|js|mjs|svelte|rs|json|md|sql|toml)$/
 // A repository path such as lexicons/zone/stratos/space/feed.json has a
-// /space/ segment but is not a URI, so the legacy form is matched only after
-// an at:// scheme. The case-insensitive spaceuri marker also catches
-// spaceUri, SpaceUri, parseSpaceUri, formatSpaceUri and boundaryToSpaceUri.
+// /space/ segment but is not a URI, so the earlier spelling is matched only
+// after an at:// scheme. The at:space/ marker finds the current spelling, and
+// the case-insensitive spaceuri marker also catches spaceUri, SpaceUri,
+// parseSpaceUri, formatSpaceUri and boundaryToSpaceUri.
 //
 // The generic markers find code that handles a space URI under a plain name.
 // The at:// prefix check is matched only on a value named as a URI: the
@@ -173,8 +175,11 @@ const SWEEP_TEXT_FILE = /\.(ts|tsx|js|mjs|svelte|rs|json|md|sql|toml)$/
 // handle, not a record. A bare startsWith('at://') is not a marker for that
 // reason. The column markers name columns that hold record URIs in the
 // projection, the backlink index and the label log.
+const EARLIER_SPACE_URI = /at:\/\/[^\s'"`]*\/space\//
+const CURRENT_SPACE_URI = /at:space\//
 const SPACE_URI_MARKERS = [
-  /at:\/\/[^\s'"`]*\/space\//,
+  EARLIER_SPACE_URI,
+  CURRENT_SPACE_URI,
   /spaceuri/i,
   /space_uri/,
   /parseRecordUri/,
@@ -188,6 +193,23 @@ const SPACE_URI_MARKERS = [
   /\blinkTo\b/,
 ]
 
+// Paths that may still spell a space URI in the earlier at://.../space/...
+// form on a line that does not say legacy. Each holds until the work named in
+// its reason lands.
+const EARLIER_SPELLING_EXEMPTIONS: Record<string, string> = {
+  docs: 'prose and examples wait for the cutover documentation work',
+  'test/scripts': 'end-to-end scripts wait for the cutover work',
+  'test/feedgen-harness': 'the harness waits for the cutover work',
+  clubhouse:
+    'the room configuration check and its tests wait for the client-flow work',
+  'webapp/src/lib/inspector.ts':
+    'the record inspector waits for the client-flow work',
+  'webapp/tests/inspector.test.ts':
+    'the record inspector tests wait for the client-flow work',
+  'stratos-feedgen-ng/src/store/migrations.rs':
+    'migration tests describe rows an older build wrote, and migrations are not edited',
+}
+
 // Files that read, compare or carry a record or space URI. Each must stay
 // under the paths of the named row, whether or not a marker matches it, so a
 // consumer that uses only generic names cannot drop out of the ledger.
@@ -197,6 +219,8 @@ const KNOWN_URI_CONSUMERS: Record<string, string> = {
   'clubhouse/src/lib/components/RoomFeed.svelte': 'uri-clubhouse-topic-route',
   'clubhouse/src/lib/feed-authors.ts': 'uri-clubhouse-topic-route',
   'clubhouse/src/lib/post-writer.ts': 'uri-clubhouse-space-map',
+  'stratos-client/src/space-uri.ts': 'uri-client-formatter',
+  'stratos-feedgen-ng/src/identifier.rs': 'uri-rust-record-uri',
   'stratos-service/src/oauth/handlers/room-post.ts': 'uri-room-post-references',
   'stratos-feedgen-ng/src/store/read.rs': 'uri-feed-read-predicates',
   'stratos-feedgen-ng/src/cursor.rs': 'uri-feed-pagination-cursors',
@@ -275,6 +299,22 @@ function sweepFiles(directory: string): string[] {
       if (entry.isDirectory()) return sweepFiles(path)
       return SWEEP_TEXT_FILE.test(entry.name) ? [path] : []
     })
+}
+
+function isExemptFromLegacyLines(file: string): boolean {
+  return Object.keys(EARLIER_SPELLING_EXEMPTIONS).some((path) =>
+    coversPath(path, file),
+  )
+}
+
+function earlierSpellingWithoutLegacy(file: string): string[] {
+  return readFileSync(resolve(REPO_ROOT, file), 'utf8')
+    .split('\n')
+    .flatMap((line, index) =>
+      EARLIER_SPACE_URI.test(line) && !/legacy/i.test(line)
+        ? [`${file}:${index + 1}`]
+        : [],
+    )
 }
 
 function isCoveredByRowPath(file: string, rows: LedgerRow[]): boolean {
@@ -501,6 +541,13 @@ describe('november applicability ledger', () => {
     expect(uncovered.join('\n')).toBe('')
   })
 
+  it('names the earlier spelling only on lines that say legacy', () => {
+    const unnamed = SWEEP_ROOTS.flatMap(sweepFiles)
+      .filter((file) => !isExemptFromLegacyLines(file))
+      .flatMap(earlierSpellingWithoutLegacy)
+    expect(unnamed).toEqual([])
+  })
+
   it('keeps every known uri consumer under the paths of its row', () => {
     const byId = rowsById(rows)
     const lost = Object.entries(KNOWN_URI_CONSUMERS)
@@ -536,6 +583,19 @@ describe('november applicability ledger', () => {
       `citation-probe: ${cursor}:${past}-${past + 1} is outside the file (${past - 1} lines)`,
       'citation-probe: bebop/swordfish.rs:1 names no unique file',
     ])
+  })
+
+  it('finds the files that hold the current spelling by its marker', () => {
+    const found = SWEEP_ROOTS.flatMap(sweepFiles).filter((file) =>
+      CURRENT_SPACE_URI.test(readFileSync(resolve(REPO_ROOT, file), 'utf8')),
+    )
+    expect(found).toEqual(
+      expect.arrayContaining([
+        'stratos-core/src/spaces/domain.ts',
+        'stratos-client/src/space-uri.ts',
+        'stratos-feedgen-ng/src/identifier.rs',
+      ]),
+    )
   })
 
   it('finds the known consumers the sweep must never lose', () => {

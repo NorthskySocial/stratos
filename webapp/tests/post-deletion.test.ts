@@ -88,7 +88,7 @@ describe('deletePost', () => {
 
     await deletePost({
       post: post({
-        uri: `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
+        uri: `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
         isPrivate: true,
       }),
       session: session(fetchHandler),
@@ -106,7 +106,7 @@ describe('deletePost', () => {
       headers: { 'content-type': 'application/json' },
     })
     expect(JSON.parse(request.body)).toEqual({
-      space: 'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve',
+      space: 'at:space/did:web:stratos.example/zone.stratos.space.feed/nerve',
       repo: DID,
       collection: 'zone.stratos.feed.post',
       rkey: 'three',
@@ -146,7 +146,7 @@ describe('deletePost', () => {
     await expect(
       deletePost({
         post: post({
-          uri: `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
+          uri: `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
           isPrivate: true,
         }),
         session: session(
@@ -163,7 +163,7 @@ describe('deletePost', () => {
     await expect(
       deletePost({
         post: post({
-          uri: `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
+          uri: `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
           isPrivate: true,
         }),
         session: session(
@@ -186,7 +186,7 @@ describe('deletePost', () => {
     await expect(
       deletePost({
         post: post({
-          uri: `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
+          uri: `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
           isPrivate: true,
         }),
         session: staleSession,

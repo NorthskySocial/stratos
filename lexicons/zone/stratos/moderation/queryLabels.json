@@ -25,7 +25,7 @@
               "type": "string",
               "maxLength": 2048
             },
-            "description": "Only return labels on these subjects. Each item is a record URI in repo or space form, or an account DID."
+            "description": "Only return labels on these subjects. Each item is a record URI in repo form (at://{did}/{collection}/{rkey}) or space form (at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey}), or an account DID."
           }
         }
       },

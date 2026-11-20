@@ -18,7 +18,7 @@
         "seq": 2,
         "subject": {
           "$type": "zone.stratos.moderation.defs#recordSubject",
-          "uri": "at://did:web:stratos.test/space/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/eva-02"
+          "uri": "at:space/did:web:stratos.test/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/eva-02"
         },
         "val": "!takedown",
         "neg": false,
@@ -54,7 +54,7 @@
         "seq": 2,
         "subject": {
           "$type": "zone.stratos.moderation.defs#recordSubject",
-          "uri": "at://did:web:stratos.test/space/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/eva-02"
+          "uri": "at:space/did:web:stratos.test/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/eva-02"
         },
         "val": "!takedown",
         "neg": false,

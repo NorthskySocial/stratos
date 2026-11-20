@@ -14,7 +14,7 @@ use crate::{
     credential_manager::boundary_to_space_uri,
     identifier::RecordUri,
     lifecycle::ControlLifecycle,
-    moderation_label::LabelSubject,
+    moderation_label::{LabelPage, LabelSubject},
     store::ActorEnrollment,
     telemetry::{FeedTelemetry, LabelPollOutcome},
 };
@@ -235,6 +235,9 @@ async fn poll_to_caught_up(
             Ok(page) => page,
             Err(error) => return LabelCycle::Failed(outcome_for(&error)),
         };
+        if let Some(line) = skipped_subjects_line(&page) {
+            eprintln!("{line}");
+        }
         // The lexicon permits short or empty pages while more remain, so only a
         // response that does not advance the cursor proves the log is drained.
         if page.cursor == cursor {
@@ -457,19 +460,10 @@ async fn replay_author(
 /// The boundary a space-form record belongs to, when it is the one boundary
 /// space type this feed generator syncs.
 fn member_boundary(uri: &str) -> Option<String> {
-    let Ok(RecordUri::Space {
-        authority,
-        space_type,
-        space_key,
-        ..
-    }) = RecordUri::parse(uri)
-    else {
-        return None;
-    };
-    let authority = authority.as_str();
-    let boundary = format!("{authority}/{space_key}");
+    let space = RecordUri::parse(uri).ok()?.space()?;
+    let boundary = format!("{}/{}", space.authority(), space.space_key());
     let expected = boundary_to_space_uri(&boundary).ok()?;
-    (expected == format!("at://{authority}/space/{space_type}/{space_key}")).then_some(boundary)
+    (expected == space.to_string()).then_some(boundary)
 }
 
 /// Counts enforcement failures by kind, so a cycle logs each kind once.
@@ -489,6 +483,16 @@ impl EnforcementFailures {
             })
             .collect()
     }
+}
+
+/// Carries the count only; a skipped subject is a string nobody vouched for.
+fn skipped_subjects_line(page: &LabelPage) -> Option<String> {
+    (page.skipped_subjects > 0).then(|| {
+        format!(
+            "event=label_subjects_skipped count={}",
+            page.skipped_subjects
+        )
+    })
 }
 
 fn failure_line(outcome: LabelPollOutcome) -> String {
@@ -536,7 +540,7 @@ mod tests {
 
     use super::{
         AccountEnforcement, LabelCycle, LabelPoller, LabelTiming, RecordEnforcement, failure_line,
-        run_cycle,
+        run_cycle, skipped_subjects_line,
     };
     use crate::{
         actor_stream::{ActorPool, ActorStreamConfig},
@@ -547,6 +551,7 @@ mod tests {
         feed_service::{FeedQuery, FeedServiceError},
         feeds::{FeedDescription, FeedRegistry},
         lifecycle::ControlLifecycle,
+        moderation_label::LabelPage,
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         service::ProjectionReader,
         service_auth::ServiceSigningKey,
@@ -824,6 +829,48 @@ mod tests {
         assert_eq!(responder.requested_cursors(), [0, 2, 4]);
         assert!(readiness.lock().unwrap().is_ready());
         assert!(serve_feed(&lifecycle).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_takedown_of_an_unparseable_uri_does_not_stall_the_label_cursor() {
+        const LEGACY_FAYE_POST: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:faye/zone.stratos.feed.post/redtail";
+        let responder = respond_by_cursor([
+            (
+                0,
+                label_page(3, &[(1, SPIKE_POST), (2, LEGACY_FAYE_POST), (3, FAYE_POST)]),
+            ),
+            (3, label_page(3, &[])),
+        ])
+        .await;
+        let (lifecycle, readiness) = lifecycle_with(Arc::new(FeedTelemetry::disabled()));
+        reconcile_session(&lifecycle);
+
+        let cycle = run_cycle(
+            &lifecycle,
+            client(&responder).as_ref(),
+            &enforcement(&responder, &lifecycle),
+            &record_enforcement(),
+            &FeedTelemetry::disabled(),
+        )
+        .await;
+
+        assert_eq!(cycle, LabelCycle::CaughtUp);
+        assert_eq!(lifecycle.label_cursor().unwrap(), 3);
+        assert!(readiness.lock().unwrap().is_ready());
+    }
+
+    #[test]
+    fn logs_the_skipped_count_of_a_page_and_never_a_uri() {
+        let page = |skipped_subjects| LabelPage {
+            cursor: 1,
+            labels: Vec::new(),
+            skipped_subjects,
+        };
+        assert_eq!(skipped_subjects_line(&page(0)), None);
+        assert_eq!(
+            skipped_subjects_line(&page(3)).as_deref(),
+            Some("event=label_subjects_skipped count=3")
+        );
     }
 
     #[tokio::test]
@@ -1483,10 +1530,10 @@ mod tests {
 
     const SPIKE_SECOND_POST: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop2";
     const SPACE_BOUNDARY: &str = "did:web:stratos.example.test/bebop";
-    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
     const FAYE_VALENTINE: &str = "did:plc:fayevalentine";
-    const FAYE_SPACE_POST: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
-    const FAYE_SECOND_SPACE_POST: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/redtail";
+    const FAYE_SPACE_POST: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
+    const FAYE_SECOND_SPACE_POST: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/redtail";
     const SWORDFISH_BYTES: &[u8] = b"swordfish";
 
     fn swordfish_cid() -> String {
@@ -2293,8 +2340,33 @@ mod tests {
         assert_eq!(super::member_boundary(SPIKE_POST), None);
         assert_eq!(
             super::member_boundary(
-                "at://did:web:stratos.example.test/space/zone.stratos.space.other/bebop/did:plc:fayevalentine/zone.stratos.feed.post/swordfish"
+                "at:space/did:web:stratos.example.test/zone.stratos.space.other/bebop/did:plc:fayevalentine/zone.stratos.feed.post/swordfish"
             ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_negated_record_in_the_previous_spelling_has_nothing_to_replay() {
+        const LEGACY_CREW_POST: &str = "at://did:web:bebop.example/space/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
+        let (lifecycle, _readiness) = lifecycle_with(Arc::new(FeedTelemetry::disabled()));
+
+        assert_eq!(super::replay_scope(&lifecycle, LEGACY_CREW_POST), Ok(None));
+    }
+
+    #[test]
+    fn member_boundary_follows_the_canonical_space_spelling() {
+        const CREW_POST: &str = "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
+        const OTHER_TYPE_POST: &str = "at:space/did:web:bebop.example/zone.stratos.space.chat/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
+        const LEGACY_CREW_POST: &str = "at://did:web:bebop.example/space/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish";
+        assert_eq!(
+            super::member_boundary(CREW_POST).as_deref(),
+            Some("did:web:bebop.example/crew")
+        );
+        assert_eq!(super::member_boundary(OTHER_TYPE_POST), None);
+        assert_eq!(super::member_boundary(LEGACY_CREW_POST), None);
+        assert_eq!(
+            super::member_boundary("at://did:plc:fayevalentine/zone.stratos.feed.post/swordfish"),
             None
         );
     }

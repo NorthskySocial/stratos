@@ -459,7 +459,8 @@ export const stratosLexicons: LexiconDoc[] = [
         },
         "spaceUri": {
           "type": "string",
-          "format": "uri"
+          "format": "uri",
+          "description": "The space's URI, at:space/{authority}/{type}/{skey}."
         },
         "host": {
           "type": "string",
@@ -1566,7 +1567,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "properties": {
           "uri": {
             "type": "string",
-            "description": "Exact indexed post URI, including space record URIs."
+            "description": "Exact indexed post URI: at://{did}/{collection}/{rkey}, or at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey} for a space record."
           },
           "cid": {
             "type": "string",
@@ -1664,7 +1665,7 @@ export const stratosLexicons: LexiconDoc[] = [
       "properties": {
         "uri": {
           "type": "string",
-          "description": "AT URI or permissioned space record URI."
+          "description": "Record URI: at://{did}/{collection}/{rkey} for a Stratos-hosted post, or at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey} for a permissioned space record."
         },
         "cid": {
           "type": "string",
@@ -1981,7 +1982,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "uri": {
           "type": "string",
           "maxLength": 2048,
-          "description": "The record's at:// URI, either at://{did}/{collection}/{rkey} or the space form at://{authority}/space/{type}/{skey}/{author}/{collection}/{rkey}. Declared as a plain string because the at-uri format rejects URIs with more than two path segments."
+          "description": "The record's URI, either at://{did}/{collection}/{rkey} or the space form at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey}. Declared as a plain string because the at-uri format does not accept the space form."
         },
         "cid": {
           "type": "string",
@@ -2031,7 +2032,7 @@ export const stratosLexicons: LexiconDoc[] = [
               "type": "string",
               "maxLength": 2048
             },
-            "description": "Only return labels on these subjects. Each item is a record URI in repo or space form, or an account DID."
+            "description": "Only return labels on these subjects. Each item is a record URI in repo form (at://{did}/{collection}/{rkey}) or space form (at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey}), or an account DID."
           }
         }
       },
@@ -2897,7 +2898,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "properties": {
           "space": {
             "type": "string",
-            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
+            "description": "The space's URI (at:space/{did}/{type}/{skey}). This is a space URI in the form above; upstream's space-ref format (atproto#5187) is expected to adopt it. Declared as a plain string until @atproto/lexicon supports a matching format. Its space DID must equal this service's DID."
           },
           "repo": {
             "type": "string",
@@ -2968,7 +2969,7 @@ export const stratosLexicons: LexiconDoc[] = [
           "properties": {
             "space": {
               "type": "string",
-              "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
+              "description": "The space's URI (at:space/{did}/{type}/{skey}). This is a space URI in the form above; upstream's space-ref format (atproto#5187) is expected to adopt it. Declared as a plain string until @atproto/lexicon supports a matching format. Its space DID must equal this service's DID."
             },
             "delegationToken": {
               "type": "string",
@@ -3041,7 +3042,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "properties": {
           "space": {
             "type": "string",
-            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
+            "description": "The space's URI (at:space/{did}/{type}/{skey}). This is a space URI in the form above; upstream's space-ref format (atproto#5187) is expected to adopt it. Declared as a plain string until @atproto/lexicon supports a matching format. Its space DID must equal this service's DID."
           },
           "repo": {
             "type": "string",
@@ -3113,7 +3114,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "properties": {
           "space": {
             "type": "string",
-            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
+            "description": "The space's URI (at:space/{did}/{type}/{skey}). This is a space URI in the form above; upstream's space-ref format (atproto#5187) is expected to adopt it. Declared as a plain string until @atproto/lexicon supports a matching format. Its space DID must equal this service's DID."
           },
           "limit": {
             "type": "integer",

@@ -21,7 +21,7 @@ const SERVICE_DID = 'did:web:bebop.example'
 const SPIKE_DID = 'did:plc:spikespiegel7777'
 const POST = 'zone.stratos.feed.post'
 const REPO_URI = `at://${SPIKE_DID}/${POST}/3kbebop`
-const SPACE_PREFIX = `at://${SERVICE_DID}/space/zone.stratos.space.feed/3kswordfish`
+const SPACE_PREFIX = `at:space/${SERVICE_DID}/zone.stratos.space.feed/3kswordfish`
 const SPACE_URI = `${SPACE_PREFIX}/${SPIKE_DID}/${POST}/3kbebop`
 const CID = 'bafyreigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi'
 
@@ -52,7 +52,7 @@ describe('parseLabelSubject', () => {
     })
   })
 
-  it('accepts a seven-segment URI with the author taken from segment 5', () => {
+  it('accepts a six-part URI with the author taken from part 4', () => {
     const result = record(SPACE_URI, CID)
     expect(result.ok).toBe(true)
     if (!result.ok || result.value.kind !== 'space-record') {
@@ -75,8 +75,8 @@ describe('parseLabelSubject', () => {
     ['a 2-component repo URI', `at://${SPIKE_DID}/${POST}`],
     ['a 4-component repo URI', `at://${SPIKE_DID}/${POST}/3kbebop/extra`],
     ['a trailing slash', `${REPO_URI}/`],
-    ['a 6-segment space URI', `${SPACE_PREFIX}/${SPIKE_DID}/${POST}`],
-    ['an 8-segment space URI', `${SPACE_URI}/extra`],
+    ['a 5-part space URI', `${SPACE_PREFIX}/${SPIKE_DID}/${POST}`],
+    ['a 7-part space URI', `${SPACE_URI}/extra`],
     ['a non-at:// scheme', `https://${SPIKE_DID}/${POST}/3kbebop`],
     ['a query string', `${REPO_URI}?foo=bar`],
     ['a fragment', `${REPO_URI}#frag`],
@@ -438,5 +438,43 @@ describe('subjectQueryCursor', () => {
 
   it('never moves behind the input cursor', () => {
     expect(subjectQueryCursor(50, 40)).toBe('50')
+  })
+})
+
+describe('legacy space URIs as label subjects', () => {
+  const LEGACY_SPACE_URI = `at://${SERVICE_DID}/space/zone.stratos.space.feed/3kswordfish`
+  const LEGACY_SPACE_RECORD_URI = `${LEGACY_SPACE_URI}/${SPIKE_DID}/${POST}/3kbebop`
+
+  it.each([
+    ['a legacy space', LEGACY_SPACE_URI],
+    ['a legacy space record', LEGACY_SPACE_RECORD_URI],
+  ])('refuses %s through the hosted-record parse', (_name, uri) => {
+    const result = record(uri)
+    expectInvalidSubject(result)
+    if (!result.ok) {
+      expect(result.error.spacesCode).toBeUndefined()
+      expect(result.error.message).toContain('components')
+    }
+  })
+
+  it('refuses a legacy space record in a subject filter', () => {
+    const result = parseSubjectFilter([SPIKE_DID, LEGACY_SPACE_RECORD_URI])
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('invalid-subject')
+  })
+
+  it('chooses the space parse by the at:space/ prefix and keeps the submitted string as the key', () => {
+    const result = record(SPACE_URI, CID)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.kind).toBe('space-record')
+    expect(labelSubjectKey(result.value)).toBe(SPACE_URI)
+  })
+
+  it('refuses a space-prefixed string that is not a record without trying the repo form', () => {
+    const result = record(SPACE_PREFIX)
+    expectInvalidSubject(result)
+    if (!result.ok)
+      expect(result.error.spacesCode).toBe('invalid-component-count')
   })
 })

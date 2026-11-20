@@ -52,6 +52,15 @@ export {
   type VerifyAttestationOptions,
 } from './attestation.js'
 export {
+  boundaryToSpaceUri,
+  parseSpaceRecordUri,
+  parseSpaceUri,
+  type BoundarySpaceUriResult,
+  type SpaceRecordUriParts,
+  type SpaceUriParseResult,
+  type SpaceUriParts,
+} from './space-uri.js'
+export {
   STRATOS_SCOPES,
   buildCollectionScope,
   buildRpcScope,
@@ -59,7 +68,6 @@ export {
 } from './scopes.js'
 export {
   applyBoundaryWrites,
-  boundaryToSpaceUri,
   BoundaryWriteError,
   createBoundaryRecord,
   deleteBoundaryRecord,
@@ -67,7 +75,6 @@ export {
   ScopeUpgradeRequiredError,
   type ApplyBoundaryWritesInput,
   type ApplyBoundaryWritesOutput,
-  type BoundarySpaceUriResult,
   type BoundaryWriteAction,
   type BoundaryWriteClient,
   type BoundaryWriteOperation,

@@ -361,8 +361,8 @@ describe('isEligibleSubject for a space-form subject', () => {
             `${eligibleSpaceFacts.uri}/`,
             `${eligibleSpaceFacts.uri}#frag`,
             `${eligibleSpaceFacts.uri}/extra`,
-            eligibleSpaceFacts.uri.replace('at://', 'AT://'),
-            eligibleSpaceFacts.uri.replace('/space/', '/Space/'),
+            eligibleSpaceFacts.uri.replace('at:space/', 'AT:space/'),
+            eligibleSpaceFacts.uri.replace('at:space/', 'at:Space/'),
             eligibleSpaceFacts.uri.replace(
               `/${SPACE_TYPE}/`,
               `/${SPACE_TYPE}/./`,
@@ -476,7 +476,7 @@ describe('the canonical uri parsers', () => {
 })
 
 describe('the canonical uri parsers on spellings that nearly pass', () => {
-  const SPACE_PREFIX = `at://${SERVICE_DID}/space/${SPACE_TYPE}/engineering/${ASUKA}/${POST}`
+  const SPACE_PREFIX = `at:space/${SERVICE_DID}/${SPACE_TYPE}/engineering/${ASUKA}/${POST}`
   const spaceSuffixes = ['/eva02/', '/eva02?q=1', '/eva02#f', '/eva02//', '']
 
   it.each(spaceSuffixes)('refuse the space record uri ending %j', (suffix) => {
@@ -561,4 +561,22 @@ describe('the canonical uri parsers on spellings that nearly pass', () => {
       expect(isEligibleSubject(facts, expected)).toBe(false)
     },
   )
+})
+
+describe('legacy space record URIs', () => {
+  const LEGACY_SPACE_RECORD_URI = `at://${SERVICE_DID}/space/${SPACE_TYPE}/engineering/${ASUKA}/${POST}/eva02`
+
+  it('are refused by both canonical parsers', () => {
+    expect(parseCanonicalSpaceRecordUri(LEGACY_SPACE_RECORD_URI)).toBeNull()
+    expect(parseCanonicalRepoUri(LEGACY_SPACE_RECORD_URI)).toBeNull()
+  })
+
+  it('make a space subject ineligible', () => {
+    expect(
+      isEligibleSubject(
+        { ...eligibleSpaceFacts, uri: LEGACY_SPACE_RECORD_URI },
+        expected,
+      ),
+    ).toBe(false)
+  })
 })

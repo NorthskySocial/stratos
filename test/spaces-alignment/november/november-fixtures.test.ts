@@ -13,6 +13,7 @@ const CLASSIFICATIONS = [
   'rfc',
   'upstream-uri-free',
   'target-uri-synthetic',
+  'target-uri-conformance',
 ]
 const HEX_64 = /^[0-9a-f]{64}$/
 const LEGACY_SPACE_URI = /at:\/\/[^"\s]*\/space\//
@@ -227,9 +228,40 @@ describe('november fixture attribution', () => {
       (name) =>
         LEGACY_SPACE_URI.test(
           readFileSync(resolve(FIXTURES_DIR, name), 'utf8'),
-        ) && loadFixture(name).header.classification !== 'upstream-legacy-uri',
+        ) &&
+        !['upstream-legacy-uri', 'target-uri-conformance'].includes(
+          loadFixture(name).header.classification,
+        ),
     )
     expect(wrong).toEqual([])
+  })
+
+  it('lets a conformance file hold a legacy space uri only as a flagged invalid input', () => {
+    const problems: string[] = []
+    let checked = 0
+    for (const name of names) {
+      const fixture = loadFixture(name)
+      if (fixture.header.classification !== 'target-uri-conformance') continue
+      checked += 1
+      if (fixture.header.upstreamVerified !== false)
+        problems.push(`${name}: upstreamVerified`)
+      const invalid = (fixture['invalid'] ?? []) as Array<{
+        input: string
+        legacy: boolean
+      }>
+      const rest = { ...fixture, invalid: [] }
+      if (LEGACY_SPACE_URI.test(JSON.stringify(rest)))
+        problems.push(`${name}: legacy uri outside invalid`)
+      for (const entry of invalid) {
+        if (LEGACY_SPACE_URI.test(entry.input) && entry.legacy !== true)
+          problems.push(`${name}: unflagged legacy input ${entry.input}`)
+      }
+      for (const key of fieldKeys(fixture)) {
+        if (CRYPTO_FIELD_NAME.test(key)) problems.push(`${name}: ${key}`)
+      }
+    }
+    expect(problems).toEqual([])
+    expect(checked).toBeGreaterThan(0)
   })
 
   it('keeps synthetic target uri files free of legacy uris and upstream claims', () => {

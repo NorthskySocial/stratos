@@ -37,12 +37,12 @@ describe('boundaryToSpaceUri', () => {
 
     expect(boundaryToSpaceUri(`${did}/${name}`, spaceType)).toEqual({
       ok: true,
-      value: `at://${did}/space/${spaceType}/${name}`,
+      value: `at:space/${did}/${spaceType}/${name}`,
     })
     expect(spaceType).toHaveLength(MAX_NSID_LENGTH)
     expect(boundaryToSpaceUri(`${SERVICE_DID}/a`, SHORTEST_NSID)).toEqual({
       ok: true,
-      value: `at://${SERVICE_DID}/space/${SHORTEST_NSID}/a`,
+      value: `at:space/${SERVICE_DID}/${SHORTEST_NSID}/a`,
     })
   })
 

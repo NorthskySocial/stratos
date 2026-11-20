@@ -46,7 +46,7 @@
         "uri": {
           "type": "string",
           "maxLength": 2048,
-          "description": "The record's at:// URI, either at://{did}/{collection}/{rkey} or the space form at://{authority}/space/{type}/{skey}/{author}/{collection}/{rkey}. Declared as a plain string because the at-uri format rejects URIs with more than two path segments."
+          "description": "The record's URI, either at://{did}/{collection}/{rkey} or the space form at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey}. Declared as a plain string because the at-uri format does not accept the space form."
         },
         "cid": {
           "type": "string",

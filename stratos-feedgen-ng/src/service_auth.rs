@@ -261,7 +261,7 @@ mod tests {
             &key,
             SpaceDelegationClaims {
                 issuer: "did:web:feedgen.example.test",
-                space_uri: "at://did:web:stratos.example.test/space/zone.stratos.space.feed/crew",
+                space_uri: "at:space/did:web:stratos.example.test/zone.stratos.space.feed/crew",
                 authority_did: "did:web:stratos.example.test",
                 jti: "nonce",
             },
@@ -296,6 +296,38 @@ mod tests {
     }
 
     #[test]
+    fn a_delegation_for_a_boundary_names_the_space_the_boundary_maps_to() {
+        let key = ServiceSigningKey::from_hex(
+            "2fe8e925727a16e4970a5b0a556d9f8263b7c6b894885ca2857c8878938aa97b",
+        )
+        .unwrap();
+        let boundary = "did:web:stratos.example.test/crew";
+        let space_uri = crate::credential_manager::boundary_to_space_uri(boundary).unwrap();
+        let token = mint_space_delegation(
+            &key,
+            SpaceDelegationClaims {
+                issuer: "did:web:feedgen.example.test",
+                space_uri: &space_uri,
+                authority_did: "did:web:stratos.example.test",
+                jti: "nonce",
+            },
+            1_000,
+        )
+        .unwrap();
+        let encoded_claims = token.split('.').nth(1).unwrap();
+        let claims: serde_json::Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded_claims).unwrap()).unwrap();
+        assert_eq!(
+            claims["sub"],
+            crate::credential_manager::boundary_to_space_uri(boundary).unwrap()
+        );
+        assert_eq!(
+            claims["sub"],
+            "at:space/did:web:stratos.example.test/zone.stratos.space.feed/crew"
+        );
+    }
+
+    #[test]
     fn rejects_invalid_space_delegation_claims_before_signing() {
         let key = ServiceSigningKey::from_hex(
             "2fe8e925727a16e4970a5b0a556d9f8263b7c6b894885ca2857c8878938aa97b",
@@ -306,7 +338,7 @@ mod tests {
                 &key,
                 SpaceDelegationClaims {
                     issuer: "",
-                    space_uri: "at://did:web:stratos.example.test/space/zone.stratos.space.feed/crew",
+                    space_uri: "at:space/did:web:stratos.example.test/zone.stratos.space.feed/crew",
                     authority_did: "did:web:stratos.example.test",
                     jti: "nonce",
                 },

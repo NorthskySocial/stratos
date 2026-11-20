@@ -372,6 +372,7 @@ mod tests {
                 subject,
                 neg: false,
             }],
+            skipped_subjects: 0,
         }
     }
 
@@ -1166,7 +1167,7 @@ mod tests {
         }
     }
 
-    const PDS_SPACE: &str = "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop";
+    const PDS_SPACE: &str = "at:space/did:web:stratos.example/zone.stratos.space.feed/bebop";
 
     fn repost(actor: &str, rkey: &str, subject: &str, boundary: &str) -> ProjectionInteraction {
         ProjectionInteraction {

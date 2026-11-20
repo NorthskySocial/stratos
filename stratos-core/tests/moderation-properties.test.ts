@@ -76,7 +76,7 @@ describe('moderation subject properties', () => {
     )
   })
 
-  it('parses every valid seven-segment URI as a space record', () => {
+  it('parses every valid six-part URI as a space record', () => {
     fc.assert(
       fc.property(
         didArb,
@@ -120,7 +120,7 @@ describe('moderation subject properties', () => {
     )
     const badCount = fc
       .array(componentArb, { maxLength: 12 })
-      .filter((parts) => parts.length !== (parts[1] === 'space' ? 7 : 3))
+      .filter((parts) => parts.length !== 3)
     fc.assert(
       fc.property(badCount, (parts) => {
         const result = record(`at://${parts.join('/')}`)
@@ -145,7 +145,7 @@ describe('moderation subject properties', () => {
         .tuple(didArb, nsidArb, rkeyArb, didArb, nsidArb, rkeyArb)
         .map(
           ([spaceDid, spaceType, skey, authorDid, collection, rkey]) =>
-            `${spaceDid}/space/${spaceType}/${skey}/${authorDid}/${collection}/${rkey}`,
+            `${spaceDid}/${spaceType}/${skey}/${authorDid}/${collection}/${rkey}`,
         ),
     )
     fc.assert(
@@ -176,7 +176,7 @@ describe('moderation subject properties', () => {
     )
   })
 
-  it('rejects a space-marked URI with 6 or 8+ components', () => {
+  it('rejects an at:space/ URI with 5 or 7+ components', () => {
     fc.assert(
       fc.property(
         didArb,
@@ -186,7 +186,7 @@ describe('moderation subject properties', () => {
           const tail = Array.from({ length: 5 + delta }, (_, i) =>
             i < rest.length ? rest[i] : 'x',
           )
-          const result = record(`at://${did}/space/${tail.join('/')}`)
+          const result = record(`at:space/${did}/${tail.join('/')}`)
           expect(result.ok).toBe(false)
           if (!result.ok) expect(result.error.code).toBe('invalid-subject')
         },

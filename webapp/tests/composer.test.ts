@@ -175,8 +175,7 @@ describe('Composer.svelte', () => {
     })
     expect(JSON.parse(init.body)).toEqual(
       expect.objectContaining({
-        space:
-          'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve',
+        space: 'at:space/did:web:stratos.example/zone.stratos.space.feed/nerve',
         repo: 'did:plc:faye',
         collection: 'zone.stratos.feed.post',
         validate: false,

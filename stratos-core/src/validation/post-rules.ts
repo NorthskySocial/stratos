@@ -1,14 +1,36 @@
 import { AtUri } from '@atproto/syntax'
-import { parseRecordUri } from '../spaces/domain.js'
+import { AT_SCHEME, parseRecordUri } from '../spaces/domain.js'
 import { StratosConfig, StratosValidationError } from '../types.js'
 import type { RepoRecord } from './base.js'
 import type { RecordRule, RecordRuleInput } from './registry.js'
 
 export const POST_COLLECTION = 'zone.stratos.feed.post'
 
+const REPO_URI_PART_COUNT = 3
 const DOMAINS_TYPE = 'zone.stratos.boundary.defs#Domains'
 
 type EmbedNamespace = 'stratos' | 'bsky'
+
+/**
+ * The collection a record URI names: the `collection` part of a space record
+ * URI, or of a three-part `at://` record URI. Anything else, including a space
+ * URI handed to the public parser, names none. A space URI never reaches
+ * `AtUri`, which throws on it.
+ */
+export function recordUriCollection(uri: unknown): string | undefined {
+  if (typeof uri !== 'string') return undefined
+  const spaceRecord = parseRecordUri(uri)
+  if (spaceRecord.ok) return spaceRecord.value.collection
+  if (!uri.startsWith(AT_SCHEME)) return undefined
+  if (uri.slice(AT_SCHEME.length).split('/').length !== REPO_URI_PART_COUNT) {
+    return undefined
+  }
+  try {
+    return new AtUri(uri).collection
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * Checks if a URI references a stratos collection.
@@ -17,16 +39,7 @@ type EmbedNamespace = 'stratos' | 'bsky'
  * @returns true if the URI references a stratos collection, false otherwise
  */
 export function isStratosUri(uri: string): boolean {
-  const spaceRecord = parseRecordUri(uri)
-  if (spaceRecord.ok) {
-    return spaceRecord.value.collection.startsWith('zone.stratos.')
-  }
-  try {
-    const parsed = new AtUri(uri)
-    return parsed.collection.startsWith('zone.stratos.')
-  } catch {
-    return false
-  }
+  return recordUriCollection(uri)?.startsWith('zone.stratos.') ?? false
 }
 
 /**
@@ -36,11 +49,20 @@ export function isStratosUri(uri: string): boolean {
  * @returns true if the URI references a bsky collection, false otherwise
  */
 export function isBskyUri(uri: string): boolean {
+  const collection = recordUriCollection(uri) ?? lenientUriCollection(uri)
+  return collection?.startsWith('app.bsky.') ?? false
+}
+
+/**
+ * The embed guard has to refuse every spelling the upstream parser reads
+ * (any scheme case, no scheme, any depth), not only the strict forms, because
+ * it is the only guard on the legacy write path.
+ */
+function lenientUriCollection(uri: string): string | undefined {
   try {
-    const parsed = new AtUri(uri)
-    return parsed.collection.startsWith('app.bsky.')
+    return new AtUri(uri).collection
   } catch {
-    return false
+    return undefined
   }
 }
 
@@ -71,7 +93,8 @@ export function assertNoCrossNamespaceEmbed(
     media?: unknown
   }
 
-  if (recordEmbed.record?.uri && isInvalidUri(recordEmbed.record.uri)) {
+  const embeddedUri = recordEmbed.record?.uri
+  if (embeddedUri && isInvalidUri(embeddedUri)) {
     throw new StratosValidationError(errorMessage, 'CrossNamespaceEmbed')
   }
 

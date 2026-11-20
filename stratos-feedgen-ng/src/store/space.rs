@@ -4,13 +4,7 @@ use crate::config::{MAX_SPACE_PROMOTION_STAGE_BYTES, MAX_SPACE_PROMOTION_STAGE_R
 type PreviousStage = (i64, Option<String>, Option<Vec<u8>>, Option<Vec<u8>>);
 
 fn is_space_uri(value: &str) -> bool {
-    let segments: Vec<_> = value
-        .strip_prefix("at://")
-        .unwrap_or_default()
-        .split('/')
-        .collect();
-    matches!(segments.as_slice(), [authority, "space", space_type, space_key]
-        if crate::identifier::RecordUri::parse(&format!("at://{authority}/space/{space_type}/{space_key}/did:plc:spikespiegel/zone.stratos.feed.post/x")).is_ok())
+    crate::identifier::SpaceUri::parse(value).is_ok()
 }
 
 fn validate_space_stage_page(page: &SpaceStagePage) -> Result<(), StoreError> {
@@ -118,10 +112,9 @@ fn stage_space_mutation(
 fn validate_space_stage_uri(page: &SpaceStagePage, value: &str) -> Result<(), StoreError> {
     let uri = crate::identifier::RecordUri::parse(value)
         .map_err(|_| StoreError::InvalidProjectionMutation)?;
-    if !matches!(uri, crate::identifier::RecordUri::Space { .. })
-        || uri.author().as_str() != page.actor_did
-        || !value.starts_with(&format!("{}/", page.space_uri))
-    {
+    let in_page_space = crate::identifier::SpaceUri::parse(&page.space_uri)
+        .is_ok_and(|space| uri.space().as_ref() == Some(&space));
+    if !in_page_space || uri.author().as_str() != page.actor_did {
         return Err(StoreError::InvalidProjectionMutation);
     }
     Ok(())
@@ -692,7 +685,7 @@ fn purge_departed_pds_member(
     let (authority, _) = boundary
         .split_once('/')
         .ok_or(StoreError::InvalidProjectionMutation)?;
-    let space_prefix = format!("at://{authority}/space/");
+    let space_prefix = crate::identifier::SpaceUri::authority_prefix(authority);
     transaction
         .execute(
             "DELETE FROM post_boundary WHERE boundary = ?1 AND uri IN (
@@ -1183,7 +1176,7 @@ mod revocation_tests {
 
     const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
     const OTHER: &str = "did:web:stratos.example.test/trigun";
-    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
     const DID: &str = "did:plc:fayevalentine";
     const OTHER_DID: &str = "did:plc:spiegel";
     const NOW: &str = "2026-09-22T00:00:00.000Z";
@@ -1523,7 +1516,7 @@ mod stage_limit_tests {
     use super::*;
     use crate::store::StorageKey;
 
-    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+    const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
     const DID: &str = "did:plc:fayevalentine";
     const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
     const NOW: &str = "2026-09-22T00:00:00.000Z";

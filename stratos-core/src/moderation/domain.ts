@@ -6,7 +6,7 @@ import {
   isValidNsidStr,
   isValidRkey,
   parseRecordUri,
-  SPACE_SEGMENT,
+  SPACE_URI_PREFIX,
   spaceUriToBoundary,
 } from '../spaces/index.js'
 import type { RecordUri, SpacesError } from '../spaces/index.js'
@@ -28,7 +28,6 @@ export const ACCOUNT_SUBJECT_TYPE =
 export const TAKEDOWN_VALUE = '!takedown'
 
 const REPO_URI_COMPONENT_COUNT = 3
-const SPACE_MARKER_INDEX = 1
 
 function fail(
   code: ModerationErrorCode,
@@ -88,10 +87,7 @@ function parseRecordSubject(
   cid: string | undefined,
 ): ModerationResult<ParsedLabelSubject> {
   const pinned = cid === undefined ? {} : { cid }
-  const isSpaceForm =
-    uri.startsWith(AT_SCHEME) &&
-    uri.slice(AT_SCHEME.length).split('/')[SPACE_MARKER_INDEX] === SPACE_SEGMENT
-  if (isSpaceForm) {
+  if (uri.startsWith(SPACE_URI_PREFIX)) {
     const record = parseRecordUri(uri)
     if (!record.ok) {
       return invalidSubject('invalid space record URI', record.error)
@@ -188,7 +184,7 @@ export function spaceSubjectBoundary(
   return boundary
 }
 
-/** Record URIs start with "at://" and DIDs with "did:", so keys never collide. */
+/** Record URIs start with "at:" and DIDs with "did:", so keys never collide. */
 export function labelSubjectKey(subject: ParsedLabelSubject): string {
   return subject.kind === 'account' ? subject.did : subject.uri
 }

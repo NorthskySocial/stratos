@@ -126,18 +126,18 @@ describe('space-form record uris in a lexicon-checked record', () => {
   it.each([
     [
       'a collection that is not an nsid',
-      `at://${HARNESS_SERVICE_DID}/space/${HOSTED_SPACE_TYPE}/engineering/${PDS_MEMBER}/NotAnNsid/eva02`,
+      `at:space/${HARNESS_SERVICE_DID}/${HOSTED_SPACE_TYPE}/engineering/${PDS_MEMBER}/NotAnNsid/eva02`,
     ],
     [
       'an author that is not a did',
-      `at://${HARNESS_SERVICE_DID}/space/${HOSTED_SPACE_TYPE}/engineering/asuka.nerv.tokyo.jp/${POST}/eva02`,
+      `at:space/${HARNESS_SERVICE_DID}/${HOSTED_SPACE_TYPE}/engineering/asuka.nerv.tokyo.jp/${POST}/eva02`,
     ],
     [
-      'a missing space segment',
+      'the at:// scheme instead of at:space/',
       `at://${HARNESS_SERVICE_DID}/spaces/${HOSTED_SPACE_TYPE}/engineering/${PDS_MEMBER}/${POST}/eva02`,
     ],
     ['a trailing slash', `${spaceUriOf('eva02')}/`],
-  ])('still refuses a seven-segment uri with %s', async (_name, uri) => {
+  ])('still refuses a record uri with %s', async (_name, uri) => {
     const response = await create(post('Sortie', replyTo(uri)))
 
     expect(response.status).toBe(400)

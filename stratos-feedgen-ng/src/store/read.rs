@@ -239,4 +239,108 @@ mod tests {
         assert_eq!(summaries.keys().collect::<Vec<_>>(), [liked]);
         assert_eq!(summaries[liked].like_count, 1);
     }
+
+    const NEWEST: &str = "1998-04-03T00:00:03.000Z";
+    const MIDDLE: &str = "1998-04-03T00:00:02.000Z";
+    const OLDEST: &str = "1998-04-03T00:00:01.000Z";
+    const READ_AT: &str = "1998-04-03T12:00:00.000Z";
+
+    fn space_post_uri(rkey: &str) -> String {
+        format!(
+            "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/{rkey}"
+        )
+    }
+
+    fn insert_post(store: &EncryptedStore, uri: &str, sort_at: &str) {
+        store
+            .connection
+            .execute(
+                "INSERT INTO post (uri, author_did, cid, sort_at, indexed_at, retained_at, projection_bytes, record_json, blob_refs_json, row_version)
+                 VALUES (?1, 'did:plc:spikespiegel', 'bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                         ?2, ?2, '1998-05-03T00:00:00.000Z', 100, x'7b7d', x'5b5d', 1)",
+                rusqlite::params![uri, sort_at],
+            )
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "INSERT INTO post_boundary (uri, boundary, sort_at) VALUES (?1, 'bebop', ?2)",
+                rusqlite::params![uri, sort_at],
+            )
+            .unwrap();
+    }
+
+    fn listed_after(store: &EncryptedStore, cursor: &crate::cursor::FeedCursor) -> Vec<String> {
+        store
+            .list_posts_by_boundary("bebop", Some(cursor), 50, READ_AT)
+            .unwrap()
+            .posts
+            .into_iter()
+            .map(|post| post.uri)
+            .collect()
+    }
+
+    #[test]
+    fn a_cursor_carrying_a_legacy_uri_is_compared_as_an_opaque_string() {
+        const LEGACY_CURSOR_URI: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/eva01";
+        let store = open_store();
+        for (rkey, sort_at) in [("a", NEWEST), ("b", MIDDLE), ("c", OLDEST)] {
+            insert_post(&store, &space_post_uri(rkey), sort_at);
+        }
+        let stale = crate::cursor::FeedCursor {
+            sort_at: MIDDLE.to_owned(),
+            uri: LEGACY_CURSOR_URI.to_owned(),
+        };
+
+        // The tie at the cursor timestamp is broken by byte order, which puts
+        // the current spelling after the previous one.
+        assert_eq!(
+            listed_after(&store, &stale),
+            [space_post_uri("b"), space_post_uri("c")]
+        );
+    }
+
+    #[test]
+    fn a_cursor_in_the_current_spelling_resumes_strictly_after_its_post() {
+        let store = open_store();
+        for (rkey, sort_at) in [("a", NEWEST), ("b", MIDDLE), ("c", OLDEST)] {
+            insert_post(&store, &space_post_uri(rkey), sort_at);
+        }
+        let cursor = crate::cursor::FeedCursor {
+            sort_at: MIDDLE.to_owned(),
+            uri: space_post_uri("b"),
+        };
+
+        assert_eq!(listed_after(&store, &cursor), [space_post_uri("c")]);
+    }
+
+    #[test]
+    fn posts_with_one_timestamp_are_ordered_by_the_bytes_of_their_uris() {
+        const CUSTODY_URI: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you";
+        let store = open_store();
+        for uri in [
+            space_post_uri("b"),
+            CUSTODY_URI.to_owned(),
+            space_post_uri("a"),
+        ] {
+            insert_post(&store, &uri, MIDDLE);
+        }
+
+        let uris: Vec<String> = store
+            .list_posts_by_boundary("bebop", None, 50, READ_AT)
+            .unwrap()
+            .posts
+            .into_iter()
+            .map(|post| post.uri)
+            .collect();
+
+        assert_eq!(
+            uris,
+            [
+                CUSTODY_URI.to_owned(),
+                space_post_uri("a"),
+                space_post_uri("b")
+            ]
+        );
+    }
 }

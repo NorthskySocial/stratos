@@ -6,7 +6,7 @@ export interface HandlerAuth {
     did?: string
     iss?: string
     /**
-     * Present ONLY for space-credential auth. The space's `at://` URI the
+     * Present ONLY for space-credential auth. The space's `at:space/` URI the
      * credential admits the caller to. When set, the
      * caller has NO `did` — visibility is scoped to this space's boundary and
      * still filtered per-record by the existing boundary gate.
