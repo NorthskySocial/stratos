@@ -1,3 +1,9 @@
+---
+audience: App developers
+type: How-to
+status: current
+---
+
 # Repo Export & Import
 
 A user can export their whole Stratos repository as one CAR file. It holds

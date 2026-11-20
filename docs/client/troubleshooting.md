@@ -1,4 +1,30 @@
-# Troubleshooting
+---
+audience: App developers
+type: Troubleshooting
+status: current
+---
+
+# Troubleshoot your app
+
+Find the symptom, then follow the link for the detail. Every error name is
+listed in [Error codes](/reference/errors).
+
+| Symptom                                                                                 | Likely cause                                                   | Fix                                                                    |
+| --------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [Every request answers 401](#every-request-answers-401)                                 | The request sends `Authorization: Bearer`                      | Use the OAuth session's fetch handler with the absolute Stratos URL    |
+| [`NotEnrolled` after OAuth](#notenrolled-after-completing-oauth)                        | The service uses an allowlist and the user is not on it        | Check `zone.stratos.enrollment.status`. The operator must grant access |
+| [`PdsCustodyWriteForbidden`](#writes-fail-with-pdscustodywriteforbidden)                | The user has `pds` custody                                     | Write with `com.atproto.space.createRecord` on the user's PDS          |
+| [A boundary error on write](#writes-fail-with-a-boundary-error)                         | The boundary is missing, foreign, or not held                  | Put one full boundary from the user's enrollment in `boundary.values`  |
+| [A PDS-custody write fails](#a-pds-custody-write-fails)                                 | The session lacks the space scope                              | Ask the user to sign in again                                          |
+| [Posts missing from the feed](#posts-not-appearing-in-the-feed)                         | The viewer lacks the boundary, or the author left              | Check the viewer's boundaries and the author's membership              |
+| [Enrollment redirect fails](#enrollment-redirect-fails)                                 | No client metadata document proves the `redirect_uri`          | Publish client metadata and send `client_id`                           |
+| [JSON error after enrollment](#the-browser-stops-on-a-json-error-after-enrollment)      | Stratos refused the enrollment                                 | Read the `error` in the JSON body                                      |
+| [Requests reach the PDS](#requests-go-to-the-pds-instead-of-stratos)                    | `new Agent(session)` with a changed `serviceUrl`               | Wrap the session's fetch handler                                       |
+| [429 errors](#rate-limiting-429-errors)                                                 | The DID passed the write rate limit                            | Retry with exponential backoff                                         |
+| [DPoP nonce errors](#dpop-nonce-errors)                                                 | A proxy hides `DPoP-Nonce`                                     | Expose the header through CORS                                         |
+| [`RecordNotFound` for a member](#a-record-reads-as-recordnotfound-for-an-enrolled-user) | The viewer lacks the boundary, or the author has `pds` custody | Check boundaries. Read PDS-hosted posts through the feed generator     |
+| [`fetchAndVerifyRecord` fails](#fetchandverifyrecord-fails)                             | Stratos does not serve `com.atproto.sync.getRecord`            | Use `verifyRecordCid`                                                  |
+| [`importRepo` fails](#importrepo-fails)                                                 | The service registers no handler for it                        | Use `com.atproto.repo.applyWrites`                                     |
 
 ## Every request answers 401
 
@@ -29,6 +55,9 @@ refuses repo writes for them. Resolve the repository target and call
 [Custody and Routing](/client/custody).
 
 ## Writes fail with a boundary error
+
+See [Writing records](/reference/errors#writing-records) for every write
+error.
 
 | Error                | Fix                                                                  |
 | -------------------- | -------------------------------------------------------------------- |

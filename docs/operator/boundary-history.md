@@ -1,3 +1,9 @@
+---
+audience: Operators and admins
+type: Explanation and reference
+status: current
+---
+
 # Boundary membership history
 
 Stratos keeps authority-signed history of stored boundary membership changes.

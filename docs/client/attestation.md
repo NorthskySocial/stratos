@@ -1,3 +1,9 @@
+---
+audience: App developers
+type: How-to
+status: current
+---
+
 # Attestation Verification
 
 <script setup>

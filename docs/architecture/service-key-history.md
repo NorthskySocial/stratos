@@ -1,4 +1,45 @@
+---
+audience: Client developers, operators, and maintainers
+type: Decision record
+status: current
+---
+
+<script setup>
+import FlowDiagram from '../.vitepress/theme/components/FlowDiagram.vue'
+
+const verifyNodes = [
+  { id: 'client', title: 'Client', sub: 'has the attestation', col: 0, row: 0 },
+  { id: 'did', title: 'DID document', sub: 'current #atproto key', col: 1, row: 0 },
+  { id: 'history', title: 'Key history', sub: '#stratos endpoint', col: 1, row: 1 },
+  { id: 'result', title: 'Signature check', sub: 'key covers issuedAt', col: 2, row: 0 },
+]
+const verifyEdges = [
+  { id: 'resolve', from: 'client', to: 'did' },
+  { id: 'fetch', from: 'did', to: 'history' },
+  { id: 'current', from: 'did', to: 'result', tone: 'ok' },
+  { id: 'historical', from: 'history', to: 'result', tone: 'ok' },
+]
+const verifySteps = [
+  { text: 'The client resolves the current DID document on every attestation check.', edges: ['resolve'] },
+  { text: 'When the embedded key equals the current key, it verifies the signature without fetching history.', edges: ['current'], tone: 'ok' },
+  { text: "Otherwise it fetches history from the DID document's #stratos service endpoint.", edges: ['fetch'] },
+  { text: 'It verifies every hash and both proofs, and checks that the final key matches the current key.', nodes: ['history'] },
+  { text: 'The historical key must cover the signed issuedAt in its validity interval.', edges: ['historical'], tone: 'ok' },
+]
+</script>
+
 # Service signing key history
+
+::: info At a glance
+
+| Question         | Answer                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| Status           | Current. `zone.stratos.identity.getKeyHistory` serves the history.                                           |
+| Scope            | The service signing key: rotation, its public history, and attestation verification against older keys.      |
+| What it decides  | The `did:web` identifier stays when the key rotates. Each rotation is signed by the old key and the new key. |
+| What it does not | It does not re-sign per-actor repo keys or MST commits. It is not a revocation or timestamp service.         |
+
+:::
 
 Stratos keeps its existing `did:web` identifier when its service signing key rotates.
 `zone.stratos.identity.getKeyHistory` publishes the service's public signing history as a lexicon XRPC query.
@@ -28,10 +69,13 @@ A previous-key signature alone does not authenticate the history against its fin
 An attacker can authorize a rotation from their own key to the real service's public key without possessing that key.
 Requiring the new key to sign the exact entry prevents that forged parallel history.
 
-The current DID document remains the root of trust. A compromised current private key or compromised DID hosting can authorize false history.
-Without an external witness or pinned prior checkpoint, clients cannot detect a controller rewriting its entire history.
-A signed issue time is a claim by the signing service, not independent timestamp evidence.
-A stolen retired key can backdate a forged attestation into that key's validity window.
+The current DID document remains the root of trust. The history has these limits:
+
+- A compromised current private key or compromised DID hosting can authorize false history.
+- Without an external witness or pinned prior checkpoint, clients cannot detect a controller rewriting its entire history.
+- A signed issue time is a claim by the signing service, not independent timestamp evidence.
+- A stolen retired key can backdate a forged attestation into that key's validity window.
+
 Operators must protect and retire private keys accordingly; this log is not a revocation or external timestamp service.
 
 ## Client verification
@@ -48,11 +92,29 @@ if (!result.valid)
   throw new Error(result.error ?? 'Invalid enrollment attestation')
 ```
 
+<FlowDiagram
+  title="How a client verifies an attestation against key history"
+  :cols="3"
+  :nodes="verifyNodes"
+  :edges="verifyEdges"
+  :steps="verifySteps"
+/>
+
 The client resolves the current DID document on each attestation check, even when a CAR-verification key cache is provided.
 When the embedded key equals the current key, it verifies the signature without fetching history.
 Otherwise it fetches history from the DID document's `#stratos` service endpoint, verifies every hash and both proofs, and checks the current-key anchor.
-History fetches require HTTPS, reject credentials and redirects, have a ten-second timeout, and cap response bodies at two megabytes.
-The log contains at most 1,024 entries. Server-side callers must supply a network-policy-enforcing `fetchFn` when service DIDs are untrusted.
+History fetches have these limits:
+
+| Limit         | Value                 |
+| ------------- | --------------------- |
+| Transport     | HTTPS only            |
+| Credentials   | Rejected              |
+| Redirects     | Rejected              |
+| Timeout       | Ten seconds           |
+| Response body | At most two megabytes |
+| Log length    | At most 1,024 entries |
+
+Server-side callers must supply a network-policy-enforcing `fetchFn` when service DIDs are untrusted.
 
 The historical key must cover the signed `attestation.issuedAt` in its `[validFrom, nextValidFrom)` interval.
 New attestations sign DAG-CBOR `{boundaries, did, signingKey, issuedAt}` with sorted boundary strings.
@@ -78,16 +140,20 @@ A rotation cannot publish history and its active private key separately.
 Startup rejects invalid chains, a different service DID, or an active key that does not match the history head.
 Do not restore an older identity bundle after publishing a rotation: that rolls back the current trust anchor.
 
-The supported service runtime is Linux with the `flock` utility installed; the Docker image includes Alpine's `flock` package.
-Use a local filesystem that supports POSIX file locking, atomic rename, and directory fsync for the identity directory, including when enrollment storage uses Postgres.
-Network filesystems without these semantics are unsupported.
-The service holds an exclusive kernel lock on `{dataDir}/service-signing-identity.lock` for its lifetime.
-A short `flock` helper locks the inherited file descriptor; the service retains that descriptor after the helper exits.
-The offline rotation command obtains the same lock and refuses to run while it is held.
-Closing the descriptor or process death, including `SIGKILL`, releases ownership automatically, so a crash does not require manual lock cleanup.
-The empty lock file remains on disk deliberately. Never unlink it: replacing its inode would allow two processes to hold different locks.
-Missing `flock` or failed locking aborts startup and rotation before identity changes.
-See the [util-linux descriptor-lock documentation](https://github.com/util-linux/util-linux/blob/master/sys-utils/flock.1.adoc) for the kernel ownership semantics.
+Runtime requirements:
+
+- Linux with the `flock` utility installed. The Docker image includes Alpine's `flock` package.
+- A local filesystem that supports POSIX file locking, atomic rename, and directory fsync for the identity directory, including when enrollment storage uses Postgres. Network filesystems without these semantics are unsupported.
+
+How the lock works:
+
+- The service holds an exclusive kernel lock on `{dataDir}/service-signing-identity.lock` for its lifetime.
+- A short `flock` helper locks the inherited file descriptor; the service retains that descriptor after the helper exits.
+- The offline rotation command obtains the same lock and refuses to run while it is held.
+- Closing the descriptor or process death, including `SIGKILL`, releases ownership automatically, so a crash does not require manual lock cleanup.
+- The empty lock file remains on disk deliberately. Never unlink it: replacing its inode would allow two processes to hold different locks.
+- Missing `flock` or failed locking aborts startup and rotation before identity changes.
+  See the [util-linux descriptor-lock documentation](https://github.com/util-linux/util-linux/blob/master/sys-utils/flock.1.adoc) for the kernel ownership semantics.
 
 To rotate locally:
 

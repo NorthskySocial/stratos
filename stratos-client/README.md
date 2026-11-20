@@ -300,7 +300,7 @@ fresh keys. The Rust client has no legacy fallback; do not deploy it against an
 old receiver. October PDS hosts require the standard profile even though Stratos
 continues to support legacy clients. Roll back the receiver, client, and compatible
 PDS set together, then clear grant caches. See the
-[operator rollout procedure](../docs/operator/configuration.md#october-spaces-rollout).
+[operator rollout procedure](../docs/operator/upgrades/october-spaces.md).
 
 The issued legacy credential covers one whole space until expiry (normally two
 hours), not just the member who requested it. Production reads require a fresh

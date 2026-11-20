@@ -1,3 +1,37 @@
+---
+audience: App developers and operators
+type: Explanation and reference
+prerequisites: A working feed request through the feed generator
+status: current
+---
+
+<script setup>
+import FlowDiagram from '../.vitepress/theme/components/FlowDiagram.vue'
+
+const downloadNodes = [
+  { id: 'app', title: 'App', sub: "viewer's session", col: 0, row: 0 },
+  { id: 'pds', title: "Viewer's PDS", sub: 'atproto-proxy', col: 1, row: 0 },
+  { id: 'feedgen', title: 'Feed generator', sub: 'checks, caches', col: 2, row: 0 },
+  { id: 'stratos', title: 'Stratos', sub: 'holds the file', col: 3, row: 0 },
+]
+const downloadEdges = [
+  { id: 'ask', from: 'app', to: 'pds' },
+  { id: 'forward', from: 'pds', to: 'feedgen' },
+  { id: 'fetch', from: 'feedgen', to: 'stratos' },
+  { id: 'file', from: 'stratos', to: 'feedgen' },
+  { id: 'reply', from: 'feedgen', to: 'pds', tone: 'ok' },
+  { id: 'render', from: 'pds', to: 'app', tone: 'ok' },
+]
+const downloadSteps = [
+  { text: "The app asks the viewer's PDS for zone.stratos.feedgen.getBlob, with the atproto-proxy header naming the feed generator.", edges: ['ask'] },
+  { text: 'The PDS forwards the request with a service-auth token whose lxm is zone.stratos.feedgen.getBlob.', edges: ['forward'] },
+  { text: 'The feed generator checks the viewer\'s membership, and that the post still references the CID.', nodes: ['feedgen'] },
+  { text: 'On a first request it downloads the file from Stratos.', edges: ['fetch'] },
+  { text: 'It verifies the CID and keeps a temporary copy in memory, never on disk.', edges: ['file'] },
+  { text: 'It checks again, then returns the file. The app renders a local object URL.', edges: ['reply', 'render'], tone: 'ok' },
+]
+</script>
+
 # Private feed attachments
 
 A private post can carry a photo. The photo is as private as the post. So
@@ -39,6 +73,14 @@ So the rule for a client is short. If `post.blobs` is present, use it. If it
 is absent, do not call `getBlob` for that post.
 
 ## Authenticated downloads
+
+<FlowDiagram
+  title="The authenticated download path"
+  :cols="4"
+  :nodes="downloadNodes"
+  :edges="downloadEdges"
+  :steps="downloadSteps"
+/>
 
 Call `zone.stratos.feedgen.getBlob` with the post's `uri` and the attachment's
 `cid`. Send the post URI exactly as the feed returned it.

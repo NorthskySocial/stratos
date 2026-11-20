@@ -1,3 +1,9 @@
+---
+audience: Anyone new to Stratos
+type: Explanation
+status: current
+---
+
 <script setup>
 import BoundaryAccess from '../.vitepress/theme/components/BoundaryAccess.vue'
 import EnrollmentFlow from '../.vitepress/theme/components/EnrollmentFlow.vue'
@@ -5,7 +11,7 @@ import SpaceDataResidencyAnimation from '../.vitepress/theme/components/SpaceDat
 import FeedgenRequestFlow from '../.vitepress/theme/components/FeedgenRequestFlow.vue'
 </script>
 
-# Shared Private Data — Explained Simply
+# What is Stratos? Explained simply
 
 Imagine a house party where everyone is in the same room socialising, they're able to gather into
 groups to have independent discussions but anyone is able to join them. This is how ATproto data
@@ -37,13 +43,9 @@ else sees nothing — not even a hint that the post exists.
 Most services also have one room that every member is in, usually called `general`. A post there
 is for the whole community.
 
-<div class="animation-card">
-  <div class="animation-label">
-    <span class="step-number">1</span>
-    <span>Who can see what — boundary access control</span>
-  </div>
+<Figure step="1" caption="Who can see what — boundary access control">
   <BoundaryAccess />
-</div>
+</Figure>
 
 ---
 
@@ -59,13 +61,9 @@ When you enroll:
 3. A small _enrollment record_ is written to your own PDS (your personal data store on the network),
    so anyone can discover which Stratos service you're a member of.
 
-<div class="animation-card">
-  <div class="animation-label">
-    <span class="step-number">2</span>
-    <span>Joining a Stratos service — the enrollment flow</span>
-  </div>
+<Figure step="2" caption="Joining a Stratos service — the enrollment flow">
   <EnrollmentFlow />
-</div>
+</Figure>
 
 ---
 
@@ -87,13 +85,9 @@ it out when you enroll, and both kinds of member share the same rooms.
 In either case, a private post is not part of the public feed. Your public enrollment record only
 tells apps which Stratos service to ask.
 
-<div class="animation-card">
-  <div class="animation-label">
-    <span class="step-number">3</span>
-    <span>Where a private post is kept</span>
-  </div>
+<Figure step="3" caption="Where a private post is kept">
   <SpaceDataResidencyAnimation />
-</div>
+</Figure>
 
 ---
 
@@ -105,13 +99,9 @@ That is the job of the _feed generator_. It visits the members Stratos lists for
 collects their posts, wherever they are kept. When you open a feed, it checks the guest list
 first, then shows you the posts of the rooms you are in. Nothing else.
 
-<div class="animation-card">
-  <div class="animation-label">
-    <span class="step-number">4</span>
-    <span>Opening a private feed</span>
-  </div>
+<Figure step="4" caption="Opening a private feed">
   <FeedgenRequestFlow />
-</div>
+</Figure>
 
 ---
 
@@ -146,38 +136,3 @@ can. Join communities whose operators you trust.
 A community can run its own Stratos service with its own membership criteria — fully independent of
 any central authority.
 :::
-
-<style scoped>
-.animation-card {
-  margin: 2rem 0;
-  border-radius: 14px;
-  overflow: hidden;
-  border: 1.5px solid var(--vp-c-divider);
-  background: var(--vp-c-bg-soft);
-}
-
-.animation-label {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1.1rem;
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--vp-c-text-2);
-  border-bottom: 1px solid var(--vp-c-divider);
-}
-
-.step-number {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  border-radius: 50%;
-  font-size: 0.78rem;
-  font-weight: 700;
-  background: var(--vp-c-brand-1);
-  color: #fff;
-  flex-shrink: 0;
-}
-</style>

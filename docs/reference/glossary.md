@@ -1,3 +1,9 @@
+---
+audience: Everyone
+type: Reference
+status: current
+---
+
 # Glossary
 
 Short definitions of the terminology used across the Stratos documentation.

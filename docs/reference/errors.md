@@ -1,0 +1,156 @@
+---
+audience: App developers and operators
+type: Reference
+status: current
+---
+
+# Error codes
+
+Every error the Stratos service returns, by area. The feed generator has its
+own errors. They are listed in
+[Run the feed generator](/operator/feedgen-ng#request-limits-and-errors).
+
+## Error structure
+
+Stratos returns standard XRPC errors.
+
+```json
+{
+  "error": "ForbiddenBoundary",
+  "message": "Boundary 'did:web:stratos.example.com/writers' not allowed"
+}
+```
+
+Match on the `error` name, not the message. Most rejections use HTTP 400. The
+tables give the status of each error.
+
+## Authentication and limits
+
+| Error                    | Status | Meaning                                                                                                     |
+| ------------------------ | ------ | ----------------------------------------------------------------------------------------------------------- |
+| `AuthenticationRequired` | 401    | No valid DPoP-bound session, a fresh DPoP nonce is needed, or the caller wrote to another user's repository |
+| `NotEnrolled`            | 400    | The caller's identity is valid, but they have no active enrollment with the service                         |
+| `RateLimitExceeded`      | 429    | The DID passed the write rate limit. Back off, then retry.                                                  |
+
+Stratos accepts `Authorization: DPoP <token>` with a `DPoP` proof header. A
+`Bearer` token is not a valid user credential.
+
+When a response carries a `DPoP-Nonce` header, retry once with that nonce in
+the proof. OAuth client libraries do this for you.
+
+## Writing records
+
+| Error                      | Status | Meaning                                                              |
+| -------------------------- | ------ | -------------------------------------------------------------------- |
+| `InvalidDomainCount`       | 400    | The record does not carry exactly one boundary                       |
+| `InvalidDomain`            | 400    | The boundary name is not a valid space key                           |
+| `ServiceMismatch`          | 400    | The boundary belongs to a different Stratos service                  |
+| `ForbiddenBoundary`        | 400    | The caller does not hold the boundary                                |
+| `InvalidRecord`            | 400    | The record does not match its lexicon                                |
+| `InvalidCollection`        | 400    | The collection is not a `zone.stratos.*` collection                  |
+| `PdsCustodyWriteForbidden` | 400    | The user's records are kept on their own PDS. Write there instead.   |
+| `ServiceWriteForbidden`    | 400    | The caller is a service identity. Services can read but never write. |
+| `InvalidSwap`              | 400    | A `swapCommit` or `swapRecord` condition did not match               |
+| `ConcurrentModification`   | 400    | Another write to the same repository won the race. Retry.            |
+
+`PdsCustodyWriteForbidden` is not a failure of your user. It means your app
+sent the write to the wrong place. Resolve the repository target from the
+enrollment's custody first. See
+[Your First Post](/guide/first-post#_3-choose-the-repository-host).
+
+## Reading records
+
+| Error            | Status | Meaning                                                                             |
+| ---------------- | ------ | ----------------------------------------------------------------------------------- |
+| `RecordNotFound` | 400    | The record does not exist, or the caller may not read it                            |
+| `RecordBlocked`  | 400    | The caller may not read the record. Sent by `zone.stratos.repo.hydrateRecord` only. |
+| `RepoNotFound`   | 400    | No such repository on this service, or the caller does not own it (`getRepo`)       |
+| `BlobNotFound`   | 400    | The repository has no such blob                                                     |
+| `BlobBlocked`    | 400    | The caller may not read the blob                                                    |
+| `TooManyUris`    | 400    | A batch hydration request named more than 100 records                               |
+
+### Why "not found" also means "not allowed"
+
+`com.atproto.repo.getRecord` and `zone.stratos.space.getRecord` give the same
+answer for a record that does not exist and a record the caller may not read.
+Both are `RecordNotFound`.
+
+This is deliberate. A distinct "forbidden" answer would confirm that a
+private record exists. A stranger could then map a community's activity
+without reading a single post.
+
+Note the status: `RecordNotFound` arrives with HTTP 400, not 404. Match on
+the error name.
+
+## Space credentials
+
+| Error                 | Status | Meaning                                                                                  |
+| --------------------- | ------ | ---------------------------------------------------------------------------------------- |
+| `AuthRequired`        | 400    | No session and no delegation token                                                       |
+| `InvalidToken`        | 400    | The delegation token or client attestation did not verify, or it names another space     |
+| `ProofRequired`       | 400    | No key proof to bind the credential to                                                   |
+| `UnknownSpace`        | 400    | The space URI is malformed or not a space of this service, or the boundary is not active |
+| `NotEnrolled`         | 400    | No active enrollment that holds the space's boundary                                     |
+| `AttestationRequired` | 400    | The space has an app allow-list and no attestation was presented                         |
+| `ClientNotAllowed`    | 400    | The attested `client_id` is not on the allow-list                                        |
+
+These come from `zone.stratos.space.getSpaceCredential`. `UnknownSpace` is
+also the answer when the boundary changes while the request is authorized.
+The space read endpoints answer `AuthRequired` with HTTP 401 when the caller
+is not admitted to the space.
+
+See [Permissioned Spaces](/architecture/permissioned-spaces#credential).
+
+## Enrollment
+
+Enrollment happens in the browser, through `/oauth/authorize` and
+`/oauth/callback`. When the service refuses an enrollment, the callback
+responds on the Stratos origin with a JSON error:
+
+| Error              | Status | Meaning                                                            |
+| ------------------ | ------ | ------------------------------------------------------------------ |
+| `EnrollmentDenied` | 403    | The user may not enroll, for example they are not on the allowlist |
+| `InvalidState`     | 400    | The OAuth state is missing or expired. Start the flow again.       |
+| `CallbackError`    | 500    | The callback failed for another reason                             |
+
+A successful enrollment redirects back to your app with
+`?stratos_enrolled=true`.
+
+## Sync
+
+| Error            | Status | Meaning                                                                                   |
+| ---------------- | ------ | ----------------------------------------------------------------------------------------- |
+| `OplogTruncated` | 400    | `listRepoOps` cannot serve that position. Recover with `listRecordPaths`.                 |
+| `FutureCursor`   |        | Declared by the `subscribeRecords` lexicon. Stratos does not send it. See the note below. |
+
+A `subscribeRecords` cursor ahead of the newest event does not fail. Stratos
+resumes the stream from the newest event. A cursor older than the retained
+events gets an `OutdatedCursor` info frame, and the stream continues.
+
+## Handling errors in a client
+
+An XRPC client surfaces the name as `error`:
+
+```typescript
+import { XRPCError } from '@atproto/xrpc'
+
+try {
+  await stratos.com.atproto.repo.createRecord(input)
+} catch (err) {
+  if (!(err instanceof XRPCError)) throw err
+
+  switch (err.error) {
+    case 'NotEnrolled':
+      // send the user through enrollment
+      break
+    case 'PdsCustodyWriteForbidden':
+      // route the write to the user's PDS
+      break
+    case 'RateLimitExceeded':
+      // back off and retry
+      break
+    default:
+      throw err
+  }
+}
+```

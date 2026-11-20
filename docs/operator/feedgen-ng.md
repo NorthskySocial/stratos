@@ -1,4 +1,27 @@
-# Feed Generator
+---
+audience: Operators
+type: How-to and reference
+prerequisites: A running Stratos service and a service DID for the feed generator
+status: current
+---
+
+<script setup>
+import FeedgenIndexingFlow from '../.vitepress/theme/components/FeedgenIndexingFlow.vue'
+
+const readinessStates = [
+  { id: 'closed', title: 'Closed', sub: '503 FeedNotReady', tone: 'deny' },
+  { id: 'checking', title: 'Re-checking', sub: 'every stored author' },
+  { id: 'open', title: 'Open', sub: '/health 200', tone: 'ok' },
+]
+const readinessMoves = [
+  { from: 'closed', to: 'checking', label: 'Stream connects' },
+  { from: 'checking', to: 'open', label: 'Every answer applies' },
+  { from: 'open', to: 'closed', label: 'Stream drops, or a feed read over 2 s' },
+  { from: 'checking', to: 'closed', label: 'An answer fails; reconnect' },
+]
+</script>
+
+# Run the feed generator
 
 The feed generator turns boundaries into feeds. It copies each new post into
 a local projection as the post arrives. When a viewer asks for a feed, it
@@ -12,7 +35,7 @@ older TypeScript `stratos-feedgen` package stays in the repository for
 rollback only. Its settings and its storage layout do not apply here.
 
 This page is for operators. For the design, read
-[Feed Generator architecture](/architecture/feed-generator). For attachment
+[Feed generator design](/architecture/feed-generator). For attachment
 downloads from a client, read
 [Private feed attachments](/client/feedgen-blobs).
 
@@ -38,11 +61,9 @@ route and no `/metrics` route.
 Posts arrive on two paths. The path depends on custody: who holds the
 author's records.
 
-```text
-Stratos custody ── subscribeRecords streams ──┐
-                                              ├──> local projection ──> feeds
-PDS custody ───── membership list, then poll ─┘
-```
+<Figure step="1" caption="How posts get in">
+  <FeedgenIndexingFlow />
+</Figure>
 
 ### Stratos-custody authors
 
@@ -82,16 +103,17 @@ A client does not hold a token for the feed generator. It asks its own PDS
 and sets the `atproto-proxy` header to `<feed generator DID>#stratos_feedgen`.
 The PDS forwards the request with a service-auth JWT.
 
-The feed generator accepts the token when all of these hold:
+The feed generator accepts the token only when every row holds:
 
-- The header is `Authorization: Bearer <jwt>`.
-- The algorithm is `ES256` or `ES256K`.
-- `iss` is the viewer's DID.
-- `aud` equals `FEEDGEN_SERVICE_DID` exactly, with no fragment.
-- `exp` is in the future.
-- `lxm` names the method the client calls.
-- The signature verifies against the `#atproto` key in the viewer's DID
-  document.
+| Claim or part | Requirement                                                      |
+| ------------- | ---------------------------------------------------------------- |
+| Header        | `Authorization: Bearer <jwt>`                                    |
+| `alg`         | `ES256` or `ES256K`                                              |
+| `iss`         | The viewer's DID                                                 |
+| `aud`         | Exactly `FEEDGEN_SERVICE_DID`, with no fragment                  |
+| `exp`         | In the future                                                    |
+| `lxm`         | The method the client calls                                      |
+| Signature     | Verifies against the `#atproto` key in the viewer's DID document |
 
 Next the feed generator asks Stratos for the viewer's boundaries with
 `zone.stratos.identity.resolveEnrollments`. It keeps the answer in memory for
@@ -109,10 +131,10 @@ in-memory database. A restart loses every post and every cursor. Set
 `encrypted-volume` for any deployment that must survive a restart.
 :::
 
-| Profile            | Where data lives         | Limits                                  |
-| ------------------ | ------------------------ | --------------------------------------- |
-| `ephemeral`        | Memory only              | Fixed: 16 MiB and 1 hour                |
-| `encrypted-volume` | SQLCipher file on a disk | You set them. Both limits are required. |
+| Profile               | Where data lives         | Kept on restart      | Limits                                  | Use for                                    |
+| --------------------- | ------------------------ | -------------------- | --------------------------------------- | ------------------------------------------ |
+| `ephemeral` (default) | Memory only              | Nothing              | Fixed: 16 MiB and 1 hour                | Tests                                      |
+| `encrypted-volume`    | SQLCipher file on a disk | The whole projection | You set them. Both limits are required. | Any deployment that must survive a restart |
 
 The `ephemeral` profile uses a fixed all-zero database key. Use it for tests.
 
@@ -275,9 +297,15 @@ The feed generator keeps credentials and their keys in memory only. It holds
 at most 128. It refreshes one five minutes before expiry. It rejects a
 credential that lasts longer than one hour. The Stratos side of this
 exchange is described in
-[October Spaces rollout](/operator/configuration#october-spaces-rollout).
+[October spaces rollout](/operator/upgrades/october-spaces).
 
 ## Readiness
+
+<StateDiagram
+  title="Feed readiness"
+  :states="readinessStates"
+  :transitions="readinessMoves"
+/>
 
 Feeds start closed. They open only after two things happen in order:
 
@@ -287,8 +315,8 @@ Feeds start closed. They open only after two things happen in order:
 
 A dropped stream closes feeds at once. The feed generator reconnects with a
 delay that doubles from 1 second up to 60 seconds. Every reconnect repeats
-the check in step 2 before feeds open again. A failed author stream also ends
-the session and forces a reconnect.
+the check in step 2 before feeds open again. A failed check or a failed
+author stream also ends the session and forces a reconnect.
 
 A feed read that takes longer than 2 seconds also closes feeds. They stay
 closed until the service-level stream next reconnects and the check passes.

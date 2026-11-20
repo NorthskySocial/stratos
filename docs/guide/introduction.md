@@ -1,3 +1,9 @@
+---
+audience: Anyone evaluating Stratos
+type: Overview
+status: current
+---
+
 # Introduction
 
 On AT Protocol, everything you post is public by design.
@@ -11,19 +17,22 @@ member, and its members share posts that only other members can read. Nobody
 needs a new account. People keep their AT Protocol identity, handle,
 and PDS.
 
-If you want the idea without the vocabulary, read
-[Shared Private Data, Explained Simply](/guide/what-is-stratos) first.
+This page adds the vocabulary to the idea. For the idea without the
+vocabulary, start with the page before this one,
+[What is Stratos? Explained simply](/guide/what-is-stratos).
 
 ## How it works
 
 Follow one post from the keyboard to a friend's screen.
 
-1. **A user enrolls.** They sign in to a Stratos service with their existing
-   account, through OAuth. Stratos records which _boundaries_ they belong to
+1. **A user <Term name="enrollment">enrolls</Term>.** They sign in to a
+   Stratos service with their existing account, through OAuth. Stratos
+   records which <Term name="boundary">boundaries</Term> they belong to
    and writes one small public record, `zone.stratos.actor.enrollment`, to
    their PDS. That record tells apps where to look.
-2. **The user writes a private post** for one boundary. Where the post is
-   kept depends on the user's PDS. If the PDS supports permissioned spaces,
+2. **The user writes a private post** for one boundary. Who keeps the
+   post is the user's <Term name="custody">custody</Term>, and it depends on
+   the user's PDS. If the PDS supports permissioned spaces,
    the post stays there, in a protected space. If not, Stratos keeps it.
    Either way, Stratos decides who belongs.
 3. **The feed generator collects posts.** It follows the members Stratos
@@ -44,7 +53,7 @@ A private post never reaches the public firehose.
 | **Custody**    | Who keeps a user's private posts: Stratos, or the user's own PDS.                                |
 
 [Core Concepts](/guide/concepts) explains each one. The
-[Glossary](/guide/glossary) is the quick reference.
+[Glossary](/reference/glossary) is the quick reference.
 
 ## What is in the repository
 
@@ -66,7 +75,7 @@ and reference.
 
 **To understand it:**
 
-- [Shared Private Data, Explained Simply](/guide/what-is-stratos): the idea,
+- [What is Stratos? Explained simply](/guide/what-is-stratos): the idea,
   in plain words.
 - [Core Concepts](/guide/concepts): boundaries, enrollment, custody, and
   trust.
@@ -82,4 +91,4 @@ and reference.
 **To run it:**
 
 - [Operator Guide](/operator/overview): deploy and manage a Stratos service.
-- [Feed Generator](/operator/feedgen-ng): run the feed generator beside it.
+- [Run the feed generator](/operator/feedgen-ng): run the feed generator beside it.

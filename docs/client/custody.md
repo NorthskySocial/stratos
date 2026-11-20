@@ -1,3 +1,9 @@
+---
+audience: App developers
+type: Explanation and how-to
+status: current
+---
+
 # Custody and Routing
 
 Custody says who holds a user's private records: the Stratos service, or the
@@ -109,23 +115,12 @@ the authority URL. It does not select a repository host.
 
 ## Two record addresses
 
-Custody also decides the shape of a record URI.
+Custody also decides the shape of a record URI. A `stratos`-custody record
+keeps the familiar three segments. A `pds`-custody record lives in a space.
+Its URI has seven segments and starts with the authority. The author is the
+fifth segment.
 
-A `stratos`-custody record keeps the familiar three segments:
-
-```text
-at://{authorDid}/zone.stratos.feed.post/{rkey}
-```
-
-A `pds`-custody record lives in a space. Its URI has seven segments and
-starts with the authority:
-
-```text
-at://{serviceDid}/space/zone.stratos.space.feed/{name}/{authorDid}/zone.stratos.feed.post/{rkey}
-```
-
-Code that takes the first segment as the author is wrong for a space record.
-The author is the fifth segment.
+<RecordUri kind="space" />
 
 The space itself is the first four segments. The boundary
 `did:web:stratos.example.com/engineering` is the space
@@ -210,11 +205,9 @@ Both calls need a space scope on the session. See
 [Space scope](#space-scope) below.
 
 ::: warning A boundary on a PDS record is a claim
-A PDS does not ask Stratos before it accepts a write. Any account can write a
-record into a Stratos space URI in its own repo. The feed generator reads only
-the repos of current members, and it takes the boundary from Stratos
-enrollment state. Your app must do the same. Never grant access from a
-boundary written inside a PDS-hosted record.
+Never grant access from a boundary written inside a PDS-hosted record. Take
+the boundary from Stratos enrollment state, as the feed generator does. See
+the [three custody rules](/operator/architecture#three-rules).
 :::
 
 ## Reading by custody
