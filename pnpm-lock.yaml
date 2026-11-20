@@ -565,8 +565,8 @@ importers:
         specifier: ^0.22.8
         version: 0.22.8(supports-color@8.1.1)
       '@atproto/oauth-scopes':
-        specifier: 0.0.0-spaces-alpha-20260818163953
-        version: 0.0.0-spaces-alpha-20260818163953
+        specifier: 0.0.0-spaces-alpha-20261117141222
+        version: 0.0.0-spaces-alpha-20261117141222
       '@atproto/oauth-types':
         specifier: ^0.7.5
         version: 0.7.5
@@ -1047,6 +1047,10 @@ packages:
     resolution: {integrity: sha512-m33okNTaZWEXEjp9ZIDM1qIxwfrlxciL2d61BLUo4sX+j5PaHbrlePS2cMJ8o+C/9BcZJWpJXhjC9tMsgJD6/w==}
     engines: {node: '>=22'}
 
+  '@atproto/did@0.0.0-spaces-alpha-20261117141222':
+    resolution: {integrity: sha512-osWjQoQWRXKAYzm5MnQhc3D6lzKMsq7vNTnaTG7nrC5w9vGOBPMHPMxyWMhUWkRhHIrDSKPQnscNlfwYQ0bNHA==}
+    engines: {node: '>=22'}
+
   '@atproto/did@0.5.4':
     resolution: {integrity: sha512-BlnwQ+obL+4ZA71KH/EzZ3TY+cpSxnLiUI85mjBJIQwvDF/oN2sQA18wIj9jpduviIt2b/cMtlJuzHjzBkfXvw==}
     engines: {node: '>=22'}
@@ -1177,8 +1181,8 @@ packages:
     resolution: {integrity: sha512-2vxpL6mrPNazZGiPej8rSul4dGY1Sj2UzmKZrqsx6EDL+JQmmjjk1gHeiXjHZCat9SFCA7OuuUlX22nZpLRXaw==}
     engines: {node: '>=22'}
 
-  '@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953':
-    resolution: {integrity: sha512-bQz4BwNk/FAPd8bXGO3EyhlIKu/UJzN5XIgmNeiZXtJbhbe30J78A3WnvBuA+SILiGFw7/M9hfgq9FcJKCzjCw==}
+  '@atproto/oauth-scopes@0.0.0-spaces-alpha-20261117141222':
+    resolution: {integrity: sha512-7crBfEPSaXsROwMzrgCSVd2+2PJB2scUjlUXpC3pO8NmoJLt/2S6NdP9iaIVTVa6H5sBNmFwurTtloSjgqUWzQ==}
     engines: {node: '>=22'}
 
   '@atproto/oauth-scopes@0.5.12':
@@ -1209,8 +1213,8 @@ packages:
     resolution: {integrity: sha512-zjkfNoW20xcXVepyv2RtZj25cELBI4hRgu9L2tYHxqbyPRwtD4hV0+YqCln2GrPwUr70JBjOyimYZKk7QgoW4g==}
     engines: {node: '>=22'}
 
-  '@atproto/syntax@0.0.0-spaces-alpha-20260818163953':
-    resolution: {integrity: sha512-Xl2fpD/NcfVOWpHR86HKym2XNDYHmgiqThZXoYMwh9XUo+/LgVZYGVpSecfKRBcQ5tNGiRivE1Fvio5YDfJ3lA==}
+  '@atproto/syntax@0.0.0-spaces-alpha-20261117141222':
+    resolution: {integrity: sha512-EwGfevaQpSHFYl95a4r7Kl63PLSLeYm6Qwf3XWVzCjJO55HuuNLUQbsrF2iUlTy++82YoC/1dxHk57SWJCom8A==}
     engines: {node: '>=22'}
 
   '@atproto/syntax@0.4.3':
@@ -8070,6 +8074,10 @@ snapshots:
       '@noble/hashes': 1.8.0
       uint8arrays: 5.1.1
 
+  '@atproto/did@0.0.0-spaces-alpha-20261117141222':
+    dependencies:
+      zod: 3.25.76
+
   '@atproto/did@0.5.4':
     dependencies:
       zod: 3.25.76
@@ -8351,10 +8359,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953':
+  '@atproto/oauth-scopes@0.0.0-spaces-alpha-20261117141222':
     dependencies:
-      '@atproto/did': 0.5.4
-      '@atproto/syntax': 0.0.0-spaces-alpha-20260818163953
+      '@atproto/did': 0.0.0-spaces-alpha-20261117141222
+      '@atproto/syntax': 0.0.0-spaces-alpha-20261117141222
 
   '@atproto/oauth-scopes@0.5.12':
     dependencies:
@@ -8422,7 +8430,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@atproto/syntax@0.0.0-spaces-alpha-20260818163953':
+  '@atproto/syntax@0.0.0-spaces-alpha-20261117141222':
     dependencies:
       iso-datestring-validator: 2.2.2
       tslib: 2.8.1

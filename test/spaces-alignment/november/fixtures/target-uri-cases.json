@@ -1,0 +1,43 @@
+{
+  "header": {
+    "classification": "target-uri-synthetic",
+    "oracle": {
+      "note": "Written by hand from the chosen at:space/ grammar; no upstream artifact produces these strings yet."
+    },
+    "generator": "hand-derived",
+    "upstreamVerified": false,
+    "reproducible": true
+  },
+  "cases": [
+    {
+      "name": "a space",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew",
+      "components": {
+        "authority": "did:web:bebop.example",
+        "spaceType": "zone.stratos.space.feed",
+        "skey": "crew"
+      }
+    },
+    {
+      "name": "a record whose author differs from the authority",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish",
+      "components": {
+        "authority": "did:web:bebop.example",
+        "spaceType": "zone.stratos.space.feed",
+        "skey": "crew",
+        "author": "did:plc:fayevalentine",
+        "collection": "zone.stratos.feed.post",
+        "rkey": "swordfish"
+      }
+    },
+    {
+      "name": "a did:web authority with an encoded port",
+      "uri": "at:space/did:web:localhost%3A3100/zone.stratos.space.feed/nerv",
+      "components": {
+        "authority": "did:web:localhost%3A3100",
+        "spaceType": "zone.stratos.space.feed",
+        "skey": "nerv"
+      }
+    }
+  ]
+}

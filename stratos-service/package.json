@@ -45,7 +45,7 @@
     "@atproto/lexicon": "^0.7.11",
     "@atproto/oauth-client-node": "^0.5.7",
     "@atproto/oauth-provider": "^0.22.8",
-    "@atproto/oauth-scopes": "0.0.0-spaces-alpha-20260818163953",
+    "@atproto/oauth-scopes": "0.0.0-spaces-alpha-20261117141222",
     "@atproto/oauth-types": "^0.7.5",
     "@atproto/syntax": "^0.7.4",
     "@atproto/xrpc-server": "^0.12.5",

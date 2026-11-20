@@ -4,6 +4,17 @@ import type { Logger, SpacesCapability } from '@northskysocial/stratos-core'
 import { HOSTED_SPACE_COLLECTIONS } from '../shared/space-type-registry.js'
 import { SPACE_TYPE } from './client.js'
 
+// The scope library types an authority as a DID. The value is passed through
+// unchanged: a malformed one simply matches no grant, as before. The same
+// holds for the collection.
+function spaceOf(serviceDid: string) {
+  return {
+    spaceType: SPACE_TYPE,
+    authority: serviceDid as `did:${string}:${string}`,
+    skey: '*',
+  } as const
+}
+
 /**
  * Whether a granted scope lets the member create records of one collection in
  * this authority's space type, in any boundary.
@@ -13,12 +24,9 @@ export function grantAllowsCreate(
   collection: string,
   serviceDid: string,
 ): boolean {
-  return new ScopePermissions(scope).allowsSpace({
-    type: SPACE_TYPE,
-    authority: serviceDid,
-    skey: '*',
-    collection,
+  return new ScopePermissions(scope).allowsSpace(spaceOf(serviceDid), {
     action: 'create',
+    collection: collection as `${string}.${string}.${string}`,
   })
 }
 
@@ -30,12 +38,7 @@ export function grantAllowsCreate(
 export function holdsSpaceGrant(scope: string, serviceDid: string): boolean {
   const permissions = new ScopePermissions(scope)
   return (
-    permissions.allowsSpace({
-      type: SPACE_TYPE,
-      authority: serviceDid,
-      skey: '*',
-      action: 'read',
-    }) ||
+    permissions.allowsSpace(spaceOf(serviceDid), { action: 'read' }) ||
     HOSTED_SPACE_COLLECTIONS.some((collection) =>
       grantAllowsCreate(scope, collection, serviceDid),
     )
@@ -68,10 +71,7 @@ export async function detectSpacesCapability(
     // Check create as well as read. Custody decides where this user's records
     // are written, so a grant that reads but cannot create is not capable of
     // the flow we would put them in.
-    const canRead = permissions.allowsSpace({
-      type: SPACE_TYPE,
-      authority: serviceDid,
-      skey: '*',
+    const canRead = permissions.allowsSpace(spaceOf(serviceDid), {
       action: 'read',
     })
     const canCreate = HOSTED_SPACE_COLLECTIONS.every((collection) =>

@@ -1,0 +1,125 @@
+{
+  "reference": {
+    "repository": "https://github.com/bluesky-social/atproto",
+    "revision": "b5fd12fa57b10cf068efa879812f558780f37109",
+    "releaseAnchor": "d4def6e9f521896ed8222f576d54923d00b5fbeb",
+    "prompts": {
+      "prompt-11-12-26.md": {
+        "sha256": "3ff5a4e5bd0511c717e9afab04ab8bf69e1b404593eac9afaa5d4e026784c770"
+      },
+      "prompt-11-5-26.md": {
+        "sha256": "f48104e63052b5905a634a0002adddcc60df55c51a7f7c1c72bf6d59431e0db1"
+      },
+      "prompt-10-29-26.md": {
+        "sha256": "11d6b58d9ea910210bed2338f377abba881676a52e1694bd9728a88f01cf0fe9"
+      },
+      "prompt-10-22-26.md": {
+        "sha256": "0590ad28cef834b845c4680f498a4b9a533a5e274b8cec38fcf78569997088d6"
+      }
+    }
+  },
+  "proposal": {
+    "repository": "https://github.com/bluesky-social/proposals",
+    "revision": "b54ec6853bab77edd4fd373804a480633094b324",
+    "readmePath": "0016-permissioned-data/README.md",
+    "readmeSha256": null,
+    "readmeSha256Reason": "No local checkout of the proposals repository exists to hash the file from, and the file was deliberately not fetched."
+  },
+  "packages": [
+    {
+      "name": "@atproto/api",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-3ob7Y/2pGTrRPs3ihj1HwqnMQY6Q4ZDbUODCCVA0QVUJKxFIeLHwbXob8f4w/HOZb5T6EGSye9QsdZP+jY8t1A==",
+      "tarballSha256": "935d36a3407741d61e053bfbdc50cce3479d980b9b600689ca9a710b49083f02",
+      "selection": "inspected-not-selected"
+    },
+    {
+      "name": "@atproto/syntax",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-EwGfevaQpSHFYl95a4r7Kl63PLSLeYm6Qwf3XWVzCjJO55HuuNLUQbsrF2iUlTy++82YoC/1dxHk57SWJCom8A==",
+      "tarballSha256": "03519e77f6d9eadde2b25865da3bd0b3fd9e7d5f1927cfa6d57785e72859eb37",
+      "selection": "inspected-not-selected"
+    },
+    {
+      "name": "@atproto/oauth-scopes",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-7crBfEPSaXsROwMzrgCSVd2+2PJB2scUjlUXpC3pO8NmoJLt/2S6NdP9iaIVTVa6H5sBNmFwurTtloSjgqUWzQ==",
+      "tarballSha256": "bcc03c4d1129f17c23319fde60f829a341a6b2ab05824d849ec99a53c0abf389",
+      "selection": "selected"
+    },
+    {
+      "name": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-AasGxXJz1htNRNNR1JL/2v4EV45VvC4UrbY1x/w/cFH0avOHFxhDV0MQMMegVYhSi7DtnkJ1smwDxO6K/W402g==",
+      "tarballSha256": "40d1fcad2caaf35c26b8de58557bfab0206d5ea74a62faa58b5ce66c0969f9fd",
+      "selection": "inspected-not-selected"
+    },
+    {
+      "name": "@atproto/lexicon",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-BAa5bPR1y70+JLP1lalXsOjpSYO7yvJN2DVjwaa+PK3L6bmXgD5wHcaiC0Q+KxIpjQQ+ZtCAcocAdvlsgTGAug==",
+      "tarballSha256": "d3683106093777f6d92eeaa3f0770086f2fb1c5c9287a429df034f56b820799b",
+      "selection": "inspected-not-selected"
+    },
+    {
+      "name": "@atproto/oauth-client-node",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-7EofLSwe/dCrtau86LjWdPEtJIXjt5OL83+seuNpEvif6jc7h/k3Vcu8ELrHVW0Oqn77IQJKeB/0BALy3O/mpg==",
+      "tarballSha256": "d6ef987fbfe10730f9be0e1fcf472d30435d6073c0c74279a3afdb3ee7e49152",
+      "selection": "inspected-not-selected"
+    }
+  ],
+  "targetUriFormat": "at:space/",
+  "referenceSupportsTargetUri": false,
+  "cutoverEvidence": {
+    "status": "unfulfilled",
+    "uriProbe": null
+  },
+  "legacyUriOnly": {
+    "revisions": [
+      "b5fd12fa57b10cf068efa879812f558780f37109",
+      "d4def6e9f521896ed8222f576d54923d00b5fbeb"
+    ],
+    "packageVersions": [
+      "0.0.0-spaces-alpha-20261117141222",
+      "0.0.0-spaces-alpha-20261112204144"
+    ]
+  },
+  "fixtures": [
+    {
+      "path": "commit-and-ops.json",
+      "sha256": "f2009d7e0f0461788f1e3f3bbf1f44312f20dfa0786d1985b6fa8d415c5eac16",
+      "classification": "upstream-legacy-uri"
+    },
+    {
+      "path": "credential-signature.json",
+      "sha256": "3f9a3270c879fdb7096152a7b308c32fb54dbca1ab89f2f4a2114fb092bc594b",
+      "classification": "upstream-uri-free"
+    },
+    {
+      "path": "hpke-export-oracle.json",
+      "sha256": "b729d1e686700acf4a4a230ed7939e0e3ba18016cc13f4bb323edd0ccbc404b0",
+      "classification": "upstream-uri-free"
+    },
+    {
+      "path": "hpke-export-rfc.json",
+      "sha256": "06d54b2a7b75769b07b6d9d5b13ffd93a1ea56d74bfa2dac81594b6874c1e237",
+      "classification": "rfc"
+    },
+    {
+      "path": "lthash.json",
+      "sha256": "6a844c5135ac5814a7aa417ba10fbb121c8fd40400372135a56f30039f3f47eb",
+      "classification": "upstream-uri-free"
+    },
+    {
+      "path": "star-framing.json",
+      "sha256": "2a9dd494242378b03efea91e2dde362cfbf90882d294574e4a69b1e385bd670c",
+      "classification": "upstream-legacy-uri"
+    },
+    {
+      "path": "target-uri-cases.json",
+      "sha256": "6ad5fda8007406e4ce632b5d759adf82f6ef7becec82cd3a3160b16500162d19",
+      "classification": "target-uri-synthetic"
+    }
+  ]
+}

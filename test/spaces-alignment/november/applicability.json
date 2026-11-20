@@ -1,0 +1,1121 @@
+{
+  "rows": [
+    {
+      "id": "prompt-1a-method-renames",
+      "promptSection": "1a",
+      "surface": "Renamed upstream methods (getSpaceCredential, listRepos, notifyWrite, notifyCredentialRevoked, putMember, removeMember, checkUserAccess)",
+      "ownership": "test-owned",
+      "paths": [
+        "test/spaces-alignment/scenarios/standard-credential-transport.driver.mjs",
+        "test/spaces-alignment/scenarios/writer-sync-contract.driver.mjs",
+        "test/spaces-alignment/scenarios/credential-revocation-contract.driver.mjs",
+        "test/spike/spaces/a4-host-discovery.ts"
+      ],
+      "workstream": "interop-cutover",
+      "decision": "Only reference-host drivers and spikes call the upstream names; update them when the reference host is selected, production never calls them.",
+      "evidence": "rg -l 'com\\.atproto\\.space\\.(getSpaceCredential|listRepos|notifyWrite)' stratos-core/src stratos-service/src stratos-client/src stratos-feedgen-ng/src webapp/src clubhouse/src returns nothing; the same pattern hits only the listed test files."
+    },
+    {
+      "id": "prompt-1b-field-renames",
+      "promptSection": "1b",
+      "surface": "Renamed fields; listRepoOps commit on every page",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/space_host.rs",
+        "stratos-feedgen-ng/src/pds_space_sync.rs"
+      ],
+      "workstream": "sync-recovery",
+      "decision": "The Rust consumer decodes the listRepoOps page with an optional commit; later work requires the commit on every page and keeps custom zone.stratos response shapes unchanged.",
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:393-399 RawPage with an optional commit; pds_space_sync.rs:256-268 verifies only after the terminal page."
+    },
+    {
+      "id": "prompt-1c-error-renames",
+      "promptSection": "1c",
+      "surface": "Renamed upstream error names",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "No production or test code matches on an upstream Spaces error name, so the renames need no change here.",
+      "evidence": "rg -n 'NotSpaceOwner|UserNotAuthorized|BadSpaceMac|MalformedCursor' over production source, test/spaces-alignment and test/spike returns nothing."
+    },
+    {
+      "id": "prompt-1d-star-content-type",
+      "promptSection": "1d",
+      "surface": "STAR content type on getRepo and exportSpaceMeta",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/api/handlers/repo-read-handlers.ts",
+        "stratos-feedgen-ng/src/space_host.rs"
+      ],
+      "workstream": "sync-recovery",
+      "decision": "Stratos serves its own CAR export under a custom zone.stratos.sync method and the Rust consumer never fetches getRepo; bounded recovery adds a STAR reader later.",
+      "evidence": "stratos-service/src/api/handlers/repo-read-handlers.ts:74 exports a CAR; rg 'getRepo' stratos-feedgen-ng/src finds no call to com.atproto.space.getRepo."
+    },
+    {
+      "id": "prompt-1e-space-meta-archives",
+      "promptSection": "1e",
+      "surface": "Space meta archives with repoRev",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "No exporter or importer of space meta archives exists in this repository; nothing to migrate.",
+      "evidence": "rg -n 'exportSpaceMeta|importSpaceMeta|space-meta' stratos-core stratos-service stratos-client stratos-feedgen-ng webapp clubhouse test/spaces-alignment returns nothing."
+    },
+    {
+      "id": "prompt-2a-member-lists",
+      "promptSection": "2a",
+      "surface": "putMembers and removeMembers batches",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "Membership is Stratos enrollment, not a PDS member list; no caller of putMember or removeMember exists.",
+      "evidence": "rg -n 'putMember|removeMember|memberspace' production source finds only removeMembership in stratos-service/src/features/boundary/manager.ts:17, an unrelated enrollment hook."
+    },
+    {
+      "id": "prompt-2b-managing-apps",
+      "promptSection": "2b",
+      "surface": "Managing app checkAccess",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "Stratos does not serve checkUserAccess or checkAccess; the custom enrollment oracle is the authority.",
+      "evidence": "rg -n 'checkUserAccess|checkAccess|managedspace' stratos-core stratos-service stratos-client stratos-feedgen-ng returns nothing."
+    },
+    {
+      "id": "prompt-2c-allowed-apps",
+      "promptSection": "2c",
+      "surface": "memberspace policy allowedApps URIs",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "No policy objects are created or read by Stratos.",
+      "evidence": "rg -n 'allowedApps' production source returns nothing."
+    },
+    {
+      "id": "prompt-3-declarations-and-scopes",
+      "promptSection": "3",
+      "surface": "Space type declaration title and named scope spaceType",
+      "ownership": "production-owned",
+      "paths": [
+        "lexicons-spaces/zone/stratos/space/feed.json",
+        "stratos-service/src/shared/space-type-registry.ts",
+        "stratos-service/src/oauth/client.ts",
+        "stratos-browser/src/auth.ts"
+      ],
+      "workstream": "schemas-and-clients",
+      "decision": "The declaration still uses name, and scopes are built in positional and named form; rename and audit the scope strings.",
+      "evidence": "lexicons-spaces/zone/stratos/space/feed.json:9 has name; stratos-service/src/oauth/client.ts:42 buildSpaceScope."
+    },
+    {
+      "id": "prompt-4a-credentials",
+      "promptSection": "4a",
+      "surface": "authorizeSpaceSync request and response",
+      "ownership": "test-owned",
+      "paths": [
+        "test/spaces-alignment/scenarios/standard-credential-transport.driver.mjs",
+        "test/spaces-alignment/scenarios/credential-lifetime.driver.mjs",
+        "test/spike/spaces/b1b-authorize-probe.ts"
+      ],
+      "workstream": "interop-cutover",
+      "decision": "Production mints credentials through the custom getSpaceCredential; only reference-authority test calls use the upstream request.",
+      "evidence": "rg -l 'getSpaceCredential' test/spaces-alignment test/spike lists the drivers; production uses zone.stratos.space.getSpaceCredential (stratos-service/src/features/space-credential/handler.ts:29)."
+    },
+    {
+      "id": "prompt-4b-registration",
+      "promptSection": "4b",
+      "surface": "Notification registration through authorizeSpaceSync",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "No production registerNotify or notify registration; polling continues and no feature is added.",
+      "evidence": "rg -n 'registerNotify|unregisterNotify|notifyWrite|confirmRegistration' production source returns nothing; only test drivers name them."
+    },
+    {
+      "id": "prompt-4c-notifications",
+      "promptSection": "4c",
+      "surface": "notifySpaceUpdate receiver",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "No receiver of space update notifications exists; none is added.",
+      "evidence": "rg -n 'notifySpaceUpdate|notifySpaceDeleted' production source returns nothing."
+    },
+    {
+      "id": "prompt-4d-repo-host-notify",
+      "promptSection": "4d",
+      "surface": "notifyRepoUpdate from repo hosts",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "Stratos is not the repo host for a PDS-custody member and sends no repo update notice.",
+      "evidence": "rg -n 'notifyRepoUpdate|notifyWrite' production source returns nothing."
+    },
+    {
+      "id": "prompt-4e-space-host-registrations",
+      "promptSection": "4e",
+      "surface": "Space host registration storage and delivery",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "Stratos as authority stores no syncer registrations.",
+      "evidence": "rg -n 'registration|notify' stratos-service/src/features/space-credential returns nothing."
+    },
+    {
+      "id": "prompt-5-credential-signatures",
+      "promptSection": "5",
+      "surface": "Credential HTTP signature lookup by tag",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/infra/auth/space-http-signature.ts",
+        "stratos-feedgen-ng/src/space_http_signature.rs",
+        "stratos-feedgen-ng/src/space_host.rs"
+      ],
+      "workstream": "credential-transport",
+      "decision": "The service verifier looks signatures up by a fixed label and the Rust signer emits one; switch the verifier to tag selection with the exact covered components.",
+      "evidence": "stratos-service/src/infra/auth/space-http-signature.ts:51-65 label lookup; stratos-feedgen-ng/src/space_host.rs:190-193 sets signature-input and signature."
+    },
+    {
+      "id": "prompt-6a-shared-secret",
+      "promptSection": "6a",
+      "surface": "HPKE secret export for the MAC shared secret",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "response-authentication",
+      "decision": "The Rust consumer has no KEM key discovery or shared secret; add HPKE export-only derivation there.",
+      "evidence": "rg -n -i 'hpke|hkdf|kem|key_share' stratos-feedgen-ng/src returns nothing."
+    },
+    {
+      "id": "prompt-6b-mac-request",
+      "promptSection": "6b",
+      "surface": "Accept-Signature MAC request",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "response-authentication",
+      "decision": "No MAC request header is sent by the Rust host client.",
+      "evidence": "rg -n -i 'accept-signature|want-mac' stratos-feedgen-ng/src returns nothing; requests at stratos-feedgen-ng/src/space_host.rs:185-193 carry no MAC request."
+    },
+    {
+      "id": "prompt-6c-mac-response",
+      "promptSection": "6c",
+      "surface": "Covered MAC response headers",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "response-authentication",
+      "decision": "Stratos serves no MAC-bearing space responses.",
+      "evidence": "rg -n -i 'atproto-space-commit|atproto-space-record|Signature-Input' stratos-service/src returns only the credential-signature verifier."
+    },
+    {
+      "id": "prompt-6d-mac-verification",
+      "promptSection": "6d",
+      "surface": "Syncer verification of commit and record MACs",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/space_commit.rs",
+        "stratos-feedgen-ng/src/space_host.rs"
+      ],
+      "workstream": "response-authentication",
+      "decision": "The Rust verifier checks an ikm and mac inside the commit body; replace it with response-header verification, never keeping the old format.",
+      "evidence": "stratos-feedgen-ng/src/space_commit.rs:113-120 SignedSpaceCommit has hash, ikm, mac, signature."
+    },
+    {
+      "id": "prompt-6e-repo-host-mac",
+      "promptSection": "6e",
+      "surface": "Repo host MAC production",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "Stratos hosts no PDS-custody repo; the custom sync service signs its own commits without MACs.",
+      "evidence": "rg -n -i 'mac' stratos-service/src/features/pull-sync returns nothing."
+    },
+    {
+      "id": "prompt-7a-writer-removal",
+      "promptSection": "7a",
+      "surface": "Writer removal announced and listed as repoRemoved",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/features/space-read/handler.ts",
+        "stratos-feedgen-ng/src/space_membership.rs"
+      ],
+      "workstream": "sync-recovery",
+      "decision": "Membership comes from the custom enrollment oracle with generation checks; removals stay on that path and no writer list is consumed.",
+      "evidence": "stratos-service/src/features/space-read/handler.ts:41 LIST_SPACE_REPOS_METHOD is zone.stratos.space.listRepos."
+    },
+    {
+      "id": "prompt-7b-list-repo-ops-commit",
+      "promptSection": "7b",
+      "surface": "listRepoOps commit on every page and RepoNotFound",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/space_host.rs",
+        "stratos-feedgen-ng/src/pds_space_sync.rs"
+      ],
+      "workstream": "sync-recovery",
+      "decision": "Verify only against a commit on the terminal page and map RepoNotFound to an empty repo.",
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:173 requests com.atproto.space.listRepoOps; pds_space_sync.rs:256-268 terminal handling."
+    },
+    {
+      "id": "prompt-7c-garbage-collection",
+      "promptSection": "7c",
+      "surface": "72 hour garbage collection and full re-enumeration",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/pds_space_scheduler.rs",
+        "stratos-feedgen-ng/src/space_membership.rs"
+      ],
+      "workstream": "sync-recovery",
+      "decision": "The scheduler already enumerates the whole membership from the enrollment oracle each round, so no catch-up path depends on a writer cursor.",
+      "evidence": "stratos-feedgen-ng/src/space_membership.rs reads the oracle; no writer cursor exists in store/migrations.rs."
+    },
+    {
+      "id": "prompt-7d-space-host-sequencing",
+      "promptSection": "7d",
+      "surface": "Space host sequences removals",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "Stratos is not a standard space host; it has no sequenced writer set.",
+      "evidence": "rg -n 'repoRemoved|\\brepoWrite\\b|spaceRev' production source returns nothing."
+    },
+    {
+      "id": "prompt-8-moderation-guidance",
+      "promptSection": "8",
+      "surface": "Moderation and access-control guidance",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/moderation_label.rs",
+        "stratos-feedgen-ng/src/label_poller.rs",
+        "stratos-service/src/features/moderation/handler.ts"
+      ],
+      "workstream": "interop-cutover",
+      "decision": "Guidance only; the custom label log and feedgen takedown filter stay as they are and remaining gaps are reported at cutover, not fixed.",
+      "evidence": "stratos-feedgen-ng/src/label_poller.rs polls the service label log; stratos-service/src/features/moderation/handler.ts writes it."
+    },
+    {
+      "id": "prompt-9-api-library",
+      "promptSection": "9",
+      "surface": "@atproto/api Spaces symbols",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "No production package calls an agent.com.atproto.space method or imports a generated space type from the API package.",
+      "evidence": "rg -n 'agent\\.com\\.atproto\\.space|ComAtprotoSpace|SpaceRef|AtUri\\.makeSpace|SpacePermission' stratos-core stratos-service stratos-browser stratos-client webapp clubhouse returns nothing."
+    },
+    {
+      "id": "prompt-9-lex-bindings",
+      "promptSection": "9",
+      "surface": "@atproto/lex generated bindings",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "No package depends on @atproto/lex; generated bindings are not maintained.",
+      "evidence": "rg -n '\"@atproto/lex\"' */package.json returns nothing."
+    },
+    {
+      "id": "prompt-9-space-package",
+      "promptSection": "9",
+      "surface": "@atproto/space package",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "Not a dependency; the TypeScript and Rust code implement the wire themselves.",
+      "evidence": "rg -n '@atproto/space' */package.json returns nothing."
+    },
+    {
+      "id": "prompt-9-syntax",
+      "promptSection": "9",
+      "surface": "@atproto/syntax AtUri, SpaceRef and URI helpers",
+      "ownership": "external-library-owned",
+      "paths": [
+        "stratos-core/package.json",
+        "stratos-core/src/spaces/domain.ts",
+        "stratos-core/src/validation/subject.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Only AtUri and string validators are imported; the installed syntax package cannot parse the target URI form, so Stratos parsers own it.",
+      "evidence": "rg -n \"from '@atproto/syntax'\" stratos-core/src shows AtUri and is* validators; no SpaceRef import."
+    },
+    {
+      "id": "prompt-9-oauth-scopes",
+      "promptSection": "9",
+      "surface": "@atproto/oauth-scopes allowsSpace and SpacePermission",
+      "ownership": "external-library-owned",
+      "paths": [
+        "stratos-service/package.json",
+        "stratos-service/src/oauth/spaces-capability.ts"
+      ],
+      "workstream": "schemas-and-clients",
+      "decision": "The only importer is spaces-capability.ts. It builds the space as one object with spaceType, authority and skey and passes it with the action to the two-argument allowsSpace; no further change is expected, and the exact November alpha is pinned in stratos-service/package.json.",
+      "evidence": "rg -n '@atproto/oauth-scopes' --glob '!node_modules' --glob '!pnpm-lock.yaml' finds stratos-service/package.json:48 and spaces-capability.ts:1; spaces-capability.ts:10-16 spaceOf, :27 and :41 and :74 allowsSpace calls."
+    },
+    {
+      "id": "prompt-9-crypto-did",
+      "promptSection": "9",
+      "surface": "@atproto/crypto hkdf and @atproto/did KEM key extraction",
+      "ownership": "external-library-owned",
+      "paths": ["stratos-service/package.json", "stratos-client/package.json"],
+      "workstream": "response-authentication",
+      "decision": "No call to hkdfSha256 exists; HPKE work happens in Rust, so the TypeScript packages stay on their stable ranges.",
+      "evidence": "rg -n 'hkdfSha256|extractKemKey' stratos-core/src stratos-service/src stratos-client/src returns nothing."
+    },
+    {
+      "id": "prompt-9-repo-car",
+      "promptSection": "9",
+      "surface": "@atproto/repo and @atproto/car",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "Neither package is a dependency; CAR export and MST code are Stratos-owned.",
+      "evidence": "rg -n '@atproto/(repo|car)\"' */package.json returns nothing."
+    },
+    {
+      "id": "prompt-9-lex-space",
+      "promptSection": "9",
+      "surface": "@atproto/lex-space SDK",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "Optional and not adopted; no SDK family change.",
+      "evidence": "rg -n 'lex-space' */package.json returns nothing."
+    },
+    {
+      "id": "prompt-10-reference-pds-deployment",
+      "promptSection": "10",
+      "surface": "Reference PDS deployment and image build",
+      "ownership": "test-owned",
+      "paths": [
+        "test/spaces-alignment/sources.json",
+        "test/spaces-alignment/templates/october-pds.definition.json",
+        "test/spaces-alignment/atmosphere"
+      ],
+      "workstream": "interop-cutover",
+      "decision": "Stratos does not deploy the reference PDS; only the disposable test harness builds it, from the old Dockerfile path.",
+      "evidence": "test/spaces-alignment/sources.json pins the October PDS revision; the harness builds services/pds/Dockerfile."
+    },
+    {
+      "id": "prompt-11-verify-and-report",
+      "promptSection": "11",
+      "surface": "Verification guidance and regression menu",
+      "ownership": "test-owned",
+      "paths": [
+        "test/spaces-alignment/november",
+        "test/spaces-alignment/scenarios"
+      ],
+      "workstream": "interop-cutover",
+      "decision": "Section 11 asks for proportionate checks and a summary, forbids building an upstream protocol suite, and offers a menu: renames, policies, registration, credential signatures, MACs checked against the RFC 9180 vectors, and the writer set with the listRepoOps commit. Later work picks only the items that match code Stratos owns (credential signatures, MACs, commit and ops consumption, STAR content type) and skips policies and registration, which Stratos does not implement; the HPKE vectors already sit in the fixtures here.",
+      "evidence": "prompt-11-12-26.md lines 288-303; rows prompt-2a-member-lists to prompt-2c-allowed-apps and prompt-4b-registration to prompt-4e-space-host-registrations are absent."
+    },
+    {
+      "id": "prerequisite-lthash-commit",
+      "promptSection": "prerequisite:2026-10-22",
+      "surface": "LtHash set-hash commit authentication",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "verified-state",
+      "decision": "The base has no set hash over repo state; the Rust consumer trusts a hash, ikm and mac commit shape.",
+      "evidence": "rg -n -i 'lthash|blake3|set_hash' stratos-feedgen-ng/src stratos-core/src stratos-service/src returns nothing; stratos-feedgen-ng/src/space_commit.rs:113-120."
+    },
+    {
+      "id": "prerequisite-prev-cid-ops",
+      "promptSection": "prerequisite:2026-10-29",
+      "surface": "Operation prev and cid fields",
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen-ng/src/space_host.rs"],
+      "workstream": "verified-state",
+      "decision": "RawOp keeps rev, collection, rkey and cid but has no prev, so op chains cannot be verified; add prev handling.",
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:401-409 RawOp."
+    },
+    {
+      "id": "prerequisite-terminal-revision",
+      "promptSection": "prerequisite:2026-10-29",
+      "surface": "Terminal revision of a repo catch-up",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/pds_space_sync.rs",
+        "stratos-feedgen-ng/src/store/space.rs"
+      ],
+      "workstream": "verified-state",
+      "decision": "Promotion is by page cursor; later work verifies the final revision against the verified commit before promoting.",
+      "evidence": "stratos-feedgen-ng/src/pds_space_sync.rs:200-268 cursor start and terminal check."
+    },
+    {
+      "id": "prerequisite-star-framing",
+      "promptSection": "prerequisite:2026-11-05",
+      "surface": "STAR archive framing and limits",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "sync-recovery",
+      "decision": "No STAR reader exists in the base; full-state recovery needs a bounded one.",
+      "evidence": "rg -n -i 'star' stratos-feedgen-ng/src/space_host.rs stratos-core/src/repo returns no archive reader."
+    },
+    {
+      "id": "prerequisite-token-audience",
+      "promptSection": "prerequisite:2026-10-22",
+      "surface": "Delegation and attestation audience #atproto_pds",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/infra/auth/delegation-verifier.ts",
+        "stratos-service/src/infra/auth/client-attestation-verifier.ts",
+        "stratos-feedgen-ng/src/service_auth.rs"
+      ],
+      "workstream": "credential-transport",
+      "decision": "All three still use the #atproto_space_host audience fragment; migrate them together.",
+      "evidence": "delegation-verifier.ts:44 and client-attestation-verifier.ts:43 SPACE_HOST_FRAGMENT; stratos-feedgen-ng/src/service_auth.rs:115."
+    },
+    {
+      "id": "prerequisite-kem-key-discovery",
+      "promptSection": "prerequisite:2026-10-22",
+      "surface": "Author #atproto_kem key discovery",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "response-authentication",
+      "decision": "The base resolves no KEM key from a DID document; the Rust consumer adds that with the HPKE work.",
+      "evidence": "rg -n 'atproto_kem' production source returns nothing."
+    },
+    {
+      "id": "custom-zone-space-list-repos",
+      "promptSection": "custom",
+      "surface": "zone.stratos.space.listRepos enrollment oracle",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/features/space-read/handler.ts",
+        "lexicons/zone/stratos/space/listRepos.json",
+        "stratos-feedgen-ng/src/space_membership.rs"
+      ],
+      "workstream": "none",
+      "decision": "custom, not renamed: it lists current enrollments with custody and host metadata and is not the upstream writer list.",
+      "evidence": "stratos-service/src/features/space-read/handler.ts:41."
+    },
+    {
+      "id": "custom-zone-space-get-space-credential",
+      "promptSection": "custom",
+      "surface": "zone.stratos.space.getSpaceCredential mint",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/features/space-credential/handler.ts",
+        "stratos-service/src/features/space-credential/minter.ts",
+        "lexicons/zone/stratos/space/getSpaceCredential.json",
+        "stratos-feedgen-ng/src/credential_issuer.rs"
+      ],
+      "workstream": "none",
+      "decision": "custom, not renamed: Stratos is always the authority and mints under its own enrollment rules.",
+      "evidence": "stratos-service/src/features/space-credential/handler.ts:29; stratos-feedgen-ng/src/credential_issuer.rs:17."
+    },
+    {
+      "id": "custom-zone-space-get-record",
+      "promptSection": "custom",
+      "surface": "zone.stratos.space.getRecord read",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/features/space-read/handler.ts",
+        "lexicons/zone/stratos/space/getRecord.json"
+      ],
+      "workstream": "none",
+      "decision": "custom, not renamed: boundary-scoped reads for Stratos-custody records.",
+      "evidence": "stratos-service/src/features/space-read/handler.ts:27."
+    },
+    {
+      "id": "custom-zone-space-list-blobs",
+      "promptSection": "custom",
+      "surface": "zone.stratos.space.listBlobs",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/features/space-read/handler.ts",
+        "lexicons/zone/stratos/space/listBlobs.json"
+      ],
+      "workstream": "none",
+      "decision": "custom, not renamed: space-scoped blob enumeration under the zone namespace.",
+      "evidence": "stratos-service/src/features/space-read/handler.ts:34."
+    },
+    {
+      "id": "custom-zone-repo-boundary-writes",
+      "promptSection": "custom",
+      "surface": "zone.stratos.repo.* boundary writes",
+      "ownership": "production-owned",
+      "paths": [
+        "lexicons/zone/stratos/repo",
+        "stratos-service/src/api/handlers/repo-boundary-write-handlers.ts",
+        "stratos-service/src/api/records/boundary-writes.ts"
+      ],
+      "workstream": "none",
+      "decision": "custom, not renamed: createRecord, putRecord, deleteRecord and applyWrites carry a boundary, never a space.",
+      "evidence": "ls lexicons/zone/stratos/repo; stratos-service/src/api/handlers/repo-boundary-write-handlers.ts."
+    },
+    {
+      "id": "custom-zone-sync-methods",
+      "promptSection": "custom",
+      "surface": "zone.stratos.sync.* pull and stream methods",
+      "ownership": "production-owned",
+      "paths": [
+        "lexicons/zone/stratos/sync",
+        "stratos-service/src/features/pull-sync",
+        "stratos-service/src/api/handlers/repo-read-handlers.ts"
+      ],
+      "workstream": "none",
+      "decision": "custom, not renamed: listRepoOps, listRecordPaths, getRepo and subscribeRecords are Stratos-custody sync, distinct from the upstream methods of the same short name.",
+      "evidence": "ls lexicons/zone/stratos/sync; stratos-service/src/features/pull-sync/handler.ts."
+    },
+    {
+      "id": "uri-core-parser-formatter",
+      "promptSection": "base",
+      "surface": "Core space and record URI parser and formatter",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-core/src/spaces/domain.ts",
+        "stratos-core/src/spaces/types.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Single TypeScript grammar for the legacy at://authority/space/type/skey form; retarget it and keep one spelling.",
+      "evidence": "stratos-core/src/spaces/domain.ts:57 SPACE_SEGMENT, :164 marker check, :221-243 parseSpaceUri and parseRecordUri, :252-275 formatters."
+    },
+    {
+      "id": "uri-client-formatter",
+      "promptSection": "base",
+      "surface": "Client-side boundary to space URI formatter",
+      "ownership": "production-owned",
+      "paths": ["stratos-client/src/writes.ts", "stratos-client/src/index.ts"],
+      "workstream": "canonical-uri",
+      "decision": "A second formatter with its own patterns sends the space parameter to the member PDS; it must move together with the core one.",
+      "evidence": "stratos-client/src/writes.ts:36-63 boundaryToSpaceUri; :157-165 use."
+    },
+    {
+      "id": "uri-subject-checks",
+      "promptSection": "base",
+      "surface": "Canonical subject URI checks for likes and reposts",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-core/src/validation/subject.ts",
+        "stratos-core/src/validation/post-rules.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Accepts exactly one spelling by parse-and-reformat equality; the accepted form changes with the grammar. post-rules.ts isStratosUri parses either form, see uri-reply-and-embed-strings.",
+      "evidence": "stratos-core/src/validation/subject.ts:70-95 parseCanonicalRepoUri and :97-102 parseCanonicalSpaceRecordUri; post-rules.ts:19-30 isStratosUri."
+    },
+    {
+      "id": "uri-subject-resolver",
+      "promptSection": "base",
+      "surface": "Resolver of a canonical subject to a stored record",
+      "ownership": "production-owned",
+      "paths": ["stratos-service/src/api/records/references.ts"],
+      "workstream": "canonical-uri",
+      "decision": "Resolves a space-form subject against enrollment and boundary state; follows the checks above.",
+      "evidence": "stratos-service/src/api/records/references.ts:27-33."
+    },
+    {
+      "id": "uri-validation-copy-rewrite",
+      "promptSection": "base",
+      "surface": "Validation-copy URI rewrite before lexicon validation",
+      "ownership": "production-owned",
+      "paths": ["stratos-service/src/api/records/lexicon-validation.ts"],
+      "workstream": "canonical-uri",
+      "decision": "Rewrites a copy only and leaves the stored record untouched, so it is not a rewrite of authenticated bytes; retarget and prove it for post, like and repost.",
+      "evidence": "stratos-service/src/api/records/lexicon-validation.ts:146-177 withRepoFormUris and repoFormOf."
+    },
+    {
+      "id": "uri-backlink-keys",
+      "promptSection": "base",
+      "surface": "Backlink link-to keys for subject.uri",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-core/src/record/reader.ts",
+        "stratos-core/src/record/transactor.ts",
+        "stratos-core/src/db/schema/tables.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Authoritative per-actor index: a space-form subject is stored in its canonical spelling as linkTo, written by StratosRecordTransactor.addBacklinks; the key is never rewritten in place.",
+      "evidence": "stratos-core/src/record/reader.ts:513-580 getStratosBacklinks and subjectLinkTarget; transactor.ts:124-129; schema table stratos_backlink at db/schema/tables.ts:110-121."
+    },
+    {
+      "id": "uri-label-log-subjects",
+      "promptSection": "base",
+      "surface": "Service moderation label log record subjects",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/features/moderation/label-store.ts",
+        "stratos-service/src/features/moderation/handler.ts",
+        "stratos-core/src/moderation/domain.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Authoritative append-only log: moderation_label.subjectKey holds the submitted record URI string for a space-record subject, written by the label handler through labelSubjectKey.",
+      "evidence": "stratos-core/src/moderation/domain.ts:88-110 parseRecordSubject and :192 labelSubjectKey; label-store.ts inserts subjectKey."
+    },
+    {
+      "id": "uri-moderation-subject-parser",
+      "promptSection": "base",
+      "surface": "Moderation record subject parser",
+      "ownership": "production-owned",
+      "paths": ["stratos-core/src/moderation/domain.ts"],
+      "workstream": "canonical-uri",
+      "decision": "Detects the space form by position of the space marker segment; retarget with the grammar.",
+      "evidence": "stratos-core/src/moderation/domain.ts:93 SPACE_MARKER_INDEX check."
+    },
+    {
+      "id": "uri-service-credential-subjects",
+      "promptSection": "base",
+      "surface": "Space URI claims in credentials and delegations",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/features/space-credential/handler.ts",
+        "stratos-service/src/infra/auth/space-credential-verifier.ts",
+        "stratos-service/src/infra/auth/delegation-verifier.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Parse the space URI from request and token subject claims; authenticated bytes are verified as received and never normalised.",
+      "evidence": "handler.ts:149, space-credential-verifier.ts:206, delegation-verifier.ts:184 call parseSpaceUri."
+    },
+    {
+      "id": "uri-rust-record-uri",
+      "promptSection": "base",
+      "surface": "Rust RecordUri parser",
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen-ng/src/identifier.rs"],
+      "workstream": "canonical-uri",
+      "decision": "The shared Rust parser for repo and space record URIs, called by the projection store, labels, interactions and sync. It is not the only Rust reader of the space form: space_membership.rs, credential_manager.rs and store/space.rs strip, match or format the literal space segment themselves (see uri-rust-space-uri-checks and uri-rust-credential-cache), so every one of them must move with the grammar.",
+      "evidence": "stratos-feedgen-ng/src/identifier.rs:67-99 RecordUri::parse and parse_space_record."
+    },
+    {
+      "id": "uri-rust-space-uri-checks",
+      "promptSection": "base",
+      "surface": "Rust space URI checks in the store, sync and membership listing",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/store/space.rs",
+        "stratos-feedgen-ng/src/space_sync.rs",
+        "stratos-feedgen-ng/src/space_membership.rs"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "store/space.rs has its own is_space_uri and prefix delete, space_sync.rs checks type and subject admission, and space_membership.rs space_authority has its own parser: it strips at://, matches the literal space segment and the zone.stratos.space.feed type by position, and compares the result with boundary_to_space_uri output without calling RecordUri. Derived projection state is keyed by URI strings.",
+      "evidence": "store/space.rs:6-14 and :695; space_sync.rs:173-176, :267-290, :300-312; space_membership.rs:170-187 space_authority."
+    },
+    {
+      "id": "uri-interaction-index",
+      "promptSection": "base",
+      "surface": "Interaction index subject_uri equality and post-delete trigger",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/store/interactions.rs",
+        "stratos-feedgen-ng/src/store/migrations.rs"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Derived index: interaction rows join post_boundary by string equality and a trigger removes them with the post, so a changed post URI orphans them.",
+      "evidence": "interactions.rs:162-178 join, :199-250 parse; migrations.rs:262-287 version 9 trigger."
+    },
+    {
+      "id": "uri-takedown-set",
+      "promptSection": "base",
+      "surface": "Takedown set keyed by label_subject.subject_key",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/store/labels.rs",
+        "stratos-feedgen-ng/src/store/migrations.rs"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Derived from the service label log and matched by string equality; a re-spelled post no longer matches its takedown row.",
+      "evidence": "stratos-feedgen-ng/src/store/labels.rs:26-43 and :105; migrations.rs:249-258."
+    },
+    {
+      "id": "uri-label-page-parsing",
+      "promptSection": "base",
+      "surface": "Label page subject parsing",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/moderation_label.rs",
+        "stratos-feedgen-ng/src/label_poller.rs"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Rejects a whole page when one subject fails RecordUri::parse, which would stall the cursor on an old-form label.",
+      "evidence": "stratos-feedgen-ng/src/moderation_label.rs:132 and :71-72; label_poller.rs:416, :465."
+    },
+    {
+      "id": "uri-feedgen-migration-v1-projection-core",
+      "promptSection": "base",
+      "surface": "Feedgen migration 1: post, post_boundary, space_cursor, space_sync_stage, space_sync_pending_verification, suppression_marker and non-URI tables",
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
+      "workstream": "verified-state",
+      "decision": "Derived projection: post.uri, post_boundary.uri, space_cursor.space_uri, space_sync_stage.uri and space_uri, pending_verification.space_uri and suppression_marker.uri hold URI strings and are rebuilt from the sources.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:10-120."
+    },
+    {
+      "id": "uri-feedgen-migration-v2-boundary-columns",
+      "promptSection": "base",
+      "surface": "Feedgen migration 2: boundary columns on space_cursor and pending verification",
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
+      "workstream": "verified-state",
+      "decision": "Adds boundary columns and indexes keyed with space_uri; derived.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:121-131."
+    },
+    {
+      "id": "uri-feedgen-migration-v3-actor-enrollment",
+      "promptSection": "base",
+      "surface": "Feedgen migration 3: actor_enrollment",
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
+      "workstream": "verified-state",
+      "decision": "Keyed by actor DID and holds no space URI; the cache migration must preserve it unchanged.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:132-142."
+    },
+    {
+      "id": "uri-feedgen-migration-v4-enrollment-index",
+      "promptSection": "base",
+      "surface": "Feedgen migration 4: actor_enrollment index",
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
+      "workstream": "verified-state",
+      "decision": "Index on enrolled and did only; the cache migration must preserve it unchanged.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:143-149."
+    },
+    {
+      "id": "uri-feedgen-migration-v5-stage-cursor",
+      "promptSection": "base",
+      "surface": "Feedgen migration 5: space_sync_stage_cursor",
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
+      "workstream": "verified-state",
+      "decision": "Staged cursors keyed by space_uri; derived and discardable with the stage.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:150-177."
+    },
+    {
+      "id": "uri-feedgen-migration-v6-pds-generations",
+      "promptSection": "base",
+      "surface": "Feedgen migration 6: pds_boundary_generation and pds_member_generation",
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
+      "workstream": "verified-state",
+      "decision": "Generation tables keyed by boundary and DID, not by URI; they gate staging and promotion and must be preserved.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:178-194."
+    },
+    {
+      "id": "uri-feedgen-migration-v7-stage-lifetime",
+      "promptSection": "base",
+      "surface": "Feedgen migration 7: space_sync_stage_lifetime and its triggers",
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
+      "workstream": "verified-state",
+      "decision": "Stage lifetime rows keyed by space_uri with triggers on the stage tables; derived.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:195-241."
+    },
+    {
+      "id": "uri-feedgen-migration-v8-label-subjects",
+      "promptSection": "base",
+      "surface": "Feedgen migration 8: label_cursor and label_subject",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/store/migrations.rs",
+        "stratos-feedgen-ng/src/store/labels.rs"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Derived from the service label log: the cursor is a log sequence and subject_key holds record URIs.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:242-261."
+    },
+    {
+      "id": "uri-feedgen-migration-v9-interactions",
+      "promptSection": "base",
+      "surface": "Feedgen migration 9: interaction table, indexes and trigger",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/store/migrations.rs",
+        "stratos-feedgen-ng/src/store/interactions.rs"
+      ],
+      "workstream": "verified-state",
+      "decision": "Interaction rows hold space-form uri and subject_uri for both custody classes; the stratos-custody rows come from the actor stream and are not replayed after a purge.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:262-287."
+    },
+    {
+      "id": "uri-feed-pagination-cursors",
+      "promptSection": "base",
+      "surface": "Feed pagination cursor containing a post URI",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/cursor.rs",
+        "stratos-feedgen-ng/src/feed_service.rs"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Opaque client state of the form sort_at::uri; a malformed or stale cursor is treated as the first page, so it needs no migration.",
+      "evidence": "stratos-feedgen-ng/src/cursor.rs:1-25; feed_service.rs:203 decode and :489 malformed-cursor test."
+    },
+    {
+      "id": "uri-rust-credential-cache",
+      "promptSection": "base",
+      "surface": "Rust per-boundary credential cache",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/credential_manager.rs",
+        "stratos-feedgen-ng/src/credential_issuer.rs"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Cache is keyed by boundary and holds a credential whose subject is a space URI built by boundary_to_space_uri; invalidate it when the spelling changes.",
+      "evidence": "stratos-feedgen-ng/src/credential_manager.rs:45-50 and :217-230 boundary_to_space_uri, which formats at://{authority}/space/{type}/{key} itself and probes it with RecordUri::parse_space_record."
+    },
+    {
+      "id": "uri-clubhouse-space-map",
+      "promptSection": "base",
+      "surface": "Clubhouse room to space URI configuration",
+      "ownership": "production-owned",
+      "paths": [
+        "clubhouse/src/lib/config.ts",
+        "clubhouse/src/lib/post-writer.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Operator-supplied map accepted when a value starts with at://; the check changes with the grammar. post-writer.ts reads the configured string and sends it unchanged as the space parameter of the member PDS create call, so it holds no parser of its own.",
+      "evidence": "clubhouse/src/lib/config.ts:54-70 parseSpaceUris and :115; clubhouse/src/lib/post-writer.ts:85-95 sends pdsSpaceUriByRoom[roomId]."
+    },
+    {
+      "id": "uri-webapp-inspector",
+      "promptSection": "base",
+      "surface": "Webapp record inspector URI split",
+      "ownership": "production-owned",
+      "paths": [
+        "webapp/src/lib/inspector.ts",
+        "webapp/src/lib/RecordInspector.svelte"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Splits any at:// URI into did, collection and rkey, which is wrong for a space record; needs a space mode.",
+      "evidence": "webapp/src/lib/inspector.ts:23-27 parseAtUri."
+    },
+    {
+      "id": "uri-webapp-feed-targets",
+      "promptSection": "base",
+      "surface": "Webapp feed and post-delete URI helpers",
+      "ownership": "production-owned",
+      "paths": [
+        "webapp/src/lib/feed.ts",
+        "webapp/src/lib/Composer.svelte",
+        "webapp/src/lib/post-deletion.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Parse and format space URIs through the core helpers; follow the core grammar.",
+      "evidence": "webapp/src/lib/feed.ts:203-222; Composer.svelte:125."
+    },
+    {
+      "id": "uri-reply-and-embed-strings",
+      "promptSection": "base",
+      "surface": "Space-form reply parent, reply root and embed record URIs in posts",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/api/records/validation.ts",
+        "stratos-core/src/validation/post-rules.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Today a space-form reply.parent.uri is parsed with parseRecordUri in resolveParentBoundaries and its boundary is derived from the space DID and key without reading the parent record; a repo-form parent is looked up in the actor store instead. post-rules.ts isStratosUri accepts a space-form reply.parent.uri, reply.root.uri and embed record.uri when the collection starts with zone.stratos., and isBskyUri reads such a URI with AtUri, which sees the collection as space, so a space-form embed never counts as bsky. These strings are authoritative record content stored inside signed post records: they are never rewritten, so a post stored in the old spelling keeps it, and the parser change must either keep reading that spelling or say how those posts are handled.",
+      "evidence": "stratos-service/src/api/records/validation.ts:317-330 resolveParentBoundaries; stratos-core/src/validation/post-rules.ts:19-30 isStratosUri, :54-82 assertNoCrossNamespaceEmbed, :148 embed check, :209-226 assertReplyIsolation; AtUri on a space-form URI returns collection space."
+    },
+    {
+      "id": "uri-rust-record-uri-callers",
+      "promptSection": "base",
+      "surface": "Rust callers that depend on the repo or space form of a URI",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/actor_event.rs",
+        "stratos-feedgen-ng/src/store.rs",
+        "stratos-feedgen-ng/src/feed_service.rs",
+        "stratos-feedgen-ng/src/lifecycle.rs",
+        "stratos-feedgen-ng/src/membership_reconciler.rs",
+        "stratos-feedgen-ng/src/service.rs",
+        "stratos-feedgen-ng/src/store/retention.rs"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "actor_event.rs builds repo-form URIs for the actor stream and requires RecordUri::Repo, and accepts a like or repost subject in either form through RecordUri::parse; store.rs validate_actor_page requires the repo form for actor pages; feed_service.rs blob_views and lifecycle.rs blob lookup return nothing for a URI that is not repo form, so space-form posts get no blobs on those paths; membership_reconciler.rs calls boundary_to_space_uri per boundary and carries the string into the poll targets; service.rs and lifecycle.rs pass space_uri strings to the store unparsed; store/retention.rs selects and deletes expired stage rows by space_uri equality. Derived state, rebuilt from the sources.",
+      "evidence": "rg -n 'RecordUri::|space_uri|boundary_to_space_uri' on each listed file; actor_event.rs:109-115 and :223-241, store.rs:487-525, feed_service.rs:270, lifecycle.rs:165, membership_reconciler.rs:108-142, store/retention.rs:124-145."
+    },
+    {
+      "id": "uri-service-emitters",
+      "promptSection": "base",
+      "surface": "Service code that emits or carries a space URI string",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/features/enrollment/handler.ts",
+        "stratos-service/src/api/types.ts",
+        "stratos-service/admin-ui/src/lib/api/client.ts",
+        "stratos-service/admin-ui/src/routes/Enrollments.svelte",
+        "stratos-service/src/features/space-credential/minter.ts",
+        "lexicons/zone/stratos/admin/getRepoHost.json"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "The admin repo-host handler builds a space URI per boundary with boundaryToSpaceUri and returns it as the spaceUri field of getRepoHost, which the admin UI shows and keys on; the minter signs the requested space URI verbatim into the credential sub claim, and a signed claim is never rewritten. The emitted string changes with the grammar; the signed bytes of already minted credentials do not.",
+      "evidence": "stratos-service/src/features/enrollment/handler.ts:1267-1278; stratos-service/src/api/types.ts:14; admin-ui client.ts:48 and Enrollments.svelte:557; space-credential/minter.ts:132 and :198 sub: input.spaceUri; lexicons/zone/stratos/admin/getRepoHost.json:51-60."
+    },
+    {
+      "id": "uri-service-credential-consumers",
+      "promptSection": "base",
+      "surface": "Service code that compares or maps a verified credential space URI",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/features/space-read/handler.ts",
+        "stratos-service/src/infra/auth/credential-scope.ts",
+        "stratos-service/src/features/boundary/credential-access.ts",
+        "stratos-service/src/infra/auth/verifiers.ts",
+        "stratos-core/src/spaces/host-discovery.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "space-read/handler.ts maps the requested space to a boundary with spaceUriToBoundary and admits a credential only when its spaceUri equals the requested space string, so a differently spelled equivalent URI is refused; credential-scope.ts and boundary-credential access map the verified credential's spaceUri to a boundary with spaceUriToBoundary; verifiers.ts passes the verified spaceUri through as auth credentials; host-discovery.ts treats the space URI as an opaque lookup key for host overrides. All follow the core parser; none stores the string.",
+      "evidence": "space-read/handler.ts:150 and :458; credential-scope.ts:69-82; features/boundary/credential-access.ts:13; verifiers.ts:605; stratos-core/src/spaces/host-discovery.ts:34 and :70-75."
+    },
+    {
+      "id": "text-lexicon-legacy-uri-spelling",
+      "promptSection": "base",
+      "surface": "Lexicon descriptions and the generated bundle that spell the legacy space URI",
+      "ownership": "production-owned",
+      "paths": [
+        "lexicons/zone/stratos/space",
+        "lexicons/zone/stratos/moderation/defs.json",
+        "stratos-client/src/lexicons.gen.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "The space lexicons and the moderation subject definition describe the space URI as at://{did}/space/{type}/{skey} in description text only. Update the descriptions with the grammar and regenerate the bundle with lexgen; never hand-edit the generated file. Do not touch any com.atproto lexicon.",
+      "evidence": "rg -n 'space/\\{' lexicons -g '*.json'; stratos-client/src/lexicons.gen.ts:2 states it is generated."
+    },
+    {
+      "id": "text-client-and-docs-legacy-uri-spelling",
+      "promptSection": "base",
+      "surface": "Client README, export check and documentation that spell the legacy space URI",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-client/README.md",
+        "stratos-client/scripts/check-exports.mjs",
+        "docs"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Prose and examples show at://{authority}/space/... and name boundaryToSpaceUri, parseRecordUri and parseSpaceUri; check-exports.mjs lists boundaryToSpaceUri as a required export and holds no URI. Update the prose with the grammar. The README must change whenever an exported client function or endpoint changes.",
+      "evidence": "rg -n 'at://[^ ]*/space/' stratos-client/README.md docs; stratos-client/scripts/check-exports.mjs:65."
+    },
+    {
+      "id": "tests-package-uri-literals",
+      "promptSection": "base",
+      "surface": "Package unit and integration tests that spell the legacy space URI",
+      "ownership": "test-owned",
+      "paths": [
+        "stratos-core/tests",
+        "stratos-service/tests",
+        "stratos-client/tests",
+        "webapp/tests",
+        "clubhouse/src/lib/config.test.ts",
+        "clubhouse/src/lib/integration.test.ts",
+        "clubhouse/src/lib/join.test.ts",
+        "clubhouse/src/lib/post-writer.test.ts"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "Inputs and expected values in these tests, including the frozen reference copy and fixtures under tests, hold the legacy spelling or the identifiers that build it. They change only in the work that changes the grammar, which must list each assertion it edits; upstream-derived fixtures there are regenerated from a pinned source, never edited by hand.",
+      "evidence": "rg -l 'at://[^ ]*/space/|spaceUri|parseRecordUri' stratos-core/tests stratos-service/tests stratos-client/tests webapp/tests clubhouse/src/lib."
+    },
+    {
+      "id": "tests-rust-uri-literals",
+      "promptSection": "base",
+      "surface": "Rust tests that spell the legacy space URI",
+      "ownership": "test-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/store/tests.rs",
+        "stratos-feedgen-ng/src/conformance.rs"
+      ],
+      "workstream": "canonical-uri",
+      "decision": "store/tests.rs holds legacy-form space and record URIs as inputs; conformance.rs reads the shared space-record-uri fixture from the deprecated stratos-feedgen testdata, so the grammar change must either move that fixture or stop sharing it, since the deprecated package is not a target.",
+      "evidence": "stratos-feedgen-ng/src/store/tests.rs:74-109; stratos-feedgen-ng/src/conformance.rs:196-230 include_str of ../../stratos-feedgen/testdata/conformance/v1/space-record-uri.json."
+    },
+    {
+      "id": "dependency-oauth-scopes-importer",
+      "promptSection": "base",
+      "surface": "Direct importer of @atproto/oauth-scopes",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/oauth/spaces-capability.ts",
+        "stratos-service/package.json"
+      ],
+      "workstream": "schemas-and-clients",
+      "decision": "Uses the two-argument allowsSpace with a space object carrying spaceType; the only source file edited for the dependency update, with no behaviour change. The authority and collection are cast to the library's template types without checking, as before.",
+      "evidence": "rg -n '@atproto/oauth-scopes' --glob '!node_modules' --glob '!pnpm-lock.yaml'; spaces-capability.ts:10-16 spaceOf, :22-31 grantAllowsCreate, :38-46 holdsSpaceGrant, :74-79 detectSpacesCapability read and create checks."
+    },
+    {
+      "id": "dependency-scope-check-caller",
+      "promptSection": "base",
+      "surface": "Indirect caller of the oauth-scopes wrappers",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-service/src/api/records/scope-check.ts",
+        "stratos-service/src/api/records/boundary-writes.ts"
+      ],
+      "workstream": "schemas-and-clients",
+      "decision": "Calls holdsSpaceGrant and grantAllowsCreate for the upgrade check; no change expected and its tests pin the behaviour.",
+      "evidence": "stratos-service/src/api/records/scope-check.ts:33-46."
+    },
+    {
+      "id": "tests-aiab-scenarios",
+      "promptSection": "base",
+      "surface": "Reference-PDS scenario drivers and sandbox",
+      "ownership": "test-owned",
+      "paths": [
+        "test/spaces-alignment/scenarios",
+        "test/spaces-alignment/atmosphere",
+        "test/spaces-alignment/sources.json"
+      ],
+      "workstream": "interop-cutover",
+      "decision": "Pinned to the October PDS; updated only when a November suite is selected and the old receipt stays reproducible.",
+      "evidence": "test/spaces-alignment/sources.json pins the October PDS revision."
+    },
+    {
+      "id": "tests-spike-and-harness",
+      "promptSection": "base",
+      "surface": "Spaces spikes and feedgen harness",
+      "ownership": "test-owned",
+      "paths": ["test/spike/spaces", "test/feedgen-harness"],
+      "workstream": "interop-cutover",
+      "decision": "Probe scripts and a comparison harness; refresh with the reference host.",
+      "evidence": "ls test/spike/spaces test/feedgen-harness."
+    },
+    {
+      "id": "tests-e2e-scripts",
+      "promptSection": "base",
+      "surface": "End-to-end scripts that exercise spaces",
+      "ownership": "test-owned",
+      "paths": [
+        "test/scripts/test-spaces.ts",
+        "test/scripts/test-mixed-mode.ts",
+        "test/scripts/lib/stratos.ts",
+        "test/scripts/lib/tamper-space-commit.mjs",
+        "test/scripts/lib/config.ts"
+      ],
+      "workstream": "interop-cutover",
+      "decision": "Run against a live PDS and service; they follow the URI and wire changes. test/scripts/lib/config.ts spaceUriFor formats the legacy at://{did}/space/{type}/{skey} form for the scripts.",
+      "evidence": "rg -l 'listRepoOps|getSpaceCredential' test/scripts; test/scripts/lib/config.ts:80-85 spaceUriFor."
+    },
+    {
+      "id": "deprecated-stratos-feedgen",
+      "promptSection": "base",
+      "surface": "Deprecated TypeScript feed generator",
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen"],
+      "workstream": "none",
+      "decision": "deprecated, not a target: kept for rollback only and not modernised.",
+      "evidence": "AGENTS.md lists stratos-feedgen as deprecated rollback reference."
+    },
+    {
+      "id": "deprecated-stratos-indexer",
+      "promptSection": "base",
+      "surface": "Deprecated AppView indexer",
+      "ownership": "production-owned",
+      "paths": ["stratos-indexer"],
+      "workstream": "none",
+      "decision": "deprecated, not a target: no new work.",
+      "evidence": "AGENTS.md lists stratos-indexer as deprecated."
+    },
+    {
+      "id": "deprecated-atproto-stratos",
+      "promptSection": "base",
+      "surface": "Deprecated atproto fork carrying the AppView proof of concept",
+      "ownership": "absent",
+      "paths": [],
+      "workstream": "none",
+      "decision": "deprecated, not a target: it lives outside this repository and is not an integration target.",
+      "evidence": "AGENTS.md workspace layout names atproto-stratos as deprecated; no such directory exists in this repository."
+    },
+    {
+      "id": "deno-lock-pins-retired-oauth-scopes",
+      "promptSection": "base",
+      "surface": "Root Deno lockfile for the end-to-end scripts",
+      "ownership": "test-owned",
+      "paths": ["deno.lock", "deno.json"],
+      "workstream": "interop-cutover",
+      "decision": "Still pins the August oauth-scopes build because the Deno end-to-end scripts are not touched by the dependency update; the later suite work must refresh it.",
+      "evidence": "rg -n 'oauth-scopes' deno.lock shows 0.0.0-spaces-alpha-20260818163953 at lines 47, 861 and 9230."
+    }
+  ]
+}
