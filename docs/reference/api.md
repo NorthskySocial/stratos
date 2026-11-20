@@ -280,8 +280,8 @@ differences are on purpose.
 - `ScopeUpgradeRequired` exists only on Stratos.
 - `via` on a repost is not resolved and not indexed. When `validate` is not
   `false`, its shape is checked.
-- A `boundary` claim in the record body must be `{ values: [{ value:
-<boundary> }] }`, with an optional `$type` of
+- A `boundary` claim in the record body must be `{ values: [{ value }] }` with
+  one entry, whose `value` is the request's boundary. It may carry a `$type` of
   `zone.stratos.boundary.defs#Domains`. An entry with its own `$type` is a
   `BoundaryMismatch`.
 
