@@ -562,7 +562,7 @@ Errors, by name:
 | `InvalidRecord`                                                                                                                                  | `createRecord`, `putRecord`, `applyWrites` | The record breaks a rule of its collection, or its subject is wrong. |
 | `InvalidCollection`                                                                                                                              | all four                                   | The collection is not allowed.                                       |
 | `ScopeUpgradeRequired`                                                                                                                           | `createRecord`, `putRecord`, `applyWrites` | The member must authorize again.                                     |
-| `NotEnrolled`, `ServiceWriteForbidden`, `PdsCustodyWriteForbidden`, `ForbiddenBoundary`, `InvalidDomain`, `ServiceMismatch`, `RateLimitExceeded` | all four                                   | As in the [error reference](../docs/guide/errors.md).                |
+| `NotEnrolled`, `ServiceWriteForbidden`, `PdsCustodyWriteForbidden`, `ForbiddenBoundary`, `InvalidDomain`, `ServiceMismatch`, `RateLimitExceeded` | all four                                   | As in the [error reference](../docs/reference/errors.md).            |
 
 ### When `ScopeUpgradeRequired` is returned
 
