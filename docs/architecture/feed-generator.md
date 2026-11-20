@@ -1,4 +1,10 @@
-# Feed Generator
+---
+audience: Protocol implementers and maintainers
+type: Explanation
+status: current
+---
+
+# Feed generator design
 
 <script setup>
 import FeedgenRequestFlow from '../.vitepress/theme/components/FeedgenRequestFlow.vue'

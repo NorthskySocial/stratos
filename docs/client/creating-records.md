@@ -1,8 +1,16 @@
+---
+audience: App developers
+type: How-to
+prerequisites: A resolved repository target
+status: current
+---
+
 # Creating Records
 
 Where the post goes depends on custody. Read
 [Custody and Routing](/client/custody) first. Most of this page describes
 `stratos` custody, where the Stratos service stores the record.
+[Basic post](#basic-post) shows both custody classes.
 
 [Boundary procedures](#boundary-procedures) is the current way to write. It
 takes the boundary as a parameter. The helpers work for both custody classes:
@@ -95,7 +103,11 @@ async function stratosPost(
 
 ## Basic post
 
-```typescript
+Choose the tab for the user's custody.
+
+::: code-group
+
+```typescript [Stratos custody]
 function buildBoundary(boundary: string): StratosPost['boundary'] {
   return {
     $type: 'zone.stratos.boundary.defs#Domains',
@@ -123,9 +135,46 @@ async function createPrivatePost(
 }
 ```
 
-`boundary` is the full value, such as `did:web:stratos.example.com/general`.
+```typescript [PDS custody]
+async function createSpacePost(
+  session: OAuthSession,
+  spaceUri: string,
+  text: string,
+): Promise<{ uri: string; cid: string }> {
+  // The session's fetch handler already targets the user's own PDS.
+  const response = await session.fetchHandler(
+    '/xrpc/com.atproto.space.createRecord',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        space: spaceUri,
+        repo: session.sub,
+        collection: 'zone.stratos.feed.post',
+        validate: false,
+        record: {
+          $type: 'zone.stratos.feed.post',
+          text,
+          createdAt: new Date().toISOString(),
+        },
+      }),
+    },
+  )
+  if (!response.ok) {
+    throw new Error(`PDS write failed (${response.status})`)
+  }
+  return response.json()
+}
+```
+
+:::
+
+With `stratos` custody, `boundary` is the full value, such as `did:web:stratos.example.com/general`.
 The response is `{ uri, cid }`. The URI has three segments:
 `at://{userDid}/zone.stratos.feed.post/{rkey}`.
+
+With `pds` custody, the record carries no `boundary` field. The space names
+the boundary, and the record URI that comes back has seven segments.
 
 ## Post with rich text
 
@@ -336,11 +385,11 @@ collection.
   and `message`.
 - `ScopeUpgradeRequiredError` is a `BoundaryWriteError`. Catch it and send the
   member through OAuth authorization again. Do not retry the write first.
-  [Errors](/guide/errors#writing-into-a-boundary) says when it is returned.
+  [Errors](/reference/errors#writing-into-a-boundary) says when it is returned.
 
 `putBoundaryRecord`, `deleteBoundaryRecord` and `applyBoundaryWrites` take the
 same `boundary` and `repo`. The
-[API reference](/client/api-reference#boundary-records) lists the inputs, the
+[API reference](/reference/api#boundary-records) lists the inputs, the
 outputs, and the differences from the upstream procedures. Deploy the Rust
 feed generator before any client uses them.
 
@@ -423,9 +472,8 @@ function createStratosClient(
 
 ## PDS custody
 
-A `pds`-custody user does not write to Stratos. Their app calls
-`com.atproto.space.createRecord` on their own PDS, with a `space` URI in place
-of the `boundary` field. The record URI that comes back has seven segments.
-
-[Writing by custody](/client/custody#writing-by-custody) has the request and
-the scope it needs.
+The rest of this page describes `stratos` custody. A `pds`-custody user
+writes to their own PDS, as the **PDS custody** tab under
+[Basic post](#basic-post) shows.
+[Writing by custody](/client/custody#writing-by-custody) has the deletion call
+and the scope the write needs.

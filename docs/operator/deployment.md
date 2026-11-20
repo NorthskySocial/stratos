@@ -1,3 +1,10 @@
+---
+audience: Operators
+type: How-to
+prerequisites: Linux with flock, Node.js 24, a domain with HTTPS, a did:web identifier, and your own DID
+status: current
+---
+
 # Deployment
 
 This page takes you through a first deployment in order: build the service,
@@ -175,7 +182,7 @@ you configured.
 
 To serve private feeds, deploy the Rust `stratos-feedgen-ng` service with its
 own DID, signing key, feed list, and encrypted data volume. Do not reuse the
-older TypeScript feed generator's database. See [Feed Generator](/operator/feedgen-ng)
+older TypeScript feed generator's database. See [Run the feed generator](/operator/feedgen-ng)
 for how it collects posts, checks membership, and protects local data.
 
 > Before startup, the feed generator's `did:web` **must be under the

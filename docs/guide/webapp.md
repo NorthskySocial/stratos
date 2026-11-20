@@ -1,3 +1,9 @@
+---
+audience: Members and app developers
+type: Guide
+status: current
+---
+
 # Stratos WebApp (Demo Client)
 
 The fastest way to understand Stratos is to use it once. The Stratos WebApp

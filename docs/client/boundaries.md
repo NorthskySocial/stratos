@@ -1,4 +1,10 @@
-# Domain Boundaries
+---
+audience: App developers
+type: Explanation
+status: current
+---
+
+# Boundaries
 
 A boundary is a named group. A post belongs to one boundary, and only the
 members of that boundary can read it.

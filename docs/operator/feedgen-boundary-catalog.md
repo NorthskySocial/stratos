@@ -1,11 +1,17 @@
-# Feed generator boundary catalogue (legacy)
+---
+audience: Operators of the TypeScript feed generator
+type: Reference
+status: legacy
+---
+
+# Feed generator boundary catalogue <Badge type="warning" text="legacy" />
 
 ::: danger Legacy page: TypeScript feed generator only
 This page describes the deprecated TypeScript `stratos-feedgen` package. The
 current feed generator, `stratos-feedgen-ng`, does not implement any of it.
 It does not call `zone.stratos.sync.listBoundaries`, and it ignores every
 `FEEDGEN_BOUNDARY_CATALOG_*` variable. It reads a static feed list at startup.
-Use [Feed Generator](/operator/feedgen-ng#feeds) for a current deployment.
+Use [Run the feed generator](/operator/feedgen-ng#feeds) for a current deployment.
 :::
 
 The text below is kept as a record for operators who still run the TypeScript

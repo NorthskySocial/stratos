@@ -1,21 +1,25 @@
+---
+audience: App developers
+type: How-to
+prerequisites: An AT Protocol OAuth session in your app
+status: current
+---
+
 # Getting Started
 
 This page takes an app from sign-in to its first private post. You find the
-user's enrollment, learn who holds their records, and send each new post to
-the right place.
+user's <Term name="enrollment">enrollment</Term>, learn their
+<Term name="custody">custody</Term>, and send each new post to one
+<Term name="boundary">boundary</Term>.
 
 New to the ideas? Read
-[What Is Shared Private Data?](/guide/what-is-stratos) first.
+[What is Stratos? Explained simply](/guide/what-is-stratos) first.
 
 ## What you are integrating
 
-| Concept         | Description                                                                                         |
-| --------------- | --------------------------------------------------------------------------------------------------- |
-| Stratos service | The space authority. It decides who belongs to each boundary.                                       |
-| Enrollment      | A user joins a Stratos service through OAuth. A record on their PDS announces it.                   |
-| Boundary        | A named access group, written `{serviceDid}/{name}`, such as `did:web:stratos.example.com/general`. |
-| Custody         | Who hosts the user's private records: `stratos` or `pds`.                                           |
-| Private post    | A `zone.stratos.feed.post` record in exactly one boundary.                                          |
+A private post is a `zone.stratos.feed.post` record in exactly one boundary.
+The Stratos service is the space authority: it decides who belongs to each
+boundary. The terms are defined in the [Glossary](/reference/glossary).
 
 ## The packages
 
@@ -220,7 +224,7 @@ custody classes. See [Reading Records](/client/reading-records).
 
 Stratos does not serve `com.atproto.repo.putRecord`,
 `com.atproto.sync.getRecord`, or `zone.stratos.repo.importRepo`. The
-[API Reference](/client/api-reference) has the full list.
+[API methods](/reference/api) has the full list.
 
 ## DPoP-aware transport
 
@@ -315,5 +319,5 @@ For a React Native app shaped like Bluesky's
 - [Creating Records](/client/creating-records): posts, replies, and images.
 - [Reading Records](/client/reading-records): single records, feeds, and
   verification.
-- [Domain Boundaries](/client/boundaries): visibility rules.
+- [Boundaries](/client/boundaries): visibility rules.
 - [Attestation Verification](/client/attestation): the trust model.

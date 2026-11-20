@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type {
   ShutdownDeps,
   ShutdownHandler,
@@ -76,6 +76,16 @@ vi.mock('../src/lifecycle/shutdown.js', async (importOriginal) => {
     },
   }
 })
+
+// The first load of these modules takes seconds when the whole suite runs at
+// once, which is most of a test's time budget. Resetting modules keeps the
+// transformed sources, so loading once here makes the imports in each case
+// cheap.
+beforeAll(async () => {
+  await import('../src/subscription/index.js')
+  await import('../src/space-sync/index.js')
+  await import('../src/upstream/index.js')
+}, 60_000)
 
 afterEach(() => {
   vi.restoreAllMocks()

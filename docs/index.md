@@ -7,13 +7,13 @@ hero:
   tagline: Share private posts with approved members, using the AT Protocol identity you already have.
   actions:
     - theme: brand
-      text: Get Started
-      link: /guide/introduction
+      text: Get started
+      link: /guide/what-is-stratos
     - theme: alt
-      text: Client Integration
+      text: Build
       link: /client/getting-started
     - theme: alt
-      text: Operator Guide
+      text: Operate
       link: /operator/overview
 
 features:

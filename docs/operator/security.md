@@ -1,3 +1,9 @@
+---
+audience: Operators
+type: Reference
+status: current
+---
+
 # Security
 
 Stratos checks the caller on every request. It never trusts what a caller

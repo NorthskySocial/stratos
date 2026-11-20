@@ -1,4 +1,21 @@
-# October writer-sync contract
+---
+audience: Authority and syncer developers
+type: Decision record
+status: proposed
+---
+
+# October writer sync contract <Badge type="info" text="proposed" />
+
+::: info At a glance
+
+| Question         | Answer                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Status           | Proposed. The delivery policy is a proposal, not shipped Stratos behavior.                                                                 |
+| Scope            | How a Stratos authority and a syncer treat the standard writer listing and write notifications, beside the custom membership listing.      |
+| What it decides  | Current enrollment authorizes writers and selects repositories. Standard writer metadata only identifies changed repositories.             |
+| What it does not | It adds no production endpoint, storage, scheduler, or discovery role. Mixed-custody representation and the outbox policy stay unresolved. |
+
+:::
 
 ## Problem and decision
 
@@ -59,13 +76,31 @@ Input requires `space`, `repo`, `repoRev`, and `hash`. Forwarded notifications a
 
 For the proposed Stratos adapter, check current active enrollment and boundary for every write admission, including retries. A retained writer row, a valid signature, or retained hosting is insufficient. Reject unsolicited writers without adding members, assigning boundaries, or overriding host discovery. Continue re-deriving boundaries from enrollment during foreign ingest.
 
-Reject a repository revision more than five minutes in the future. Ignore `repoRev <= accepted repoRev` without changing its hash or allocating a new space revision. For each accepted newer update, atomically allocate a globally increasing `spaceRev` within that space and record the previous global value as `prevSpaceRev`. “Global” means across all writers in one space, not across spaces. Concurrent writers must not receive the same revision. Membership removal racing with admission or durable projection needs a generation fence, not a cached preflight check alone.
+Revision rules:
+
+- Reject a repository revision more than five minutes in the future.
+- Ignore `repoRev <= accepted repoRev` without changing its hash or allocating a new space revision.
+- For each accepted newer update, atomically allocate a globally increasing `spaceRev` within that space and record the previous global value as `prevSpaceRev`. “Global” means across all writers in one space, not across spaces.
+- Concurrent writers must not receive the same revision.
+- Membership removal racing with admission or durable projection needs a generation fence, not a cached preflight check alone.
 
 The authority records a claim; it does not verify the full content or signature behind the reported hash on this hop. Syncers verify repository state at the actual host before durable promotion. A `prevSpaceRev` gap triggers listing catch-up from the last durable space checkpoint. Duplicate notifications are harmless; an older notification must not roll state backwards.
 
 ## Delivery policy: proposal, not shipped Stratos behavior
 
-Keep repo-host delivery separate from authority fanout. The reference repo host sends immediately, coalesces retryable failures by `(space, repo)` durably, and retains the newest `repoRev` and hash. Newer revisions reset its backoff and 24-hour window. A leased worker drains bounded batches; takeover can duplicate delivery. Backoff doubles from one minute to one hour with 50–100% jitter, and requests have a ten-second timeout. Successful or permanent failures clear only retries no newer than the attempted revision. Expired retries stop after 24 hours. Removed accounts clear retries; deactivated or taken-down accounts are rescheduled within the window.
+Keep repo-host delivery separate from authority fanout. The reference repo host behaves like this:
+
+| Aspect             | Reference behavior                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------ |
+| First send         | Immediate                                                                                        |
+| Retryable failures | Coalesced durably by `(space, repo)`, keeping the newest `repoRev` and hash                      |
+| Newer revisions    | Reset the backoff and the 24-hour window                                                         |
+| Worker             | A leased worker drains bounded batches; takeover can duplicate delivery                          |
+| Backoff            | Doubles from one minute to one hour, with 50–100% jitter                                         |
+| Request timeout    | Ten seconds                                                                                      |
+| Clearing           | Success or a permanent failure clears only retries no newer than the attempted revision          |
+| Expiry             | Retries stop after 24 hours                                                                      |
+| Account state      | Removed accounts clear retries; deactivated or taken-down accounts are rescheduled in the window |
 
 The reference has an immediate-send-to-queue crash window: it does not establish a transactional outbox with the repo commit. Do not describe this as guaranteed delivery of every write. Authority-to-syncer fanout uses a background queue with reasonable effort, not that durable repo-host retry queue. Polling repairs notification loss.
 

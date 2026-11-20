@@ -1,3 +1,9 @@
+---
+audience: App developers
+type: How-to and reference
+status: current
+---
+
 # User Enrollment
 
 Enrollment is how a user joins a Stratos service. The user signs in through
@@ -66,7 +72,7 @@ empty signed commit, and a signing key for it. The repo is valid before the
 first post. For `pds` custody, Stratos creates no repo and no key.
 
 Every enrollment includes the reserved all-members boundary. See
-[Domain Boundaries](/client/boundaries#the-all-members-boundary).
+[Boundaries](/client/boundaries#the-all-members-boundary).
 
 ## Checking enrollment
 

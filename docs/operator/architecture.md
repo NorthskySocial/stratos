@@ -1,4 +1,10 @@
-# Architecture
+---
+audience: Operators
+type: Explanation
+status: current
+---
+
+# System architecture
 
 <script setup>
 import SystemOverviewAnimation from '../.vitepress/theme/components/SystemOverviewAnimation.vue'
@@ -47,7 +53,7 @@ The feed generator collects posts hosted by Stratos and protected posts from
 PDS users whom Stratos lists as members. It checks each PDS user's signed
 update before adding those posts to its encrypted local database. A viewer
 can read posts and attachments only from boundaries they currently belong to.
-See [Feed Generator](/operator/feedgen-ng) for storage, access, and startup
+See [Run the feed generator](/operator/feedgen-ng) for storage, access, and startup
 checks.
 
 ## Mixed-mode custody
@@ -84,23 +90,7 @@ explains the model. The rest of this section covers what changes for you.
 
 ### Three rules
 
-These rules hold for every `pds` member. Each one was proven against the
-upstream alpha PDS.
-
-1. **Never trust a boundary written on a `pds` record.** A PDS does not ask
-   Stratos before it accepts a write. Any account can write a record into a
-   Stratos space URI in its own repository. The boundary on that record is the
-   author's claim. Stratos and the feed generator derive the boundary from
-   enrollment state.
-2. **Membership decides whose repository is read.** That is the only control
-   on the write side. Removing a member does not stop them writing to their own
-   PDS. It stops Stratos and the feed generator from reading it.
-3. **A space record has a longer address.** It has seven segments and starts
-   with the authority:
-   `at://{authorityDid}/space/{type}/{skey}/{authorDid}/{collection}/{rkey}`.
-   A Stratos-hosted record keeps the familiar
-   `at://{authorDid}/{collection}/{rkey}`. In logs and tools, the first segment
-   of a space record is your service DID, not the author.
+<!--@include: ../.vitepress/partials/custody-rules.md-->
 
 ### Keep the space type published
 
