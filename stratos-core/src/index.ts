@@ -8,7 +8,7 @@ export * from './repo/index.js'
 export * from './record/index.js'
 export * from './mst/index.js'
 
-// Blob - export with renamed BlobMetadata to avoid conflict
+// Blob. The metadata type keeps the name BlobInfo that consumers already import.
 export {
   StratosBlobReader,
   StratosBlobTransactor,

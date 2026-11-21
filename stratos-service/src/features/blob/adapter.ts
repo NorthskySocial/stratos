@@ -52,21 +52,7 @@ export class BlobAuthServiceImpl implements BlobAuthService {
     }
 
     return this.actorStore.read(actorDid, async (store) => {
-      // Find all records that reference this blob
-      // Note: We need a way to find records by blob CID.
-      // The `stratosRecordBlob` table in the database handles this.
-      // We should use a method from the actor store that queries this association.
-
-      // For now, let's assume we have a way to get record URIs for a blob CID.
-      // Looking at `BlobMetadataReader`, it has `listBlobsForRecord`, but not `listRecordsForBlob`.
-      // We might need to add this to the storage layer or use the DB directly if available.
-
-      // In the current architecture, ActorStore provides access to specialized stores.
-      // Let's use the underlying DB from the store if possible, or assume a new method.
-
-      // Since I'm implementing the adapter, I should check how to query the association.
-      // The `SqliteBlobMetadataReader` has access to `this.db`.
-
+      // Access follows the records that reference the blob; none means orphaned
       const recordUris = await store.blob.getRecordsForBlob(blobCid)
 
       if (!recordUris || recordUris.length === 0) {

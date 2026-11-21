@@ -14,8 +14,8 @@ the current description.
   - [x] Define `BlobAuthService` interface in `stratos-core/src/blob/auth-service.ts`.
   - [x] Add `canAccessBlob(viewerDid, actorDid, blobCid)` method.
   - [x] Add `canAccessBlobs(viewerDid, actorDid, blobCids)` batch method.
-- [x] **BlobMetadataReader Updates**
-  - [x] Ensure `BlobMetadataReader` can efficiently fetch all records associated with a CID.
+- [x] **Blob record lookup**
+  - [x] Ensure the actor store can efficiently fetch all records associated with a CID (as built: `ActorBlobReader.getRecordsForBlob` in `stratos-service/src/actor-store-types.ts`; the former core `BlobMetadataReader` was removed).
 - [x] **Domain Errors**
   - [x] Add `BlobAccessDeniedError` to `stratos-core/src/shared/errors.ts`.
 
