@@ -56,7 +56,7 @@ const passed = []
 async function call(method, did, boundary = all) {
   const token = await createServiceJwt({ iss: caller, aud: authority, lxm: method, keypair })
   const params = method === 'zone.stratos.space.listRepos'
-    ? 'space=' + encodeURIComponent('at://' + authority + '/space/zone.stratos.space.feed/' + boundary.slice(authority.length + 1))
+    ? 'space=' + encodeURIComponent(['at:space', authority, 'zone.stratos.space.feed', boundary.slice(authority.length + 1)].join('/'))
     : 'did=' + encodeURIComponent(did)
   const response = await fetch('http://localhost:3100/xrpc/' + method + '?' + params, {
     headers: { Authorization: 'Bearer ' + token },

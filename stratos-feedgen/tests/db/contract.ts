@@ -277,8 +277,8 @@ export function describeStoreContract(
     })
 
     describe('space sync cursor', () => {
-      const SPACE_URI = `at://${SPIKE_DID}/space/feed/bounty-hunters`
-      const OTHER_SPACE_URI = `at://${SPIKE_DID}/space/feed/syndicate`
+      const SPACE_URI = `at:space/${SPIKE_DID}/feed/bounty-hunters`
+      const OTHER_SPACE_URI = `at:space/${SPIKE_DID}/feed/syndicate`
 
       it('upserts and reads back', async () => {
         await store.upsertSpaceCursor(
@@ -423,7 +423,7 @@ export function describeStoreContract(
     })
 
     describe('unverified space sync staging', () => {
-      const SPACE_URI = `at://${SPIKE_DID}/space/feed/bounty-hunters`
+      const SPACE_URI = `at:space/${SPIKE_DID}/feed/bounty-hunters`
       const BOUNDARY = 'bounty-hunters'
       const STAGED_URI = `at://${FAYE_DID}/zone.stratos.feed.post/staged`
       const DELETED_URI = `at://${FAYE_DID}/zone.stratos.feed.post/deleted`

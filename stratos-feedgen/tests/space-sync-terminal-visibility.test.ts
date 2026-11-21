@@ -21,7 +21,7 @@ import {
 
 const STRATOS_DID = 'did:web:stratos.test'
 const BOUNDARY = `${STRATOS_DID}/bebop-crew`
-const SPACE_URI = `at://${STRATOS_DID}/space/zone.stratos.space.feed/bebop-crew`
+const SPACE_URI = `at:space/${STRATOS_DID}/zone.stratos.space.feed/bebop-crew`
 const SPIKE_DID = 'did:plc:spikespiegel'
 const HOST = 'https://spike.example'
 const POST_COLLECTION = 'zone.stratos.feed.post'

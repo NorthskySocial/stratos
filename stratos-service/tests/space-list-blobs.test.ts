@@ -1,6 +1,7 @@
 /**
- * Contract tests for `zone.stratos.space.listBlobs` — the spec-shaped mirror
- * of `com.atproto.space.listBlobs` (atproto#5187).
+ * Contract tests for `zone.stratos.space.listBlobs` — Stratos's own
+ * boundary-scoped blob listing, not the upstream `com.atproto.space.listBlobs`
+ * of a similar name.
  *
  * Contract under test (from the quoted reference lexicon):
  *   - callable with standard user auth (member of the space) OR a space

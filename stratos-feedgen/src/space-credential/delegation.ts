@@ -5,9 +5,8 @@ import type { Keypair } from '@atproto/crypto'
  * Self-minted `atproto-space-delegation+jwt` tokens.
  *
  * The feedgen has a `did:web` identity and no PDS, so it cannot use the PDS
- * convenience endpoint for a delegation token. It signs its own, exactly as
- * proven against the real verifier in
- * `test/spike/spaces/a3-feedgen-delegation.ts`. The server-side spec this
+ * convenience endpoint for a delegation token. It signs its own with the
+ * header and claims the verifier requires. The server-side spec this
  * must satisfy is `stratos-service/src/infra/auth/delegation-verifier.ts`.
  */
 

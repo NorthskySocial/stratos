@@ -110,8 +110,12 @@ services:
       timeout: 5s
       retries: 30
 
+  # Pinned by digest. This image refuses the `at:space/` URI
+  # spelling, so the PDS-custody phases cannot pass against it; it starts only
+  # when the run asks for it (`run-all.ts --spaces-pds`).
   pds-spaces:
-    image: ghcr.io/bluesky-social/atproto:pds-spaces-alpha
+    profiles: ['spaces-pds']
+    image: ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:36ab29eb69af61d3beba8ada2d8d524921622b2b4fedc487f6e282634cc2b541
     container_name: stratos-test-pds-spaces
     restart: 'no'
     network_mode: service:stratos

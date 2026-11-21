@@ -85,6 +85,12 @@
       "0.0.0-spaces-alpha-20261112204144"
     ]
   },
+  "referenceHost": {
+    "url": "https://github.com/bluesky-social/atproto.git",
+    "dockerfile": "Dockerfile",
+    "lockfile": "pnpm-lock.yaml",
+    "sha256": {}
+  },
   "fixtures": [
     {
       "path": "blob-url-space-record.json",

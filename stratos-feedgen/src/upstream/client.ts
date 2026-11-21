@@ -114,7 +114,7 @@ export interface ListSpaceReposOptions {
   limit?: number
 }
 
-/** Spec-shaped mirror of a `com.atproto.space.listRepos` entry, extended with `host`/`hostSource`. */
+/** One repo of Stratos's own `zone.stratos.space.listRepos` answer: its custody and, for a PDS-custody repo, `host`/`hostSource`. */
 export interface SpaceRepoEntry {
   did: string
   /** Fail-closed normalization: anything except an explicit `pds` is `stratos`. */

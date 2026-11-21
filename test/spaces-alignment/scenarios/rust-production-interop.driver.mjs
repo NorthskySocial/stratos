@@ -9,13 +9,14 @@ import {
   removeMember,
   denied,
   credentialLifetime,
+  spaceUriFromParts,
 } from './standard-credential-transport.driver.mjs'
 
 export const requiredAssertions = [
   'rust-manager-expiry-refresh',
   'rust-standard-exchange',
   'rust-stratos-read',
-  'rust-october-pds-read',
+  'rust-reference-pds-read',
   'rust-two-owners-one-host',
   'rust-wrong-owner-denied',
   'rust-wrong-key-denied',
@@ -53,8 +54,8 @@ export async function runScenario() {
   assert.match(domain ?? '', /^[a-z0-9.-]+$/)
   const authority = 'https://stratos-e2e.atmosbox.internal'
   const authorityDid = `did:web:stratos-e2e.${domain}`
-  const space = `at://${authorityDid}/space/zone.stratos.space.feed/general`
-  const pds = `https://october-pds-e2e.${domain}`
+  const space = spaceUriFromParts(authorityDid, 'general')
+  const pds = `https://reference-pds-e2e.${domain}`
   const passed = []
   let browser
   try {
@@ -89,7 +90,11 @@ export async function runScenario() {
     }
     async function read(repo, headers, marker) {
       const response = await fetch(recordsUrl(repo), { headers })
-      assert.equal(response.status, 200, 'Rust-signed October PDS read failed')
+      assert.equal(
+        response.status,
+        200,
+        'Rust-signed reference PDS read failed',
+      )
       assert.ok(
         (await response.json()).records.some(
           (item) => item.value?.text === marker,
@@ -108,7 +113,7 @@ export async function runScenario() {
     passed.push('rust-standard-exchange')
     const headers = await presentation('initial', credential, account.did)
     await read(account.did, headers, account.seedText)
-    passed.push('rust-october-pds-read')
+    passed.push('rust-reference-pds-read')
     await read(account.did, headers, account.seedText)
     passed.push('rust-same-signature-reused')
     await denied(

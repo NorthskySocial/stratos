@@ -1,0 +1,1923 @@
+{
+  "entries": [
+    {
+      "suite": "baseline",
+      "id": "browser-oauth",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "baseline",
+          "id": "browser-oauth"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "baseline",
+      "id": "stratos-custody",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "baseline",
+          "id": "stratos-custody"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "baseline",
+      "id": "pds-custody",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "baseline",
+          "id": "pds-custody"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "baseline",
+      "id": "space-lexicon",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "baseline",
+          "id": "space-lexicon"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "baseline",
+      "id": "pds-space-grant",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "baseline",
+          "id": "pds-space-grant"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "baseline",
+      "id": "publication-feed",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "baseline",
+          "id": "publication-feed"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "baseline",
+      "id": "boundary-isolation",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "baseline",
+          "id": "boundary-isolation"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "baseline",
+      "id": "unrelated-boundary-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "baseline",
+          "id": "unrelated-boundary-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "baseline",
+      "id": "public-private-blob-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "baseline",
+          "id": "public-private-blob-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "baseline",
+      "id": "authenticated-space-blob",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "baseline",
+          "id": "authenticated-space-blob"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "client-custody",
+      "id": "sdk-discovers-both-custodies",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "client-custody",
+          "id": "sdk-discovers-both-custodies"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "client-custody",
+      "id": "authority-and-host-agree",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "client-custody",
+          "id": "authority-and-host-agree"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "client-custody",
+      "id": "selected-space-write",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "client-custody",
+          "id": "selected-space-write"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "client-custody",
+      "id": "space-write-is-private",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "client-custody",
+          "id": "space-write-is-private"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "client-custody",
+      "id": "unresolved-custody-sends-no-credentials",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "client-custody",
+          "id": "unresolved-custody-sends-no-credentials"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "oauth-space-session",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "oauth-space-session"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "pds-issued-delegation",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "pds-issued-delegation"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "credential-minted",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "credential-minted"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "local-read-before-removal",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "local-read-before-removal"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "foreign-read-before-removal",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "foreign-read-before-removal"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "member-removed",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "member-removed"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "local-credential-after-removal",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "local-credential-after-removal"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "foreign-credential-after-removal",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "foreign-credential-after-removal"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "wrong-key-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "wrong-key-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "expired-local-credential-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "expired-local-credential-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "local-revision-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "local-revision-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "credential-lifetime",
+      "id": "local-deactivation-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "credential-lifetime",
+          "id": "local-deactivation-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "delegation-transport",
+      "id": "oauth-space-session",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "delegation-transport",
+          "id": "oauth-space-session"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "delegation-transport",
+      "id": "authorization-server-pds-separation",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "delegation-transport",
+          "id": "authorization-server-pds-separation"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "delegation-transport",
+      "id": "pds-issued-delegation",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "delegation-transport",
+          "id": "pds-issued-delegation"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "delegation-transport",
+      "id": "header-exchange",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "delegation-transport",
+          "id": "header-exchange"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "delegation-transport",
+      "id": "foreign-repo-read",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "delegation-transport",
+          "id": "foreign-repo-read"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "delegation-transport",
+      "id": "tampered-delegation-signature-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "delegation-transport",
+          "id": "tampered-delegation-signature-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "delegation-transport",
+      "id": "wrong-key-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "delegation-transport",
+          "id": "wrong-key-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "delegation-transport",
+      "id": "delegation-replay-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "delegation-transport",
+          "id": "delegation-replay-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "delegation-transport",
+      "id": "missing-proof-preserves-delegation",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "delegation-transport",
+          "id": "missing-proof-preserves-delegation"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "delegation-transport",
+      "id": "ambiguous-transport-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "delegation-transport",
+          "id": "ambiguous-transport-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "delegation-transport",
+      "id": "ordinary-bearer-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "delegation-transport",
+          "id": "ordinary-bearer-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "feed-errors",
+      "id": "private-feed-loaded",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "feed-errors",
+          "id": "private-feed-loaded"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "feed-errors",
+      "id": "interrupted-feed-error",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "feed-errors",
+          "id": "interrupted-feed-error"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "feed-errors",
+      "id": "public-feed-retained",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "feed-errors",
+          "id": "public-feed-retained"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "feed-errors",
+      "id": "retry-recovered",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "feed-errors",
+          "id": "retry-recovered"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "feed-errors",
+      "id": "revoked-session-cleared",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "feed-errors",
+          "id": "revoked-session-cleared"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "feed-errors",
+      "id": "late-response-isolated",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "feed-errors",
+          "id": "late-response-isolated"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "service-admission",
+      "id": "never-enrolled-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "service-admission",
+          "id": "never-enrolled-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "service-admission",
+      "id": "active-all-boundary",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "service-admission",
+          "id": "active-all-boundary"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "service-admission",
+      "id": "active-assigned-pull-records",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "service-admission",
+          "id": "active-assigned-pull-records"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "service-admission",
+      "id": "active-second-boundary",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "service-admission",
+          "id": "active-second-boundary"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "service-admission",
+      "id": "foreign-boundary-pull-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "service-admission",
+          "id": "foreign-boundary-pull-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "service-admission",
+      "id": "deactivated-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "service-admission",
+          "id": "deactivated-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "service-admission",
+      "id": "reactivated-admitted",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "service-admission",
+          "id": "reactivated-admitted"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "space-delete",
+      "id": "webapp-oauth-delete-grant",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "space-delete",
+          "id": "webapp-oauth-delete-grant"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "space-delete",
+      "id": "pds-delete-target",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "space-delete",
+          "id": "pds-delete-target"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "space-delete",
+      "id": "feed-removes-only-target",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "space-delete",
+          "id": "feed-removes-only-target"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "space-delete",
+      "id": "other-author-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "space-delete",
+          "id": "other-author-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "space-delete",
+      "id": "stratos-delete-preserved",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "space-delete",
+          "id": "stratos-delete-preserved"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "rust-production-interop",
+      "id": "rust-second-owner-ingestion",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-second-owner-ingestion"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "rust-production-interop",
+      "id": "rust-manager-expiry-refresh",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-manager-expiry-refresh"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "rust-production-interop",
+      "id": "rust-standard-exchange",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-standard-exchange"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "rust-production-interop",
+      "id": "rust-stratos-read",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-stratos-read"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "rust-production-interop",
+      "id": "rust-october-pds-read",
+      "disposition": "renamed",
+      "renamedTo": "rust-reference-pds-read",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-reference-pds-read"
+        }
+      ],
+      "reason": "Renamed to rust-reference-pds-read: the host is the November reference host, and the old name described the October build."
+    },
+    {
+      "suite": "rust-production-interop",
+      "id": "rust-two-owners-one-host",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-two-owners-one-host"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "rust-production-interop",
+      "id": "rust-wrong-owner-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-wrong-owner-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "rust-production-interop",
+      "id": "rust-wrong-key-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-wrong-key-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "rust-production-interop",
+      "id": "rust-same-signature-reused",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-same-signature-reused"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "rust-production-interop",
+      "id": "rust-renewal-fresh-key",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-renewal-fresh-key"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "rust-production-interop",
+      "id": "rust-renewal-after-removal-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-renewal-after-removal-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "standard-exchange",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "standard-exchange"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "stratos-read",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "stratos-read"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "october-pds-read",
+      "disposition": "renamed",
+      "renamedTo": "reference-pds-read",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "reference-pds-read"
+        }
+      ],
+      "reason": "Renamed to reference-pds-read: the host is the November reference host, and the old name described the October build."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "two-owners-one-host",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "two-owners-one-host"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "wrong-owner-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "wrong-owner-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "wrong-key-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "wrong-key-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "tampered-token-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "tampered-token-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "same-signature-reused",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "same-signature-reused"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "default-lifetime-600",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "default-lifetime-600"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "renewal-fresh-key",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "renewal-fresh-key"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "renewal-after-removal-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "renewal-after-removal-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "cross-space-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "cross-space-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "legacy-compatible",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-service/tests/space-presentation-routes.integration.test.ts",
+          "title": "refuses the old scheme beside an otherwise valid tagged signature"
+        },
+        {
+          "kind": "test",
+          "file": "stratos-service/tests/space-presentation-routes.integration.test.ts",
+          "title": "refuses the old scheme even when it is signed as the old profile did"
+        }
+      ],
+      "reason": "There is no dual acceptance now; the service route tests refuse the earlier scheme, and a run that expected both to be accepted cannot pass on any current build."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "conflicting-proof-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "conflicting-proof-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "standard-credential-transport",
+      "id": "delegation-replay-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "delegation-replay-denied"
+        }
+      ],
+      "reason": "Same assertion, same suite, driver ported to the new spelling."
+    },
+    {
+      "suite": "october-interop",
+      "id": "standard-exchange",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "standard-exchange"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "stratos-read",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "stratos-read"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "october-pds-read",
+      "disposition": "renamed",
+      "renamedTo": "reference-pds-read",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "reference-pds-read"
+        }
+      ],
+      "reason": "The composition is gone; the assertion lives on in standard-credential-transport as reference-pds-read."
+    },
+    {
+      "suite": "october-interop",
+      "id": "two-owners-one-host",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "two-owners-one-host"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "wrong-owner-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "wrong-owner-denied"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "wrong-key-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "wrong-key-denied"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "tampered-token-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "tampered-token-denied"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "same-signature-reused",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "same-signature-reused"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "default-lifetime-600",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "default-lifetime-600"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "renewal-fresh-key",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "renewal-fresh-key"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "renewal-after-removal-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "renewal-after-removal-denied"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "cross-space-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "cross-space-denied"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "legacy-compatible",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-service/tests/space-presentation-routes.integration.test.ts",
+          "title": "refuses the old scheme beside an otherwise valid tagged signature"
+        },
+        {
+          "kind": "test",
+          "file": "stratos-service/tests/space-presentation-routes.integration.test.ts",
+          "title": "refuses the old scheme even when it is signed as the old profile did"
+        }
+      ],
+      "reason": "There is no dual acceptance now; the service route tests refuse the earlier scheme, so the October expectation cannot pass on any current build."
+    },
+    {
+      "suite": "october-interop",
+      "id": "conflicting-proof-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "conflicting-proof-denied"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "delegation-replay-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "standard-credential-transport",
+          "id": "delegation-replay-denied"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in standard-credential-transport."
+    },
+    {
+      "suite": "october-interop",
+      "id": "rust-second-owner-ingestion",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-second-owner-ingestion"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in rust-production-interop."
+    },
+    {
+      "suite": "october-interop",
+      "id": "rust-manager-expiry-refresh",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-manager-expiry-refresh"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in rust-production-interop."
+    },
+    {
+      "suite": "october-interop",
+      "id": "rust-standard-exchange",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-standard-exchange"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in rust-production-interop."
+    },
+    {
+      "suite": "october-interop",
+      "id": "rust-stratos-read",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-stratos-read"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in rust-production-interop."
+    },
+    {
+      "suite": "october-interop",
+      "id": "rust-october-pds-read",
+      "disposition": "renamed",
+      "renamedTo": "rust-reference-pds-read",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-reference-pds-read"
+        }
+      ],
+      "reason": "The composition is gone; the assertion lives on in rust-production-interop as rust-reference-pds-read."
+    },
+    {
+      "suite": "october-interop",
+      "id": "rust-two-owners-one-host",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-two-owners-one-host"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in rust-production-interop."
+    },
+    {
+      "suite": "october-interop",
+      "id": "rust-wrong-owner-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-wrong-owner-denied"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in rust-production-interop."
+    },
+    {
+      "suite": "october-interop",
+      "id": "rust-wrong-key-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-wrong-key-denied"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in rust-production-interop."
+    },
+    {
+      "suite": "october-interop",
+      "id": "rust-same-signature-reused",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-same-signature-reused"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in rust-production-interop."
+    },
+    {
+      "suite": "october-interop",
+      "id": "rust-renewal-fresh-key",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-renewal-fresh-key"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in rust-production-interop."
+    },
+    {
+      "suite": "october-interop",
+      "id": "rust-renewal-after-removal-denied",
+      "disposition": "retained",
+      "carriedBy": [
+        {
+          "kind": "suite-assertion",
+          "suite": "rust-production-interop",
+          "id": "rust-renewal-after-removal-denied"
+        }
+      ],
+      "reason": "The composition is gone; the same assertion is kept in rust-production-interop."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "upstream-two-grants-read",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "upstream-wrong-issuer-denied",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "upstream-foreign-audience-denied",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "upstream-service-audience-denied",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "upstream-wrong-method-denied",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "upstream-missing-method-denied",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "upstream-malformed-batch-denied",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "upstream-cross-space-isolation",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "upstream-grant-a-revoked-b-unaffected",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "upstream-duplicate-idempotence",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "upstream-restart-retention",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "stratos-unsupported-route",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-service/tests/unsupported-upstream-routes.test.ts",
+          "title": "answers $nsid as an unknown method"
+        }
+      ],
+      "reason": "The in-process service test answers each upstream revocation route as an unknown method; the October probe needed a receiver that no longer exists."
+    },
+    {
+      "suite": "credential-revocation-contract",
+      "id": "stratos-unsupported-role-unadvertised",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-service/tests/unsupported-upstream-routes.test.ts",
+          "title": "offers no #atproto_pds service in the DID document"
+        }
+      ],
+      "reason": "The in-process service test reads the DID document and finds no host service; the October probe needed a receiver that no longer exists."
+    },
+    {
+      "suite": "writer-sync-contract",
+      "id": "upstream-commit-rev-unchanged",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+    },
+    {
+      "suite": "writer-sync-contract",
+      "id": "upstream-short-page-cursor",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+    },
+    {
+      "suite": "writer-sync-contract",
+      "id": "upstream-exclusive-empty-preserves-checkpoint",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+    },
+    {
+      "suite": "writer-sync-contract",
+      "id": "upstream-repeated-writer-new-state",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+    },
+    {
+      "suite": "writer-sync-contract",
+      "id": "upstream-equal-older-idempotent",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+    },
+    {
+      "suite": "writer-sync-contract",
+      "id": "upstream-wrong-issuer-denied",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+    },
+    {
+      "suite": "writer-sync-contract",
+      "id": "upstream-wrong-audience-denied",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+    },
+    {
+      "suite": "writer-sync-contract",
+      "id": "upstream-future-revision-denied",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+    },
+    {
+      "suite": "writer-sync-contract",
+      "id": "upstream-current-write-policy-denied",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+    },
+    {
+      "suite": "writer-sync-contract",
+      "id": "stratos-standard-writer-routes-unsupported",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-service/tests/unsupported-upstream-routes.test.ts",
+          "title": "answers them as unknown whoever asks"
+        },
+        {
+          "kind": "test",
+          "file": "stratos-service/tests/unsupported-upstream-routes.test.ts",
+          "title": "notices a handler registered for one of the routes"
+        }
+      ],
+      "reason": "The in-process service test answers the upstream writer routes as unknown methods; the October probe needed a PDS that speaks them."
+    },
+    {
+      "suite": "pds-revocation",
+      "id": "late-page-revoked",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
+          "title": "a_member_removed_during_the_poll_promotes_nothing"
+        }
+      ],
+      "reason": "Replaced by the named Rust tests (a member removed during a poll promotes nothing); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "pds-revocation",
+      "id": "late-terminal-verification-revoked",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_generation_bumped_between_the_read_and_the_promotion_is_unauthorized"
+        }
+      ],
+      "reason": "Replaced by the named Rust tests (a promotion after the generation changed is unauthorized); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "pds-revocation",
+      "id": "other-member-preserved",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_stale_generation_or_a_forged_boundary_clears_nothing"
+        },
+        {
+          "kind": "journey",
+          "name": "membership-revoked-mid-poll"
+        }
+      ],
+      "reason": "Replaced by the named Rust tests (a stale generation clears nothing and leaves another member rows alone); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "pds-revocation",
+      "id": "old-generation-rejection-observed",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_stale_generation_changes_nothing"
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/lifecycle.rs",
+          "title": "reading_the_base_under_a_stale_generation_is_refused"
+        }
+      ],
+      "reason": "Replaced by the named Rust tests (the generation is checked at each store write and at each base read); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "pds-revocation",
+      "id": "fresh-generation-recovers",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
+          "title": "a_member_re_enrolled_with_a_new_generation_starts_with_a_replacement"
+        },
+        {
+          "kind": "journey",
+          "name": "membership-revoked-mid-poll"
+        }
+      ],
+      "reason": "Replaced by the named Rust tests (a member added again starts with a replacement under a new generation); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "pds-revocation",
+      "id": "restart-keeps-revocation",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_member_who_left_cannot_be_replaced"
+        },
+        {
+          "kind": "journey",
+          "name": "membership-revoked-mid-poll"
+        }
+      ],
+      "reason": "Replaced by the named Rust tests (a member who left cannot be replaced); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "cumulative-pass-budget",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/space_ops.rs",
+          "title": "pages_of_one_cycle_draw_on_the_same_budget"
+        }
+      ],
+      "reason": "Replaced by the named Rust test of the budget, deadline or interruption it exercised; staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "same-path-replacement-and-delete-accounting",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "rejected-page-transaction-rollback",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
+          "title": "an_archive_over_a_limit_fails_as_over_budget_and_changes_nothing"
+        }
+      ],
+      "reason": "Replaced by the named Rust test of the budget, deadline or interruption it exercised; staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "promotion-replaces-staged-accounting",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "unrelated-target-remains-available",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/pds_space_scheduler.rs",
+          "title": "a_pass_over_every_kind_of_outcome_counts_each_and_logs_one_reason_line"
+        }
+      ],
+      "reason": "Replaced by the named Rust test of the budget, deadline or interruption it exercised; staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "multi-target-global-budget",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "persisted-storage-accounting",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "target-row-budget",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "global-row-budget",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "service-responsive",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
+          "title": "a_cycle_whose_deadline_passes_while_it_waits_for_its_target_fails_sends_nothing_and_gets_no_cooldown"
+        }
+      ],
+      "reason": "Replaced by the named Rust test of the budget, deadline or interruption it exercised; staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "interrupted-stage",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_promotion_that_never_commits_leaves_nothing_and_a_full_one_survives_reopening"
+        }
+      ],
+      "reason": "Replaced by the named Rust test of the budget, deadline or interruption it exercised; staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
+    },
+    {
+      "suite": "staging-limits",
+      "id": "expired-stage-restart",
+      "disposition": "superseded",
+      "carriedBy": [
+        {
+          "kind": "none"
+        }
+      ],
+      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+    }
+  ]
+}

@@ -55,7 +55,7 @@ describe('client custody sandbox suite', () => {
           iss: 'did:web:feedgen-e2e.atmosbox.test',
           aud: 'did:web:stratos-e2e.atmosbox.test',
           exp: expect.any(Number),
-          lxm: 'com.atproto.space.listRepos',
+          lxm: 'zone.stratos.space.listRepos',
         })
         const now = Math.floor(Date.now() / 1000)
         expect(payload.exp).toBeGreaterThan(now)
@@ -285,7 +285,7 @@ describe('client custody sandbox suite', () => {
     const verified = await verifyServiceAuth(
       `Bearer ${token}`,
       'did:web:stratos-e2e.atmosbox.test',
-      'com.atproto.space.listRepos',
+      'zone.stratos.space.listRepos',
       idResolver as unknown as Parameters<typeof verifyServiceAuth>[3],
     )
     expect(verified.iss).toBe(issuer)

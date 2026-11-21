@@ -1,11 +1,15 @@
 #!/usr/bin/env -S deno run -A
 // Run all E2E test phases sequentially.
-// Usage: deno run -A test/scripts/run-all.ts [--postgres] [--appview]
+// Usage: deno run -A test/scripts/run-all.ts [--postgres] [--appview] [--spaces-pds]
 //
 // Options:
-//   --postgres Use PostgreSQL storage backend instead of SQLite
-//   --appview  Bring up the AppView stack and run the service-auth subscription
-//              feed phase. Implies the PostgreSQL backend.
+//   --postgres   Use PostgreSQL storage backend instead of SQLite
+//   --appview    Bring up the AppView stack and run the service-auth subscription
+//                feed phase. Implies the PostgreSQL backend.
+//   --spaces-pds Also start the pinned spaces PDS image, create its fixture
+//                accounts and run the two PDS-custody phases. That image
+//                refuses the current space URI spelling, so those phases
+//                cannot pass against it.
 //
 import {
   fail,
@@ -16,11 +20,18 @@ import {
   section,
   skip,
 } from './lib/log.ts'
+import {
+  exportSpacesPdsChoice,
+  parseRunOptions,
+  type Phase,
+  phasesFor,
+} from './lib/phases.ts'
 
 const SCRIPTS_DIR = new URL('.', import.meta.url).pathname
 
 // Parse command line args
-const appviewMode = Deno.args.includes('--appview')
+const runOptions = parseRunOptions(Deno.args)
+const appviewMode = runOptions.appview
 const preserve = Deno.args.includes('--preserve')
 const postgresMode = appviewMode || Deno.args.includes('--postgres')
 
@@ -30,43 +41,9 @@ if (postgresMode) {
 if (appviewMode) {
   Deno.env.set('STRATOS_E2E_APPVIEW', 'true')
 }
+exportSpacesPdsChoice(runOptions)
 
-interface Phase {
-  name: string
-  script: string
-  /** If true, always run (e.g. teardown) even after prior failures */
-  always?: boolean
-}
-
-const phases: Phase[] = [
-  {
-    name: 'Cloudflare Tunnel',
-    script: 'cloudflare-tunnel-setup.ts',
-  },
-  { name: 'Setup', script: 'setup.ts' },
-  { name: 'OAuth Enrollment', script: 'test-enrollment.ts' },
-  { name: 'Multi-Enrollment Verify', script: 'test-multi-enrollment.ts' },
-  { name: 'OAuth Login: Invalid Password', script: 'test-auth-failures.ts' },
-  { name: 'Configure Boundaries', script: 'configure-boundaries.ts' },
-  { name: 'Post CRUD & Boundaries', script: 'test-posts.ts' },
-  { name: 'DPoP CRUD (production auth)', script: 'test-dpop-crud.ts' },
-  { name: 'Blobs: Upload & Access', script: 'test-blobs.ts' },
-  { name: 'Spaces: Credentials & Sync', script: 'test-spaces.ts' },
-  { name: 'Sync Stream: subscribeRecords', script: 'test-sync-stream.ts' },
-  { name: 'Feedgen: describeFeed & getFeed', script: 'test-feedgen.ts' },
-  ...(appviewMode
-    ? [{ name: 'AppView Service-Auth Feed', script: 'test-appview-feed.ts' }]
-    : []),
-  { name: 'Mixed Mode: Spaces PDS Custody', script: 'test-mixed-mode.ts' },
-  {
-    name: 'Webapp: Browser Mixed Custody',
-    script: 'test-webapp-mixed-mode.ts',
-  },
-  { name: 'Admin API: Boundary Management', script: 'test-admin-api.ts' },
-  { name: 'Admin UI: SPA Smoke Tests', script: 'test-admin-ui.ts' },
-  { name: 'Unenrollment', script: 'test-unenrollment.ts' },
-  { name: 'Teardown', script: 'teardown.ts', always: true },
-]
+const phases = phasesFor(runOptions)
 
 async function runPhase(phase: Phase): Promise<void> {
   section(`▶ ${phase.name}`)

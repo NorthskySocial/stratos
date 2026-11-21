@@ -30,24 +30,49 @@ function httpsUrl(value, name) {
   return parsed.toString().replace(/\/$/, '')
 }
 
-function assertAtprotoUri(uri, authorityDid, roomId) {
-  assert.ok(uri.startsWith('at://'), 'PDS returned a non-AT URI')
-  const segments = uri.slice('at://'.length).split('/')
-  assert.equal(segments.length, 7, 'Space record URI must have seven segments')
-  assert.equal(
-    segments[0],
-    authorityDid,
+function spaceUriFromParts(authorityDid, skey) {
+  return `at:space/${authorityDid}/${spaceType}/${skey}`
+}
+
+function assertSpaceRecordUri(uri, space) {
+  assert.ok(
+    uri.startsWith(`${space}/`),
     'Post is not in the configured Stratos space',
   )
-  assert.equal(segments[1], 'space')
-  assert.equal(segments[2], spaceType)
-  assert.equal(segments[3], roomId)
-  assert.equal(segments[5], postCollection)
+  const [author, collection, rkey, ...extra] = uri
+    .slice(space.length + 1)
+    .split('/')
   assert.ok(
-    segments[4].startsWith('did:'),
+    author?.startsWith('did:'),
     'Space URI is missing its repo author DID',
   )
-  assert.ok(segments[6], 'Space URI is missing its record key')
+  assert.equal(collection, postCollection)
+  assert.ok(rkey, 'Space URI is missing its record key')
+  assert.equal(extra.length, 0, 'Space record URI has extra parts')
+  return { author, rkey }
+}
+
+function assertCustodyUri(uri, did) {
+  const prefix = `at://${did}/${postCollection}/`
+  assert.ok(
+    typeof uri === 'string' && uri.startsWith(prefix),
+    'Ordinary PDS account did not use Stratos custody',
+  )
+  const rkey = uri.slice(prefix.length)
+  assert.ok(rkey && !rkey.includes('/'), 'Custody URI is missing its rkey')
+}
+
+let activeSuite = 'baseline'
+
+// The runner reads these lines to name the assertions reached when a run fails.
+function reach(assertionId) {
+  console.log(
+    JSON.stringify({
+      progress: 'assertion-reached',
+      suite: activeSuite,
+      id: assertionId,
+    }),
+  )
 }
 
 async function trustSandboxCa() {
@@ -470,7 +495,7 @@ async function pdsEnrollment(domain, account, authorityDid) {
   throw new Error('PDS enrollment record was not published')
 }
 
-async function assertSpaceLexicon(domain, authorityDid, account) {
+async function assertSpaceLexiconPublished(domain) {
   const query = new URL(
     `https://authority.${domain}/xrpc/com.atproto.repo.getRecord`,
   )
@@ -481,9 +506,11 @@ async function assertSpaceLexicon(domain, authorityDid, account) {
   assert.equal(response.status, 200, 'Space lexicon record did not resolve')
   const record = await response.json()
   assert.equal(record.value?.defs?.main?.type, 'space')
+}
 
-  // The alpha PDS resolves this NSID during Stratos OAuth. PDS custody in
-  // the PDS-hosted enrollment record proves that the scope was granted there.
+// The alpha PDS resolves the space NSID during Stratos OAuth. PDS custody in
+// the PDS-hosted enrollment record proves that the scope was granted there.
+async function assertPdsGrantedSpaceScope(domain, authorityDid, account) {
   const enrollment = await pdsEnrollment(domain, account, authorityDid)
   assert.equal(enrollment.custody, 'pds', 'PDS did not grant the space scope')
   assert.equal(
@@ -493,7 +520,7 @@ async function assertSpaceLexicon(domain, authorityDid, account) {
   )
 }
 
-async function assertSpaceBlob(domain, account, authorityDid, roomId) {
+async function writeSpaceBlobFixture(domain, account, authorityDid, roomId) {
   const pdsUrl = `https://pds-space1.${domain}`
   const session = await pdsSession(domain, account)
   const payload = Buffer.from(`Private space blob ${randomUUID()}`)
@@ -515,7 +542,7 @@ async function assertSpaceBlob(domain, account, authorityDid, roomId) {
     typeof cid === 'string' && cid.length > 0,
     'Space blob upload returned no CID',
   )
-  const space = `at://${authorityDid}/space/${spaceType}/${roomId}`
+  const space = spaceUriFromParts(authorityDid, roomId)
   const write = await requestJson(
     `${pdsUrl}${pdsCreatePath}`,
     {
@@ -550,6 +577,10 @@ async function assertSpaceBlob(domain, account, authorityDid, roomId) {
     'unknown',
     'PDS did not run its default record validation path',
   )
+  return { pdsUrl, session, cid, payload, space }
+}
+
+async function assertPublicBlobDenied({ pdsUrl, session, cid }) {
   const publicUrl = new URL(`${pdsUrl}/xrpc/com.atproto.sync.getBlob`)
   publicUrl.searchParams.set('did', session.did)
   publicUrl.searchParams.set('cid', cid)
@@ -559,6 +590,15 @@ async function assertSpaceBlob(domain, account, authorityDid, roomId) {
     400,
     'Public sync.getBlob exposed a private-only blob',
   )
+}
+
+async function assertAuthenticatedSpaceBlob({
+  pdsUrl,
+  session,
+  cid,
+  payload,
+  space,
+}) {
   const privateUrl = new URL(`${pdsUrl}/xrpc/com.atproto.space.getBlob`)
   privateUrl.searchParams.set('space', space)
   privateUrl.searchParams.set('repo', session.did)
@@ -574,6 +614,21 @@ async function assertSpaceBlob(domain, account, authorityDid, roomId) {
   assert.deepEqual(Buffer.from(await privateResponse.arrayBuffer()), payload)
 }
 
+async function postAsCustodyMember(page, account, text) {
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === stratosCreatePath &&
+      response.ok(),
+    { timeout: 45_000 },
+  )
+  await page.locator('#room-post').fill(text)
+  await page.getByRole('button', { name: 'Post topic' }).click()
+  const result = await (await responsePromise).json()
+  assertCustodyUri(result.uri, account.did)
+  return result
+}
+
 async function assertStratosCustody(domain, clubhouseUrl, roomId, pdsText) {
   const account = await ordinaryAccount(domain)
   const browser = await chromium.launch({ headless: true })
@@ -583,29 +638,81 @@ async function assertStratosCustody(domain, clubhouseUrl, roomId, pdsText) {
     await signIn(page, account, clubhouseUrl)
     await enterRoom(page, account, clubhouseUrl, roomId)
     const text = `Stratos custody sandbox E2E ${randomUUID()}`
-    const responsePromise = page.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        new URL(response.url()).pathname === stratosCreatePath &&
-        response.ok(),
-      { timeout: 45_000 },
-    )
-    await page.locator('#room-post').fill(text)
-    await page.getByRole('button', { name: 'Post topic' }).click()
-    const response = await responsePromise
-    const result = await response.json()
-    assert.ok(
-      typeof result.uri === 'string' &&
-        result.uri.startsWith(`at://${account.did}/`),
-      'Ordinary PDS account did not use Stratos custody',
-    )
+    const result = await postAsCustodyMember(page, account, text)
     await waitForFeed(page, responses, text, result.uri)
     assert.ok(
       await visible(page.locator('.post', { hasText: pdsText }).first()),
       'The authorized feed did not include the PDS custody post',
     )
+    reach('stratos-custody')
   } finally {
     await browser.close()
+  }
+}
+
+async function enrollThroughStratos(page, account) {
+  const authorization = new URL(
+    'https://stratos-e2e.atmosbox.internal/oauth/authorize',
+  )
+  authorization.searchParams.set('handle', account.username)
+  await page.goto(authorization.toString(), {
+    waitUntil: 'domcontentloaded',
+  })
+  await completeOAuth(page, account, authorization.origin)
+  const result = JSON.parse(await page.locator('body').innerText())
+  assert.equal(result.success, true, 'Unrelated actor enrollment failed')
+  assert.equal(result.did, account.did)
+}
+
+async function assertEnrolledOnlyInOtherBoundary(
+  domain,
+  account,
+  authorityDid,
+) {
+  const enrollment = await pdsEnrollment(domain, account, authorityDid)
+  const boundaries = enrollment.boundaries?.map((item) => item.value)
+  assert.ok(Array.isArray(boundaries), 'Unrelated enrollment has no boundaries')
+  assert.ok(
+    boundaries.includes(`${authorityDid}/other`),
+    'Unrelated actor did not receive its distinct boundary',
+  )
+  assert.ok(
+    !boundaries.includes(`${authorityDid}/general`),
+    'Unrelated actor unexpectedly received the target boundary',
+  )
+}
+
+async function assertFeedEmptyOrRefused(domain, account, roomId) {
+  const session = await pdsSession(domain, account)
+  const feedUrl = new URL(
+    `${accountPdsUrl(domain, account)}/xrpc/zone.stratos.feedgen.getFeed`,
+  )
+  feedUrl.searchParams.set('feed', roomId)
+  feedUrl.searchParams.set('limit', '50')
+  const deadline = Date.now() + 30_000
+  let feedResponse
+  while (Date.now() < deadline) {
+    feedResponse = await fetch(feedUrl, {
+      headers: {
+        authorization: `Bearer ${session.accessJwt}`,
+        'atproto-proxy': `did:web:feedgen-e2e.${domain}#stratos_feedgen`,
+      },
+    })
+    if (feedResponse.ok) break
+    const body = await feedResponse.clone().json()
+    if (body.error !== 'FeedNotReady') break
+    await delay(500)
+  }
+  assert.ok(feedResponse, 'Unrelated-boundary feed was never requested')
+  if (feedResponse.ok) {
+    const body = await feedResponse.json()
+    assert.ok(
+      Array.isArray(body.feed) && body.feed.length === 0,
+      'Unrelated-boundary actor received target feed content',
+    )
+  } else {
+    const body = await feedResponse.json()
+    assert.equal(body.error, 'BoundaryMismatch')
   }
 }
 
@@ -616,63 +723,10 @@ async function assertNonmemberDenied(domain, clubhouseUrl, roomId, postText) {
   try {
     const page = await browser.newPage()
     const responses = listenForFeedResponses(page)
-    const authorization = new URL(
-      'https://stratos-e2e.atmosbox.internal/oauth/authorize',
-    )
-    authorization.searchParams.set('handle', account.username)
-    await page.goto(authorization.toString(), {
-      waitUntil: 'domcontentloaded',
-    })
-    await completeOAuth(page, account, authorization.origin)
-    const result = JSON.parse(await page.locator('body').innerText())
-    assert.equal(result.success, true, 'Unrelated actor enrollment failed')
-    assert.equal(result.did, account.did)
-    const enrollment = await pdsEnrollment(domain, account, authorityDid)
-    const boundaries = enrollment.boundaries?.map((item) => item.value)
-    assert.ok(
-      Array.isArray(boundaries),
-      'Unrelated enrollment has no boundaries',
-    )
-    assert.ok(
-      boundaries.includes(`${authorityDid}/other`),
-      'Unrelated actor did not receive its distinct boundary',
-    )
-    assert.ok(
-      !boundaries.includes(`${authorityDid}/general`),
-      'Unrelated actor unexpectedly received the target boundary',
-    )
-
-    const session = await pdsSession(domain, account)
-    const feedUrl = new URL(
-      `${accountPdsUrl(domain, account)}/xrpc/zone.stratos.feedgen.getFeed`,
-    )
-    feedUrl.searchParams.set('feed', roomId)
-    feedUrl.searchParams.set('limit', '50')
-    const deadline = Date.now() + 30_000
-    let feedResponse
-    while (Date.now() < deadline) {
-      feedResponse = await fetch(feedUrl, {
-        headers: {
-          authorization: `Bearer ${session.accessJwt}`,
-          'atproto-proxy': `did:web:feedgen-e2e.${domain}#stratos_feedgen`,
-        },
-      })
-      if (feedResponse.ok) break
-      const body = await feedResponse.clone().json()
-      if (body.error !== 'FeedNotReady') break
-      await delay(500)
-    }
-    assert.ok(feedResponse, 'Unrelated-boundary feed was never requested')
-    if (feedResponse.ok) {
-      const body = await feedResponse.json()
-      assert.ok(
-        Array.isArray(body.feed) && body.feed.length === 0,
-        'Unrelated-boundary actor received target feed content',
-      )
-    } else {
-      const body = await feedResponse.json()
-      assert.equal(body.error, 'BoundaryMismatch')
-    }
+    await enrollThroughStratos(page, account)
+    await assertEnrolledOnlyInOtherBoundary(domain, account, authorityDid)
+    await assertFeedEmptyOrRefused(domain, account, roomId)
+    reach('unrelated-boundary-denied')
 
     await signIn(page, account, clubhouseUrl)
     const card = roomCard(page, roomId)
@@ -717,12 +771,135 @@ async function assertNonmemberDenied(domain, clubhouseUrl, roomId, postText) {
       ),
       'Feedgen returned private content to an account without the boundary',
     )
+    reach('boundary-isolation')
   } finally {
     await browser.close()
   }
 }
 
-async function main() {
+async function deletePostFromClubhouse(page, text) {
+  const post = page.locator('.post', { hasText: text }).first()
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'DELETE' &&
+      new URL(response.url()).pathname === stratosCreatePath,
+    { timeout: 45_000 },
+  )
+  await post.getByRole('button', { name: 'Delete', exact: true }).click()
+  await post.getByRole('button', { name: 'Delete now' }).click()
+  assert.equal(
+    (await responsePromise).status(),
+    200,
+    'Stratos custody post deletion failed',
+  )
+}
+
+async function waitForFeedWithout(page, responses, text, uri) {
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline) {
+    const before = responses.length
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await delay(1_000)
+    const fresh = responses.slice(before).filter(({ status }) => status === 200)
+    const listed = (item) =>
+      item?.post?.uri === uri || item?.post?.record?.text === text
+    if (
+      fresh.length > 0 &&
+      fresh.every(
+        ({ body }) => Array.isArray(body?.feed) && !body.feed.some(listed),
+      )
+    ) {
+      return
+    }
+  }
+  throw new Error('Rust Feedgen still returned the deleted custody post')
+}
+
+const ordinaryCustodyAssertions = [
+  'ordinary-sign-in',
+  'ordinary-custody-post',
+  'ordinary-feed-delivery',
+  'ordinary-nonmember-denied',
+  'ordinary-delete',
+]
+
+// The Stratos-custody journey on the ordinary PDS. Sign-in reaches the
+// Clubhouse through its handle resolver, and the spaces PDS holds no account,
+// scope or record of this journey.
+async function runOrdinaryCustody() {
+  const domain = required('SANDBOX_DOMAIN')
+  const clubhouseUrl = httpsUrl(
+    'https://clubhouse-e2e.atmosbox.internal',
+    'Clubhouse URL',
+  )
+  const roomId = process.env.FEEDGEN_E2E_ROOM?.trim() || 'general'
+  assert.match(roomId, /^[a-z0-9-]+$/, 'FEEDGEN_E2E_ROOM must be a room slug')
+  const authorityDid = `did:web:stratos-e2e.${domain}`
+  await trustSandboxCa()
+
+  const account = await ordinaryAccount(domain)
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage()
+    const responses = listenForFeedResponses(page)
+    await signIn(page, account, clubhouseUrl)
+    await enterRoom(page, account, clubhouseUrl, roomId)
+    const enrollment = await pdsEnrollment(domain, account, authorityDid)
+    assert.notEqual(
+      enrollment.custody,
+      'pds',
+      'Ordinary PDS account was enrolled as PDS custody',
+    )
+    reach('ordinary-sign-in')
+
+    const text = `Ordinary custody sandbox E2E ${randomUUID()}`
+    const result = await postAsCustodyMember(page, account, text)
+    reach('ordinary-custody-post')
+
+    await waitForFeed(page, responses, text, result.uri)
+    reach('ordinary-feed-delivery')
+
+    const other = await unjoinedOrdinaryAccount(domain)
+    const otherPage = await browser.newPage()
+    await enrollThroughStratos(otherPage, other)
+    await assertEnrolledOnlyInOtherBoundary(domain, other, authorityDid)
+    await assertFeedEmptyOrRefused(domain, other, roomId)
+    reach('ordinary-nonmember-denied')
+
+    await deletePostFromClubhouse(page, text)
+    await waitForFeedWithout(page, responses, text, result.uri)
+    reach('ordinary-delete')
+
+    console.log(
+      JSON.stringify({
+        suite: 'ordinary-custody',
+        coverage:
+          'Ordinary custody only: one Stratos-custody member on the ordinary PDS. PDS custody, space credentials and the spaces PDS are not covered.',
+        assertions: ordinaryCustodyAssertions.map((id) => ({
+          id,
+          status: 'passed',
+        })),
+      }),
+    )
+  } finally {
+    await browser.close()
+  }
+}
+
+const baselineAssertions = [
+  'browser-oauth',
+  'stratos-custody',
+  'pds-custody',
+  'space-lexicon',
+  'pds-space-grant',
+  'publication-feed',
+  'boundary-isolation',
+  'unrelated-boundary-denied',
+  'public-private-blob-denied',
+  'authenticated-space-blob',
+]
+
+async function runBaseline() {
   const domain = required('SANDBOX_DOMAIN')
   const account = await provisionAccount(domain)
   const clubhouseUrl = httpsUrl(
@@ -752,6 +929,7 @@ async function main() {
     const card = roomCard(page, roomId)
     await card.waitFor({ state: 'visible', timeout: 30_000 })
     await enterRoom(page, account, clubhouseUrl, roomId)
+    reach('browser-oauth')
 
     const text = `Feedgen NG sandbox E2E ${randomUUID()}`
     const responsePromise = page.waitForResponse(
@@ -769,38 +947,55 @@ async function main() {
       typeof result.uri === 'string' && typeof result.cid === 'string',
       'Alpha PDS did not return a record strong reference',
     )
-    assertAtprotoUri(result.uri, authorityDid, roomId)
+    const { author } = assertSpaceRecordUri(
+      result.uri,
+      spaceUriFromParts(authorityDid, roomId),
+    )
     const write = assertPdsCustodyWrite(writes, text)
     assert.equal(
       write.repo,
-      result.uri.slice('at://'.length).split('/')[4],
+      author,
       'PDS custody URI author does not match the createRecord repo',
     )
+    reach('pds-custody')
     await waitForFeed(page, feedResponses, text, result.uri)
-    await assertSpaceLexicon(domain, authorityDid, account)
-    await assertSpaceBlob(domain, account, authorityDid, roomId)
+    reach('publication-feed')
+    await assertSpaceLexiconPublished(domain)
+    reach('space-lexicon')
+    await assertPdsGrantedSpaceScope(domain, authorityDid, account)
+    reach('pds-space-grant')
+    const blobFixture = await writeSpaceBlobFixture(
+      domain,
+      account,
+      authorityDid,
+      roomId,
+    )
+    await assertPublicBlobDenied(blobFixture)
+    reach('public-private-blob-denied')
+    await assertAuthenticatedSpaceBlob(blobFixture)
+    reach('authenticated-space-blob')
     await assertStratosCustody(domain, clubhouseUrl, roomId, text)
     await assertNonmemberDenied(domain, clubhouseUrl, roomId, text)
     console.log(
       JSON.stringify({
         suite: 'baseline',
-        assertions: [
-          'browser-oauth',
-          'stratos-custody',
-          'pds-custody',
-          'space-lexicon',
-          'pds-space-grant',
-          'publication-feed',
-          'boundary-isolation',
-          'unrelated-boundary-denied',
-          'public-private-blob-denied',
-          'authenticated-space-blob',
-        ].map((id) => ({ id, status: 'passed' })),
+        assertions: baselineAssertions.map((id) => ({ id, status: 'passed' })),
       }),
     )
   } finally {
     await browser.close()
   }
+}
+
+const journeys = {
+  baseline: runBaseline,
+  'ordinary-custody': runOrdinaryCustody,
+}
+
+async function main() {
+  activeSuite = process.argv[2] ?? 'baseline'
+  assert.ok(Object.hasOwn(journeys, activeSuite), 'Unknown suite')
+  await journeys[activeSuite]()
 }
 
 main().catch((error) => {

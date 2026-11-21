@@ -411,8 +411,7 @@ describe('UpstreamStratosClient', () => {
     it('POSTs space + delegationToken and sends the mint proof as the dpop header', async () => {
       mock.handler = (_req, res, body) => {
         expect(JSON.parse(body)).toEqual({
-          space:
-            'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+          space: 'at:space/did:web:stratos.test/zone.stratos.space.feed/spike',
           delegationToken: 'delegation-token-value',
         })
         res.setHeader('content-type', 'application/json')
@@ -424,7 +423,7 @@ describe('UpstreamStratosClient', () => {
         )
       }
       const result = await client.getSpaceCredential({
-        space: 'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+        space: 'at:space/did:web:stratos.test/zone.stratos.space.feed/spike',
         delegationToken: 'delegation-token-value',
         buildMintProof: async (htu) => `proof-for-${htu}`,
       })
@@ -462,7 +461,7 @@ describe('UpstreamStratosClient', () => {
         )
       }
       await publicClient.getSpaceCredential({
-        space: 'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+        space: 'at:space/did:web:stratos.test/zone.stratos.space.feed/spike',
         delegationToken: 'delegation-token-value',
         buildMintProof: async (htu) => `proof-for-${htu}`,
       })
@@ -482,8 +481,7 @@ describe('UpstreamStratosClient', () => {
       }
       await expect(
         client.getSpaceCredential({
-          space:
-            'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+          space: 'at:space/did:web:stratos.test/zone.stratos.space.feed/spike',
           delegationToken: 'delegation-token-value',
           buildMintProof: async () => 'proof',
         }),
@@ -521,7 +519,7 @@ describe('UpstreamStratosClient', () => {
       })
 
       const request = timeoutClient.getSpaceCredential({
-        space: 'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+        space: 'at:space/did:web:stratos.test/zone.stratos.space.feed/spike',
         delegationToken: 'delegation-token-value',
         buildMintProof: async () => 'proof',
       })
@@ -558,7 +556,7 @@ describe('UpstreamStratosClient', () => {
     }
 
     const SPACE_URI =
-      'at://did:web:stratos.test/space/zone.stratos.space.feed/spike'
+      'at:space/did:web:stratos.test/zone.stratos.space.feed/spike'
 
     it('GETs the mirror with a DPoP credential header and a presentation proof', async () => {
       const credentialProof = fakeCredentialProof()
@@ -593,7 +591,7 @@ describe('UpstreamStratosClient', () => {
       const req = mock.requests[0]
       expect(req.method).toBe('GET')
       expect(req.url).toBe(
-        '/xrpc/zone.stratos.space.listRepos?space=at%3A%2F%2Fdid%3Aweb%3Astratos.test%2Fspace%2Fzone.stratos.space.feed%2Fspike',
+        `/xrpc/zone.stratos.space.listRepos?space=${encodeURIComponent(SPACE_URI)}`,
       )
       expect(req.headers.authorization).toBe('DPoP space-credential-value')
       expect(req.headers.accept).toBe('application/json')
@@ -638,7 +636,7 @@ describe('UpstreamStratosClient', () => {
       }
       await publicClient.listSpaceRepos({ space: SPACE_URI }, credentialProof)
       expect(mock.requests[0].url).toBe(
-        '/xrpc/zone.stratos.space.listRepos?space=at%3A%2F%2Fdid%3Aweb%3Astratos.test%2Fspace%2Fzone.stratos.space.feed%2Fspike',
+        `/xrpc/zone.stratos.space.listRepos?space=${encodeURIComponent(SPACE_URI)}`,
       )
       expect(credentialProof.proofCalls).toEqual([
         {
@@ -834,7 +832,7 @@ describe('UpstreamStratosClient', () => {
         )
       }
       await slashClient.getSpaceCredential({
-        space: 'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+        space: 'at:space/did:web:stratos.test/zone.stratos.space.feed/spike',
         delegationToken: 'delegation-token-value',
         buildMintProof: async (htu) => `proof-for-${htu}`,
       })

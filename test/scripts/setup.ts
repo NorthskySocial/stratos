@@ -18,6 +18,7 @@ import {
   createPdsAccount,
   waitForPdsSpacesReady,
 } from './lib/mixed-mode-pds.ts'
+import { SPACES_PDS_PROFILE, spacesPdsRequested } from './lib/phases.ts'
 
 async function prepareTestDataDir() {
   info('Preparing test-data directory...')
@@ -33,11 +34,15 @@ async function prepareTestDataDir() {
     }
   }
   await Deno.mkdir(TEST_DATA_DIR, { recursive: true })
-  const pdsSpacesDataDir = `${TEST_DATA_DIR}/pds-spaces`
-  await Deno.mkdir(pdsSpacesDataDir, { recursive: true })
+  const writableDirs = [TEST_DATA_DIR]
+  if (spacesPdsRequested()) {
+    const pdsSpacesDataDir = `${TEST_DATA_DIR}/pds-spaces`
+    await Deno.mkdir(pdsSpacesDataDir, { recursive: true })
+    writableDirs.push(pdsSpacesDataDir)
+  }
 
   const chmod = new Deno.Command('chmod', {
-    args: ['777', TEST_DATA_DIR, pdsSpacesDataDir],
+    args: ['777', ...writableDirs],
   })
   await chmod.output()
 }
@@ -174,13 +179,14 @@ async function startStratos(envVars: Record<string, string>) {
     composeArgs.push('-f', 'docker-compose.postgres.yml')
     info('Using PostgreSQL storage backend')
   }
+  if (spacesPdsRequested()) composeArgs.push('--profile', SPACES_PDS_PROFILE)
   composeArgs.push('up', '-d', '--build', '--force-recreate')
+  const services = isPostgres() ? ['postgres', 'stratos'] : ['stratos']
+  if (spacesPdsRequested()) services.push('pds-spaces')
   if (isAppview()) {
-    composeArgs.push('--wait', 'postgres', 'stratos', 'pds-spaces', 'appview')
-  } else if (isPostgres()) {
-    composeArgs.push('postgres', 'stratos', 'pds-spaces')
+    composeArgs.push('--wait', ...services, 'appview')
   } else {
-    composeArgs.push('stratos', 'pds-spaces')
+    composeArgs.push(...services)
   }
 
   const compose = new Deno.Command('docker-compose', {
@@ -241,11 +247,13 @@ async function run() {
     throw err
   }
 
-  info('Waiting for spaces PDS to become ready...')
-  await waitForPdsSpacesReady()
-  pass('Spaces PDS is ready')
+  if (spacesPdsRequested()) {
+    info('Waiting for spaces PDS to become ready...')
+    await waitForPdsSpacesReady()
+    pass('Spaces PDS is ready')
 
-  await createMixedModeAccounts(state)
+    await createMixedModeAccounts(state)
+  }
 
   state.stratosRunning = true
   await saveState(state)

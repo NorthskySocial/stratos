@@ -13,8 +13,7 @@
  * live on the PDS named in their DID document.
  *
  * This module is pure: both dependencies are injected ports, so resolution is
- * unit-testable without network access. Prototype:
- * `test/spike/spaces/a4-host-discovery.ts`.
+ * unit-testable without network access.
  */
 
 /**

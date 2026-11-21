@@ -44,7 +44,7 @@ upstream alpha PDS rather than read from the spec.
    reading. The syncer iterates the member list. Do not add writer discovery.
 3. **A space record URI has six parts after `at:space/` and starts with the authority**:
    `at:space/{authorityDid}/{type}/{skey}/{authorDid}/{collection}/{rkey}`.
-   Nothing recognises the earlier `at://{authorityDid}/space/...` spelling.
+   Nothing recognises the legacy `at://{authorityDid}/space/...` spelling.
    A custody record keeps the familiar `at://{authorDid}/{collection}/{rkey}`.
    Code that takes the first part as the author is wrong for a space record.
 
@@ -53,8 +53,8 @@ record with `defs.main.type` of `space`. A user's PDS resolves that NSID before
 it grants a space scope. If the record is missing, authorization fails with
 `invalid_scope`, and nothing in the Stratos logs explains why.
 
-Interop regression scripts live in `test/spike/spaces/`. Run them when you change
-credentials, host discovery, or ingest.
+The interop checklist is `test/spaces-alignment/november/INTEROP.md`. Work through
+it when you change credentials, host discovery, or ingest.
 
 ### Packages
 

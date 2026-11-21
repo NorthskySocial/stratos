@@ -112,7 +112,15 @@ describe('zone.stratos.space.feed declaration', () => {
     const fixtureMain = loadLexicon(SANDBOX_FIXTURE_PATH).defs?.['main']
     expect(fixtureMain?.type).toBe('space')
     expect(fixtureMain?.title).toBe(main?.title)
-    expect(fixtureMain).not.toHaveProperty('name')
+    expect(fixtureMain?.name).toBe(fixtureMain?.title)
+  })
+
+  it('holds the sandbox declaration fixture equal to the repository declaration apart from `name`', () => {
+    const fixture = loadLexicon(SANDBOX_FIXTURE_PATH)
+    const { name: _fixtureName, ...fixtureMain } = fixture.defs?.[
+      'main'
+    ] as SpaceDef
+    expect({ ...fixture, defs: { main: fixtureMain } }).toEqual(doc)
   })
 
   it('carries a required `collections` array of syntactically valid NSIDs', () => {

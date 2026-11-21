@@ -21,7 +21,7 @@ const SPIKE = 'did:plc:spikespiegel'
 const FAYE = 'did:plc:fayevalentine'
 
 function spaceUriFor(boundary: string): string {
-  return `at://${STRATOS_DID}/space/zone.stratos.space.feed/${boundary.split('/')[1]}`
+  return `at:space/${STRATOS_DID}/zone.stratos.space.feed/${boundary.split('/')[1]}`
 }
 
 function fakeCredentialManager() {

@@ -1,6 +1,7 @@
 /**
- * Contract tests for `zone.stratos.space.getRecord` — the spec-shaped mirror
- * of `com.atproto.space.getRecord` (atproto#5187).
+ * Contract tests for `zone.stratos.space.getRecord` — Stratos's own
+ * boundary-scoped record read, not the upstream `com.atproto.space.getRecord`
+ * of a similar name.
  *
  * Contract under test (from the quoted reference lexicon):
  *   - callable with standard user auth (member of the space) OR a space

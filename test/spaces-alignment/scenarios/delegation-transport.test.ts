@@ -24,7 +24,7 @@ describe('delegation transport browser scenario', () => {
     expect(start).toBeGreaterThanOrEqual(0)
     expect(end).toBeGreaterThan(start)
     const requestedSpace =
-      'at://did:web:stratos-e2e.atmosbox.test/space/zone.stratos.space.feed/general'
+      'at:space/did:web:stratos-e2e.atmosbox.test/zone.stratos.space.feed/general'
     const pdsUrl = 'https://pds-space1.atmosbox.test'
     const session = {
       async fetchHandler(pathname: string | URL, init?: RequestInit) {

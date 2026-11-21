@@ -422,9 +422,8 @@ export async function hydrateRecordWithCredential(
 }
 
 /**
- * Read a record from a space via `zone.stratos.space.getRecord` (spec-shaped
- * mirror of com.atproto.space.getRecord). The bearer may be a user DID
- * (dev mode) or a space credential.
+ * Read a record from a space via Stratos's own `zone.stratos.space.getRecord`.
+ * The bearer may be a user DID (dev mode) or a space credential.
  */
 export async function getSpaceRecord(
   bearer: string,

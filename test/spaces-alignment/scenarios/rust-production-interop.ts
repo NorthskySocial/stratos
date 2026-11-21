@@ -18,7 +18,7 @@ const requiredAssertions = [
   'rust-manager-expiry-refresh',
   'rust-standard-exchange',
   'rust-stratos-read',
-  'rust-october-pds-read',
+  'rust-reference-pds-read',
   'rust-two-owners-one-host',
   'rust-wrong-owner-denied',
   'rust-wrong-key-denied',

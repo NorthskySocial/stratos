@@ -1,7 +1,8 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { JOURNEYS } from './interop-journeys.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '..', '..', '..')
@@ -13,6 +14,7 @@ const OWNERSHIPS = [
   'external-library-owned',
   'absent',
 ] as const
+const STATUSES = ['done', 'pending-upstream'] as const
 const WORKSTREAMS = [
   'canonical-uri',
   'credential-transport',
@@ -31,6 +33,8 @@ interface LedgerRow {
   ownership: string
   paths: string[]
   workstream: string
+  status: string
+  condition?: string
   decision: string
   evidence: string
 }
@@ -195,15 +199,42 @@ const SPACE_URI_MARKERS = [
   /\blinkTo\b/,
 ]
 
-// Paths that may still spell a space URI in the earlier at://.../space/...
-// form on a line that does not say legacy. Each holds until the work named in
-// its reason lands.
+// Where the earlier spelling may appear only on a line that says legacy: the
+// roots above, the rest of the test tree, the deprecated feed generator, the
+// documentation site's own source, and the root pages a reader opens first.
+const LEGACY_LINE_ROOTS = [
+  ...SWEEP_ROOTS,
+  'test/spaces-alignment',
+  'stratos-feedgen',
+  'docs/.vitepress',
+  'AGENTS.md',
+  'README.md',
+  'test/README.md',
+]
+const LEGACY_LINE_SKIPPED_DIRECTORY =
+  /^(node_modules|target|dist|build|cache|\..*)$/
+const LEGACY_LINE_TEXT_FILE =
+  /\.(ts|tsx|js|mjs|mts|cjs|svelte|vue|rs|json|md|sql|toml|ya?ml)$/
+
+// Paths that may spell a space URI in the earlier scheme-and-segment form on a
+// line that does not say legacy, each with its reason. Nothing else may.
 const EARLIER_SPELLING_EXEMPTIONS: Record<string, string> = {
-  docs: 'prose and examples wait for the cutover documentation work',
-  'test/scripts': 'end-to-end scripts wait for the cutover work',
-  'test/feedgen-harness': 'the harness waits for the cutover work',
   'stratos-feedgen-ng/src/store/migrations.rs':
-    'migration tests describe rows an older build wrote, and migrations are not edited',
+    'migration test rows describe what an older build wrote, and migrations are not edited',
+  'test/spaces-alignment/november/fixtures/commit-and-ops.json':
+    'upstream output recorded in the earlier spelling, classified as such in the source manifest',
+  'test/spaces-alignment/november/fixtures/star-framing.json':
+    'upstream output recorded in the earlier spelling, classified as such in the source manifest',
+  'test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs':
+    'the generator lines that make the two fixtures above',
+  'test/spaces-alignment/november/fixtures/space-uri-conformance.json':
+    'the corpus: inputs every parser must refuse',
+  'test/spaces-alignment/november/applicability.json':
+    'ledger rows quote the earlier spelling as the marker they search for',
+  'test/spaces-alignment/november/november-sources.test.ts':
+    'a probe whose record URI is in the earlier spelling, to be refused',
+  'docs/history':
+    'the pages that describe the October contract, which no current build implements',
 }
 
 // Files that read, compare or carry a record or space URI. Each must stay
@@ -287,14 +318,27 @@ const DEPRECATED_IDS = [
   'deprecated-atproto-stratos',
 ]
 
-function sweepFiles(directory: string): string[] {
+function sweepFiles(
+  directory: string,
+  skipped: RegExp = SWEEP_SKIPPED_DIRECTORY,
+  textFile: RegExp = SWEEP_TEXT_FILE,
+): string[] {
   return readdirSync(resolve(REPO_ROOT, directory), { withFileTypes: true })
-    .filter((entry) => !SWEEP_SKIPPED_DIRECTORY.test(entry.name))
+    .filter((entry) => !skipped.test(entry.name))
     .flatMap((entry) => {
       const path = join(directory, entry.name)
-      if (entry.isDirectory()) return sweepFiles(path)
-      return SWEEP_TEXT_FILE.test(entry.name) ? [path] : []
+      if (entry.isDirectory()) return sweepFiles(path, skipped, textFile)
+      return textFile.test(entry.name) ? [path] : []
     })
+}
+
+// A root that is a single file (the root pages) is read as it is.
+function legacyLineFiles(): string[] {
+  return LEGACY_LINE_ROOTS.flatMap((root) =>
+    statSync(resolve(REPO_ROOT, root)).isFile()
+      ? [root]
+      : sweepFiles(root, LEGACY_LINE_SKIPPED_DIRECTORY, LEGACY_LINE_TEXT_FILE),
+  )
 }
 
 function isExemptFromLegacyLines(file: string): boolean {
@@ -546,7 +590,7 @@ describe('november applicability ledger', () => {
   })
 
   it('covers every file that holds a space uri marker with a row path', () => {
-    const uncovered = SWEEP_ROOTS.flatMap(sweepFiles)
+    const uncovered = SWEEP_ROOTS.flatMap((root) => sweepFiles(root))
       .filter((file) => {
         const text = readFileSync(resolve(REPO_ROOT, file), 'utf8')
         return SPACE_URI_MARKERS.some((marker) => marker.test(text))
@@ -556,10 +600,70 @@ describe('november applicability ledger', () => {
   })
 
   it('names the earlier spelling only on lines that say legacy', () => {
-    const unnamed = SWEEP_ROOTS.flatMap(sweepFiles)
+    const unnamed = legacyLineFiles()
       .filter((file) => !isExemptFromLegacyLines(file))
       .flatMap(earlierSpellingWithoutLegacy)
     expect(unnamed).toEqual([])
+  })
+
+  it('sweeps the whole test tree, the deprecated feed generator, the docs site source and the root pages', () => {
+    const swept = new Set(legacyLineFiles())
+    for (const file of [
+      'test/spaces-alignment/run-sandbox.ts',
+      'test/spaces-alignment/scenarios/baseline.ts',
+      'test/spaces-alignment/atmosphere/runtime/feedgen-ng-e2e-browser.mjs',
+      'stratos-feedgen/tests/upstream.test.ts',
+      'docs/.vitepress/theme/components/RecordUri.vue',
+      'AGENTS.md',
+      'README.md',
+      'test/README.md',
+    ])
+      expect(swept.has(file), file).toBe(true)
+    expect([...swept].some((file) => file.includes('/dist/'))).toBe(false)
+    expect([...swept].some((file) => file.includes('/cache/'))).toBe(false)
+  })
+
+  it('exempts only named paths that exist, each with a reason', () => {
+    for (const [path, reason] of Object.entries(EARLIER_SPELLING_EXEMPTIONS)) {
+      expect(existsSync(resolve(REPO_ROOT, path)), path).toBe(true)
+      expect(reason.trim().length, path).toBeGreaterThan(0)
+    }
+  })
+
+  it('gives every row a status, and a condition to every row that waits', () => {
+    const wrong = rows.flatMap((row) => {
+      if (!(STATUSES as readonly string[]).includes(row.status))
+        return [`${row.id}: status ${String(row.status)}`]
+      const condition = row.condition
+      if (row.status === 'pending-upstream')
+        return typeof condition === 'string' && condition.trim() !== ''
+          ? []
+          : [`${row.id}: pending-upstream without a condition`]
+      return condition === undefined ? [] : [`${row.id}: done with a condition`]
+    })
+    expect(wrong).toEqual([])
+  })
+
+  it('names, in a condition, only journeys the prepared suite has', () => {
+    const known = new Set(JOURNEYS.map((journey) => journey.id))
+    const unknown = rows.flatMap((row) =>
+      [...(row.condition ?? '').matchAll(/\(journeys? ([^)]+)\)/g)]
+        .flatMap((match) => match[1]!.split(/,| and /).map((id) => id.trim()))
+        .filter((id) => id !== '' && !known.has(id))
+        .map((id) => `${row.id}: ${id}`),
+    )
+    expect(unknown).toEqual([])
+  })
+
+  it('claims no row is verified against a host', () => {
+    const claims = rows
+      .filter((row) =>
+        /verified (?:against|on|by) a (?:real )?host/i.test(
+          `${row.decision} ${row.evidence}`,
+        ),
+      )
+      .map((row) => row.id)
+    expect(claims).toEqual([])
   })
 
   it('keeps every known uri consumer under the paths of its row', () => {
@@ -589,6 +693,7 @@ describe('november applicability ledger', () => {
       ownership: 'test-owned',
       paths: [cursor],
       workstream: 'none',
+      status: 'done',
       decision: `${cursor}:1-2, :3 and at :${past}`,
       evidence: `cursor.rs:${past}-${past + 1}; bebop/swordfish.rs:1`,
     }
@@ -600,8 +705,9 @@ describe('november applicability ledger', () => {
   })
 
   it('finds the files that hold the current spelling by its marker', () => {
-    const found = SWEEP_ROOTS.flatMap(sweepFiles).filter((file) =>
-      CURRENT_SPACE_URI.test(readFileSync(resolve(REPO_ROOT, file), 'utf8')),
+    const found = SWEEP_ROOTS.flatMap((root) => sweepFiles(root)).filter(
+      (file) =>
+        CURRENT_SPACE_URI.test(readFileSync(resolve(REPO_ROOT, file), 'utf8')),
     )
     expect(found).toEqual(
       expect.arrayContaining([
@@ -613,7 +719,7 @@ describe('november applicability ledger', () => {
   })
 
   it('finds the known consumers the sweep must never lose', () => {
-    const found = SWEEP_ROOTS.flatMap(sweepFiles)
+    const found = SWEEP_ROOTS.flatMap((root) => sweepFiles(root))
     expect(found).toEqual(
       expect.arrayContaining([
         'stratos-core/src/spaces/domain.ts',

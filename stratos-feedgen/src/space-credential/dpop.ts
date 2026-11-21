@@ -3,9 +3,8 @@ import { createHash, randomUUID, webcrypto } from 'node:crypto'
 /**
  * RFC 9449 DPoP proof construction for the space-credential surface.
  *
- * Mirrors the pattern proven against the real alpha PDS in
- * `test/spike/spaces/b3-feedgen-foreign-ingest.ts`: a P-256 key made with
- * `node:crypto`'s `webcrypto`, so the feedgen needs no JOSE dependency. The
+ * The proof is signed with a P-256 key made by `node:crypto`'s `webcrypto`, so
+ * the feedgen needs no JOSE dependency. The
  * server-side checker this must satisfy is
  * `stratos-service/src/infra/auth/space-dpop.ts`.
  */

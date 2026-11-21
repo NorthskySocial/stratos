@@ -18,6 +18,14 @@ import { buildAlphaPds } from './build-alpha-pds.js'
 import type { PdsBuildReceipt, PdsSourcePin } from './build-alpha-pds.js'
 import { CommandFailure, executeCommand, sha256File } from './command.js'
 import {
+  assertImageDigest,
+  loadNovemberSources,
+  manifestReadinessProblems,
+  referenceHostPin,
+} from './november/reference-host.js'
+import type { NovemberSources } from './november/reference-host.js'
+import {
+  assertionsReachedBy,
   suiteExecutionOrder,
   validateAssertions,
   validateReviewReceipt,
@@ -25,14 +33,20 @@ import {
 import type { AssertionResult, ReviewReceipt, ScenarioSuite } from './rules.js'
 
 const harnessDirectory = dirname(fileURLToPath(import.meta.url))
-const octoberPdsSuites = new Set([
-  'writer-sync-contract',
-  'credential-revocation-contract',
+const referencePdsSuites = new Set([
   'standard-credential-transport',
   'rust-production-interop',
-  'october-interop',
+  'november-interop',
 ])
-const rustProbeSuites = new Set(['rust-production-interop', 'october-interop'])
+/**
+ * Suites that are written but never run by default: each refuses to start
+ * until the caller names the reference PDS image by digest and the November
+ * manifest says that host accepts the new spelling.
+ */
+export const PREPARED_SUITE_IDS: ReadonlySet<string> = new Set([
+  'november-interop',
+])
+const rustProbeSuites = new Set(['rust-production-interop'])
 interface SourcePins {
   atmosphereInABox: {
     url: string
@@ -40,7 +54,6 @@ interface SourcePins {
     sha256: Record<string, string>
     archivePaths: string[]
   }
-  octoberSpacesPds?: PdsSourcePin
 }
 
 const sources = JSON.parse(
@@ -49,6 +62,7 @@ const sources = JSON.parse(
 
 export interface RunnerDependencies {
   sourcePins?: SourcePins
+  novemberSources?: NovemberSources
   runnerSource?: string
   buildPds?: (
     pin: PdsSourcePin,
@@ -63,6 +77,7 @@ interface Options {
   reportDirectory: string
   evidenceMode: 'review' | 'ci'
   reviewReceipt?: string
+  pdsImageDigest?: string
 }
 
 /**
@@ -92,6 +107,7 @@ export function parseOptions(args: string[]): Options {
     '--suite': 'suite',
     '--report-dir': 'reportDirectory',
     '--review-receipt': 'reviewReceipt',
+    '--pds-image-digest': 'pdsImageDigest',
   }
   const options: Partial<Options> = {}
   let ciEvidence = false
@@ -118,6 +134,7 @@ export function parseOptions(args: string[]): Options {
   }
   if (!options.suite || !/^[a-z][a-z0-9-]*$/.test(options.suite))
     throw new Error('Invalid suite ID')
+  if (options.pdsImageDigest) assertImageDigest(options.pdsImageDigest)
   if (ciEvidence && options.reviewReceipt)
     throw new Error('--ci-evidence and --review-receipt are mutually exclusive')
   if (ciEvidence && process.env.GITHUB_ACTIONS !== 'true')
@@ -573,6 +590,29 @@ chown 1000:1000 /data`,
   }
 }
 
+/**
+ * A prepared suite starts only when the caller names the reference PDS image
+ * by digest and the November manifest records the cutover evidence for it.
+ */
+export function requirePreparedRunConditions(
+  suiteId: string,
+  pdsImageDigest: string | undefined,
+  sources: NovemberSources,
+): void {
+  if (!pdsImageDigest)
+    throw new Error(
+      `${suiteId} is prepared and runs only with --pds-image-digest naming the reference PDS image`,
+    )
+  const problems = manifestReadinessProblems(sources)
+  const probedDigest = sources.cutoverEvidence.uriProbe?.imageDigest
+  if (problems.length === 0 && probedDigest !== pdsImageDigest)
+    problems.push('--pds-image-digest differs from uriProbe.imageDigest')
+  if (problems.length > 0)
+    throw new Error(
+      `${suiteId} is prepared and the November manifest is not ready: ${problems.join('; ')}`,
+    )
+}
+
 export async function runSandbox(
   options: Options,
   dependencies: RunnerDependencies = {},
@@ -595,6 +635,13 @@ export async function runSandbox(
     options.suite,
     await discoverSuites(source),
   )
+  const novemberSources = dependencies.novemberSources ?? loadNovemberSources()
+  if (PREPARED_SUITE_IDS.has(options.suite))
+    requirePreparedRunConditions(
+      options.suite,
+      options.pdsImageDigest,
+      novemberSources,
+    )
   const sandbox = await pinnedCheckout(
     options.sandboxDirectory,
     pins.atmosphereInABox,
@@ -622,7 +669,8 @@ export async function runSandbox(
   const childEnvironment = sandboxEnvironment(dockerConfig)
   const steps: Array<{ name: string; exitCode: 0 }> = []
   const results: Record<string, AssertionResult[]> = {}
-  let octoberPds: PdsBuildReceipt | undefined
+  const assertionsReached: Record<string, readonly string[]> = {}
+  let referencePds: PdsBuildReceipt | undefined
   let failedStep = 'docker-config'
   let gateError: unknown
   let summary: Record<string, unknown> | undefined
@@ -663,16 +711,22 @@ export async function runSandbox(
       workspace,
       pins,
     )
-    if (suites.some((suite) => octoberPdsSuites.has(suite.id))) {
-      failedStep = 'build-october-pds'
-      if (!pins.octoberSpacesPds)
-        throw new Error('October PDS source pin is missing')
-      const octoberReport = join(workspace, 'october-pds')
-      await mkdir(octoberReport, { mode: 0o700 })
-      octoberPds = await (dependencies.buildPds ?? buildAlphaPds)(
-        pins.octoberSpacesPds,
-        octoberReport,
+    if (suites.some((suite) => referencePdsSuites.has(suite.id))) {
+      failedStep = 'build-reference-pds'
+      const referencePin = referenceHostPin(novemberSources)
+      const referenceReport = join(workspace, 'reference-pds')
+      await mkdir(referenceReport, { mode: 0o700 })
+      referencePds = await (dependencies.buildPds ?? buildAlphaPds)(
+        referencePin,
+        referenceReport,
       )
+      if (
+        options.pdsImageDigest &&
+        referencePds.imageId !== options.pdsImageDigest
+      )
+        throw new Error(
+          'The built reference PDS image differs from --pds-image-digest',
+        )
     }
     if (rustProbeSuites.has(options.suite)) {
       failedStep = 'prepare-browser-dockerfile'
@@ -722,29 +776,29 @@ export async function runSandbox(
       : sourceStack
     await writeFile(stackPath, stack)
 
-    if (octoberPds) {
-      const octoberImageId = octoberPds.imageId
-      const octoberStack = await readFile(
+    if (referencePds) {
+      const referenceImageId = referencePds.imageId
+      const referenceStack = await readFile(
         join(
           workspace,
-          'stratos/test/spaces-alignment/templates/october-pds.yaml',
+          'stratos/test/spaces-alignment/templates/reference-pds.yaml',
         ),
         'utf8',
       )
-      if (!octoberStack.includes('${OCTOBER_PDS_IMAGE_ID}'))
-        throw new Error('October PDS image placeholder is missing')
+      if (!referenceStack.includes('${REFERENCE_PDS_IMAGE_ID}'))
+        throw new Error('Reference PDS image placeholder is missing')
       await writeFile(
         stackPath,
         (await readFile(stackPath, 'utf8')).replace(
           '\nvolumes:\n',
           () =>
             '\n' +
-            octoberStack
-              .replace('${OCTOBER_PDS_IMAGE_ID}', octoberImageId)
+            referenceStack
+              .replace('${REFERENCE_PDS_IMAGE_ID}', referenceImageId)
               .split('\n')
               .map((line) => (line ? '  ' + line : line))
               .join('\n') +
-            '\nvolumes:\n  feedgen-e2e-pds-october-data: {}\n',
+            '\nvolumes:\n  feedgen-e2e-pds-reference-data: {}\n',
         ),
       )
       const definitionPath = join(
@@ -756,7 +810,7 @@ export async function runSandbox(
       ) as Record<string, unknown[]>
       const extraPath = join(
         workspace,
-        'stratos/test/spaces-alignment/templates/october-pds.definition.json',
+        'stratos/test/spaces-alignment/templates/reference-pds.definition.json',
       )
       const extra = JSON.parse(await readFile(extraPath, 'utf8')) as Record<
         string,
@@ -779,24 +833,24 @@ export async function runSandbox(
         })
       }
       browser.secretFiles!.push({
-        secret: 'feedgen-e2e-october-admin',
-        name: 'october-admin-password',
+        secret: 'feedgen-e2e-reference-admin',
+        name: 'reference-admin-password',
         uid: 1001,
         gid: 1001,
       })
       await writeFile(definitionPath, JSON.stringify(definition))
       const updatedStack = (await readFile(stackPath, 'utf8')).replace(
         'IDENTITY_PRIVATE_ORIGINS: ',
-        'IDENTITY_PRIVATE_ORIGINS: https://october-pds-e2e.atmosbox.test,https://faye.october-pds-e2e.atmosbox.test,https://edward.october-pds-e2e.atmosbox.test,https://rustfaye.october-pds-e2e.atmosbox.test,https://rustedward.october-pds-e2e.atmosbox.test,',
+        'IDENTITY_PRIVATE_ORIGINS: https://reference-pds-e2e.atmosbox.test,https://faye.reference-pds-e2e.atmosbox.test,https://edward.reference-pds-e2e.atmosbox.test,https://rustfaye.reference-pds-e2e.atmosbox.test,https://rustedward.reference-pds-e2e.atmosbox.test,',
       )
       await writeFile(stackPath, updatedStack)
-      templateHashes['stacks/october-pds.yaml'] = await sha256File(
+      templateHashes['stacks/reference-pds.yaml'] = await sha256File(
         join(
           workspace,
-          'stratos/test/spaces-alignment/templates/october-pds.yaml',
+          'stratos/test/spaces-alignment/templates/reference-pds.yaml',
         ),
       )
-      templateHashes['stacks/october-pds.definition.json'] =
+      templateHashes['stacks/reference-pds.definition.json'] =
         await sha256File(extraPath)
     }
 
@@ -910,14 +964,23 @@ export async function runSandbox(
     for (const suite of suites) {
       failedStep = `suite:${suite.id}`
       console.log(`AiaB [suite:${suite.id}]`)
-      results[suite.id] = await suite.run({
-        sandboxDirectory: atmosphere,
-        composeFile,
-        projectName,
-        scratchDirectory: workspace,
-        runCommand: async (file, args, cwd) =>
-          (await command(file, args, cwd, childEnvironment)).output,
-      })
+      try {
+        results[suite.id] = await suite.run({
+          sandboxDirectory: atmosphere,
+          composeFile,
+          projectName,
+          scratchDirectory: workspace,
+          runCommand: async (file, args, cwd) =>
+            (await command(file, args, cwd, childEnvironment)).output,
+        })
+      } catch (error) {
+        const reached = assertionsReachedBy(error)
+        if (reached)
+          assertionsReached[suite.id] = reached.filter((id) =>
+            suite.requiredAssertions.includes(id),
+          )
+        throw error
+      }
       validateAssertions(suite, results[suite.id])
     }
     failedStep = 'write-receipt'
@@ -935,14 +998,14 @@ export async function runSandbox(
       atmosphereSourceSha: pins.atmosphereInABox.revision,
       atmosphereFingerprint,
       templateHashes,
-      octoberPds,
+      referencePds,
       pdsServices: {
         primary: { service: 'pds-space1' },
-        ...(octoberPds
+        ...(referencePds
           ? {
-              october: {
-                service: 'feedgen-e2e-pds-october',
-                build: octoberPds,
+              reference: {
+                service: 'feedgen-e2e-pds-reference',
+                build: referencePds,
               },
             }
           : {}),
@@ -951,6 +1014,7 @@ export async function runSandbox(
       suites: suites.map((suite) => ({
         id: suite.id,
         requiredAssertions: suite.requiredAssertions,
+        ...(suite.coverage ? { coverage: suite.coverage } : {}),
         passed: results[suite.id].length,
         skipped: 0,
         failed: 0,
@@ -992,7 +1056,9 @@ export async function runSandbox(
   } else {
     cleanup.compose = { status: 'not-needed' }
   }
-  for (const [imageKind, image] of [['octoberImage', octoberPds]] as const) {
+  for (const [imageKind, image] of [
+    ['referenceImage', referencePds],
+  ] as const) {
     if (image) {
       try {
         await command(
@@ -1043,6 +1109,7 @@ export async function runSandbox(
           projectName,
           failedStep,
           completedSteps: steps,
+          assertionsReached,
           error: 'Sandbox gate failed',
           cleanup,
         },

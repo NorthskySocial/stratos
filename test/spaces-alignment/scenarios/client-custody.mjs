@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import {
+  boundaryToSpaceUri,
   createServiceFetchHandler,
   getEnrollmentByServiceDid,
+  parseSpaceRecordUri,
   resolveRepositoryTarget,
   resolveServiceUrl,
 } from './client-custody-sdk.mjs'
@@ -26,7 +28,12 @@ async function session(url, identifier, password) {
 }
 
 async function main() {
-  const space = `at://${authorityDid}/space/zone.stratos.space.feed/general`
+  const builtSpace = boundaryToSpaceUri(
+    `${authorityDid}/general`,
+    'zone.stratos.space.feed',
+  )
+  assert.ok(builtSpace.ok, 'Sandbox boundary has no space URI')
+  const space = builtSpace.value
   const serviceJwt = (
     await readFile('/runner/client-custody-service-jwt', 'utf8')
   ).trim()
@@ -151,14 +158,14 @@ async function main() {
       `${space}/${spacesSession.did}/zone.stratos.feed.post/`,
     ),
   )
-  const segments = result.uri.slice('at://'.length).split('/')
-  assert.equal(segments.length, 7)
+  const writtenRecord = parseSpaceRecordUri(result.uri)
+  assert.ok(writtenRecord.ok, 'PDS returned a malformed space record URI')
   assertions.push({ id: 'selected-space-write', status: 'passed' })
 
   const publicUrl = new URL(`${spacesPdsUrl}/xrpc/com.atproto.repo.getRecord`)
   publicUrl.searchParams.set('repo', spacesSession.did)
   publicUrl.searchParams.set('collection', 'zone.stratos.feed.post')
-  publicUrl.searchParams.set('rkey', segments[6])
+  publicUrl.searchParams.set('rkey', writtenRecord.value.rkey)
   const publicRead = await fetch(publicUrl)
   assert.ok(publicRead.status === 400 || publicRead.status === 404)
   assertions.push({ id: 'space-write-is-private', status: 'passed' })
