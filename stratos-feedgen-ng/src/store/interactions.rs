@@ -410,7 +410,8 @@ mod tests {
         }
 
         fn compact_to_capacity(&mut self, capacity: i64, limit: u16) -> ProjectionCompaction {
-            // The stage budget reserves half of the cap, so doubling yields this capacity.
+            // The space write reserve defaults to half the maximum, so doubling
+            // yields this capacity.
             self.compact_projection(AS_OF, MAXIMUM_RETAINED_AT, (capacity * 2) as u64, limit)
                 .unwrap()
         }
@@ -1303,10 +1304,6 @@ mod tests {
 
     #[test]
     fn pds_member_removal_removes_the_members_interactions_in_that_boundary() {
-        use crate::space_sync::{
-            SpacePage, SpaceRepoOp, SpaceSyncTarget, prepare_space_page, stage_space_page,
-        };
-
         let mut store = open_store();
         let member = |did: &str| PdsSpaceMember {
             did: did.to_owned(),
@@ -1316,32 +1313,22 @@ mod tests {
             .unwrap();
         let subject = format!("{PDS_SPACE}/{SPIKE}/zone.stratos.feed.post/bang");
         for (actor, rkey) in [(FAYE, "one"), (JET, "two")] {
-            let target =
-                SpaceSyncTarget::from_authoritative_membership(&store, PDS_SPACE, BEBOP, actor)
-                    .unwrap();
-            let prepared = prepare_space_page(
-                target,
-                SpacePage {
-                    ops: vec![SpaceRepoOp {
-                        collection: InteractionKind::Like.collection().to_owned(),
-                        rkey: rkey.to_owned(),
-                        cid: Some(
-                            "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                                .to_owned(),
-                        ),
-                        value: Some(serde_json::json!({
+            store
+                .publish_verified_records(
+                    BEBOP,
+                    PDS_SPACE,
+                    actor,
+                    &[(
+                        InteractionKind::Like.collection(),
+                        rkey,
+                        serde_json::json!({
                             "$type": InteractionKind::Like.collection(),
                             "subject": { "uri": subject }
-                        })),
-                    }],
-                    next_cursor: None,
-                },
-                AS_OF,
-            )
-            .unwrap();
-            stage_space_page(&mut store, prepared).unwrap();
-            store
-                .promote_authorized_space_stage(BEBOP, PDS_SPACE, actor, RETAINED_AT)
+                        }),
+                    )],
+                    RETAINED_AT,
+                    AS_OF,
+                )
                 .unwrap();
         }
         let elsewhere = like(FAYE, "elsewhere", &subject, RED_TAIL);

@@ -32,7 +32,6 @@ const STORAGE_KEY_BYTES: usize = 32;
 const MAX_ENCODED_KEY_BYTES: usize = STORAGE_KEY_BYTES * 2 + 1;
 const SQLITE_CACHE_KIB: u32 = 16 * 1024;
 const MAX_PURGE_BATCH: u16 = 512;
-const MAX_SPACE_PROMOTION_BATCH: u16 = 512;
 const MAX_ACTOR_ENROLLMENT_PAGE: u16 = 512;
 const MAX_PDS_SPACE_MEMBER_PAGE: usize = 1_000;
 const SQLITE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
@@ -96,10 +95,6 @@ pub enum StoreError {
     InvalidProjectionMutation,
     StaleCursor,
     EnrollmentConflict,
-    UnverifiedSpaceStage,
-    SpaceStageLimit,
-    SpacePromotionLimit,
-    ExpiredSpaceStage,
     UnauthorizedSpaceMember,
     SpaceRepoFenced,
     SpaceRepoBaseMoved,
@@ -120,10 +115,6 @@ impl fmt::Debug for StoreError {
             Self::InvalidProjectionMutation => "InvalidProjectionMutation",
             Self::StaleCursor => "StaleCursor",
             Self::EnrollmentConflict => "EnrollmentConflict",
-            Self::UnverifiedSpaceStage => "UnverifiedSpaceStage",
-            Self::SpaceStageLimit => "SpaceStageLimit",
-            Self::SpacePromotionLimit => "SpacePromotionLimit",
-            Self::ExpiredSpaceStage => "ExpiredSpaceStage",
             Self::UnauthorizedSpaceMember => "UnauthorizedSpaceMember",
             Self::SpaceRepoFenced => "SpaceRepoFenced",
             Self::SpaceRepoBaseMoved => "SpaceRepoBaseMoved",
@@ -153,14 +144,6 @@ impl fmt::Display for StoreError {
             Self::EnrollmentConflict => {
                 formatter.write_str("actor enrollment conflicts at the same observation time")
             }
-            Self::UnverifiedSpaceStage => {
-                formatter.write_str("space stage has not completed verification")
-            }
-            Self::SpaceStageLimit => formatter.write_str("space stage exceeds the storage budget"),
-            Self::SpacePromotionLimit => {
-                formatter.write_str("space stage exceeds the atomic promotion work budget")
-            }
-            Self::ExpiredSpaceStage => formatter.write_str("space stage has expired"),
             Self::UnauthorizedSpaceMember => {
                 formatter.write_str("space member is no longer authorized")
             }
@@ -344,14 +327,6 @@ pub struct PdsSpaceMember {
 struct StoredActorEnrollment {
     enrollment: Option<ActorEnrollment>,
     observed_at: String,
-}
-
-pub struct SpaceStagePage {
-    pub space_uri: String,
-    pub actor_did: String,
-    pub boundary: String,
-    pub next_cursor: Option<String>,
-    pub updated_at: String,
 }
 
 struct SpaceStageRow {

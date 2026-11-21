@@ -124,6 +124,7 @@ const URI_INVENTORY_IDS = [
   'uri-feedgen-migration-v8-label-subjects',
   'uri-feedgen-migration-v9-interactions',
   'uri-feedgen-migration-v10-verified-state',
+  'uri-feedgen-migration-v11-drop-stage-tables',
   'uri-feed-pagination-cursors',
   'uri-rust-credential-cache',
   'uri-clubhouse-space-map',
@@ -228,7 +229,6 @@ const KNOWN_URI_CONSUMERS: Record<string, string> = {
   'stratos-feedgen-ng/src/server/feed.rs': 'uri-feed-pagination-cursors',
   'stratos-feedgen-ng/src/space_host.rs': 'uri-rust-space-host-requests',
   'stratos-feedgen-ng/src/pds_space_sync.rs': 'uri-rust-space-host-requests',
-  'stratos-feedgen-ng/src/space_commit.rs': 'uri-rust-space-host-requests',
   'stratos-feedgen-ng/src/space_mac.rs': 'uri-rust-space-host-requests',
   'stratos-feedgen-ng/src/service_auth.rs': 'uri-rust-space-host-requests',
   'stratos-feedgen-ng/src/label_poller.rs': 'uri-label-page-parsing',
@@ -406,6 +406,24 @@ describe('november applicability ledger', () => {
   it('has every uri and persisted-state surface', () => {
     const missing = URI_INVENTORY_IDS.filter((id) => !present.has(id))
     expect(missing).toEqual([])
+  })
+
+  it('requires a row for every migration the feedgen store applies', () => {
+    const migrations = readFileSync(
+      resolve(REPO_ROOT, 'stratos-feedgen-ng/src/store/migrations.rs'),
+      'utf8',
+    )
+    const versions = [...migrations.matchAll(/^ {8}version: (\d+),$/gm)].map(
+      (match) => Number(match[1]),
+    )
+    expect(versions.length).toBeGreaterThan(0)
+    const unrequired = versions.filter(
+      (version) =>
+        !URI_INVENTORY_IDS.some((id) =>
+          id.startsWith(`uri-feedgen-migration-v${version}-`),
+        ),
+    )
+    expect(unrequired).toEqual([])
   })
 
   it('has no duplicate ids', () => {

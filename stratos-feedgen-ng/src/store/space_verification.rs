@@ -141,6 +141,49 @@ impl EncryptedStore {
 
 #[cfg(test)]
 impl EncryptedStore {
+    /// Puts `records` (collection, rkey, value) into a member's verified state
+    /// the way a verified archive does, under a commit over exactly them, for
+    /// tests of other features that need posts or interactions already served.
+    pub(crate) fn publish_verified_records(
+        &mut self,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
+        records: &[(&str, &str, Value)],
+        retained_at: &str,
+        observed_at: &str,
+    ) -> Result<(), StoreError> {
+        let mut state = SetHashState::empty();
+        let mut verified = Vec::new();
+        for (collection, rkey, value) in records {
+            let path = RecordPath::parse(collection, rkey).expect("a record path");
+            let cid = crate::space_record::record_cid(
+                &crate::space_record::encode_record(value).expect("an encodable record"),
+            );
+            state.add(&set_hash_element(&path, &cid));
+            verified.push(VerifiedSpaceRecord {
+                path,
+                cid,
+                value: Some(value.clone()),
+            });
+        }
+        verified.sort_by(|first, second| {
+            joined_path_bytes(&first.path).cmp(joined_path_bytes(&second.path))
+        });
+        let target = VerifiedSpaceTarget {
+            boundary: boundary.to_owned(),
+            space_uri: space_uri.to_owned(),
+            actor_did: actor_did.to_owned(),
+            host: "https://pds.example.test".to_owned(),
+            generation: self
+                .pds_member_generation(boundary, actor_did)?
+                .ok_or(StoreError::UnauthorizedSpaceMember)?,
+        };
+        let commit =
+            MacVerifiedCommit::for_tests(actor_did, space_uri, "3jzfcijpj2z2a", state.digest());
+        self.replace_verified_space_repo(&target, &commit, &verified, retained_at, observed_at)
+    }
+
     /// Every row of every table as text, for tests in other modules that
     /// compare a store before and after a cycle that must change nothing.
     pub(crate) fn table_snapshot(&self) -> Vec<(String, Vec<String>)> {
@@ -388,8 +431,8 @@ fn apply_projection(
     Ok(())
 }
 
-/// A write adds the rows it upserts to the projection, counted as the old
-/// staging counted them; that and what is already published must not pass the
+/// A write adds the rows it upserts to the projection, counted by the length
+/// of each field; that and what is already published must not pass the
 /// configured maximum. Deletions add nothing.
 fn check_projection_maximum(
     transaction: &rusqlite::Transaction<'_>,
@@ -3762,15 +3805,11 @@ mod tests {
         .unwrap();
     }
 
-    // The same figure the old staging computed for the rows of a page, taken
-    // by staging them there and reading `stage_usage` before and after.
+    // The figure is pinned by hand for these four rows so a change to how rows
+    // are counted shows up: the length of each field, in characters for text and
+    // bytes for blobs.
     #[test]
-    fn the_bytes_a_write_adds_are_what_staging_the_same_rows_counted() {
-        let mut store = memory_store();
-        let generation = store
-            .pds_member_generation(BOUNDARY, FAYE)
-            .unwrap()
-            .unwrap();
+    fn the_bytes_a_write_adds_are_the_length_of_each_field_of_its_rows() {
         let ops = json!([
             create_post("3jzfcijpj2z2a", "ein", &post_value("Woof")),
             create_post(
@@ -3817,37 +3856,14 @@ mod tests {
             )
             .unwrap()
         };
-        let page = |cursor: &str| SpaceStagePage {
-            space_uri: SPACE.to_owned(),
-            actor_did: FAYE.to_owned(),
-            boundary: BOUNDARY.to_owned(),
-            next_cursor: Some(cursor.to_owned()),
-            updated_at: OBSERVED.to_owned(),
-        };
-        let usage = |store: &mut EncryptedStore| {
-            let transaction = store.connection.transaction().unwrap();
-            super::super::space::stage_usage(&transaction, Some(SPACE), Some(FAYE))
-                .unwrap()
-                .bytes
-        };
-        store
-            .stage_authorized_space_page_at_generation(page("c1"), Vec::new(), generation)
-            .unwrap();
-        let without_rows = usage(&mut store);
 
         let mutations = mutations_of();
         assert_eq!(mutations.len(), 4);
-        store
-            .stage_authorized_space_page_at_generation(page("c1"), mutations, generation)
-            .unwrap();
-        let staged = usage(&mut store) - without_rows;
-
-        let counted: i64 = stage_rows(mutations_of(), BOUNDARY, OBSERVED)
+        let counted: i64 = stage_rows(mutations, BOUNDARY, OBSERVED)
             .iter()
             .map(|row| stage_row_bytes(SPACE, FAYE, row))
             .sum();
-        assert!(staged > 800, "{staged}");
-        assert_eq!(counted, staged);
+        assert_eq!(counted, 1_571);
     }
 
     fn follow_value(name: &str) -> Value {
@@ -4007,5 +4023,163 @@ mod tests {
         );
 
         assert!(matches!(error, StoreError::SpaceRepoInvalid), "{error:?}");
+    }
+
+    // Real store: Stratos-custody pages have no byte check, so Spike's custody
+    // posts fill the projection past its maximum before the compactor runs.
+
+    const SPIKE: &str = "did:plc:spikespiegel";
+    const COMPACTED_AS_OF: &str = "2026-09-22T06:00:00.000Z";
+    const COMPACTED_MAXIMUM_RETAINED_AT: &str = "2026-12-01T00:00:00.000Z";
+
+    fn fill_with_custody_posts(store: &mut EncryptedStore) {
+        let rkeys = [
+            "callisto", "ganymede", "io", "titan", "europa", "venus", "mars", "tharsis",
+        ];
+        store
+            .apply_actor_page(crate::store::ActorPage {
+                authority_did: AUTHORITY.to_owned(),
+                actor_did: SPIKE.to_owned(),
+                sequence: 1,
+                upserts: rkeys
+                    .iter()
+                    .enumerate()
+                    .map(|(day, rkey)| crate::store::ProjectionPost {
+                        uri: format!("at://{SPIKE}/{POST}/{rkey}"),
+                        author_did: SPIKE.to_owned(),
+                        cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .to_owned(),
+                        sort_at: format!("1998-04-{:02}T00:00:00.000Z", day + 1),
+                        indexed_at: OBSERVED.to_owned(),
+                        retained_at: "2026-09-30T00:00:00.000Z".to_owned(),
+                        record_json: format!(r#"{{"text":"{}"}}"#, "Bang ".repeat(160))
+                            .into_bytes(),
+                        blob_refs_json: b"[]".to_vec(),
+                        boundaries: vec![BOUNDARY.to_owned()],
+                    })
+                    .collect(),
+                deletes: Vec::new(),
+                interactions: crate::store::InteractionChanges::default(),
+                updated_at: OBSERVED.to_owned(),
+            })
+            .unwrap();
+    }
+
+    /// Fills the projection past a maximum of three quarters of what it holds,
+    /// lets the compactor run with its default reserve, and returns the maximum.
+    fn compacted_full_projection(store: &mut EncryptedStore) -> i64 {
+        fill_with_custody_posts(store);
+        let maximum = published_bytes_of(store) * 3 / 4;
+        while store
+            .compact_projection(
+                COMPACTED_AS_OF,
+                COMPACTED_MAXIMUM_RETAINED_AT,
+                maximum as u64,
+                1,
+            )
+            .unwrap()
+            .has_more
+        {}
+        maximum
+    }
+
+    #[test]
+    fn a_full_projection_compacted_keeps_half_its_maximum_free_for_space_writes() {
+        let mut store = memory_store();
+
+        let maximum = compacted_full_projection(&mut store);
+
+        assert!(
+            published_bytes_of(&store) <= maximum - maximum / 2,
+            "published {} of {maximum}",
+            published_bytes_of(&store)
+        );
+    }
+
+    #[test]
+    fn a_promotion_that_fits_the_reserve_succeeds_on_a_compacted_full_projection() {
+        let mut store = memory_store();
+        let target = target_of(&store, FAYE);
+        compacted_full_projection(&mut store);
+
+        promote_records(&mut store, &target, "3jzfcijpj2z2a", &three_posts());
+
+        assert_eq!(
+            store
+                .verified_space_base(SPACE, FAYE)
+                .unwrap()
+                .unwrap()
+                .state
+                .digest(),
+            digest_of(&three_posts())
+        );
+        assert_eq!(post_rows_of(&store, FAYE).len(), 3);
+    }
+
+    #[test]
+    fn a_first_sync_that_fits_the_reserve_succeeds_on_a_compacted_full_projection() {
+        let mut store = memory_store();
+        compacted_full_projection(&mut store);
+        assert_eq!(store.verified_space_base(SPACE, FAYE).unwrap(), None);
+
+        replace_faye(
+            &mut store,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2a", &three_posts()),
+            &three_posts(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            store
+                .verified_space_base(SPACE, FAYE)
+                .unwrap()
+                .unwrap()
+                .record_count,
+            3
+        );
+        assert_eq!(post_rows_of(&store, FAYE).len(), 3);
+    }
+
+    #[test]
+    fn a_write_larger_than_the_reserve_on_a_compacted_full_projection_is_refused_and_changes_nothing()
+     {
+        let mut store = memory_store();
+        let target = target_of(&store, FAYE);
+        let maximum = compacted_full_projection(&mut store);
+        let huge = record_of(POST, "radical", &post_value(&"Ed ".repeat(1_500)));
+        // The record's text alone is past the room compaction left.
+        assert!(
+            huge.value.as_ref().unwrap().to_string().len() as i64
+                > maximum - published_bytes_of(&store)
+        );
+        let before = every_row(&store);
+
+        let promoted = promote_with(
+            &mut store,
+            &target,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2a", std::slice::from_ref(&huge)),
+            &json!([create_post(
+                "3jzfcijpj2z2a",
+                "radical",
+                huge.value.as_ref().unwrap()
+            )]),
+        );
+        assert!(
+            matches!(promoted, Err(StoreError::SpaceRepoOverBudget)),
+            "{promoted:?}"
+        );
+        assert_eq!(every_row(&store), before);
+
+        let replaced = replace(
+            &mut store,
+            &target,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2a", std::slice::from_ref(&huge)),
+            std::slice::from_ref(&huge),
+        );
+        assert!(
+            matches!(replaced, Err(StoreError::SpaceRepoOverBudget)),
+            "{replaced:?}"
+        );
+        assert_eq!(every_row(&store), before);
     }
 }

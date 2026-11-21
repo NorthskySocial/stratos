@@ -640,70 +640,6 @@ mod tests {
     }
 
     #[test]
-    fn a_staged_page_of_a_taken_down_member_is_not_promoted() {
-        const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
-        const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
-        let mut store = EncryptedStore::open_memory(key()).unwrap();
-        let faye = "did:plc:fayevalentine";
-        store
-            .apply_label_page(
-                AUTHORITY,
-                &page(
-                    1,
-                    vec![label(
-                        1,
-                        LabelSubject::Account {
-                            did: faye.to_owned(),
-                        },
-                        false,
-                    )],
-                ),
-                UPDATED_AT,
-            )
-            .unwrap();
-        // A membership listing fetched before the hold took effect can still name her.
-        store
-            .replace_pds_space_members(
-                BOUNDARY,
-                vec![PdsSpaceMember {
-                    did: faye.to_owned(),
-                }],
-                UPDATED_AT,
-            )
-            .unwrap();
-        let stage = SpaceStagePage {
-            space_uri: SPACE.to_owned(),
-            actor_did: faye.to_owned(),
-            boundary: BOUNDARY.to_owned(),
-            next_cursor: None,
-            updated_at: UPDATED_AT.to_owned(),
-        };
-        store
-            .stage_authorized_space_page(
-                stage,
-                vec![SpaceStageMutation::Upsert {
-                    uri: FAYE_SPACE_POST.to_owned(),
-                    cid: "bafyreia".to_owned(),
-                    sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
-                    indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
-                    record_json: br#"{"text":"Swordfish"}"#.to_vec(),
-                    blob_refs_json: b"[]".to_vec(),
-                }],
-            )
-            .unwrap();
-
-        store
-            .promote_authorized_space_stage(BOUNDARY, SPACE, faye, "2026-11-02T00:00:00.000Z")
-            .unwrap();
-
-        let posts: i64 = store
-            .connection
-            .query_row("SELECT COUNT(*) FROM post", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(posts, 0);
-    }
-
-    #[test]
     fn a_member_who_was_unenrolled_can_be_enrolled_again() {
         let mut store = EncryptedStore::open_memory(key()).unwrap();
         let enroll = |store: &mut EncryptedStore, observed_at: &str| {
@@ -800,41 +736,25 @@ mod tests {
     #[test]
     fn upgrading_from_version_seven_keeps_existing_posts() {
         let path = database_path("upgrade");
-        let mut store = EncryptedStore::open(&path, key()).unwrap();
-        store
-            .apply_actor_page(ActorPage {
-                authority_did: AUTHORITY.to_owned(),
-                actor_did: "did:plc:spikespiegel".to_owned(),
-                sequence: 1,
-                upserts: vec![ProjectionPost {
-                    uri: SPIKE_POST.to_owned(),
-                    author_did: "did:plc:spikespiegel".to_owned(),
-                    cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
-                    sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
-                    indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
-                    retained_at: "1998-04-04T00:00:00.000Z".to_owned(),
-                    record_json: br#"{"text":"Bang"}"#.to_vec(),
-                    blob_refs_json: b"[]".to_vec(),
-                    boundaries: vec!["bebop".to_owned()],
-                }],
-                deletes: Vec::new(),
-                updated_at: UPDATED_AT.to_owned(),
-                interactions: crate::store::InteractionChanges::default(),
-            })
+        let mut version_seven = Connection::open(&path).unwrap();
+        version_seven
+            .execute_batch(&format!(
+                "PRAGMA key = \"x'{}'\"; PRAGMA foreign_keys = ON;",
+                key().as_hex()
+            ))
             .unwrap();
-        store
-            .connection
-            .execute_batch(
-                "DROP TABLE space_repo_record; DROP TABLE space_repo_state;
-                 DELETE FROM schema_migration WHERE version = 10;
-                 DROP TRIGGER interaction_after_post_delete; DROP TABLE interaction;
-                 DELETE FROM schema_migration WHERE version = 9;
-                 DROP TABLE label_subject; DROP TABLE label_cursor;
-                 DELETE FROM schema_migration WHERE version = 8;
-                 PRAGMA user_version = 7;",
-            )
+        migrations::apply_through(&mut version_seven, 7).unwrap();
+        version_seven
+            .execute_batch(&format!(
+                "INSERT INTO post (uri, author_did, cid, sort_at, indexed_at, retained_at, projection_bytes, record_json, blob_refs_json, row_version)
+                   VALUES ('{SPIKE_POST}', 'did:plc:spikespiegel', 'bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                           '1998-04-03T00:00:00.000Z', '1998-04-03T00:00:01.000Z', '1998-04-04T00:00:00.000Z', 64,
+                           CAST('{{\"text\":\"Bang\"}}' AS BLOB), CAST('[]' AS BLOB), 0);
+                 INSERT INTO post_boundary (uri, boundary, sort_at)
+                   VALUES ('{SPIKE_POST}', 'bebop', '1998-04-03T00:00:00.000Z');"
+            ))
             .unwrap();
-        drop(store);
+        drop(version_seven);
 
         let upgraded = EncryptedStore::open(&path, key()).unwrap();
         let posts: i64 = upgraded
@@ -1037,68 +957,6 @@ mod tests {
         assert_eq!(stored_posts(&store, SPIKE_SECOND_POST), 1);
     }
 
-    #[test]
-    fn a_staged_space_page_does_not_readmit_a_taken_down_space_post() {
-        const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
-        const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
-        const FAYE_SECOND_POST: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/redtail";
-        let mut store = EncryptedStore::open_memory(key()).unwrap();
-        let faye = "did:plc:fayevalentine";
-        store
-            .replace_pds_space_members(
-                BOUNDARY,
-                vec![PdsSpaceMember {
-                    did: faye.to_owned(),
-                }],
-                UPDATED_AT,
-            )
-            .unwrap();
-        store
-            .apply_label_page(
-                AUTHORITY,
-                &page(
-                    1,
-                    vec![label(
-                        1,
-                        LabelSubject::Record {
-                            uri: FAYE_SPACE_POST.to_owned(),
-                            author_did: faye.to_owned(),
-                        },
-                        false,
-                    )],
-                ),
-                UPDATED_AT,
-            )
-            .unwrap();
-        let upsert = |uri: &str| SpaceStageMutation::Upsert {
-            uri: uri.to_owned(),
-            cid: "bafyreia".to_owned(),
-            sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
-            indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
-            record_json: br#"{"text":"Swordfish"}"#.to_vec(),
-            blob_refs_json: b"[]".to_vec(),
-        };
-        store
-            .stage_authorized_space_page(
-                SpaceStagePage {
-                    space_uri: SPACE.to_owned(),
-                    actor_did: faye.to_owned(),
-                    boundary: BOUNDARY.to_owned(),
-                    next_cursor: None,
-                    updated_at: UPDATED_AT.to_owned(),
-                },
-                vec![upsert(FAYE_SPACE_POST), upsert(FAYE_SECOND_POST)],
-            )
-            .unwrap();
-
-        store
-            .promote_authorized_space_stage(BOUNDARY, SPACE, faye, "2026-11-02T00:00:00.000Z")
-            .unwrap();
-
-        assert_eq!(stored_posts(&store, FAYE_SPACE_POST), 0);
-        assert_eq!(stored_posts(&store, FAYE_SECOND_POST), 1);
-    }
-
     const FAYE: &str = "did:plc:fayevalentine";
     const JET: &str = "did:plc:jetblack";
     const BEBOP_BOUNDARY: &str = "did:web:stratos.example.test/bebop";
@@ -1200,61 +1058,43 @@ mod tests {
                 UPDATED_AT,
             )
             .unwrap();
-        let stage_page = |did: &str, next_cursor: Option<&str>| SpaceStagePage {
-            space_uri: BEBOP_SPACE.to_owned(),
-            actor_did: did.to_owned(),
-            boundary: BEBOP_BOUNDARY.to_owned(),
-            next_cursor: next_cursor.map(str::to_owned),
-            updated_at: UPDATED_AT.to_owned(),
-        };
-        let swordfish = SpaceStageMutation::Upsert {
-            uri: FAYE_SPACE_POST.to_owned(),
-            cid: "bafyreia".to_owned(),
-            sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
-            indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
-            record_json: br#"{"text":"Swordfish"}"#.to_vec(),
-            blob_refs_json: b"[]".to_vec(),
-        };
+        let swordfish = serde_json::json!({
+            "$type": "zone.stratos.feed.post",
+            "createdAt": "1998-04-03T00:00:00.000Z"
+        });
         store
-            .stage_authorized_space_page(stage_page(FAYE, Some("c1")), Vec::new())
-            .unwrap();
-        store
-            .stage_authorized_space_page(stage_page(FAYE, None), vec![swordfish])
-            .unwrap();
-        store
-            .promote_authorized_space_stage(
+            .publish_verified_records(
                 BEBOP_BOUNDARY,
                 BEBOP_SPACE,
                 FAYE,
+                &[("zone.stratos.feed.post", "swordfish", swordfish)],
                 "2026-11-02T00:00:00.000Z",
+                UPDATED_AT,
             )
             .unwrap();
         store
-            .stage_authorized_space_page(stage_page(JET, Some("c1")), Vec::new())
+            .publish_verified_records(
+                BEBOP_BOUNDARY,
+                BEBOP_SPACE,
+                JET,
+                &[],
+                "2026-11-02T00:00:00.000Z",
+                UPDATED_AT,
+            )
             .unwrap();
-        assert_eq!(
+        let base_of = |store: &EncryptedStore, did: &str| {
             store
-                .space_sync_cursor(BEBOP_BOUNDARY, BEBOP_SPACE, FAYE)
-                .unwrap(),
-            Some("c1".to_owned())
-        );
-
+                .verified_space_base(BEBOP_SPACE, did)
+                .unwrap()
+                .map(|base| base.rev)
+        };
+        assert!(base_of(&store, FAYE).is_some());
         store
             .reset_pds_member_space_state(BEBOP_BOUNDARY, FAYE)
             .unwrap();
 
-        assert_eq!(
-            store
-                .space_sync_cursor(BEBOP_BOUNDARY, BEBOP_SPACE, FAYE)
-                .unwrap(),
-            None
-        );
-        assert_eq!(
-            store
-                .space_sync_cursor(BEBOP_BOUNDARY, BEBOP_SPACE, JET)
-                .unwrap(),
-            Some("c1".to_owned())
-        );
+        assert_eq!(base_of(&store, FAYE), None);
+        assert!(base_of(&store, JET).is_some());
         assert_eq!(stored_posts(&store, FAYE_SPACE_POST), 1);
         assert!(
             store

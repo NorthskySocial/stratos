@@ -340,10 +340,32 @@ const MIGRATIONS: &[Migration] = &[
         CREATE INDEX space_repo_record_boundary_idx ON space_repo_record(boundary, did);
     "#,
     },
+    // Pages are no longer staged: a poll proves its ops in memory and writes
+    // once, so nothing reads these tables or their cursors again.
+    Migration {
+        version: 11,
+        sql: r#"
+        DROP TRIGGER stage_lifetime_after_stage_delete;
+        DROP TRIGGER stage_lifetime_after_cursor_delete;
+        DROP TRIGGER stage_lifetime_after_pending_delete;
+        DROP TABLE space_sync_stage_lifetime;
+        DROP TABLE space_sync_pending_verification;
+        DROP TABLE space_sync_stage_cursor;
+        DROP TABLE space_sync_stage;
+        DROP TABLE space_cursor;
+    "#,
+    },
 ];
 
 pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
     apply_migrations(connection, MIGRATIONS)
+}
+
+/// Brings a database to an earlier version with the real migrations, for tests
+/// of an upgrade.
+#[cfg(test)]
+pub(super) fn apply_through(connection: &mut Connection, version: usize) -> rusqlite::Result<()> {
+    apply_migrations(connection, &MIGRATIONS[..version])
 }
 
 fn apply_migrations(connection: &mut Connection, migrations: &[Migration]) -> rusqlite::Result<()> {
@@ -376,6 +398,7 @@ mod tests {
     use super::{MIGRATIONS, Migration, apply, apply_migrations};
 
     const LAST_VERSION_BEFORE_PURGE: usize = 9;
+    const LAST_VERSION_BEFORE_DROP: usize = 10;
 
     #[test]
     fn initializes_the_versioned_projection_schema() {
@@ -385,13 +408,13 @@ mod tests {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
         let migration_count: u32 = connection
             .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(migration_count, 10);
+        assert_eq!(migration_count, 11);
         let post_boundary_sql: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_boundary'",
@@ -571,7 +594,7 @@ mod tests {
     #[test]
     fn rejects_a_database_from_a_newer_store_format() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection.pragma_update(None, "user_version", 11).unwrap();
+        connection.pragma_update(None, "user_version", 12).unwrap();
 
         assert!(apply(&mut connection).is_err());
     }
@@ -583,9 +606,7 @@ mod tests {
 
     use rusqlite::{OpenFlags, params, types::Value};
 
-    use crate::store::{
-        EncryptedStore, PdsSpaceMember, SpaceStageMutation, SpaceStagePage, StorageKey,
-    };
+    use crate::store::{EncryptedStore, PdsSpaceMember, StorageKey};
 
     const BOUNDARY: &str = "did:web:stratos.example/bebop";
     const SPACE: &str = "at:space/did:web:stratos.example/zone.stratos.space.feed/bebop";
@@ -634,6 +655,10 @@ mod tests {
 
     fn bring_to_version_nine(connection: &mut Connection) {
         apply_migrations(connection, &MIGRATIONS[..LAST_VERSION_BEFORE_PURGE]).unwrap();
+    }
+
+    fn bring_to_version_ten(connection: &mut Connection) {
+        apply_migrations(connection, &MIGRATIONS[..LAST_VERSION_BEFORE_DROP]).unwrap();
     }
 
     fn insert_post(connection: &Connection, uri: &str, author: &str, boundaries: &[&str]) {
@@ -953,7 +978,7 @@ mod tests {
         assert_eq!(count(&connection, "post"), 4);
         assert_eq!(count(&connection, "interaction"), 7);
 
-        apply(&mut connection).unwrap();
+        bring_to_version_ten(&mut connection);
 
         assert_purged_and_kept(&connection, &survivors_before);
     }
@@ -974,7 +999,7 @@ mod tests {
         populate_as_an_older_build(&connection);
         let survivors_before = survivors(&connection);
 
-        apply(&mut connection).unwrap();
+        bring_to_version_ten(&mut connection);
 
         assert_purged_and_kept(&connection, &survivors_before);
         let orphans: i64 = connection
@@ -990,7 +1015,7 @@ mod tests {
     #[test]
     fn the_two_space_state_tables_exist_and_are_empty() {
         let mut connection = old_build_memory_database();
-        apply(&mut connection).unwrap();
+        bring_to_version_ten(&mut connection);
 
         let table_sql = |name: &str| -> String {
             connection
@@ -1044,10 +1069,10 @@ mod tests {
     #[test]
     fn a_second_apply_changes_nothing() {
         let mut connection = old_build_memory_database();
-        apply(&mut connection).unwrap();
+        bring_to_version_ten(&mut connection);
         let after_first = whole_database(&connection);
 
-        apply(&mut connection).unwrap();
+        bring_to_version_ten(&mut connection);
 
         assert_eq!(whole_database(&connection), after_first);
         assert_eq!(version_of(&connection), 10);
@@ -1057,7 +1082,7 @@ mod tests {
     fn an_empty_database_reaches_version_ten() {
         let mut connection = Connection::open_in_memory().unwrap();
 
-        apply(&mut connection).unwrap();
+        bring_to_version_ten(&mut connection);
 
         assert_eq!(version_of(&connection), 10);
         assert_eq!(count(&connection, "schema_migration"), 10);
@@ -1143,10 +1168,10 @@ mod tests {
     }
 
     #[test]
-    fn a_database_at_version_eleven_is_refused_and_left_alone() {
+    fn a_database_at_version_twelve_is_refused_and_left_alone() {
         let mut connection = old_build_memory_database();
         apply(&mut connection).unwrap();
-        connection.pragma_update(None, "user_version", 11).unwrap();
+        connection.pragma_update(None, "user_version", 12).unwrap();
         let before = whole_database(&connection);
 
         assert!(apply(&mut connection).is_err());
@@ -1198,52 +1223,291 @@ mod tests {
         let path = old_build_encrypted_file("purge");
         let survivors_before = survivors_of_file(&path);
 
-        let migrated = EncryptedStore::open(&path, key()).unwrap();
-        assert_purged_and_kept(&migrated.connection, &survivors_before);
+        let mut migrated = open_raw_encrypted_file(&path);
+        bring_to_version_ten(&mut migrated);
+        assert_purged_and_kept(&migrated, &survivors_before);
         let foreign_keys: i64 = migrated
-            .connection
             .pragma_query_value(None, "foreign_keys", |row| row.get(0))
             .unwrap();
         assert_eq!(
             foreign_keys, 1,
             "the migration connection enforces foreign keys"
         );
-        let after_first_open = whole_database(&migrated.connection);
+        let after_first_open = whole_database(&migrated);
         drop(migrated);
 
-        let reopened = EncryptedStore::open(&path, key()).unwrap();
-        assert_purged_and_kept(&reopened.connection, &survivors_before);
-        assert_eq!(whole_database(&reopened.connection), after_first_open);
+        let mut reopened = open_raw_encrypted_file(&path);
+        bring_to_version_ten(&mut reopened);
+        assert_purged_and_kept(&reopened, &survivors_before);
+        assert_eq!(whole_database(&reopened), after_first_open);
         drop(reopened);
         fs::remove_file(path).unwrap();
     }
 
-    fn feed_post_page() -> (SpaceStagePage, Vec<SpaceStageMutation>) {
-        (
-            SpaceStagePage {
-                space_uri: SPACE.to_owned(),
-                actor_did: JET.to_owned(),
-                boundary: BOUNDARY.to_owned(),
-                next_cursor: None,
-                updated_at: THEN.to_owned(),
-            },
-            vec![SpaceStageMutation::Upsert {
-                uri: JET_POST.to_owned(),
-                cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
-                sort_at: THEN.to_owned(),
-                indexed_at: THEN.to_owned(),
-                record_json: br#"{"text":"See you space cowboy"}"#.to_vec(),
-                blob_refs_json: b"[]".to_vec(),
-            }],
+    /// An encrypted file opened the way the store opens one, but not migrated.
+    fn open_raw_encrypted_file(path: &PathBuf) -> Connection {
+        let connection = Connection::open(path).unwrap();
+        connection
+            .execute_batch(&format!(
+                "PRAGMA key = \"x'{}'\"; PRAGMA foreign_keys = ON;",
+                key().as_hex()
+            ))
+            .unwrap();
+        connection
+    }
+
+    // Migration 11: databases at version 10, which still hold the stage tables.
+
+    const STAGE_TABLES: [&str; 5] = [
+        "space_cursor",
+        "space_sync_stage",
+        "space_sync_stage_cursor",
+        "space_sync_pending_verification",
+        "space_sync_stage_lifetime",
+    ];
+    const STAGE_TRIGGERS: [&str; 3] = [
+        "stage_lifetime_after_stage_delete",
+        "stage_lifetime_after_cursor_delete",
+        "stage_lifetime_after_pending_delete",
+    ];
+
+    fn put_rows_in_the_stage_tables(connection: &Connection) {
+        connection
+            .execute_batch(&format!(
+                "INSERT INTO space_cursor (space_uri, did, boundary, cursor, updated_at)
+                   VALUES ('{SPACE}', '{JET}', '{BOUNDARY}', 'firehose:8', '{THEN}');
+                 INSERT INTO space_sync_stage (space_uri, did, uri, boundary, deleted, updated_at)
+                   VALUES ('{SPACE}', '{JET}', '{JET_POST}', '{BOUNDARY}', 1, '{THEN}');
+                 INSERT INTO space_sync_stage_cursor (space_uri, did, boundary, cursor, updated_at)
+                   VALUES ('{SPACE}', '{FAYE}', '{BOUNDARY}', 'unverified', '{THEN}');
+                 INSERT INTO space_sync_pending_verification (space_uri, did, boundary, updated_at)
+                   VALUES ('{SPACE}', '{JET}', '{BOUNDARY}', '{THEN}');
+                 INSERT INTO space_sync_stage_lifetime (space_uri, did, boundary, created_at, last_progress_at)
+                   VALUES ('{SPACE}', '{JET}', '{BOUNDARY}', '{THEN}', '{THEN}');"
+            ))
+            .unwrap();
+    }
+
+    fn schema_names(connection: &Connection, kind: &str) -> Vec<String> {
+        table_rows(
+            connection,
+            &format!("SELECT name FROM sqlite_master WHERE type = '{kind}' ORDER BY name"),
         )
+        .into_iter()
+        .map(|row| match &row[0] {
+            Value::Text(name) => name.clone(),
+            other => panic!("name is not text: {other:?}"),
+        })
+        .collect()
+    }
+
+    fn version_ten_database_with_stage_rows() -> Connection {
+        let mut connection = old_build_memory_database();
+        bring_to_version_ten(&mut connection);
+        put_rows_in_the_stage_tables(&connection);
+        for table in STAGE_TABLES {
+            assert_eq!(count(&connection, table), 1, "{table}");
+        }
+        let triggers = schema_names(&connection, "trigger");
+        for trigger in STAGE_TRIGGERS {
+            assert!(triggers.contains(&trigger.to_owned()), "{trigger}");
+        }
+        connection
     }
 
     #[test]
-    fn the_old_path_still_stages_and_promotes_on_a_migrated_database_and_leaves_the_new_tables_empty()
-     {
-        let path = old_build_encrypted_file("old-path");
+    fn a_version_ten_database_with_rows_in_the_five_tables_reaches_eleven_and_loses_only_them() {
+        let mut connection = version_ten_database_with_stage_rows();
+        let mut before = whole_database(&connection);
+        let triggers_before = schema_names(&connection, "trigger");
+        let indexes_before = schema_names(&connection, "index");
+
+        apply(&mut connection).unwrap();
+
+        assert_eq!(version_of(&connection), 11);
+        let mut after = whole_database(&connection);
+        for table in STAGE_TABLES {
+            assert!(before.remove(table).is_some(), "{table} was there");
+            assert!(!after.contains_key(table), "{table} is gone");
+        }
+        let triggers_after = schema_names(&connection, "trigger");
+        assert_eq!(
+            triggers_before
+                .iter()
+                .filter(|name| !STAGE_TRIGGERS.contains(&name.as_str()))
+                .collect::<Vec<_>>(),
+            triggers_after.iter().collect::<Vec<_>>(),
+            "only the three stage triggers went"
+        );
+        assert!(
+            triggers_after.contains(&"interaction_after_post_delete".to_owned()),
+            "the post-delete trigger stays"
+        );
+        let indexes_after = schema_names(&connection, "index");
+        assert!(
+            indexes_after
+                .iter()
+                .all(|name| !name.starts_with("space_sync_") && !name.starts_with("space_cursor_")),
+            "{indexes_after:?}"
+        );
+        assert!(indexes_before.len() > indexes_after.len());
+        let migrations_before = before.remove("schema_migration").unwrap();
+        let migrations_after = after.remove("schema_migration").unwrap();
+        assert_eq!(migrations_after.len(), 11);
+        assert_eq!(&migrations_after[..10], migrations_before.as_slice());
+        assert_eq!(after, before, "every other table is byte for byte the same");
+        for table in SPACE_STATE_TABLES {
+            assert!(after.contains_key(table), "{table} stays");
+        }
+    }
+
+    #[test]
+    fn a_second_apply_after_the_drop_changes_nothing() {
+        let mut connection = version_ten_database_with_stage_rows();
+        apply(&mut connection).unwrap();
+        let after_first = whole_database(&connection);
+        let schema_first = schema_names(&connection, "table");
+
+        apply(&mut connection).unwrap();
+
+        assert_eq!(whole_database(&connection), after_first);
+        assert_eq!(schema_names(&connection, "table"), schema_first);
+        assert_eq!(version_of(&connection), 11);
+    }
+
+    #[test]
+    fn an_empty_database_reaches_version_eleven_without_the_stage_tables() {
+        let mut connection = Connection::open_in_memory().unwrap();
+
+        apply(&mut connection).unwrap();
+
+        assert_eq!(version_of(&connection), 11);
+        assert_eq!(count(&connection, "schema_migration"), 11);
+        let tables = every_table(&connection);
+        for table in STAGE_TABLES {
+            assert!(!tables.contains(&table.to_owned()), "{table}");
+        }
+        for table in SPACE_STATE_TABLES {
+            assert_eq!(count(&connection, table), 0);
+        }
+        let triggers = schema_names(&connection, "trigger");
+        assert_eq!(triggers, ["interaction_after_post_delete"]);
+    }
+
+    #[test]
+    fn a_failure_after_the_drops_rolls_back_to_version_ten_through_apply_migrations() {
+        let mut connection = version_ten_database_with_stage_rows();
+        let before = whole_database(&connection);
+        let schema_before = table_rows(
+            &connection,
+            "SELECT type, name FROM sqlite_master ORDER BY type, name",
+        );
+        let drop_batch = &MIGRATIONS[LAST_VERSION_BEFORE_DROP];
+        assert_eq!(drop_batch.version, 11);
+        // A duplicate version fails only when it runs, after every drop of the
+        // batch has run in the same transaction.
+        let failing_drop = format!(
+            "{} INSERT INTO schema_migration (version, applied_at) VALUES (1, 0);",
+            drop_batch.sql
+        );
+        let migrations: Vec<Migration> = MIGRATIONS[..LAST_VERSION_BEFORE_DROP]
+            .iter()
+            .map(|migration| Migration {
+                version: migration.version,
+                sql: migration.sql,
+            })
+            .chain(std::iter::once(Migration {
+                version: drop_batch.version,
+                sql: failing_drop.leak(),
+            }))
+            .collect();
+
+        let outcome = apply_migrations(&mut connection, &migrations);
+
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert_eq!(version_of(&connection), 10);
+        assert_eq!(whole_database(&connection), before);
+        assert_eq!(
+            table_rows(
+                &connection,
+                "SELECT type, name FROM sqlite_master ORDER BY type, name",
+            ),
+            schema_before,
+            "the tables, indexes and triggers are all still there"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_verified_sync_of_a_member_works_end_to_end_on_a_migrated_file_store() {
+        use std::sync::{Arc, Mutex};
+
+        use async_trait::async_trait;
+        use serde_json::json;
+
+        use crate::{
+            credential_issuer::{
+                CredentialExpiry, CredentialMintError, IssuedSpaceCredential, SpaceCredentialIssuer,
+            },
+            credential_manager::SpaceCredentialManager,
+            lifecycle::ControlLifecycle,
+            membership_reconciler::PdsPollTarget,
+            pds_space_sync::{
+                PdsSpaceSynchronizer, VerifiedSyncOutcome,
+                test_host::{HostRepo, StaticKemKeys, TestClock, TestHost, TestSource},
+            },
+            readiness::FeedReadinessGate,
+            service::ProjectionReader,
+            space_http_signature::SpaceHttpSignatureKey,
+        };
+
+        struct Issuer;
+
+        #[async_trait]
+        impl SpaceCredentialIssuer for Issuer {
+            async fn mint(
+                &self,
+                _: &str,
+                _: &SpaceHttpSignatureKey,
+                _: u64,
+            ) -> Result<IssuedSpaceCredential, CredentialMintError> {
+                Ok(IssuedSpaceCredential {
+                    credential: "header.payload.signature".to_owned(),
+                    expires_at: CredentialExpiry::from_epoch_seconds(10_000),
+                })
+            }
+        }
+
+        fn credential_clock() -> u64 {
+            1_000
+        }
+
+        const PDS: &str = "https://pds.example.test/";
+        const POST: &str = "zone.stratos.feed.post";
+        const RETAINED: &str = "2100-01-01T00:00:00.000Z";
+        const AS_OF: &str = "1998-04-03T12:00:00.000Z";
+        let post = |text: &str| json!({ "$type": POST, "text": text, "createdAt": THEN });
+
+        let path = old_build_encrypted_file("verified-sync");
+        let survivors_before = survivors_of_file(&path);
         let mut store = EncryptedStore::open(&path, key()).unwrap();
-        assert_eq!(store.space_sync_cursor(BOUNDARY, SPACE, JET).unwrap(), None);
+        assert_eq!(version_of(&store.connection), 11);
+        assert_eq!(
+            survivors(&store.connection),
+            survivors_before,
+            "every row meant to survive both migrations is byte for byte what it was"
+        );
+        let tables = every_table(&store.connection);
+        for table in STAGE_TABLES {
+            assert!(!tables.contains(&table.to_owned()), "{table}");
+        }
+        let foreign_keys: i64 = store
+            .connection
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            foreign_keys, 1,
+            "the store's connection enforces foreign keys"
+        );
         store
             .replace_pds_space_members(
                 BOUNDARY,
@@ -1253,41 +1517,77 @@ mod tests {
                 THEN,
             )
             .unwrap();
-        let (mut first_page, mutations) = feed_post_page();
-        first_page.next_cursor = Some("firehose:9".to_owned());
-        store
-            .stage_authorized_space_page(first_page, mutations)
-            .unwrap();
-        let (terminal_page, _) = feed_post_page();
-        store
-            .stage_authorized_space_page(terminal_page, Vec::new())
-            .unwrap();
-
-        store
-            .promote_authorized_space_stage(BOUNDARY, SPACE, JET, "1998-04-05T00:00:00.000Z")
-            .unwrap();
-
-        let served = store
-            .list_posts_by_boundary(BOUNDARY, None, 10, "1998-04-03T12:00:00.000Z")
-            .unwrap();
-        let uris: Vec<&str> = served.posts.iter().map(|post| post.uri.as_str()).collect();
-        assert!(
-            uris.contains(&JET_POST),
-            "the promoted space post is served: {uris:?}"
+        let lifecycle = ControlLifecycle::for_authority(
+            ProjectionReader::new(store),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            AUTHORITY,
+        )
+        .unwrap();
+        let host = TestHost::serving(SPACE);
+        let mut repo = HostRepo::new(1);
+        repo.put(2, POST, "see-you", post("See you space cowboy"));
+        host.hold(JET, repo);
+        let source = TestSource::new(StaticKemKeys::new());
+        source.host_at(PDS, Arc::clone(&host));
+        let synchronizer = PdsSpaceSynchronizer::with_clock(
+            source,
+            Arc::new(SpaceCredentialManager::with_clock(
+                Arc::new(Issuer),
+                credential_clock,
+            )),
+            TestClock::new(),
         );
+        let target = PdsPollTarget {
+            space_uri: SPACE.to_owned(),
+            boundary: BOUNDARY.to_owned(),
+            did: JET.to_owned(),
+            host: PDS.to_owned(),
+            generation: lifecycle
+                .pds_member_generation(BOUNDARY, JET)
+                .unwrap()
+                .expect("jet is a current member"),
+        };
+
+        assert_eq!(
+            synchronizer
+                .sync_target(&lifecycle, &target, RETAINED)
+                .await,
+            VerifiedSyncOutcome::Replaced
+        );
+        host.edit(JET, |repo| {
+            repo.put(3, POST, "bebop", post("Bang"));
+        });
+        assert_eq!(
+            synchronizer
+                .sync_target(&lifecycle, &target, RETAINED)
+                .await,
+            VerifiedSyncOutcome::Promoted
+        );
+        assert_eq!(
+            synchronizer
+                .sync_target(&lifecycle, &target, RETAINED)
+                .await,
+            VerifiedSyncOutcome::Unchanged
+        );
+
+        let served: Vec<String> = lifecycle
+            .read(|projection| projection.served_posts(BOUNDARY, AS_OF))
+            .into_iter()
+            .map(|(uri, _)| uri)
+            .collect();
+        for rkey in ["see-you", "bebop"] {
+            let uri = format!("{SPACE}/{JET}/{POST}/{rkey}");
+            assert!(served.contains(&uri), "{uri} is served: {served:?}");
+        }
         assert!(
-            uris.contains(&FAYE_POST),
+            served.contains(&FAYE_POST.to_owned()),
             "the kept custody post is still served"
         );
-        assert!(!uris.contains(&LEGACY_JET_POST), "the purged post is not");
-        assert_eq!(
-            store.space_sync_cursor(BOUNDARY, SPACE, JET).unwrap(),
-            Some("firehose:9".to_owned())
+        assert!(
+            !served.contains(&LEGACY_JET_POST.to_owned()),
+            "the purged post is not"
         );
-        for table in SPACE_STATE_TABLES {
-            assert_eq!(count(&store.connection, table), 0, "{table}");
-        }
-        drop(store);
+        drop(lifecycle);
         fs::remove_file(path).unwrap();
     }
 

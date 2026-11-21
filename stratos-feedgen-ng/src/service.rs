@@ -4,7 +4,6 @@ use crate::{
     moderation_label::LabelPage,
     space_mac::MacVerifiedCommit,
     space_ops::ChangeSet,
-    space_sync::{PreparedSpacePage, SpaceSyncError, SpaceSyncTarget, stage_space_page},
     store::{
         ActorEnrollment, ActorPage, ActorSyncState, EncryptedStore, EnrollmentReconciliation,
         FeedPage, LabelPageEffects, PdsSpaceMember, ProjectionCompaction, StoreError,
@@ -146,72 +145,6 @@ impl ProjectionReader {
         self.admission.invalidate_boundary(boundary);
         Ok(generations)
     }
-    pub fn pds_space_target(
-        &self,
-        space_uri: impl Into<String>,
-        boundary: impl Into<String>,
-        actor_did: impl Into<String>,
-    ) -> Result<SpaceSyncTarget, SpaceSyncError> {
-        SpaceSyncTarget::from_authoritative_membership(&self.store, space_uri, boundary, actor_did)
-    }
-    pub fn pds_space_target_at_generation(
-        &self,
-        space_uri: impl Into<String>,
-        boundary: impl Into<String>,
-        actor_did: impl Into<String>,
-        generation: u64,
-    ) -> Result<SpaceSyncTarget, SpaceSyncError> {
-        SpaceSyncTarget::from_authoritative_membership_at_generation(
-            &self.store,
-            space_uri,
-            boundary,
-            actor_did,
-            generation,
-        )
-    }
-    pub fn space_sync_cursor(
-        &self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
-    ) -> Result<Option<String>, StoreError> {
-        self.store.space_sync_cursor(boundary, space_uri, actor_did)
-    }
-    pub fn stage_pds_space_page(&mut self, page: PreparedSpacePage) -> Result<(), SpaceSyncError> {
-        stage_space_page(&mut self.store, page)
-    }
-    pub fn promote_pds_space_stage(
-        &mut self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
-        retained_at: &str,
-    ) -> Result<(), StoreError> {
-        self.store
-            .promote_authorized_space_stage(boundary, space_uri, actor_did, retained_at)?;
-        self.admission.invalidate_boundary(boundary);
-        Ok(())
-    }
-    pub fn promote_pds_space_stage_at_generation(
-        &mut self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
-        retained_at: &str,
-        observed_at: &str,
-        generation: u64,
-    ) -> Result<(), StoreError> {
-        self.store.promote_authorized_space_stage_at_generation(
-            boundary,
-            space_uri,
-            actor_did,
-            retained_at,
-            observed_at,
-            generation,
-        )?;
-        self.admission.invalidate_boundary(boundary);
-        Ok(())
-    }
     pub fn verified_space_base(
         &self,
         space_uri: &str,
@@ -268,15 +201,6 @@ impl ProjectionReader {
     }
     pub fn pds_member_boundaries(&self, did: &str) -> Result<Vec<String>, StoreError> {
         self.store.pds_member_boundaries(did)
-    }
-    pub fn discard_pds_space_stage(
-        &mut self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
-    ) -> Result<(), StoreError> {
-        self.store
-            .discard_unverified_space_stage(boundary, space_uri, actor_did)
     }
     pub fn reconcile_actor_enrollment(
         &mut self,
@@ -378,27 +302,27 @@ impl ProjectionReader {
         }
         Ok(result)
     }
-
-    pub fn compact_projection_with_budget(
+    pub fn compact_projection_with_reserve(
         &mut self,
         as_of: &str,
         maximum_retained_at: &str,
         max_bytes: u64,
         limit: u16,
-        budget: &crate::config::SpaceStageBudget,
+        space_write_reserve_bytes: u64,
     ) -> Result<ProjectionCompaction, StoreError> {
-        let result = self.store.compact_projection_with_budget(
+        let result = self.store.compact_projection_with_reserve(
             as_of,
             maximum_retained_at,
             max_bytes,
             limit,
-            budget,
+            space_write_reserve_bytes,
         )?;
         if result.deleted != 0 {
             self.admission.replace_projection();
         }
         Ok(result)
     }
+
     pub fn prepare(
         &self,
         request: ReadRequest<'_>,

@@ -226,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    fn the_count_of_a_body_is_the_count_of_the_tree_it_parses_to() {
+    fn the_count_of_a_body_is_never_below_its_tree_and_equal_to_it_without_duplicate_keys() {
         let mut generator = Lcg(0xC0FFEE);
         for _ in 0..300 {
             let value = random_value(&mut generator, 0);
@@ -237,6 +237,12 @@ mod tests {
                 "{value}"
             );
         }
+        // A repeated key is counted each time it is read; the tree keeps the
+        // last, so the stream counts more, never less.
+        let repeated = br#"{"a":0,"a":1}"#;
+        let tree: Value = serde_json::from_slice(repeated).unwrap();
+        assert_eq!(count_values(&tree), 2);
+        assert_eq!(count_body_values(repeated, usize::MAX), Ok(3));
     }
 
     #[test]

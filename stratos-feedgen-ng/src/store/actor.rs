@@ -94,21 +94,6 @@ pub(super) fn unenroll_actor(
         .execute("DELETE FROM suppression_marker WHERE source_id = ?1", [did])
         .map_err(StoreError::Open)?;
     transaction
-        .execute("DELETE FROM space_cursor WHERE did = ?1", [did])
-        .map_err(StoreError::Open)?;
-    transaction
-        .execute("DELETE FROM space_sync_stage_cursor WHERE did = ?1", [did])
-        .map_err(StoreError::Open)?;
-    transaction
-        .execute(
-            "DELETE FROM space_sync_pending_verification WHERE did = ?1",
-            [did],
-        )
-        .map_err(StoreError::Open)?;
-    transaction
-        .execute("DELETE FROM space_sync_stage WHERE did = ?1", [did])
-        .map_err(StoreError::Open)?;
-    transaction
             .execute(
                 "INSERT INTO actor_enrollment (did, boundaries_json, observed_at, enrolled) VALUES (?1, ?2, ?3, 0)
                  ON CONFLICT(did) DO UPDATE SET boundaries_json = excluded.boundaries_json, observed_at = excluded.observed_at, enrolled = excluded.enrolled",
@@ -381,30 +366,6 @@ impl EncryptedStore {
                     transaction
                         .execute(
                             "DELETE FROM source_coverage WHERE source_id = ?1 AND boundary = ?2",
-                            params![did, boundary],
-                        )
-                        .map_err(StoreError::Open)?;
-                    transaction
-                        .execute(
-                            "DELETE FROM space_cursor WHERE did = ?1 AND (boundary = ?2 OR boundary = '')",
-                            params![did, boundary],
-                        )
-                        .map_err(StoreError::Open)?;
-                    transaction
-                        .execute(
-                            "DELETE FROM space_sync_stage_cursor WHERE did = ?1 AND boundary = ?2",
-                            params![did, boundary],
-                        )
-                        .map_err(StoreError::Open)?;
-                    transaction
-                        .execute(
-                            "DELETE FROM space_sync_pending_verification WHERE did = ?1 AND (boundary = ?2 OR boundary = '')",
-                            params![did, boundary],
-                        )
-                        .map_err(StoreError::Open)?;
-                    transaction
-                        .execute(
-                            "DELETE FROM space_sync_stage WHERE did = ?1 AND boundary = ?2",
                             params![did, boundary],
                         )
                         .map_err(StoreError::Open)?;

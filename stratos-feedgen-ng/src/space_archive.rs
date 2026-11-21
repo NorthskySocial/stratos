@@ -420,7 +420,7 @@ pub fn check_record_order(
 }
 
 #[cfg(test)]
-mod counting {
+pub(crate) mod counting {
     use std::{
         alloc::{GlobalAlloc, Layout, System},
         cell::Cell,
@@ -428,37 +428,52 @@ mod counting {
 
     thread_local! {
         static LARGEST_REQUEST: Cell<usize> = const { Cell::new(0) };
+        static LIVE_BYTES: Cell<isize> = const { Cell::new(0) };
+        static PEAK_LIVE_BYTES: Cell<isize> = const { Cell::new(0) };
     }
 
     fn note(size: usize) {
         LARGEST_REQUEST.with(|largest| largest.set(largest.get().max(size)));
     }
 
+    fn note_live_change(change: isize) {
+        let live = LIVE_BYTES.with(|live| {
+            live.set(live.get() + change);
+            live.get()
+        });
+        PEAK_LIVE_BYTES.with(|peak| peak.set(peak.get().max(live)));
+    }
+
     /// Wraps the system allocator and remembers, per thread, the largest block
-    /// asked for, so a test can show that a declared length was never trusted
-    /// with memory.
+    /// asked for and the most bytes held at once, so a test can show that a
+    /// declared length was never trusted with memory and that a value was
+    /// never built.
     pub(super) struct CountingAllocator;
 
     // SAFETY: every call is forwarded unchanged to the system allocator; the
-    // only addition is a write to a thread-local `Cell` that needs no
+    // only addition is a write to thread-local `Cell`s that need no
     // allocation or destructor.
     unsafe impl GlobalAlloc for CountingAllocator {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
             note(layout.size());
+            note_live_change(layout.size() as isize);
             unsafe { System.alloc(layout) }
         }
 
         unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
             note(layout.size());
+            note_live_change(layout.size() as isize);
             unsafe { System.alloc_zeroed(layout) }
         }
 
         unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            note_live_change(-(layout.size() as isize));
             unsafe { System.dealloc(pointer, layout) }
         }
 
         unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
             note(new_size);
+            note_live_change(new_size as isize - layout.size() as isize);
             unsafe { System.realloc(pointer, layout, new_size) }
         }
     }
@@ -466,10 +481,20 @@ mod counting {
     #[global_allocator]
     static ALLOCATOR: CountingAllocator = CountingAllocator;
 
-    pub(super) fn largest_request_during<T>(work: impl FnOnce() -> T) -> (T, usize) {
+    pub(crate) fn largest_request_during<T>(work: impl FnOnce() -> T) -> (T, usize) {
         LARGEST_REQUEST.with(|largest| largest.set(0));
         let outcome = work();
         (outcome, LARGEST_REQUEST.with(Cell::get))
+    }
+
+    /// The most bytes `work` held at once beyond what this thread held before
+    /// it, counting what it built and freed again.
+    pub(crate) fn peak_growth_during<T>(work: impl FnOnce() -> T) -> (T, usize) {
+        let before = LIVE_BYTES.with(Cell::get);
+        PEAK_LIVE_BYTES.with(|peak| peak.set(before));
+        let outcome = work();
+        let peak = PEAK_LIVE_BYTES.with(Cell::get);
+        (outcome, usize::try_from(peak - before).unwrap_or(0))
     }
 }
 

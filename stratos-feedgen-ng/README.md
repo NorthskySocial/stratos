@@ -5,8 +5,8 @@ serves authenticated boundary-scoped feeds, and stays closed until the
 authority stream has reconciled.
 
 It also refreshes authority-derived PDS-space membership and synchronizes only
-those targets. Pages are staged locally and become visible only after their
-terminal commit verifies. Requests use `STRATOS_SERVICE_URL` for network
+those targets. A member's records become visible only after the set hash of
+the member's repo equals the `data` of a MAC-authenticated commit. Requests use `STRATOS_SERVICE_URL` for network
 reachability. `STRATOS_PUBLIC_URL` remains validated configuration for the
 authority public endpoint; space signatures do not bind a URL.
 
@@ -45,28 +45,34 @@ immutable image digest; a source checkout alone does not prove what is running.
 `main.rs` composes the runtime from authority and identity clients, custody
 sync workers, the lifecycle, and an encrypted projection. The HTTP router in
 `server.rs` delegates feed, blob, identity, viewer authorization, and private
-response handling to focused `server/` modules. `feed_service.rs` and
-`space_sync.rs` enforce read and space-target rules; `service.rs` coordinates
-projection admission and invalidation. `store.rs` defines the SQLCipher store
-and shared types; `store/` groups connection, actor, space, read, and retention
-operations. `label_poller.rs` follows the authority's moderation label log and
+response handling to focused `server/` modules. `feed_service.rs` enforces
+read rules. `space_sync.rs` holds the predicates that decide what a space
+record admits, and the store's target check in `store/space_verification.rs`
+enforces the space-target rules. `service.rs` coordinates projection admission
+and invalidation. `pds_space_scheduler.rs` runs the
+passes over PDS-custody members, and `pds_space_sync.rs` synchronizes one
+member's repo in one space. `space_host.rs` makes the authenticated reads,
+`space_kem.rs` and `space_mac.rs` derive and check the response MAC, and
+`space_archive.rs` reads the `getRepo` archive. `store.rs` defines the
+SQLCipher store and shared types; `store/` groups connection, actor, space,
+read, and retention operations, and `store/space_verification.rs` keeps the
+verified state of each member's repo and promotes changes to it. `label_poller.rs` follows the authority's moderation label log and
 applies takedowns and their negations; `moderation_label.rs` validates label
 pages; `store/labels.rs` keeps the label cursor and the subjects under
 takedown. Rust traits live near the consumers that need them.
 
 Stratos-custody actors arrive through authenticated subscriptions. PDS-custody
 repos are selected from current authority membership, not record claims or
-writer discovery. Foreign pages stay unqueryable until their terminal commit
-verifies. A current viewer enrollment is required before local posts or blobs
+writer discovery. Foreign records stay unqueryable until their set hash
+matches the commit. A current viewer enrollment is required before local posts or blobs
 can be returned. The projection is bounded and rebuildable; its encrypted disk
 contents are not an independent authorization source. Blob content uses a
 bounded in-memory cache and never enters the projection.
 
 Authority membership selects PDS repositories and current viewer enrollment
 gates feed responses. Removing a member does not stop writes at that member's
-PDS. In-flight foreign synchronization also needs a durable generation fence
-so a page fetched before removal cannot be promoted afterward; deploy the
-Feedgen version with that fence before relying on this guarantee. An
+PDS. A foreign synchronization carries the membership generation it started
+under, so a poll read before a removal cannot be promoted afterward. An
 outstanding credential accepted by a foreign host can remain usable until its
 expiry. See [the current spaces contract](../docs/architecture/spaces-alignment.md).
 
@@ -130,7 +136,8 @@ boundaries, so takedowns in the other boundaries are never applied.
 
 An account takedown removes the member's posts, sync position and viewer
 authorization. It also stops the member's worker. A replayed `enroll` event or a
-staged space page does not re-admit the member while the takedown stands.
+space poll already in flight does not re-admit the member while the takedown
+stands.
 
 When an account takedown is lifted, the feed generator asks the authority
 whether the member is enrolled again. It asks on up to 6 polls. If another hold
@@ -143,16 +150,16 @@ When a record takedown is lifted, the feed generator reads the author again.
 For a Stratos-hosted author, it replays the author from the start of the stream.
 The replayed author takes the next free connection slot ahead of authors that
 are waiting their turn. A running worker is not interrupted. For a self-hosted
-author, it clears the space cursor and stage. The next pass then lists from the
-start. A sync of that author already in flight is refused, so it cannot store
-its old position after the reset.
+author, it clears the verified space state. The next pass then reads the whole
+repo as an archive. A sync of that author already in flight is refused, so it
+cannot store its old state after the reset.
 
 The post returns within these bounds, with a reachable authority:
 
 - Stratos-hosted author: two polls (20 seconds) to see the negation and act on
   it, plus at most one worker lease (15 seconds) for a slot, plus the replay.
 - Self-hosted author: two polls (20 seconds), plus the wait for the next space
-  pass (up to 30 seconds), plus that pass.
+  pass (up to 30 seconds), plus that pass, including its archive read.
 
 Each poll can add up to 15 seconds while lifted account takedowns are being
 checked. The bounds assume the replay or listing finishes within one worker
@@ -169,33 +176,69 @@ for up to 60 seconds after a takedown. It answers from its own cache.
 The TypeScript feed generator does not apply labels. Label logs and metrics
 carry fixed event names only. They never carry a DID, record URI or CID.
 
-## Staged space limits
+## Space sync and limits
 
-The validated `FEEDGEN_PROJECTION_MAX_BYTES` budget includes published posts,
-staged private payloads, and stage checkpoints. The memory profile uses its
-fixed 16 MiB projection budget; an encrypted volume requires an explicit
+For each PDS-custody member and space, the store keeps the last verified
+revision, a set-hash state, and the CID at every record path. Each cycle reads
+`listRepoOps` pages with `since` set to the verified revision. Every response
+is authenticated by a MAC keyed with a secret that HPKE (export only) derives
+from a one-time key and the member's `#atproto_kem` key. The cycle applies the
+ops of all pages together and promotes them in one transaction only when the
+set hash it computes equals the `data` of the last page's commit. Nothing is
+staged: the ops of a poll stay in memory until that write.
+
+When incremental sync cannot work, the cycle reads the whole repo as an
+archive (`getRepo`, STAR format, authenticated the same way) and replaces the
+member's state. That happens when there is no verified state yet, when the
+host or the membership generation changed, when the ops do not follow the
+stored records, when the digest does not match, when the host went back to an
+older revision, when the host refuses the cursor, when a poll passes its
+limits, and when a post, like or repost changed without its value. Only one
+archive is read at a time across members. After a failed archive read, that
+member gets no archive read for `SPACE_REPLACEMENT_COOLDOWN` (10 minutes).
+
+A `RepoNotFound` answer with status 400 from the member's host clears that
+member's records in that space. Every other failure leaves the stored rows as
+they were. Values of records in collections the feed does not project (anything
+but posts, likes and reposts) are checked against their CID and dropped.
+
+These limits apply:
+
+- A poll reads at most `MAX_POLL_OPS` (1,000) ops, `MAX_POLL_PAGES` (1,000)
+  pages, and `MAX_SPACE_POLL_BODY_BYTES` (16 MiB) of page bodies. A poll that
+  passes one recovers from the archive.
+- `MAX_SPACE_REPO_RECORDS` allows 20,000 records per member per space.
+- `MAX_SPACE_VERIFICATION_ROWS` allows 500,000 record paths in the store. Path
+  rows do not count against the projection budget and retention never deletes
+  them.
+- An archive is at most `MAX_SPACE_ARCHIVE_BYTES` (16 MiB), with records of at
+  most `MAX_SPACE_ARCHIVE_VALUE_BYTES` (1 MiB).
+- A member's cycle holds at most `MAX_SPACE_CYCLE_VALUES` (2,000,000) decoded
+  JSON values, and runs under the `SPACE_TARGET_DEADLINE` of 60 seconds.
+
+A member that passes a limit other than the poll limits is a failed target.
+The store is never left truncated.
+
+The validated `FEEDGEN_PROJECTION_MAX_BYTES` budget covers published posts and
+interactions. Each compaction pass brings published bytes to that maximum less
+`FEEDGEN_SPACE_WRITE_RESERVE_BYTES` or under, which leaves the reserve free for
+space writes. The reserve defaults to half the maximum and must be positive
+and below it. A space write that would push the projection over the whole
+maximum is refused and changes nothing. The memory profile uses its fixed
+16 MiB projection budget; an encrypted volume requires an explicit
 positive byte budget and `FEEDGEN_PROJECTION_MAX_AGE_MS` in whole seconds,
-with a minimum of one second. `FEEDGEN_STAGE_TARGET_MAX_ROWS` (default 1,024),
-`FEEDGEN_STAGE_GLOBAL_MAX_ROWS` (default 8,192),
-`FEEDGEN_STAGE_TARGET_MAX_BYTES` (default one quarter of the projection budget,
-up to 8 MiB), and `FEEDGEN_STAGE_GLOBAL_MAX_BYTES` (default half the projection
-budget) set the staging caps. All four values must be positive; the target caps
-must fit within the global caps, the target row cap cannot exceed 1,024, the
-target byte cap cannot exceed 8 MiB, and the global byte cap cannot exceed half
-the projection budget. The compactor preserves that global byte allowance for
-staged data by evicting the oldest published posts as needed. Checkpoints
-count as rows, including those for pages without posts. The byte and row caps
-persist across sync passes and restarts. A rejected page rolls back, and the
-sync worker discards that target's incomplete stage.
+with a minimum of one second. `FEEDGEN_STAGE_TARGET_MAX_ROWS`,
+`FEEDGEN_STAGE_GLOBAL_MAX_ROWS`, `FEEDGEN_STAGE_TARGET_MAX_BYTES` and
+`FEEDGEN_STAGE_GLOBAL_MAX_BYTES` are no longer read, and a set one is ignored.
 
-Stages expire after the configured projection age from creation or the last
-actual progress, whichever occurs first. Replaying the same cursor and data
-does not extend that age. The compactor removes expired rows, checkpoints, and
-pending verification together in bounded batches at startup and every minute.
-Promotion is atomic and has a fixed work ceiling of 1,024 staged rows
-(including checkpoints) and 8 MiB of staged bytes. The validated target caps
-fit within that ceiling, so accepted stages remain promotable. Cleanup logs
-contain aggregate counts only.
+The store is at schema version 11. An older binary refuses a migrated
+database.
+
+Each pass logs `event=pds_space_sync_pass` with the counts `promoted`,
+`unchanged`, `replaced`, `cleared`, `deferred` and `target_failures`, and the
+scheduler status reports the same counts. Each cycle with failed targets also logs one line,
+`event=pds_space_target_failures <reason>=<count> ...`, with reasons from a
+fixed list. Logs carry no DID, URI or host text.
 
 ## Private metrics export
 
@@ -227,7 +270,7 @@ existing private Prometheus exporter/scrape path, never through this service.
 | `stratos.feedgen.cache.requests`                                                                                        | Viewer-authorization cache hits and authority-resolution misses                                              | Same name and intent                                                                                           |
 | `stratos.feedgen.index.operations`                                                                                      | Actor projection upserts and deletes after commit validation                                                 | Same name and intent                                                                                           |
 | `stratos.feedgen.reconciliation.duration`, `stratos.feedgen.reconciliation.outcomes`                                    | Authority-session reconciliation                                                                             | Same name and intent                                                                                           |
-| `stratos.feedgen.space_sync.duration`, `stratos.feedgen.space_sync.outcomes`, `stratos.feedgen.space_sync.last_success` | Authority-listed PDS target passes and outcomes                                                              | Same name; Rust distinguishes deferred and rejected member results                                             |
+| `stratos.feedgen.space_sync.duration`, `stratos.feedgen.space_sync.outcomes`, `stratos.feedgen.space_sync.last_success` | Authority-listed PDS target passes and outcomes                                                              | Same name; Rust distinguishes promoted, unchanged, replaced, cleared, deferred and failed member results       |
 | `process.resident_memory`, `process.cpu.time`                                                                           | Linux-only current RSS bytes from `/proc/self/statm` and process CPU seconds from `CLOCK_PROCESS_CPUTIME_ID` | Matches the standard OTel runtime metric names; Collector Prometheus naming follows its configured translation |
 
 `stratos.feedgen.shadow_feed.reads` is TypeScript-only: the Rust service is

@@ -1,132 +1,341 @@
+//! Synchronizer for one PDS-custody member's repo in one space under the
+//! authenticated contract: pages and archives come back with a commit whose
+//! MAC was verified, and nothing is promoted until the digest of the state the
+//! ops (or the archive's records) produce equals that commit's `data`. A poll's
+//! ops live in memory until the one store call.
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
+    time::Duration,
 };
 
 use async_trait::async_trait;
+use tokio::{sync::Semaphore, time::Instant};
 
 use crate::{
-    credential_manager::{CredentialManagerError, SpaceCredentialManager},
+    config::{
+        MAX_SPACE_CYCLE_VALUES, MAX_SPACE_POLL_BODY_BYTES, SPACE_REPLACEMENT_COOLDOWN,
+        SPACE_TARGET_DEADLINE,
+    },
+    credential_manager::SpaceCredentialManager,
     lifecycle::ControlLifecycle,
     membership_reconciler::PdsPollTarget,
-    space_commit::{CommitVerification, SpaceCommitVerifier},
+    space_archive::ArchiveRefusal,
     space_credential::HeldSpaceCredential,
-    space_host::{PinnedSpaceHostClient, SpaceCredentialProof, SpaceHostError, SpaceHostPage},
-    space_sync::{MAX_SPACE_PAGE_OPS, SpaceSyncError, prepare_space_page},
-    store::StoreError,
+    space_host::{
+        AuthenticatedArchive, AuthenticatedPage, AuthenticatedReadError, PinnedSpaceHostClient,
+        SpaceCredentialProof, SpaceHostError,
+    },
+    space_identity::AuthorKemKeyResolver,
+    space_mac::MacVerifiedCommit,
+    space_ops::{ChangeSet, ChangeSetRefusal, OpPageRefusal, RepoOp, decode_op_page},
+    space_sync::MAX_SPACE_PAGE_OPS,
+    space_value_budget::ValueBudget,
+    store::{StoreError, VerifiedSpaceBase, VerifiedSpaceTarget},
 };
 
-const MAX_SYNC_PAGES: usize = 1_000;
-const MAX_SYNC_OPS: usize = 1_000;
+const MAX_POLL_PAGES: usize = 1_000;
+const MAX_POLL_OPS: usize = MAX_SPACE_PAGE_OPS;
 const MAX_TARGET_LOCKS: usize = 4_096;
+// The one status an XRPC error a lexicon declares arrives with.
+const XRPC_ERROR_STATUS: u16 = 400;
+const REPO_NOT_FOUND: &str = "RepoNotFound";
+const INVALID_CURSOR: &str = "InvalidCursor";
+const UNAUTHORIZED_STATUS: u16 = 401;
 
-#[async_trait]
-pub trait SpacePageReader: Send + Sync {
-    async fn list_page(
-        &self,
-        target: &PdsPollTarget,
-        cursor: Option<&str>,
-        limit: usize,
-    ) -> Result<SpaceHostPage, SpaceHostError>;
-}
-
-#[async_trait]
-pub trait SpacePageSource: Send + Sync {
-    async fn connect(
-        &self,
-        target: &PdsPollTarget,
-        credential: Arc<HeldSpaceCredential>,
-    ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError>;
-}
-
-pub struct PinnedSpacePageSource;
-
-#[async_trait]
-impl SpacePageSource for PinnedSpacePageSource {
-    async fn connect(
-        &self,
-        target: &PdsPollTarget,
-        credential: Arc<HeldSpaceCredential>,
-    ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
-        let proof: Arc<dyn SpaceCredentialProof> = credential;
-        PinnedSpaceHostClient::connect(&target.host, proof)
-            .await
-            .map(|client| Arc::new(client) as Arc<dyn SpacePageReader>)
-    }
-}
-
-#[async_trait]
-impl SpacePageReader for PinnedSpaceHostClient {
-    async fn list_page(
-        &self,
-        target: &PdsPollTarget,
-        cursor: Option<&str>,
-        limit: usize,
-    ) -> Result<SpaceHostPage, SpaceHostError> {
-        self.list_repo_ops(&target.space_uri, &target.did, cursor, limit)
-            .await
-    }
-}
-
-#[async_trait]
-pub trait SpaceCommitVerificationPort: Send + Sync {
-    async fn verify(
-        &self,
-        space_uri: &str,
-        author_did: &str,
-        commit: Option<&serde_json::Value>,
-    ) -> CommitVerification;
-}
-
-#[async_trait]
-impl SpaceCommitVerificationPort for SpaceCommitVerifier {
-    async fn verify(
-        &self,
-        space_uri: &str,
-        author_did: &str,
-        commit: Option<&serde_json::Value>,
-    ) -> CommitVerification {
-        Self::verify(self, space_uri, author_did, commit).await
-    }
-}
-
+/// What a cycle came to for one target. Everything but `Failed` leaves the
+/// target in a state the next cycle can build on; a failure changes nothing in
+/// the store.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PdsSpaceSyncOutcome {
+pub enum VerifiedSyncOutcome {
+    /// The member's repo is at the revision already held; nothing was written.
+    Unchanged,
+    /// The ops since the held revision were proven and promoted.
     Promoted,
-    DeferredKeyResolution,
-    RejectedCommit,
+    /// The whole repo was read, proven and written in place of the held state.
+    Replaced,
+    /// The host said the repo does not exist; the member's state was cleared.
+    Cleared,
+    /// The author's key could not be found right now.
+    Deferred,
+    /// The target moved under the cycle; the next cycle starts again. Not a
+    /// failure.
+    Retry,
+    Failed(FailureReason),
 }
 
-#[derive(Debug)]
-pub enum PdsSpaceSyncError {
-    Credential(CredentialManagerError),
-    Host(SpaceHostError),
-    Target(SpaceSyncError),
-    Stage(SpaceSyncError),
-    Store(StoreError),
-    PageLimit,
-    OperationLimit,
+/// Why a target failed, from a fixed list. No variant carries text a host sent:
+/// a host's error name is looked up in a table and anything else is `Other`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FailureReason {
+    InvalidSpaceMac,
+    InvalidSpaceUri,
+    InvalidCredential,
+    BadSpaceAudience,
+    RepoNotFound,
+    RepoTakendown,
+    RepoSuspended,
+    RepoDeactivated,
+    InvalidCursor,
+    Mac,
+    KemKey,
+    RecordRefused,
+    Archive,
+    RepoOverBudget,
+    Digest,
+    Deadline,
+    ReplacementCooldown,
+    Credential,
+    Transport,
+    Page,
     CursorStalled,
+    Store,
     TargetCapacity,
+    /// A replacement was refused because no cooldown could be kept for it.
+    CooldownCapacity,
+    /// The membership pass gave no generation for the target; only the
+    /// scheduler raises it.
+    MemberGeneration,
+    /// The target's task did not run to its end; only the scheduler raises it.
+    Task,
+    Other,
 }
 
-impl std::fmt::Display for PdsSpaceSyncError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("PDS space synchronization failed")
+impl FailureReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidSpaceMac => "invalid_space_mac",
+            Self::InvalidSpaceUri => "invalid_space_uri",
+            Self::InvalidCredential => "invalid_credential",
+            Self::BadSpaceAudience => "bad_space_audience",
+            Self::RepoNotFound => "repo_not_found",
+            Self::RepoTakendown => "repo_takendown",
+            Self::RepoSuspended => "repo_suspended",
+            Self::RepoDeactivated => "repo_deactivated",
+            Self::InvalidCursor => "invalid_cursor",
+            Self::Mac => "mac",
+            Self::KemKey => "kem_key",
+            Self::RecordRefused => "record_refused",
+            Self::Archive => "archive",
+            Self::RepoOverBudget => "repo_over_budget",
+            Self::Digest => "digest",
+            Self::Deadline => "deadline",
+            Self::ReplacementCooldown => "replacement_cooldown",
+            Self::Credential => "credential",
+            Self::Transport => "transport",
+            Self::Page => "page",
+            Self::CursorStalled => "cursor_stalled",
+            Self::Store => "store",
+            Self::TargetCapacity => "target_capacity",
+            Self::CooldownCapacity => "cooldown_capacity",
+            Self::MemberGeneration => "member_generation",
+            Self::Task => "task",
+            Self::Other => "other",
+        }
     }
 }
 
-impl std::error::Error for PdsSpaceSyncError {}
+// The only error names a host can answer with that are told apart. A name
+// outside this table is `Other`, so host-supplied text reaches nothing.
+const HOST_REFUSALS: [(&str, FailureReason); 9] = [
+    ("InvalidSpaceMac", FailureReason::InvalidSpaceMac),
+    ("InvalidSpaceUri", FailureReason::InvalidSpaceUri),
+    ("InvalidCredential", FailureReason::InvalidCredential),
+    ("BadSpaceAudience", FailureReason::BadSpaceAudience),
+    (REPO_NOT_FOUND, FailureReason::RepoNotFound),
+    ("RepoTakendown", FailureReason::RepoTakendown),
+    ("RepoSuspended", FailureReason::RepoSuspended),
+    ("RepoDeactivated", FailureReason::RepoDeactivated),
+    (INVALID_CURSOR, FailureReason::InvalidCursor),
+];
+
+fn host_refusal_reason(error: &SpaceHostError) -> FailureReason {
+    match error {
+        SpaceHostError::Request { code, .. } => HOST_REFUSALS
+            .iter()
+            .find(|(name, _)| Some(*name) == code.as_deref())
+            .map_or(FailureReason::Other, |(_, reason)| *reason),
+        _ => FailureReason::Transport,
+    }
+}
+
+/// One page request: the revision of the base the poll builds on, the cursor of
+/// the previous page, and the most ops a page may carry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PageRequest<'a> {
+    pub since: Option<&'a str>,
+    pub cursor: Option<&'a str>,
+    pub limit: usize,
+}
+
+/// Authenticated reads from one member's host.
+#[async_trait]
+pub trait VerifiedSpaceReader: Send + Sync {
+    async fn read_page(
+        &self,
+        target: &PdsPollTarget,
+        request: PageRequest<'_>,
+        deadline: Instant,
+    ) -> Result<AuthenticatedPage, AuthenticatedReadError>;
+
+    async fn read_archive(
+        &self,
+        target: &PdsPollTarget,
+        deadline: Instant,
+        budget: &ValueBudget,
+    ) -> Result<AuthenticatedArchive, AuthenticatedReadError>;
+}
+
+/// Connects a reader to the host the authority named for a member, presenting
+/// the boundary's credential.
+#[async_trait]
+pub trait VerifiedSpaceReaderSource: Send + Sync {
+    async fn connect(
+        &self,
+        target: &PdsPollTarget,
+        credential: Arc<HeldSpaceCredential>,
+    ) -> Result<Arc<dyn VerifiedSpaceReader>, SpaceHostError>;
+}
+
+/// The pinned HTTP client with the KEM key lookup the MAC needs.
+pub struct PinnedVerifiedReaderSource {
+    kem_keys: Arc<dyn AuthorKemKeyResolver>,
+}
+
+impl PinnedVerifiedReaderSource {
+    pub fn new(kem_keys: Arc<dyn AuthorKemKeyResolver>) -> Self {
+        Self { kem_keys }
+    }
+}
+
+struct PinnedVerifiedReader {
+    client: PinnedSpaceHostClient,
+    kem_keys: Arc<dyn AuthorKemKeyResolver>,
+}
+
+#[async_trait]
+impl VerifiedSpaceReaderSource for PinnedVerifiedReaderSource {
+    async fn connect(
+        &self,
+        target: &PdsPollTarget,
+        credential: Arc<HeldSpaceCredential>,
+    ) -> Result<Arc<dyn VerifiedSpaceReader>, SpaceHostError> {
+        let proof: Arc<dyn SpaceCredentialProof> = credential;
+        let client = PinnedSpaceHostClient::connect(&target.host, proof).await?;
+        Ok(Arc::new(PinnedVerifiedReader {
+            client,
+            kem_keys: Arc::clone(&self.kem_keys),
+        }))
+    }
+}
+
+#[async_trait]
+impl VerifiedSpaceReader for PinnedVerifiedReader {
+    async fn read_page(
+        &self,
+        target: &PdsPollTarget,
+        request: PageRequest<'_>,
+        deadline: Instant,
+    ) -> Result<AuthenticatedPage, AuthenticatedReadError> {
+        self.client
+            .list_repo_ops_authenticated(
+                self.kem_keys.as_ref(),
+                &target.space_uri,
+                &target.did,
+                request.since,
+                request.cursor,
+                request.limit,
+                deadline,
+            )
+            .await
+    }
+
+    async fn read_archive(
+        &self,
+        target: &PdsPollTarget,
+        deadline: Instant,
+        budget: &ValueBudget,
+    ) -> Result<AuthenticatedArchive, AuthenticatedReadError> {
+        self.client
+            .read_repo_archive_authenticated(
+                self.kem_keys.as_ref(),
+                &target.space_uri,
+                &target.did,
+                deadline,
+                budget,
+            )
+            .await
+    }
+}
+
+/// The time the synchronizer reads: a monotonic instant for the deadline and
+/// the replacement cooldown, and the UTC text the store stamps its writes with.
+pub trait SyncClock: Send + Sync {
+    fn now(&self) -> Instant;
+    fn utc_millis(&self) -> String;
+}
+
+pub struct SystemSyncClock;
+
+impl SyncClock for SystemSyncClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn utc_millis(&self) -> String {
+        let now = time::OffsetDateTime::now_utc();
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+            now.year(),
+            u8::from(now.month()),
+            now.day(),
+            now.hour(),
+            now.minute(),
+            now.second(),
+            now.millisecond()
+        )
+    }
+}
+
+/// What one cycle may read and wait. The defaults are the configured limits;
+/// tests lower them to reach a limit without building it.
+#[derive(Clone, Copy, Debug)]
+struct SyncLimits {
+    pages: usize,
+    ops: usize,
+    body_bytes: usize,
+    values: usize,
+    deadline: Duration,
+    cooldown: Duration,
+    cooldown_capacity: usize,
+}
+
+impl Default for SyncLimits {
+    fn default() -> Self {
+        Self {
+            pages: MAX_POLL_PAGES,
+            ops: MAX_POLL_OPS,
+            body_bytes: MAX_SPACE_POLL_BODY_BYTES,
+            values: MAX_SPACE_CYCLE_VALUES,
+            deadline: SPACE_TARGET_DEADLINE,
+            cooldown: SPACE_REPLACEMENT_COOLDOWN,
+            cooldown_capacity: MAX_TARGET_LOCKS,
+        }
+    }
+}
 
 pub struct PdsSpaceSynchronizer {
-    pages: Arc<dyn SpacePageSource>,
+    readers: Arc<dyn VerifiedSpaceReaderSource>,
     credentials: Arc<SpaceCredentialManager>,
-    commits: Arc<dyn SpaceCommitVerificationPort>,
-    promotion_clock: fn() -> String,
+    clock: Arc<dyn SyncClock>,
+    limits: SyncLimits,
     target_locks: Arc<Mutex<BTreeMap<String, Arc<TargetLock>>>>,
+    cooldowns: Mutex<BTreeMap<String, Instant>>,
+    replacement_slot: Semaphore,
 }
 
 struct TargetLock {
@@ -158,166 +367,97 @@ impl Drop for TargetLease {
     }
 }
 
+/// One cycle's end: either a finished outcome or the need to read the whole
+/// repo. Only the incremental path produces `NeedsReplacement`, and only for
+/// the reasons the rules name.
+#[derive(Debug, Eq, PartialEq)]
+enum PollEnd {
+    Finished(VerifiedSyncOutcome),
+    NeedsReplacement,
+}
+
+/// How a failed read ends a cycle.
+enum ReadFailure {
+    Clear,
+    Deferred,
+    Failed(FailureReason),
+}
+
+/// A failed page read either asks for the whole repo or ends the cycle as any
+/// failed read does.
+enum PageFailure {
+    Replace,
+    Read(ReadFailure),
+}
+
 impl PdsSpaceSynchronizer {
     pub fn new(
-        pages: Arc<dyn SpacePageSource>,
+        readers: Arc<dyn VerifiedSpaceReaderSource>,
         credentials: Arc<SpaceCredentialManager>,
-        commits: Arc<dyn SpaceCommitVerificationPort>,
+    ) -> Self {
+        Self::with_clock(readers, credentials, Arc::new(SystemSyncClock))
+    }
+
+    pub fn with_clock(
+        readers: Arc<dyn VerifiedSpaceReaderSource>,
+        credentials: Arc<SpaceCredentialManager>,
+        clock: Arc<dyn SyncClock>,
     ) -> Self {
         Self {
-            pages,
+            readers,
             credentials,
-            commits,
-            promotion_clock: current_utc_millis,
+            clock,
+            limits: SyncLimits::default(),
             target_locks: Arc::new(Mutex::new(BTreeMap::new())),
+            cooldowns: Mutex::new(BTreeMap::new()),
+            replacement_slot: Semaphore::new(1),
         }
     }
 
-    /// Fetches bounded pages without holding the lifecycle's encrypted-store lock.
+    /// Runs one cycle for `target` under the per-target lock and the absolute
+    /// deadline, which starts when the cycle is entered and covers the wait
+    /// for the lock. Nothing is written but by one store call that checks the
+    /// digest itself; a cycle that is dropped part way leaves the store as it
+    /// was.
     pub async fn sync_target(
         &self,
         lifecycle: &ControlLifecycle,
         target: &PdsPollTarget,
-        observed_at: &str,
         retained_at: &str,
-    ) -> Result<PdsSpaceSyncOutcome, PdsSpaceSyncError> {
-        let _lease = self.lock_target(target).await?;
-        let credential = self
-            .credentials
-            .get(&target.boundary)
-            .await
-            .map_err(PdsSpaceSyncError::Credential)?;
-        let reader = self
-            .pages
-            .connect(target, Arc::clone(&credential))
-            .await
-            .map_err(|error| {
-                if matches!(error, SpaceHostError::Request { status: 401, .. }) {
-                    self.credentials.invalidate(&target.boundary, &credential);
-                }
-                PdsSpaceSyncError::Host(error)
-            })?;
-        let mut cursor = lifecycle
-            .pds_space_cursor(&target.boundary, &target.space_uri, &target.did)
-            .map_err(PdsSpaceSyncError::Store)?;
-        let mut seen_cursors = cursor.iter().cloned().collect::<BTreeSet<_>>();
-        let mut staged_ops = 0_usize;
-        for _ in 0..MAX_SYNC_PAGES {
-            let response = reader
-                .list_page(target, cursor.as_deref(), MAX_SPACE_PAGE_OPS)
-                .await
-                .map_err(|error| {
-                    if matches!(error, SpaceHostError::Request { status: 401, .. }) {
-                        self.credentials.invalidate(&target.boundary, &credential);
-                    }
-                    PdsSpaceSyncError::Host(error)
-                })?;
-            staged_ops = staged_ops.saturating_add(response.page.ops.len());
-            if staged_ops > MAX_SYNC_OPS {
-                return Err(PdsSpaceSyncError::OperationLimit);
-            }
-            let terminal = response.page.next_cursor.is_none();
-            let next_cursor = response.page.next_cursor.clone();
-            if let Some(next_cursor) = &next_cursor
-                && !seen_cursors.insert(next_cursor.clone())
-            {
-                return Err(PdsSpaceSyncError::CursorStalled);
-            }
-            let commit = response.commit;
-            let prepared = lifecycle
-                .pds_space_target_at_generation(
-                    target.space_uri.clone(),
-                    target.boundary.clone(),
-                    target.did.clone(),
-                    target.generation,
-                )
-                .map_err(PdsSpaceSyncError::Target)
-                .and_then(|target| {
-                    prepare_space_page(target, response.page, observed_at)
-                        .map_err(PdsSpaceSyncError::Stage)
-                })?;
-            if let Err(error) = lifecycle.stage_pds_space_page(prepared) {
-                if matches!(
-                    error,
-                    SpaceSyncError::Store(
-                        StoreError::SpaceStageLimit | StoreError::ExpiredSpaceStage
-                    )
-                ) {
-                    lifecycle
-                        .discard_pds_space_stage(&target.boundary, &target.space_uri, &target.did)
-                        .map_err(PdsSpaceSyncError::Store)?;
-                    if matches!(error, SpaceSyncError::Store(StoreError::ExpiredSpaceStage)) {
-                        eprintln!("event=space_stage_expired rejected_targets=1");
-                    } else {
-                        eprintln!("event=space_stage_limit rejected_targets=1");
-                    }
-                }
-                return Err(PdsSpaceSyncError::Stage(error));
-            }
-            if !terminal {
-                cursor = next_cursor;
-                continue;
-            }
-            let verification = self
-                .commits
-                .verify(
-                    &target.space_uri,
-                    &target.did,
-                    commit.as_ref().map(|commit| commit.as_value()),
-                )
-                .await;
-            return match verification {
-                CommitVerification::Verified => {
-                    let promotion_observed_at = (self.promotion_clock)();
-                    if let Err(error) = lifecycle.promote_pds_space_stage_at_generation(
-                        &target.boundary,
-                        &target.space_uri,
-                        &target.did,
-                        retained_at,
-                        &promotion_observed_at,
-                        target.generation,
-                    ) {
-                        if matches!(
-                            error,
-                            StoreError::SpaceStageLimit | StoreError::ExpiredSpaceStage
-                        ) {
-                            lifecycle
-                                .discard_pds_space_stage(
-                                    &target.boundary,
-                                    &target.space_uri,
-                                    &target.did,
-                                )
-                                .map_err(PdsSpaceSyncError::Store)?;
-                        }
-                        if matches!(
-                            error,
-                            StoreError::SpaceStageLimit
-                                | StoreError::ExpiredSpaceStage
-                                | StoreError::SpacePromotionLimit
-                        ) {
-                            eprintln!("event=space_stage_promotion_limit rejected_targets=1");
-                        }
-                        return Err(PdsSpaceSyncError::Store(error));
-                    }
-                    Ok(PdsSpaceSyncOutcome::Promoted)
-                }
-                CommitVerification::DeferredKeyResolution => {
-                    Ok(PdsSpaceSyncOutcome::DeferredKeyResolution)
-                }
-                CommitVerification::Rejected(failure) => {
-                    eprintln!("event=pds_space_commit_rejected reason={failure:?}");
-                    lifecycle
-                        .discard_pds_space_stage(&target.boundary, &target.space_uri, &target.did)
-                        .map_err(PdsSpaceSyncError::Store)?;
-                    Ok(PdsSpaceSyncOutcome::RejectedCommit)
-                }
-            };
+    ) -> VerifiedSyncOutcome {
+        let deadline = self.clock.now() + self.limits.deadline;
+        let _lease = match tokio::time::timeout_at(deadline, self.lock_target(target)).await {
+            Ok(Ok(lease)) => lease,
+            Ok(Err(reason)) => return VerifiedSyncOutcome::Failed(reason),
+            Err(_) => return VerifiedSyncOutcome::Failed(FailureReason::Deadline),
+        };
+        let cycle = Cycle {
+            synchronizer: self,
+            lifecycle,
+            target,
+            retained_at,
+            deadline,
+            budget: ValueBudget::with_limit(self.limits.values),
+            store_target: VerifiedSpaceTarget {
+                boundary: target.boundary.clone(),
+                space_uri: target.space_uri.clone(),
+                actor_did: target.did.clone(),
+                host: target.host.clone(),
+                generation: target.generation,
+            },
+        };
+        match tokio::time::timeout_at(deadline, cycle.run()).await {
+            Ok(outcome) => outcome,
+            Err(_) => VerifiedSyncOutcome::Failed(FailureReason::Deadline),
         }
-        Err(PdsSpaceSyncError::PageLimit)
     }
 
-    async fn lock_target(&self, target: &PdsPollTarget) -> Result<TargetLease, PdsSpaceSyncError> {
-        let key = format!("{}\0{}\0{}", target.boundary, target.space_uri, target.did);
+    fn target_key(target: &PdsPollTarget) -> String {
+        format!("{}\0{}\0{}", target.boundary, target.space_uri, target.did)
+    }
+
+    async fn lock_target(&self, target: &PdsPollTarget) -> Result<TargetLease, FailureReason> {
+        let key = Self::target_key(target);
         let lock = {
             let mut locks = self.target_locks.lock().expect("PDS target locks poisoned");
             if let Some(lock) = locks.get(&key) {
@@ -325,7 +465,7 @@ impl PdsSpaceSynchronizer {
                 Arc::clone(lock)
             } else {
                 if locks.len() == MAX_TARGET_LOCKS {
-                    return Err(PdsSpaceSyncError::TargetCapacity);
+                    return Err(FailureReason::TargetCapacity);
                 }
                 let lock = Arc::new(TargetLock {
                     mutex: Arc::new(tokio::sync::Mutex::new(())),
@@ -344,831 +484,454 @@ impl PdsSpaceSynchronizer {
         lease.guard = Some(Arc::clone(&lease.lock.mutex).lock_owned().await);
         Ok(lease)
     }
+
+    fn cooling_down(&self, key: &str) -> bool {
+        let now = self.clock.now();
+        self.cooldowns
+            .lock()
+            .expect("replacement cooldowns poisoned")
+            .get(key)
+            .is_some_and(|until| *until > now)
+    }
+
+    // The map is bounded like the target locks, and an entry is never dropped
+    // before it ends: only expired entries make room, and with none to make, a
+    // target that would need a new entry is given no replacement.
+    fn has_room_for_a_cooldown(&self) -> bool {
+        let now = self.clock.now();
+        let mut cooldowns = self
+            .cooldowns
+            .lock()
+            .expect("replacement cooldowns poisoned");
+        cooldowns.retain(|_, until| *until > now);
+        cooldowns.len() < self.limits.cooldown_capacity
+    }
+
+    fn start_cooldown(&self, key: String) {
+        let now = self.clock.now();
+        self.cooldowns
+            .lock()
+            .expect("replacement cooldowns poisoned")
+            .insert(key, now + self.limits.cooldown);
+    }
+
+    #[cfg(test)]
+    fn with_limits(mut self, limits: SyncLimits) -> Self {
+        self.limits = limits;
+        self
+    }
 }
 
-fn current_utc_millis() -> String {
-    let now = time::OffsetDateTime::now_utc();
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-        now.year(),
-        u8::from(now.month()),
-        now.day(),
-        now.hour(),
-        now.minute(),
-        now.second(),
-        now.millisecond()
-    )
+struct Cycle<'a> {
+    synchronizer: &'a PdsSpaceSynchronizer,
+    lifecycle: &'a ControlLifecycle,
+    target: &'a PdsPollTarget,
+    retained_at: &'a str,
+    deadline: Instant,
+    budget: ValueBudget,
+    store_target: VerifiedSpaceTarget,
+}
+
+impl Cycle<'_> {
+    async fn run(&self) -> VerifiedSyncOutcome {
+        let credential = match self
+            .synchronizer
+            .credentials
+            .get(&self.target.boundary)
+            .await
+        {
+            Ok(credential) => credential,
+            Err(_) => return VerifiedSyncOutcome::Failed(FailureReason::Credential),
+        };
+        let reader = match self
+            .synchronizer
+            .readers
+            .connect(self.target, Arc::clone(&credential))
+            .await
+        {
+            Ok(reader) => reader,
+            Err(error) => {
+                self.forget_rejected(&credential, &error);
+                return VerifiedSyncOutcome::Failed(host_refusal_reason(&error));
+            }
+        };
+        let base = match self.lifecycle.verified_space_base_at_generation(
+            &self.target.boundary,
+            &self.target.space_uri,
+            &self.target.did,
+            self.target.generation,
+        ) {
+            Ok(base) => base,
+            Err(error) => return store_error_ends_poll(&error),
+        };
+        // A member with no base has nothing to build on, and the store fences a
+        // promotion on a base from another host or generation, so neither reads
+        // a page.
+        let Some(base) = base.filter(|base| {
+            base.host == self.target.host && base.generation == self.target.generation
+        }) else {
+            return self.replace(reader.as_ref(), &credential).await;
+        };
+        match self.poll(reader.as_ref(), &credential, &base).await {
+            PollEnd::Finished(outcome) => outcome,
+            PollEnd::NeedsReplacement => self.replace(reader.as_ref(), &credential).await,
+        }
+    }
+
+    // A 401 means the credential in hand was refused, so the next cycle must
+    // mint a new one.
+    fn forget_rejected(&self, credential: &Arc<HeldSpaceCredential>, error: &SpaceHostError) {
+        if matches!(
+            error,
+            SpaceHostError::Request {
+                status: UNAUTHORIZED_STATUS,
+                ..
+            }
+        ) {
+            self.synchronizer
+                .credentials
+                .invalidate(&self.target.boundary, credential);
+        }
+    }
+
+    async fn poll(
+        &self,
+        reader: &dyn VerifiedSpaceReader,
+        credential: &Arc<HeldSpaceCredential>,
+        base: &VerifiedSpaceBase,
+    ) -> PollEnd {
+        let limits = self.synchronizer.limits;
+        let mut ops: Vec<RepoOp> = Vec::new();
+        let mut cursor: Option<String> = None;
+        let mut seen_cursors = BTreeSet::new();
+        let mut body_bytes = 0_usize;
+        let mut commit: Option<MacVerifiedCommit> = None;
+        for _ in 0..limits.pages {
+            let request = PageRequest {
+                since: Some(&base.rev),
+                cursor: cursor.as_deref(),
+                limit: MAX_SPACE_PAGE_OPS,
+            };
+            let page = match reader.read_page(self.target, request, self.deadline).await {
+                Ok(page) => page,
+                Err(error) => {
+                    self.note_read_error(credential, &error);
+                    return match page_failure(error) {
+                        PageFailure::Replace => PollEnd::NeedsReplacement,
+                        PageFailure::Read(failure) => PollEnd::Finished(self.end_read(failure)),
+                    };
+                }
+            };
+            body_bytes = body_bytes.saturating_add(page.body().len());
+            // Too much to read for a poll is recovered from the whole repo.
+            if body_bytes > limits.body_bytes {
+                return PollEnd::NeedsReplacement;
+            }
+            let decoded = match decode_op_page(page.body(), &self.budget) {
+                Ok(decoded) => decoded,
+                Err(OpPageRefusal::OverBudget) => {
+                    return PollEnd::Finished(VerifiedSyncOutcome::Failed(
+                        FailureReason::RepoOverBudget,
+                    ));
+                }
+                Err(_) => {
+                    return PollEnd::Finished(VerifiedSyncOutcome::Failed(FailureReason::Page));
+                }
+            };
+            let next_cursor = decoded.cursor().map(str::to_owned);
+            if ops.len().saturating_add(decoded.ops().len()) > limits.ops {
+                return PollEnd::NeedsReplacement;
+            }
+            ops.extend(decoded.into_ops());
+            let Some(next_cursor) = next_cursor else {
+                commit = Some(page.commit().clone());
+                break;
+            };
+            if !seen_cursors.insert(next_cursor.clone()) {
+                return PollEnd::Finished(VerifiedSyncOutcome::Failed(
+                    FailureReason::CursorStalled,
+                ));
+            }
+            cursor = Some(next_cursor);
+        }
+        // A page with a cursor is never the last, so running out of pages is
+        // running out of the poll's page budget.
+        let Some(commit) = commit else {
+            return PollEnd::NeedsReplacement;
+        };
+        self.promote(base, ops, &commit)
+    }
+
+    fn promote(
+        &self,
+        base: &VerifiedSpaceBase,
+        ops: Vec<RepoOp>,
+        commit: &MacVerifiedCommit,
+    ) -> PollEnd {
+        // A host whose commit is older than the base is recovered from the whole
+        // repo whatever its digest: a replacement has no revision floor.
+        if commit.rev() < base.rev.as_str() {
+            return PollEnd::NeedsReplacement;
+        }
+        let change_set = match ChangeSet::apply(base.state.clone(), &ops) {
+            Ok(change_set) => change_set,
+            // The host's ops do not follow what is held.
+            Err(ChangeSetRefusal::PreviousMismatch) => return PollEnd::NeedsReplacement,
+            Err(_) => {
+                return PollEnd::Finished(VerifiedSyncOutcome::Failed(
+                    FailureReason::RecordRefused,
+                ));
+            }
+        };
+        // Nothing can be projected from a post, like or repost that arrived
+        // without its record; only the whole repo has it.
+        if change_set
+            .changes()
+            .iter()
+            .any(|change| change.value_missing())
+        {
+            return PollEnd::NeedsReplacement;
+        }
+        // An old `since` after the host dropped its oplog returns only later
+        // ops with no error, so a gap shows only here.
+        let Ok(proven) = change_set.prove(commit) else {
+            return PollEnd::NeedsReplacement;
+        };
+        // The bounds come after the digest so that ops which do not give the
+        // commit's state are recovered from the whole repo whatever their
+        // revisions.
+        if !ops_within_revisions(&ops, &base.rev, commit.rev()) {
+            return PollEnd::Finished(VerifiedSyncOutcome::Failed(FailureReason::Page));
+        }
+        if proven.change_set().changes().is_empty() && commit.rev() == base.rev {
+            return PollEnd::Finished(VerifiedSyncOutcome::Unchanged);
+        }
+        if self.past_deadline() {
+            return PollEnd::Finished(VerifiedSyncOutcome::Failed(FailureReason::Deadline));
+        }
+        match self.lifecycle.promote_verified_space_repo(
+            &self.store_target,
+            Some(&base.rev),
+            commit,
+            proven.change_set(),
+            self.retained_at,
+            &self.synchronizer.clock.utc_millis(),
+        ) {
+            Ok(()) => PollEnd::Finished(VerifiedSyncOutcome::Promoted),
+            Err(error) => promotion_refusal(&error),
+        }
+    }
+
+    async fn replace(
+        &self,
+        reader: &dyn VerifiedSpaceReader,
+        credential: &Arc<HeldSpaceCredential>,
+    ) -> VerifiedSyncOutcome {
+        let key = PdsSpaceSynchronizer::target_key(self.target);
+        if self.synchronizer.cooling_down(&key) {
+            return VerifiedSyncOutcome::Failed(FailureReason::ReplacementCooldown);
+        }
+        // One whole-repo read at a time across targets bounds what the process
+        // holds for recoveries.
+        let Ok(_slot) = self.synchronizer.replacement_slot.acquire().await else {
+            return VerifiedSyncOutcome::Failed(FailureReason::Other);
+        };
+        // Only a replacement holding the slot starts a cooldown, so room found
+        // here is still there if this one fails; a replacement that could not
+        // be cooled down after a failure is not begun.
+        if !self.synchronizer.has_room_for_a_cooldown() {
+            return VerifiedSyncOutcome::Failed(FailureReason::CooldownCapacity);
+        }
+        let mut attempt = ReplacementAttempt {
+            synchronizer: self.synchronizer,
+            key: Some(key),
+        };
+        let outcome = self.replace_in_slot(reader, credential).await;
+        // An attempt that does not get to the end, a deadline included, counts
+        // as failed too: the guard starts the cooldown when it is dropped armed.
+        if !matches!(outcome, VerifiedSyncOutcome::Failed(_)) {
+            attempt.key = None;
+        }
+        outcome
+    }
+
+    async fn replace_in_slot(
+        &self,
+        reader: &dyn VerifiedSpaceReader,
+        credential: &Arc<HeldSpaceCredential>,
+    ) -> VerifiedSyncOutcome {
+        let archive = match reader
+            .read_archive(self.target, self.deadline, &self.budget)
+            .await
+        {
+            Ok(archive) => archive,
+            Err(error) => {
+                self.note_read_error(credential, &error);
+                return self.end_read(archive_failure(error));
+            }
+        };
+        let (commit, records) = archive.into_parts();
+        if self.past_deadline() {
+            return VerifiedSyncOutcome::Failed(FailureReason::Deadline);
+        }
+        match self.lifecycle.replace_verified_space_repo(
+            &self.store_target,
+            &commit,
+            &records,
+            self.retained_at,
+            &self.synchronizer.clock.utc_millis(),
+        ) {
+            Ok(()) => VerifiedSyncOutcome::Replaced,
+            Err(error) => replacement_refusal(&error),
+        }
+    }
+
+    // The host said the repo does not exist: only the member's state in this
+    // space is cleared, and only under the generation the cycle started with.
+    fn clear(&self) -> VerifiedSyncOutcome {
+        if self.past_deadline() {
+            return VerifiedSyncOutcome::Failed(FailureReason::Deadline);
+        }
+        match self
+            .lifecycle
+            .clear_verified_space_repo(&self.store_target, &self.synchronizer.clock.utc_millis())
+        {
+            Ok(()) => VerifiedSyncOutcome::Cleared,
+            Err(error) => store_error_ends_poll(&error),
+        }
+    }
+
+    // The timeout around the cycle cannot stop a store call, which runs to its
+    // end once begun, so this check stops a write from being started after the
+    // deadline. A write that passed it waits for the store's locks, and the
+    // process locks have no time bound; it then runs as one atomic write, and
+    // the cycle reports what it did.
+    fn past_deadline(&self) -> bool {
+        self.synchronizer.clock.now() >= self.deadline
+    }
+
+    fn note_read_error(
+        &self,
+        credential: &Arc<HeldSpaceCredential>,
+        error: &AuthenticatedReadError,
+    ) {
+        if let AuthenticatedReadError::Host(host) = error {
+            self.forget_rejected(credential, host);
+        }
+    }
+
+    fn end_read(&self, failure: ReadFailure) -> VerifiedSyncOutcome {
+        match failure {
+            ReadFailure::Clear => self.clear(),
+            ReadFailure::Deferred => VerifiedSyncOutcome::Deferred,
+            ReadFailure::Failed(reason) => VerifiedSyncOutcome::Failed(reason),
+        }
+    }
+}
+
+/// Starts the replacement cooldown for its target when dropped armed.
+struct ReplacementAttempt<'a> {
+    synchronizer: &'a PdsSpaceSynchronizer,
+    key: Option<String>,
+}
+
+impl Drop for ReplacementAttempt<'_> {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.take() {
+            self.synchronizer.start_cooldown(key);
+        }
+    }
+}
+
+fn page_failure(error: AuthenticatedReadError) -> PageFailure {
+    match &error {
+        AuthenticatedReadError::Host(SpaceHostError::Request {
+            status: XRPC_ERROR_STATUS,
+            code: Some(name),
+        }) if name == INVALID_CURSOR => PageFailure::Replace,
+        // More than a poll may read is recovered from the whole repo.
+        AuthenticatedReadError::Host(SpaceHostError::ResponseTooLarge) => PageFailure::Replace,
+        _ => PageFailure::Read(read_failure(error)),
+    }
+}
+
+fn archive_failure(error: AuthenticatedReadError) -> ReadFailure {
+    match &error {
+        AuthenticatedReadError::Host(SpaceHostError::ResponseTooLarge) => {
+            ReadFailure::Failed(FailureReason::RepoOverBudget)
+        }
+        _ => read_failure(error),
+    }
+}
+
+fn read_failure(error: AuthenticatedReadError) -> ReadFailure {
+    match error {
+        AuthenticatedReadError::KemKeyUnavailable => ReadFailure::Deferred,
+        AuthenticatedReadError::KemKeyInvalid => ReadFailure::Failed(FailureReason::KemKey),
+        AuthenticatedReadError::Host(SpaceHostError::Request {
+            status: XRPC_ERROR_STATUS,
+            code: Some(name),
+        }) if name == REPO_NOT_FOUND => ReadFailure::Clear,
+        AuthenticatedReadError::Host(host) => ReadFailure::Failed(host_refusal_reason(&host)),
+        AuthenticatedReadError::Authentication(_) => ReadFailure::Failed(FailureReason::Mac),
+        AuthenticatedReadError::Archive(ArchiveRefusal::LimitExceeded(_))
+        | AuthenticatedReadError::OverBudget => ReadFailure::Failed(FailureReason::RepoOverBudget),
+        AuthenticatedReadError::Archive(_) | AuthenticatedReadError::ArchiveOrder(_) => {
+            ReadFailure::Failed(FailureReason::Archive)
+        }
+        AuthenticatedReadError::ArchiveRecord(_) => {
+            ReadFailure::Failed(FailureReason::RecordRefused)
+        }
+        AuthenticatedReadError::DeadlineExceeded => ReadFailure::Failed(FailureReason::Deadline),
+    }
+}
+
+// What a refused promotion asks for: a stored host or generation that is not
+// the target's, a record that does not follow the stored one and a digest that
+// is not the commit's are all recovered from the whole repo.
+fn promotion_refusal(error: &StoreError) -> PollEnd {
+    match error {
+        StoreError::SpaceRepoFenced
+        | StoreError::SpaceRepoPreviousMismatch
+        | StoreError::SpaceRepoDigestMismatch => PollEnd::NeedsReplacement,
+        other => PollEnd::Finished(store_error_ends_poll(other)),
+    }
+}
+
+// A refused replacement has nowhere further to recover to. The store checks
+// the digest itself, so a mismatch here is the archive's, not the poll's; and
+// it refuses the value of a record it cannot hold to its CID.
+fn replacement_refusal(error: &StoreError) -> VerifiedSyncOutcome {
+    match error {
+        StoreError::SpaceRepoDigestMismatch => VerifiedSyncOutcome::Failed(FailureReason::Digest),
+        StoreError::SpaceRepoInvalid => VerifiedSyncOutcome::Failed(FailureReason::RecordRefused),
+        other => store_error_ends_poll(other),
+    }
+}
+
+// A store refusal that does not name a recovery: the member left or the base
+// moved, which the next cycle starts over from, or a failure.
+fn store_error_ends_poll(error: &StoreError) -> VerifiedSyncOutcome {
+    match error {
+        StoreError::UnauthorizedSpaceMember | StoreError::SpaceRepoBaseMoved => {
+            VerifiedSyncOutcome::Retry
+        }
+        StoreError::SpaceRepoOverBudget => {
+            VerifiedSyncOutcome::Failed(FailureReason::RepoOverBudget)
+        }
+        _ => VerifiedSyncOutcome::Failed(FailureReason::Store),
+    }
+}
+
+// Every op is above the base, none is above the commit the poll ends on, and
+// none is below the one before it.
+fn ops_within_revisions(ops: &[RepoOp], base_rev: &str, commit_rev: &str) -> bool {
+    ops.iter()
+        .all(|op| op.rev() > base_rev && op.rev() <= commit_rev)
+        && ops.windows(2).all(|pair| pair[0].rev() <= pair[1].rev())
 }
 
 #[cfg(test)]
-mod tests {
-    use std::{
-        collections::VecDeque,
-        sync::{Arc, Mutex},
-    };
-
-    use async_trait::async_trait;
-    use serde_json::json;
-    use tokio::sync::oneshot;
-
-    use crate::{
-        credential_issuer::{
-            CredentialExpiry, CredentialMintError, IssuedSpaceCredential, SpaceCredentialIssuer,
-        },
-        lifecycle::ControlLifecycle,
-        membership_reconciler::PdsPollTarget,
-        readiness::FeedReadinessGate,
-        service::ProjectionReader,
-        space_commit::CommitVerification,
-        space_host::{SpaceHostError, SpaceHostPage},
-        space_http_signature::SpaceHttpSignatureKey,
-        space_sync::{POST_COLLECTION, SpacePage, SpaceRepoOp},
-        store::{EncryptedStore, PdsSpaceMember, StorageKey},
-    };
-
-    use super::{
-        PdsSpaceSyncError, PdsSpaceSyncOutcome, PdsSpaceSynchronizer, SpaceCommitVerificationPort,
-        SpacePageReader, SpacePageSource,
-    };
-
-    const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
-    const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
-    const DID: &str = "did:plc:fayevalentine";
-    const NOW: &str = "2026-09-22T00:00:00.000Z";
-
-    struct Issuer;
-
-    #[async_trait]
-    impl SpaceCredentialIssuer for Issuer {
-        async fn mint(
-            &self,
-            _: &str,
-            _: &SpaceHttpSignatureKey,
-            _: u64,
-        ) -> Result<IssuedSpaceCredential, CredentialMintError> {
-            Ok(IssuedSpaceCredential {
-                credential: "header.payload.signature".to_owned(),
-                expires_at: CredentialExpiry::from_epoch_seconds(10_000),
-            })
-        }
-    }
-
-    struct Pages(Arc<Mutex<VecDeque<SpaceHostPage>>>);
-
-    #[async_trait]
-    impl SpacePageReader for Pages {
-        async fn list_page(
-            &self,
-            _: &PdsPollTarget,
-            _: Option<&str>,
-            _: usize,
-        ) -> Result<SpaceHostPage, SpaceHostError> {
-            self.0
-                .lock()
-                .unwrap()
-                .pop_front()
-                .ok_or(SpaceHostError::Unreachable)
-        }
-    }
-
-    #[async_trait]
-    impl SpacePageSource for Pages {
-        async fn connect(
-            &self,
-            _: &PdsPollTarget,
-            _: Arc<crate::space_credential::HeldSpaceCredential>,
-        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
-            Ok(Arc::new(Self(Arc::clone(&self.0))))
-        }
-    }
-
-    struct Decision(CommitVerification);
-
-    #[async_trait]
-    impl SpaceCommitVerificationPort for Decision {
-        async fn verify(
-            &self,
-            _: &str,
-            _: &str,
-            _: Option<&serde_json::Value>,
-        ) -> CommitVerification {
-            self.0.clone()
-        }
-    }
-
-    #[derive(Clone)]
-    struct PausedPages(Arc<PausedPageState>);
-
-    struct PausedPageState {
-        page: Mutex<Option<SpaceHostPage>>,
-        started: Mutex<Option<oneshot::Sender<()>>>,
-        release: Mutex<Option<oneshot::Receiver<()>>>,
-    }
-
-    #[async_trait]
-    impl SpacePageSource for PausedPages {
-        async fn connect(
-            &self,
-            _: &PdsPollTarget,
-            _: Arc<crate::space_credential::HeldSpaceCredential>,
-        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
-            Ok(Arc::new(self.clone()))
-        }
-    }
-
-    #[async_trait]
-    impl SpacePageReader for PausedPages {
-        async fn list_page(
-            &self,
-            _: &PdsPollTarget,
-            _: Option<&str>,
-            _: usize,
-        ) -> Result<SpaceHostPage, SpaceHostError> {
-            let release = self
-                .0
-                .release
-                .lock()
-                .unwrap()
-                .take()
-                .ok_or(SpaceHostError::Unreachable)?;
-            if let Some(started) = self.0.started.lock().unwrap().take() {
-                let _ = started.send(());
-            }
-            release.await.map_err(|_| SpaceHostError::Unreachable)?;
-            self.0
-                .page
-                .lock()
-                .unwrap()
-                .take()
-                .ok_or(SpaceHostError::Unreachable)
-        }
-    }
-
-    struct PausedDecision {
-        started: Mutex<Option<oneshot::Sender<()>>>,
-        release: Mutex<Option<oneshot::Receiver<()>>>,
-    }
-
-    #[async_trait]
-    impl SpaceCommitVerificationPort for PausedDecision {
-        async fn verify(
-            &self,
-            _: &str,
-            _: &str,
-            _: Option<&serde_json::Value>,
-        ) -> CommitVerification {
-            let release = self.release.lock().unwrap().take().unwrap();
-            if let Some(started) = self.started.lock().unwrap().take() {
-                let _ = started.send(());
-            }
-            let _ = release.await;
-            CommitVerification::Verified
-        }
-    }
-
-    fn fixed_now() -> u64 {
-        1_000
-    }
-
-    fn target() -> PdsPollTarget {
-        PdsPollTarget {
-            space_uri: SPACE.to_owned(),
-            boundary: BOUNDARY.to_owned(),
-            did: DID.to_owned(),
-            host: "https://pds.example.test/".to_owned(),
-            generation: 0,
-        }
-    }
-
-    fn page(cursor: Option<&str>) -> SpaceHostPage {
-        SpaceHostPage {
-            page: SpacePage {
-                ops: vec![SpaceRepoOp {
-                    collection: POST_COLLECTION.to_owned(),
-                    rkey: "see-you".to_owned(),
-                    cid: Some(
-                        "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
-                    ),
-                    value: Some(json!({ "$type": POST_COLLECTION, "createdAt": NOW })),
-                }],
-                next_cursor: cursor.map(str::to_owned),
-            },
-            commit: None,
-        }
-    }
-
-    fn page_with_ops(cursor: Option<&str>, count: usize) -> SpaceHostPage {
-        let mut page = page(cursor);
-        page.page.ops = (0..count)
-            .map(|index| SpaceRepoOp {
-                collection: POST_COLLECTION.to_owned(),
-                rkey: format!("post-{index}"),
-                cid: Some("bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned()),
-                value: Some(json!({ "$type": POST_COLLECTION, "createdAt": NOW })),
-            })
-            .collect();
-        page
-    }
-
-    fn lifecycle() -> ControlLifecycle {
-        let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
-        store
-            .replace_pds_space_members(
-                BOUNDARY,
-                vec![PdsSpaceMember {
-                    did: DID.to_owned(),
-                }],
-                NOW,
-            )
-            .unwrap();
-        ControlLifecycle::new(
-            ProjectionReader::new(store),
-            Arc::new(Mutex::new(FeedReadinessGate::default())),
-        )
-    }
-
-    fn lifecycle_with_one_second_retention() -> ControlLifecycle {
-        let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
-        store
-            .replace_pds_space_members(
-                BOUNDARY,
-                vec![PdsSpaceMember {
-                    did: DID.to_owned(),
-                }],
-                NOW,
-            )
-            .unwrap();
-        store
-            .compact_projection(NOW, "2026-09-22T00:00:01.000Z", 16_000, 128)
-            .unwrap();
-        ControlLifecycle::new(
-            ProjectionReader::new(store),
-            Arc::new(Mutex::new(FeedReadinessGate::default())),
-        )
-    }
-
-    fn synchronizer(
-        pages: Vec<SpaceHostPage>,
-        decision: CommitVerification,
-    ) -> PdsSpaceSynchronizer {
-        synchronizer_with(
-            Arc::new(Pages(Arc::new(Mutex::new(pages.into())))),
-            Arc::new(Decision(decision)),
-        )
-    }
-
-    fn synchronizer_with(
-        pages: Arc<dyn SpacePageSource>,
-        commits: Arc<dyn SpaceCommitVerificationPort>,
-    ) -> PdsSpaceSynchronizer {
-        let mut synchronizer = PdsSpaceSynchronizer::new(
-            pages,
-            Arc::new(
-                crate::credential_manager::SpaceCredentialManager::with_clock(
-                    Arc::new(Issuer),
-                    fixed_now,
-                ),
-            ),
-            commits,
-        );
-        synchronizer.promotion_clock = || NOW.to_owned();
-        synchronizer
-    }
-
-    fn revoke_and_readd(lifecycle: &ControlLifecycle) {
-        lifecycle
-            .replace_pds_space_members(BOUNDARY, Vec::new(), NOW)
-            .unwrap();
-        lifecycle
-            .replace_pds_space_members(
-                BOUNDARY,
-                vec![PdsSpaceMember {
-                    did: DID.to_owned(),
-                }],
-                NOW,
-            )
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn late_page_cannot_stage_after_remove_and_readd() {
-        let lifecycle = Arc::new(lifecycle());
-        let (started_tx, started_rx) = oneshot::channel();
-        let (release_tx, release_rx) = oneshot::channel();
-        let pages = PausedPages(Arc::new(PausedPageState {
-            page: Mutex::new(Some(page(None))),
-            started: Mutex::new(Some(started_tx)),
-            release: Mutex::new(Some(release_rx)),
-        }));
-        let sync = synchronizer_with(
-            Arc::new(pages),
-            Arc::new(Decision(CommitVerification::Verified)),
-        );
-        let lifecycle_task = Arc::clone(&lifecycle);
-        let task =
-            tokio::spawn(
-                async move { sync.sync_target(&lifecycle_task, &target(), NOW, NOW).await },
-            );
-        started_rx.await.unwrap();
-        revoke_and_readd(&lifecycle);
-        release_tx.send(()).unwrap();
-        assert!(matches!(
-            task.await.unwrap(),
-            Err(PdsSpaceSyncError::Target(_))
-        ));
-        assert_eq!(
-            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
-            None
-        );
-    }
-
-    #[tokio::test]
-    async fn late_terminal_verification_cannot_promote_after_remove_and_readd() {
-        let lifecycle = Arc::new(lifecycle());
-        let (started_tx, started_rx) = oneshot::channel();
-        let (release_tx, release_rx) = oneshot::channel();
-        let decision = PausedDecision {
-            started: Mutex::new(Some(started_tx)),
-            release: Mutex::new(Some(release_rx)),
-        };
-        let sync = synchronizer_with(
-            Arc::new(Pages(Arc::new(Mutex::new(vec![page(None)].into())))),
-            Arc::new(decision),
-        );
-        let lifecycle_task = Arc::clone(&lifecycle);
-        let task =
-            tokio::spawn(
-                async move { sync.sync_target(&lifecycle_task, &target(), NOW, NOW).await },
-            );
-        started_rx.await.unwrap();
-        revoke_and_readd(&lifecycle);
-        release_tx.send(()).unwrap();
-        assert!(matches!(
-            task.await.unwrap(),
-            Err(PdsSpaceSyncError::Store(
-                crate::store::StoreError::UnauthorizedSpaceMember
-            ))
-        ));
-        assert_eq!(
-            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
-            None
-        );
-    }
-
-    #[tokio::test]
-    async fn promotes_only_after_a_verified_terminal_page() {
-        let lifecycle = lifecycle();
-        let synchronizer = synchronizer(
-            vec![page(Some("next")), page(None)],
-            CommitVerification::Verified,
-        );
-        let result = synchronizer
-            .sync_target(&lifecycle, &target(), NOW, "2026-09-23T00:00:00.000Z")
-            .await
-            .unwrap();
-
-        assert_eq!(result, PdsSpaceSyncOutcome::Promoted);
-        assert_eq!(
-            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
-            Some("next".to_owned())
-        );
-        assert!(synchronizer.target_locks.lock().unwrap().is_empty());
-    }
-
-    struct CursorRecordingPages {
-        pages: Arc<Mutex<VecDeque<SpaceHostPage>>>,
-        cursors: Arc<Mutex<Vec<Option<String>>>>,
-    }
-
-    #[async_trait]
-    impl SpacePageSource for CursorRecordingPages {
-        async fn connect(
-            &self,
-            _: &PdsPollTarget,
-            _: Arc<crate::space_credential::HeldSpaceCredential>,
-        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
-            Ok(Arc::new(Self {
-                pages: Arc::clone(&self.pages),
-                cursors: Arc::clone(&self.cursors),
-            }))
-        }
-    }
-
-    #[async_trait]
-    impl SpacePageReader for CursorRecordingPages {
-        async fn list_page(
-            &self,
-            _: &PdsPollTarget,
-            cursor: Option<&str>,
-            _: usize,
-        ) -> Result<SpaceHostPage, SpaceHostError> {
-            self.cursors.lock().unwrap().push(cursor.map(str::to_owned));
-            self.pages
-                .lock()
-                .unwrap()
-                .pop_front()
-                .ok_or(SpaceHostError::Unreachable)
-        }
-    }
-
-    fn raw_connection(path: &std::path::Path) -> rusqlite::Connection {
-        let connection = rusqlite::Connection::open(path).unwrap();
-        connection
-            .execute_batch(&format!("PRAGMA key = \"x'{}'\";", "07".repeat(32)))
-            .unwrap();
-        connection
-    }
-
-    #[tokio::test]
-    async fn the_old_path_stages_and_promotes_on_a_migrated_database_and_writes_no_verified_state()
-    {
-        let path = std::env::temp_dir().join(format!(
-            "stratos-feedgen-ng-pds-sync-migrated-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&path);
-        drop(EncryptedStore::open(&path, StorageKey::from_bytes([7; 32])).unwrap());
-        // An older build's file: the two verified-state tables do not exist yet
-        // and a cursor for this very target is on record.
-        let older_build = raw_connection(&path);
-        older_build
-            .execute_batch(&format!(
-                "DROP TABLE space_repo_record; DROP TABLE space_repo_state;
-                 DELETE FROM schema_migration WHERE version = 10;
-                 PRAGMA user_version = 9;
-                 INSERT INTO space_cursor (space_uri, did, boundary, cursor, updated_at)
-                   VALUES ('{SPACE}', '{DID}', '{BOUNDARY}', 'stale-cursor', '{NOW}');"
-            ))
-            .unwrap();
-        drop(older_build);
-
-        let mut store = EncryptedStore::open(&path, StorageKey::from_bytes([7; 32])).unwrap();
-        store
-            .replace_pds_space_members(
-                BOUNDARY,
-                vec![PdsSpaceMember {
-                    did: DID.to_owned(),
-                }],
-                NOW,
-            )
-            .unwrap();
-        let lifecycle = ControlLifecycle::new(
-            ProjectionReader::new(store),
-            Arc::new(Mutex::new(FeedReadinessGate::default())),
-        );
-        let cursors = Arc::new(Mutex::new(Vec::new()));
-        let source = CursorRecordingPages {
-            pages: Arc::new(Mutex::new(vec![page(Some("next")), page(None)].into())),
-            cursors: Arc::clone(&cursors),
-        };
-        let synchronizer = synchronizer_with(
-            Arc::new(source),
-            Arc::new(Decision(CommitVerification::Verified)),
-        );
-
-        let outcome = synchronizer
-            .sync_target(&lifecycle, &target(), NOW, "2026-09-23T00:00:00.000Z")
-            .await
-            .unwrap();
-
-        assert_eq!(outcome, PdsSpaceSyncOutcome::Promoted);
-        assert_eq!(
-            *cursors.lock().unwrap(),
-            vec![None, Some("next".to_owned())],
-            "the purged cursor reads the member from the first page"
-        );
-        drop(synchronizer);
-        drop(lifecycle);
-        let reopened = EncryptedStore::open(&path, StorageKey::from_bytes([7; 32])).unwrap();
-        let served = reopened
-            .list_posts_by_boundary(BOUNDARY, None, 10, "2026-09-22T12:00:00.000Z")
-            .unwrap();
-        let expected_uri = format!("{SPACE}/{DID}/zone.stratos.feed.post/see-you");
-        assert_eq!(
-            served
-                .posts
-                .iter()
-                .map(|post| post.uri.as_str())
-                .collect::<Vec<_>>(),
-            vec![expected_uri.as_str()]
-        );
-        drop(reopened);
-        let inspected = raw_connection(&path);
-        for table in ["space_repo_state", "space_repo_record"] {
-            let rows: i64 = inspected
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                    row.get(0)
-                })
-                .unwrap();
-            assert_eq!(rows, 0, "{table}");
-        }
-        drop(inspected);
-        std::fs::remove_file(path).unwrap();
-    }
-
-    #[tokio::test]
-    async fn delayed_verification_expires_stage_at_fresh_promotion_time() {
-        let lifecycle = lifecycle_with_one_second_retention();
-        let mut synchronizer = synchronizer(vec![page(None)], CommitVerification::Verified);
-        synchronizer.promotion_clock = || "2026-09-22T00:00:01.500Z".to_owned();
-        let result = synchronizer
-            .sync_target(&lifecycle, &target(), NOW, "2026-09-22T00:00:01.000Z")
-            .await;
-        assert!(matches!(
-            result,
-            Err(PdsSpaceSyncError::Store(
-                crate::store::StoreError::ExpiredSpaceStage
-            ))
-        ));
-        assert_eq!(
-            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
-            None
-        );
-    }
-
-    #[tokio::test]
-    async fn releases_a_target_reservation_when_a_waiting_task_is_aborted() {
-        let synchronizer = Arc::new(synchronizer(Vec::new(), CommitVerification::Verified));
-        let first = synchronizer.lock_target(&target()).await.unwrap();
-        let waiting = {
-            let synchronizer = Arc::clone(&synchronizer);
-            tokio::spawn(async move { synchronizer.lock_target(&target()).await })
-        };
-        let key = format!("{}\0{}\0{}", BOUNDARY, SPACE, DID);
-        let mut reserved = false;
-        for _ in 0..10 {
-            if synchronizer
-                .target_locks
-                .lock()
-                .unwrap()
-                .get(&key)
-                .is_some_and(|lock| lock.users.load(std::sync::atomic::Ordering::Acquire) == 2)
-            {
-                reserved = true;
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-        assert!(reserved);
-        waiting.abort();
-        let _ = waiting.await;
-        drop(first);
-
-        assert!(synchronizer.target_locks.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn discards_unverified_pages_after_a_rejected_terminal_commit() {
-        let lifecycle = lifecycle();
-        let result = synchronizer(
-            vec![page(Some("next")), page(None)],
-            CommitVerification::Rejected(
-                crate::space_commit::CommitVerificationFailure::MacMismatch,
-            ),
-        )
-        .sync_target(&lifecycle, &target(), NOW, "2026-09-23T00:00:00.000Z")
-        .await
-        .unwrap();
-
-        assert_eq!(result, PdsSpaceSyncOutcome::RejectedCommit);
-        assert_eq!(
-            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
-            None
-        );
-    }
-
-    #[tokio::test]
-    async fn preserves_staged_pages_when_identity_resolution_is_transient() {
-        let lifecycle = lifecycle();
-        let result = synchronizer(
-            vec![page(Some("next")), page(None)],
-            CommitVerification::DeferredKeyResolution,
-        )
-        .sync_target(&lifecycle, &target(), NOW, "2026-09-23T00:00:00.000Z")
-        .await
-        .unwrap();
-
-        assert_eq!(result, PdsSpaceSyncOutcome::DeferredKeyResolution);
-        assert_eq!(
-            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
-            Some("next".to_owned())
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_a_repeated_untrusted_cursor_before_staging_it() {
-        let lifecycle = lifecycle();
-        let error = synchronizer(
-            vec![page(Some("loop")), page(Some("loop"))],
-            CommitVerification::Verified,
-        )
-        .sync_target(&lifecycle, &target(), NOW, "2026-09-23T00:00:00.000Z")
-        .await
-        .unwrap_err();
-
-        assert!(matches!(error, PdsSpaceSyncError::CursorStalled));
-    }
-
-    #[tokio::test]
-    async fn bounds_total_operations_before_staging_an_excessive_pass() {
-        let lifecycle = lifecycle();
-        let error = synchronizer(
-            vec![page_with_ops(Some("next"), super::MAX_SYNC_OPS), page(None)],
-            CommitVerification::Verified,
-        )
-        .sync_target(&lifecycle, &target(), NOW, "2026-09-23T00:00:00.000Z")
-        .await
-        .unwrap_err();
-
-        assert!(matches!(error, PdsSpaceSyncError::OperationLimit));
-    }
-    #[derive(Clone, Copy)]
-    enum Denial {
-        Connect(u16),
-        Page(u16),
-    }
-
-    #[async_trait]
-    impl SpacePageSource for Denial {
-        async fn connect(
-            &self,
-            _: &PdsPollTarget,
-            _: Arc<crate::space_credential::HeldSpaceCredential>,
-        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
-            match self {
-                Self::Connect(status) => Err(SpaceHostError::Request {
-                    status: *status,
-                    code: Some("HostDenial".to_owned()),
-                }),
-                Self::Page(_) => Ok(Arc::new(*self)),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl SpacePageReader for Denial {
-        async fn list_page(
-            &self,
-            _: &PdsPollTarget,
-            _: Option<&str>,
-            _: usize,
-        ) -> Result<SpaceHostPage, SpaceHostError> {
-            let Self::Page(status) = self else {
-                panic!("Connect denial must not read pages");
-            };
-            Err(SpaceHostError::Request {
-                status: *status,
-                code: Some("HostDenial".to_owned()),
-            })
-        }
-    }
-
-    #[tokio::test]
-    async fn only_unauthorized_host_errors_invalidate_the_shared_grant() {
-        for denial in [
-            Denial::Connect(401),
-            Denial::Connect(403),
-            Denial::Page(401),
-            Denial::Page(403),
-        ] {
-            let status = match denial {
-                Denial::Connect(status) | Denial::Page(status) => status,
-            };
-            let sync = synchronizer_with(
-                Arc::new(denial),
-                Arc::new(Decision(CommitVerification::Verified)),
-            );
-            let before = sync.credentials.get(BOUNDARY).await.unwrap();
-            let error = sync
-                .sync_target(&lifecycle(), &target(), NOW, NOW)
-                .await
-                .unwrap_err();
-            assert!(matches!(
-                error,
-                PdsSpaceSyncError::Host(SpaceHostError::Request {
-                    status: actual,
-                    code: Some(code),
-                }) if actual == status && code == "HostDenial"
-            ));
-            let after = sync.credentials.get(BOUNDARY).await.unwrap();
-            assert_eq!(Arc::ptr_eq(&before, &after), status == 403);
-            assert_eq!(before.key_id() == after.key_id(), status == 403);
-        }
-    }
-
-    struct NovemberHost;
-
-    #[async_trait]
-    impl SpacePageSource for NovemberHost {
-        async fn connect(
-            &self,
-            _: &PdsPollTarget,
-            _: Arc<crate::space_credential::HeldSpaceCredential>,
-        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
-            Ok(Arc::new(Self))
-        }
-    }
-
-    #[async_trait]
-    impl SpacePageReader for NovemberHost {
-        async fn list_page(
-            &self,
-            _: &PdsPollTarget,
-            _: Option<&str>,
-            _: usize,
-        ) -> Result<SpaceHostPage, SpaceHostError> {
-            Err(SpaceHostError::Request {
-                status: 400,
-                code: Some("InvalidSpaceMac".to_owned()),
-            })
-        }
-    }
-
-    // What a host that needs response authentication answers when the request
-    // asked for none: the sync returns the host error and nothing is promoted.
-    #[tokio::test]
-    async fn a_host_that_refuses_for_a_missing_mac_request_promotes_nothing() {
-        let lifecycle = lifecycle();
-        let error = synchronizer_with(
-            Arc::new(NovemberHost),
-            Arc::new(Decision(CommitVerification::Verified)),
-        )
-        .sync_target(&lifecycle, &target(), NOW, "2026-09-23T00:00:00.000Z")
-        .await
-        .unwrap_err();
-
-        assert!(matches!(
-            error,
-            PdsSpaceSyncError::Host(SpaceHostError::Request {
-                status: 400,
-                code: Some(ref code),
-            }) if code == "InvalidSpaceMac"
-        ));
-        assert_eq!(
-            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
-            None
-        );
-    }
-
-    struct Unresolvable;
-
-    #[async_trait]
-    impl crate::auth::IdentityKeyResolver for Unresolvable {
-        async fn resolve_atproto_key(
-            &self,
-            _: &str,
-            _: bool,
-        ) -> Result<String, crate::auth::IdentityResolutionError> {
-            Err(crate::auth::IdentityResolutionError::Unavailable)
-        }
-    }
-
-    // A November host answers with `ver`, `repo`, `space`, `rev` and `data` under
-    // new-style MAC headers, which the old path never reads. The real
-    // synchronizer hands that commit to the real old verifier over a real
-    // in-memory store.
-    #[tokio::test]
-    async fn a_november_style_commit_is_malformed_to_the_old_verifier_and_nothing_is_promoted() {
-        let lifecycle = lifecycle();
-        let november_commit = crate::space_host::SpaceCommit::from_value(json!({
-            "ver": 1,
-            "repo": DID,
-            "space": SPACE,
-            "rev": "3jzfcijpj2z2d",
-            "data": { "$bytes": "okNpRMGkR5B3cOe6XMIggnjUNiWAJUuWe8RpRkj4rmI" },
-        }));
-        let mut terminal = page(None);
-        terminal.commit = Some(november_commit);
-
-        let result = synchronizer_with(
-            Arc::new(Pages(Arc::new(Mutex::new(
-                vec![page(Some("next")), terminal].into(),
-            )))),
-            Arc::new(crate::space_commit::SpaceCommitVerifier::new(Box::new(
-                Unresolvable,
-            ))),
-        )
-        .sync_target(&lifecycle, &target(), NOW, "2026-09-23T00:00:00.000Z")
-        .await
-        .unwrap();
-
-        assert_eq!(result, PdsSpaceSyncOutcome::RejectedCommit);
-        assert_eq!(
-            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
-            None
-        );
-        assert!(
-            lifecycle
-                .promote_pds_space_stage_at_generation(
-                    BOUNDARY,
-                    SPACE,
-                    DID,
-                    "2026-09-23T00:00:00.000Z",
-                    NOW,
-                    0,
-                )
-                .is_err(),
-            "the discarded stage must leave nothing to promote"
-        );
-    }
-}
+pub(crate) mod test_host;
+#[cfg(test)]
+mod tests;

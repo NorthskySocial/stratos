@@ -110,6 +110,17 @@ impl SpaceSyncOutcome {
     }
 }
 
+/// How many members of one pass ended each way.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SpaceSyncCounts {
+    pub promoted: usize,
+    pub unchanged: usize,
+    pub replaced: usize,
+    pub cleared: usize,
+    pub deferred: usize,
+    pub failed: usize,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LabelPollOutcome {
     Ok,
@@ -456,10 +467,7 @@ impl FeedTelemetry {
         &self,
         outcome: SpaceSyncOutcome,
         elapsed: Duration,
-        succeeded: usize,
-        failed: usize,
-        deferred: usize,
-        rejected: usize,
+        counts: SpaceSyncCounts,
     ) {
         if let Some(metric) = &self.space_sync_duration {
             metric.record(
@@ -469,23 +477,17 @@ impl FeedTelemetry {
         }
         if let Some(metric) = &self.space_sync_outcomes {
             metric.add(1, &[KeyValue::new("outcome", "pass")]);
-            if succeeded != 0 {
-                metric.add(succeeded as u64, &[KeyValue::new("outcome", "member_ok")]);
-            }
-            if failed != 0 {
-                metric.add(failed as u64, &[KeyValue::new("outcome", "member_error")]);
-            }
-            if deferred != 0 {
-                metric.add(
-                    deferred as u64,
-                    &[KeyValue::new("outcome", "member_deferred")],
-                );
-            }
-            if rejected != 0 {
-                metric.add(
-                    rejected as u64,
-                    &[KeyValue::new("outcome", "member_rejected")],
-                );
+            for (members, label) in [
+                (counts.promoted, "member_ok"),
+                (counts.unchanged, "member_unchanged"),
+                (counts.replaced, "member_replaced"),
+                (counts.cleared, "member_cleared"),
+                (counts.failed, "member_error"),
+                (counts.deferred, "member_deferred"),
+            ] {
+                if members != 0 {
+                    metric.add(members as u64, &[KeyValue::new("outcome", label)]);
+                }
             }
         }
         if outcome == SpaceSyncOutcome::Ok {
@@ -748,7 +750,17 @@ mod tests {
         telemetry.record_reconnect("actor");
         telemetry.record_index_operations(2, 1, "ok");
         telemetry.record_reconciliation(ReconciliationOutcome::Ok, Duration::from_millis(1));
-        telemetry.record_space_sync(SpaceSyncOutcome::Ok, Duration::from_millis(1), 1, 0, 0, 0);
+        telemetry.record_space_sync(
+            SpaceSyncOutcome::Ok,
+            Duration::from_millis(1),
+            SpaceSyncCounts {
+                promoted: 1,
+                unchanged: 1,
+                replaced: 1,
+                cleared: 1,
+                ..SpaceSyncCounts::default()
+            },
+        );
         telemetry
             .start(FeedReadStage::VerifyAuthorization)
             .finish(FeedReadStageOutcome::Success);
@@ -766,6 +778,7 @@ mod tests {
             "stratos.feedgen.cache.requests",
             "stratos.feedgen.reconciliation.duration",
             "stratos.feedgen.space_sync.duration",
+            "stratos.feedgen.space_sync.outcomes",
         ] {
             assert!(metrics.contains(name), "missing metric {name}");
         }
@@ -777,9 +790,14 @@ mod tests {
             "waiting",
             "capacity",
             "verify_authorization",
+            "member_ok",
+            "member_unchanged",
+            "member_replaced",
+            "member_cleared",
         ] {
             assert!(metrics.contains(label), "missing fixed label {label}");
         }
+        assert!(!metrics.contains("member_rejected"));
         #[cfg(target_os = "linux")]
         {
             assert!(metrics.contains("process.resident_memory"));

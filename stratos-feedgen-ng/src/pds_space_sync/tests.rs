@@ -13,18 +13,19 @@ use std::{
 };
 
 use async_trait::async_trait;
+use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 use serde_json::{Value, json};
 
 use super::{
-    FailureReason, PdsSpaceVerifiedSynchronizer, PollEnd, SyncLimits, VerifiedSyncOutcome,
-    promotion_refusal, replacement_refusal,
+    FailureReason, PdsSpaceSynchronizer, PollEnd, SyncLimits, VerifiedSyncOutcome,
+    host_refusal_reason, promotion_refusal, replacement_refusal,
     test_host::{
         ArchiveStep, Fault, Gate, HostRepo, PageStep, StaticKemKeys, TestClock, TestHost,
         TestSource, cid_of, page_body, star_archive, tid,
     },
 };
 use crate::{
-    config::{SPACE_REPLACEMENT_COOLDOWN, SPACE_TARGET_DEADLINE},
+    config::{MAX_SPACE_CYCLE_VALUES, SPACE_REPLACEMENT_COOLDOWN, SPACE_TARGET_DEADLINE},
     credential_issuer::{
         CredentialExpiry, CredentialMintError, IssuedSpaceCredential, SpaceCredentialIssuer,
     },
@@ -34,6 +35,7 @@ use crate::{
     moderation_label::{LabelPage, LabelSubject, ModerationLabel},
     readiness::FeedReadinessGate,
     service::ProjectionReader,
+    space_host::SpaceHostError,
     space_http_signature::SpaceHttpSignatureKey,
     space_mac::MacVerifiedCommit,
     space_record::encode_record,
@@ -45,6 +47,7 @@ const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
 const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
 const FAYE: &str = "did:plc:fayevalentine";
 const JET: &str = "did:plc:jetblack";
+const ED: &str = "did:plc:radicaledward";
 const HOST: &str = "https://pds.bebop.example/";
 const OTHER_HOST: &str = "https://pds.redtail.example/";
 const OBSERVED: &str = "2026-09-22T00:00:00.000Z";
@@ -85,7 +88,7 @@ struct Scene {
     kem_keys: Arc<StaticKemKeys>,
     clock: Arc<TestClock>,
     mints: Arc<AtomicUsize>,
-    synchronizer: PdsSpaceVerifiedSynchronizer,
+    synchronizer: PdsSpaceSynchronizer,
 }
 
 fn post(text: &str) -> Value {
@@ -134,7 +137,7 @@ impl Scene {
         source.host_at(HOST, Arc::clone(&host));
         let clock = TestClock::new();
         let mints = Arc::new(AtomicUsize::new(0));
-        let synchronizer = PdsSpaceVerifiedSynchronizer::with_clock(
+        let synchronizer = PdsSpaceSynchronizer::with_clock(
             Arc::clone(&source) as _,
             Arc::new(SpaceCredentialManager::with_clock(
                 Arc::new(CountingIssuer(Arc::clone(&mints))),
@@ -594,6 +597,81 @@ async fn a_taken_down_accounts_like_is_not_promoted() {
     assert_eq!(taken_down.cycle(FAYE).await, VerifiedSyncOutcome::Promoted);
     assert_eq!(taken_down.base_rev(FAYE), Some(tid(4)));
     assert!(taken_down.interactions().is_empty());
+}
+
+fn take_down_the_like(scene: &Scene) {
+    scene
+        .lifecycle
+        .apply_label_page(
+            &LabelPage {
+                cursor: 1,
+                labels: vec![ModerationLabel {
+                    seq: 1,
+                    subject: LabelSubject::Record {
+                        uri: format!("{SPACE}/{FAYE}/{LIKE}/ed"),
+                        author_did: FAYE.to_owned(),
+                    },
+                    neg: false,
+                }],
+                skipped_subjects: 0,
+            },
+            OBSERVED,
+        )
+        .unwrap();
+}
+
+fn put_a_like_on_the_host(scene: &Scene) {
+    scene.host.edit(FAYE, |repo| {
+        repo.put(2, POST, "swordfish", post("See you space cowboy"));
+        repo.put(3, LIKE, "ed", like_of_swordfish());
+    });
+}
+
+#[tokio::test]
+async fn a_like_under_a_record_takedown_is_not_promoted() {
+    let control = Scene::new();
+    put_a_like_on_the_host(&control);
+    assert_eq!(control.cycle(FAYE).await, VerifiedSyncOutcome::Replaced);
+    assert_eq!(control.interactions().len(), 1);
+
+    let taken_down = Scene::new();
+    take_down_the_like(&taken_down);
+    put_a_like_on_the_host(&taken_down);
+    assert_eq!(taken_down.cycle(FAYE).await, VerifiedSyncOutcome::Replaced);
+
+    assert!(taken_down.interactions().is_empty());
+    assert_eq!(taken_down.served().len(), 1, "only the like is withheld");
+    assert_eq!(taken_down.base_rev(FAYE), Some(tid(3)));
+}
+
+#[tokio::test]
+async fn a_like_the_host_deletes_is_removed_by_the_next_poll() {
+    let scene = Scene::with_a_base().await;
+    scene.host.edit(FAYE, |repo| {
+        repo.put(4, LIKE, "ed", like_of_swordfish());
+    });
+    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Promoted);
+    assert_eq!(scene.interactions().len(), 1);
+
+    scene.host.edit(FAYE, |repo| {
+        repo.remove(5, LIKE, "ed");
+    });
+    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Promoted);
+
+    assert!(scene.interactions().is_empty());
+}
+
+#[tokio::test]
+async fn a_record_takedown_removes_a_like_that_was_already_promoted() {
+    let scene = Scene::new();
+    put_a_like_on_the_host(&scene);
+    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Replaced);
+    assert_eq!(scene.interactions().len(), 1);
+
+    take_down_the_like(&scene);
+
+    assert!(scene.interactions().is_empty());
+    assert_eq!(scene.served().len(), 1, "the post it liked stays");
 }
 
 #[tokio::test]
@@ -1068,7 +1146,7 @@ async fn a_page_past_the_decoded_value_budget_fails_and_one_at_it_is_accepted() 
         // base is built under the default budget and the poll under the lowered.
         let scene = Scene::with_a_base().await;
         let lowered = Scene {
-            synchronizer: PdsSpaceVerifiedSynchronizer::with_clock(
+            synchronizer: PdsSpaceSynchronizer::with_clock(
                 Arc::clone(&scene.source) as _,
                 Arc::new(SpaceCredentialManager::with_clock(
                     Arc::new(CountingIssuer(Arc::clone(&scene.mints))),
@@ -1124,6 +1202,97 @@ async fn an_archive_past_the_decoded_value_budget_fails_and_one_at_it_is_replace
     }
 }
 
+// The scene's store and host under a synchronizer allowed `values` decoded
+// values a cycle, so a base built under the default budget can be polled under
+// a lowered one.
+fn under_a_value_limit(scene: Scene, values: usize) -> Scene {
+    Scene {
+        synchronizer: PdsSpaceSynchronizer::with_clock(
+            Arc::clone(&scene.source) as _,
+            Arc::new(SpaceCredentialManager::with_clock(
+                Arc::new(CountingIssuer(Arc::clone(&scene.mints))),
+                credential_clock,
+            )),
+            Arc::clone(&scene.clock) as _,
+        )
+        .with_limits(SyncLimits {
+            values,
+            ..SyncLimits::default()
+        }),
+        ..scene
+    }
+}
+
+// The headers sign the host's real commit; only the member in the body is a
+// host's choice, and it is costly to build.
+#[tokio::test]
+async fn a_page_whose_commit_member_is_hostile_fails_the_target_and_changes_nothing() {
+    let members_beside_the_five = |scene: &Scene| {
+        let extra = (0..20_000)
+            .map(|at| format!("\"ed{at}\":0"))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"ver\":1,\"repo\":\"{FAYE}\",\"space\":\"{SPACE}\",\"rev\":\"{}\",\"data\":{{\"$bytes\":\"{}\"}},{extra}}}",
+            scene.host_rev(FAYE),
+            STANDARD_NO_PAD.encode(scene.host_digest(FAYE))
+        )
+    };
+    let zeros = format!("[{}0]", "0,".repeat(2_999_999));
+    let nested_side_by_side = format!(
+        "[{}]",
+        vec![format!("{}0{}", "[".repeat(99), "]".repeat(99)); 2_000].join(",")
+    );
+    let past_the_parsers_depth = format!("{}{}", "[".repeat(100_000), "]".repeat(100_000));
+    // The fourth is within every byte limit and counted as the page is
+    // decoded, so it needs a budget it passes.
+    let cases: [(&str, FailureReason, usize); 4] = [
+        (
+            "three million zeros",
+            FailureReason::Mac,
+            MAX_SPACE_CYCLE_VALUES,
+        ),
+        (
+            "two thousand arrays nested a hundred deep",
+            FailureReason::Mac,
+            MAX_SPACE_CYCLE_VALUES,
+        ),
+        (
+            "nesting past the parser's depth",
+            FailureReason::Transport,
+            MAX_SPACE_CYCLE_VALUES,
+        ),
+        (
+            "more members beside the five than the cycle may count",
+            FailureReason::RepoOverBudget,
+            10_000,
+        ),
+    ];
+    for (name, reason, values) in cases {
+        let gapped = with_a_gap_to_recover_from().await;
+        let commit = match name {
+            "three million zeros" => zeros.clone(),
+            "two thousand arrays nested a hundred deep" => nested_side_by_side.clone(),
+            "nesting past the parser's depth" => past_the_parsers_depth.clone(),
+            _ => members_beside_the_five(&gapped),
+        };
+        let scene = under_a_value_limit(gapped, values);
+        scene
+            .host
+            .script_pages(FAYE, vec![PageStep::CommitText(commit)]);
+        let before = scene.snapshot();
+
+        assert_eq!(
+            scene.cycle(FAYE).await,
+            VerifiedSyncOutcome::Failed(reason),
+            "{name}"
+        );
+
+        assert_eq!(scene.snapshot(), before, "{name}");
+        assert_eq!(scene.host.archives_requested(), 1, "{name}: no replacement");
+    }
+}
+
 async fn with_a_gap_to_recover_from() -> Scene {
     let scene = Scene::with_a_base().await;
     scene.host.edit(FAYE, |repo| {
@@ -1159,9 +1328,73 @@ async fn repo_not_found_with_status_400_clears_the_members_state_and_nothing_els
 }
 
 #[tokio::test]
-async fn repo_not_found_from_an_archive_request_clears_too() {
-    let scene = Scene::new();
-    scene.host.script_archives(
+async fn repo_not_found_from_an_archive_request_clears_the_members_rows_in_that_space_and_nothing_else()
+ {
+    const REDTAIL_BOUNDARY: &str = "did:web:stratos.example.test/redtail";
+    const REDTAIL_SPACE: &str =
+        "at:space/did:web:stratos.example.test/zone.stratos.space.feed/redtail";
+    const REDTAIL_HOST: &str = "https://pds.tokyo3.example/";
+    let scene = Scene::with_a_base().await;
+    scene.host.edit(JET, |repo| {
+        repo.put(2, POST, "bebop", post("Spike"));
+    });
+    assert_eq!(scene.cycle(JET).await, VerifiedSyncOutcome::Replaced);
+    // Faye is a member of a second space too, with a post of her own there.
+    scene
+        .lifecycle
+        .replace_pds_space_members(
+            REDTAIL_BOUNDARY,
+            vec![PdsSpaceMember {
+                did: FAYE.to_owned(),
+            }],
+            OBSERVED,
+        )
+        .unwrap();
+    let redtail = TestHost::serving(REDTAIL_SPACE);
+    let mut repo = HostRepo::new(1);
+    repo.put(2, POST, "redtail", post("Cowboy Bebop"));
+    redtail.hold(FAYE, repo);
+    scene.source.host_at(REDTAIL_HOST, Arc::clone(&redtail));
+    let in_redtail = PdsPollTarget {
+        space_uri: REDTAIL_SPACE.to_owned(),
+        boundary: REDTAIL_BOUNDARY.to_owned(),
+        did: FAYE.to_owned(),
+        host: REDTAIL_HOST.to_owned(),
+        generation: scene
+            .lifecycle
+            .pds_member_generation(REDTAIL_BOUNDARY, FAYE)
+            .unwrap()
+            .expect("a current member"),
+    };
+    assert_eq!(
+        scene.cycle_target(&in_redtail).await,
+        VerifiedSyncOutcome::Replaced
+    );
+    let redtail_rows = |scene: &Scene| {
+        let base = scene
+            .lifecycle
+            .verified_space_base_at_generation(
+                REDTAIL_BOUNDARY,
+                REDTAIL_SPACE,
+                FAYE,
+                in_redtail.generation,
+            )
+            .unwrap();
+        let served = scene
+            .lifecycle
+            .read(|projection| projection.served_posts(REDTAIL_BOUNDARY, AS_OF));
+        (base, served)
+    };
+    let redtail_before = redtail_rows(&scene);
+    let jet_before = scene.base(JET);
+    assert!(redtail_before.0.is_some() && jet_before.is_some());
+    assert_eq!(redtail_before.1.len(), 1);
+    assert_eq!(scene.served_uris().len(), 3, "Faye's two posts and Jet's");
+    // The authority now names a host that answers that Faye's repo is not
+    // there, so the cycle goes to a replacement and the archive request is
+    // refused with that name.
+    let (mirror, moved) = moved_to_a_mirror(&scene, HostRepo::new(1));
+    mirror.script_archives(
         FAYE,
         vec![ArchiveStep::Refused {
             status: 400,
@@ -1169,8 +1402,25 @@ async fn repo_not_found_from_an_archive_request_clears_too() {
         }],
     );
 
-    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Cleared);
+    assert_eq!(
+        scene.cycle_target(&moved).await,
+        VerifiedSyncOutcome::Cleared
+    );
+
+    assert_eq!(mirror.archives_requested(), 1);
+    assert!(mirror.pages_requested(FAYE).is_empty());
     assert_eq!(scene.base(FAYE), None);
+    assert_eq!(
+        scene.served_uris(),
+        [format!("{SPACE}/{JET}/{POST}/bebop")],
+        "only Jet's post is left in the space"
+    );
+    assert_eq!(scene.base(JET), jet_before);
+    assert_eq!(
+        redtail_rows(&scene),
+        redtail_before,
+        "the other space is untouched"
+    );
 }
 
 #[tokio::test]
@@ -1367,6 +1617,45 @@ async fn an_unlisted_error_name_is_other_and_no_host_text_reaches_an_outcome() {
     assert!(!format!("{outcome:?}").contains("InvalidSpaceMac"));
 }
 
+#[test]
+fn only_the_listed_host_error_names_are_told_apart() {
+    let refusal = |code: Option<&str>| SpaceHostError::Request {
+        status: 400,
+        code: code.map(str::to_owned),
+    };
+    for (name, reason) in [
+        ("InvalidSpaceMac", FailureReason::InvalidSpaceMac),
+        ("InvalidSpaceUri", FailureReason::InvalidSpaceUri),
+        ("InvalidCredential", FailureReason::InvalidCredential),
+        ("BadSpaceAudience", FailureReason::BadSpaceAudience),
+        ("RepoNotFound", FailureReason::RepoNotFound),
+        ("RepoTakendown", FailureReason::RepoTakendown),
+        ("RepoSuspended", FailureReason::RepoSuspended),
+        ("RepoDeactivated", FailureReason::RepoDeactivated),
+        ("InvalidCursor", FailureReason::InvalidCursor),
+    ] {
+        assert_eq!(host_refusal_reason(&refusal(Some(name))), reason, "{name}");
+    }
+    for code in [
+        None,
+        Some("invalidspacemac"),
+        Some("InvalidSpaceMac "),
+        Some("InvalidSpaceMac\n"),
+        Some("InvalidRequest"),
+        Some(""),
+    ] {
+        assert_eq!(
+            host_refusal_reason(&refusal(code)),
+            FailureReason::Other,
+            "{code:?}"
+        );
+    }
+    assert_eq!(
+        host_refusal_reason(&SpaceHostError::Timeout),
+        FailureReason::Transport
+    );
+}
+
 #[tokio::test]
 async fn every_reason_is_a_fixed_word_without_text_a_host_could_send() {
     let reasons = [
@@ -1393,6 +1682,9 @@ async fn every_reason_is_a_fixed_word_without_text_a_host_could_send() {
         FailureReason::CursorStalled,
         FailureReason::Store,
         FailureReason::TargetCapacity,
+        FailureReason::CooldownCapacity,
+        FailureReason::MemberGeneration,
+        FailureReason::Task,
         FailureReason::Other,
     ];
     let words: std::collections::BTreeSet<_> =
@@ -1437,6 +1729,87 @@ async fn a_401_invalidates_the_credential_and_a_cycle_without_one_keeps_it() {
         kept,
         "a good credential is kept"
     );
+}
+
+#[tokio::test]
+async fn a_403_keeps_the_credential_that_a_401_would_have_dropped() {
+    let scene = with_a_gap_to_recover_from().await;
+    scene.host.script_pages(
+        FAYE,
+        vec![PageStep::Refused {
+            status: 403,
+            code: Some("HostDenial"),
+        }],
+    );
+    let before = scene.mints.load(Ordering::SeqCst);
+
+    assert_eq!(
+        scene.cycle(FAYE).await,
+        VerifiedSyncOutcome::Failed(FailureReason::Other)
+    );
+
+    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Promoted);
+    assert_eq!(
+        scene.mints.load(Ordering::SeqCst),
+        before,
+        "the refusal did not cost a new credential"
+    );
+}
+
+#[tokio::test]
+async fn a_host_that_refuses_a_request_without_authentication_fails_the_target_and_changes_nothing()
+{
+    let scene = with_a_gap_to_recover_from().await;
+    scene.host.script_pages(
+        FAYE,
+        vec![PageStep::Refused {
+            status: 400,
+            code: Some("InvalidSpaceMac"),
+        }],
+    );
+    let before = scene.snapshot();
+
+    assert_eq!(
+        scene.cycle(FAYE).await,
+        VerifiedSyncOutcome::Failed(FailureReason::InvalidSpaceMac)
+    );
+
+    assert_eq!(scene.snapshot(), before);
+    assert_eq!(scene.base_rev(FAYE), Some(tid(3)));
+}
+
+#[tokio::test]
+async fn a_cycle_waiting_for_its_target_releases_the_reservation_when_it_is_aborted() {
+    let scene = Arc::new(Scene::new());
+    let target = scene.target(FAYE);
+    let first = scene.synchronizer.lock_target(&target).await.unwrap();
+    let waiting = {
+        let scene = Arc::clone(&scene);
+        let target = target.clone();
+        tokio::spawn(async move { scene.synchronizer.lock_target(&target).await.map(|_| ()) })
+    };
+    let key = PdsSpaceSynchronizer::target_key(&target);
+    let mut reserved = false;
+    for _ in 0..10 {
+        if scene
+            .synchronizer
+            .target_locks
+            .lock()
+            .unwrap()
+            .get(&key)
+            .is_some_and(|lock| lock.users.load(Ordering::Acquire) == 2)
+        {
+            reserved = true;
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(reserved, "the waiting cycle counted itself as a user");
+    waiting.abort();
+    let _ = waiting.await;
+    drop(first);
+
+    assert!(scene.synchronizer.target_locks.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -2402,4 +2775,230 @@ async fn a_replacement_dropped_part_way_counts_as_failed_and_starts_the_cooldown
         VerifiedSyncOutcome::Failed(FailureReason::ReplacementCooldown)
     );
     assert_eq!(scene.host.archives_requested(), 1);
+}
+
+#[tokio::test]
+async fn a_cycle_whose_deadline_passes_while_it_waits_for_its_target_fails_sends_nothing_and_gets_no_cooldown()
+ {
+    let scene = Scene::with_limits(SyncLimits {
+        deadline: Duration::from_millis(300),
+        ..SyncLimits::default()
+    });
+    scene.host.edit(FAYE, |repo| {
+        repo.put(2, POST, "ein", post("Woof"));
+    });
+    let target = scene.target(FAYE);
+    // Another cycle holds Faye's target for longer than this one may take.
+    let held = scene.synchronizer.lock_target(&target).await.unwrap();
+    let before = scene.snapshot();
+
+    let outcome = tokio::select! {
+        outcome = scene.cycle(FAYE) => outcome,
+        () = tokio::time::sleep(Duration::from_secs(2)) => {
+            panic!("the wait for the target outlived the cycle's deadline")
+        }
+    };
+
+    assert_eq!(
+        outcome,
+        VerifiedSyncOutcome::Failed(FailureReason::Deadline)
+    );
+    assert!(scene.host.requests().is_empty(), "nothing was sent");
+    assert_eq!(scene.snapshot(), before);
+    drop(held);
+    // A minute on, well inside a cooldown had one been started, the next
+    // cycle reads the whole repo.
+    scene.clock.advance(Duration::from_secs(60));
+    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Replaced);
+    assert_eq!(scene.host.archives_requested(), 1);
+}
+
+// The synchronizer's clock reaches the deadline as the cycle's last request
+// arrives. No read looks at that clock, so for the cycle the deadline passes
+// between its last read and its write.
+#[tokio::test]
+async fn a_write_whose_deadline_has_passed_is_not_started_and_nothing_changes() {
+    let mut seen = Vec::new();
+    for case in ["a promotion", "a replacement", "a clear"] {
+        let scene = with_a_gap_to_recover_from().await;
+        let (host, target) = match case {
+            "a replacement" => {
+                let mut repo = HostRepo::new(1);
+                repo.put(2, POST, "hammerhead", post("Bang"));
+                moved_to_a_mirror(&scene, repo)
+            }
+            _ => (Arc::clone(&scene.host), scene.target(FAYE)),
+        };
+        if case == "a clear" {
+            host.script_pages(
+                FAYE,
+                vec![PageStep::Refused {
+                    status: 400,
+                    code: Some("RepoNotFound"),
+                }],
+            );
+        }
+        let clock = Arc::clone(&scene.clock);
+        host.on_next_request(move || clock.advance(SPACE_TARGET_DEADLINE));
+        let before = scene.snapshot();
+
+        let outcome = scene.cycle_target(&target).await;
+
+        let unchanged = scene.snapshot() == before;
+        let base = scene.base(FAYE).map(|base| (base.rev, base.host));
+        // A replacement that did not get to its end cools down.
+        let next = scene.cycle_target(&target).await;
+        seen.push((
+            case,
+            outcome,
+            unchanged,
+            base,
+            host.archives_requested(),
+            next,
+        ));
+    }
+
+    let held = Some((tid(3), HOST.to_owned()));
+    let deadline = VerifiedSyncOutcome::Failed(FailureReason::Deadline);
+    assert_eq!(
+        seen,
+        [
+            (
+                "a promotion",
+                deadline,
+                true,
+                held.clone(),
+                1,
+                VerifiedSyncOutcome::Promoted
+            ),
+            (
+                "a replacement",
+                deadline,
+                true,
+                held.clone(),
+                1,
+                VerifiedSyncOutcome::Failed(FailureReason::ReplacementCooldown)
+            ),
+            (
+                "a clear",
+                deadline,
+                true,
+                held,
+                1,
+                VerifiedSyncOutcome::Promoted
+            ),
+        ]
+    );
+
+    // Just inside the deadline the write goes ahead.
+    let scene = with_a_gap_to_recover_from().await;
+    let clock = Arc::clone(&scene.clock);
+    scene
+        .host
+        .on_next_request(move || clock.advance(SPACE_TARGET_DEADLINE - Duration::from_millis(1)));
+    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Promoted);
+    assert_eq!(scene.base_rev(FAYE), Some(tid(4)));
+}
+
+// The map of cooldowns is lowered to two entries. Faye's ends first, Jet's a
+// minute later; Ed's archive request would fail too.
+#[tokio::test]
+async fn a_full_cooldown_map_refuses_a_new_replacement_and_never_shortens_a_cooldown() {
+    let scene = Scene::with_limits(SyncLimits {
+        cooldown_capacity: 2,
+        ..SyncLimits::default()
+    });
+    scene
+        .lifecycle
+        .replace_pds_space_members(
+            BOUNDARY,
+            [FAYE, JET, ED]
+                .map(|did| PdsSpaceMember {
+                    did: did.to_owned(),
+                })
+                .to_vec(),
+            OBSERVED,
+        )
+        .unwrap();
+    scene.host.hold(ED, HostRepo::new(1));
+    for did in [FAYE, JET, ED] {
+        scene.host.edit(did, |repo| {
+            repo.put(2, POST, "bebop", post("Spike"));
+        });
+        scene.host.script_archives(
+            did,
+            vec![ArchiveStep::Refused {
+                status: 500,
+                code: None,
+            }],
+        );
+    }
+    let mut seen = Vec::new();
+    let mut step = async |name: &'static str, did: &str| {
+        let outcome = scene.cycle(did).await;
+        seen.push((name, outcome, scene.host.archives_requested()));
+    };
+
+    step("Faye fails at minute 0", FAYE).await;
+    scene.clock.advance(Duration::from_secs(60));
+    step("Jet fails at minute 1", JET).await;
+    let before = scene.snapshot();
+    step("Ed is turned away at minute 1", ED).await;
+    let ed_wrote_nothing = scene.snapshot() == before;
+    step("Faye is still cooling down at minute 1", FAYE).await;
+    scene
+        .clock
+        .advance(SPACE_REPLACEMENT_COOLDOWN - Duration::from_secs(61));
+    step("Faye is still cooling down a second before minute 10", FAYE).await;
+    step("Ed is still turned away", ED).await;
+    scene.clock.advance(Duration::from_secs(1));
+    step("Faye replaces at minute 10", FAYE).await;
+    step("Jet has a minute left", JET).await;
+    step("Ed takes the entry Faye's left", ED).await;
+
+    let failed = VerifiedSyncOutcome::Failed;
+    assert_eq!(
+        seen,
+        [
+            ("Faye fails at minute 0", failed(FailureReason::Other), 1),
+            ("Jet fails at minute 1", failed(FailureReason::Other), 2),
+            (
+                "Ed is turned away at minute 1",
+                failed(FailureReason::CooldownCapacity),
+                2
+            ),
+            (
+                "Faye is still cooling down at minute 1",
+                failed(FailureReason::ReplacementCooldown),
+                2
+            ),
+            (
+                "Faye is still cooling down a second before minute 10",
+                failed(FailureReason::ReplacementCooldown),
+                2
+            ),
+            (
+                "Ed is still turned away",
+                failed(FailureReason::CooldownCapacity),
+                2
+            ),
+            (
+                "Faye replaces at minute 10",
+                VerifiedSyncOutcome::Replaced,
+                3
+            ),
+            (
+                "Jet has a minute left",
+                failed(FailureReason::ReplacementCooldown),
+                3
+            ),
+            (
+                "Ed takes the entry Faye's left",
+                failed(FailureReason::Other),
+                4
+            ),
+        ]
+    );
+    assert!(ed_wrote_nothing);
+    assert_eq!(SyncLimits::default().cooldown_capacity, 4_096);
 }

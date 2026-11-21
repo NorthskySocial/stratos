@@ -17,7 +17,6 @@ use crate::{
     service_event::{EnrollmentAction, EnrollmentEvent},
     space_mac::MacVerifiedCommit,
     space_ops::ChangeSet,
-    space_sync::{PreparedSpacePage, SpaceSyncError, SpaceSyncTarget},
     store::{
         ActorEnrollment, ActorPage, ActorSyncState, EnrollmentReconciliation, LabelPageEffects,
         PdsSpaceMember, StoreError, StoreInterrupt, VerifiedSpaceBase, VerifiedSpaceRecord,
@@ -489,19 +488,25 @@ impl ControlLifecycle {
             .compact_projection(as_of, maximum_retained_at, max_bytes, limit)
     }
 
-    pub fn compact_projection_with_budget(
+    pub fn compact_projection_with_reserve(
         &self,
         as_of: &str,
         maximum_retained_at: &str,
         max_bytes: u64,
         limit: u16,
-        budget: &crate::config::SpaceStageBudget,
+        space_write_reserve_bytes: u64,
     ) -> Result<crate::store::ProjectionCompaction, StoreError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         self.projection
             .lock()
             .expect("projection lock poisoned")
-            .compact_projection_with_budget(as_of, maximum_retained_at, max_bytes, limit, budget)
+            .compact_projection_with_reserve(
+                as_of,
+                maximum_retained_at,
+                max_bytes,
+                limit,
+                space_write_reserve_bytes,
+            )
     }
 
     pub fn actor_sync_state(
@@ -611,89 +616,6 @@ impl ControlLifecycle {
             .replace_pds_space_members_at_generation(boundary, members, reconciled_at, generation)
     }
 
-    pub fn pds_space_target(
-        &self,
-        space_uri: impl Into<String>,
-        boundary: impl Into<String>,
-        actor_did: impl Into<String>,
-    ) -> Result<SpaceSyncTarget, SpaceSyncError> {
-        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .pds_space_target(space_uri, boundary, actor_did)
-    }
-    pub fn pds_space_target_at_generation(
-        &self,
-        space_uri: impl Into<String>,
-        boundary: impl Into<String>,
-        actor_did: impl Into<String>,
-        generation: u64,
-    ) -> Result<SpaceSyncTarget, SpaceSyncError> {
-        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .pds_space_target_at_generation(space_uri, boundary, actor_did, generation)
-    }
-
-    pub fn pds_space_cursor(
-        &self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
-    ) -> Result<Option<String>, StoreError> {
-        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .space_sync_cursor(boundary, space_uri, actor_did)
-    }
-
-    pub fn stage_pds_space_page(&self, page: PreparedSpacePage) -> Result<(), SpaceSyncError> {
-        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .stage_pds_space_page(page)
-    }
-
-    pub fn promote_pds_space_stage(
-        &self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
-        retained_at: &str,
-    ) -> Result<(), StoreError> {
-        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .promote_pds_space_stage(boundary, space_uri, actor_did, retained_at)
-    }
-    pub fn promote_pds_space_stage_at_generation(
-        &self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
-        retained_at: &str,
-        observed_at: &str,
-        generation: u64,
-    ) -> Result<(), StoreError> {
-        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .promote_pds_space_stage_at_generation(
-                boundary,
-                space_uri,
-                actor_did,
-                retained_at,
-                observed_at,
-                generation,
-            )
-    }
-
     /// The checkpoint a verified promotion builds on. A caller holding a
     /// generation that is no longer the member's current one is refused before
     /// it reads anything.
@@ -768,19 +690,6 @@ impl ControlLifecycle {
             .lock()
             .expect("projection lock poisoned")
             .pds_member_boundaries(did)
-    }
-
-    pub fn discard_pds_space_stage(
-        &self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
-    ) -> Result<(), StoreError> {
-        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .discard_pds_space_stage(boundary, space_uri, actor_did)
     }
 
     pub fn reconcile_actor_enrollment(

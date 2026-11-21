@@ -565,8 +565,7 @@ mod tests {
         service_auth::ServiceSigningKey,
         service_event::{EnrollmentAction, EnrollmentEvent},
         store::{
-            ActorEnrollment, ActorPage, EncryptedStore, PdsSpaceMember, ProjectionPost,
-            SpaceStageMutation, SpaceStagePage, StorageKey,
+            ActorEnrollment, ActorPage, EncryptedStore, PdsSpaceMember, ProjectionPost, StorageKey,
         },
         telemetry::{FeedTelemetry, LabelPollOutcome},
     };
@@ -1603,32 +1602,18 @@ mod tests {
                 "1998-04-03T00:00:00.000Z",
             )
             .unwrap();
-        let upsert = |uri: &str| SpaceStageMutation::Upsert {
-            uri: uri.to_owned(),
-            cid: "bafyreia".to_owned(),
-            sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
-            indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
-            record_json: br#"{"text":"Swordfish"}"#.to_vec(),
-            blob_refs_json: b"[]".to_vec(),
-        };
+        let post = || json!({ "$type": POST_COLLECTION, "createdAt": "1998-04-03T00:00:00.000Z" });
         store
-            .stage_authorized_space_page(
-                SpaceStagePage {
-                    space_uri: SPACE.to_owned(),
-                    actor_did: FAYE_VALENTINE.to_owned(),
-                    boundary: SPACE_BOUNDARY.to_owned(),
-                    next_cursor: None,
-                    updated_at: "1998-04-03T00:00:00.000Z".to_owned(),
-                },
-                vec![upsert(FAYE_SPACE_POST), upsert(FAYE_SECOND_SPACE_POST)],
-            )
-            .unwrap();
-        store
-            .promote_authorized_space_stage(
+            .publish_verified_records(
                 SPACE_BOUNDARY,
                 SPACE,
                 FAYE_VALENTINE,
+                &[
+                    (POST_COLLECTION, "swordfish", post()),
+                    (POST_COLLECTION, "redtail", post()),
+                ],
                 "1998-04-04T00:00:00.000Z",
+                "1998-04-03T00:00:00.000Z",
             )
             .unwrap();
         store
@@ -1839,8 +1824,6 @@ mod tests {
         assert!(scene.lifecycle.release_blob(token, (), 2).is_none());
     }
 
-    use std::collections::VecDeque;
-
     use async_trait::async_trait;
     use serde_json::json;
 
@@ -1851,12 +1834,13 @@ mod tests {
         credential_manager::SpaceCredentialManager,
         membership_reconciler::PdsPollTarget,
         pds_space_sync::{
-            PdsSpaceSynchronizer, SpaceCommitVerificationPort, SpacePageReader, SpacePageSource,
+            PdsSpaceSynchronizer, VerifiedSyncOutcome,
+            test_host::{
+                Gate, HostRepo, PageStep, Request, StaticKemKeys, TestClock, TestHost, TestSource,
+            },
         },
-        space_commit::CommitVerification,
-        space_host::{SpaceHostError, SpaceHostPage},
         space_http_signature::SpaceHttpSignatureKey,
-        space_sync::{POST_COLLECTION, SpacePage, SpaceRepoOp},
+        space_sync::POST_COLLECTION,
     };
 
     #[derive(Clone, Copy)]
@@ -1906,79 +1890,6 @@ mod tests {
         }
     }
 
-    #[derive(Clone)]
-    struct HostPages {
-        pages: Arc<Mutex<VecDeque<SpaceHostPage>>>,
-        requested_cursors: Arc<Mutex<Vec<Option<String>>>>,
-    }
-
-    #[async_trait]
-    impl SpacePageReader for HostPages {
-        async fn list_page(
-            &self,
-            _: &PdsPollTarget,
-            cursor: Option<&str>,
-            _: usize,
-        ) -> Result<SpaceHostPage, SpaceHostError> {
-            self.requested_cursors
-                .lock()
-                .unwrap()
-                .push(cursor.map(str::to_owned));
-            self.pages
-                .lock()
-                .unwrap()
-                .pop_front()
-                .ok_or(SpaceHostError::Unreachable)
-        }
-    }
-
-    #[async_trait]
-    impl SpacePageSource for HostPages {
-        async fn connect(
-            &self,
-            _: &PdsPollTarget,
-            _: Arc<crate::space_credential::HeldSpaceCredential>,
-        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
-            Ok(Arc::new(self.clone()))
-        }
-    }
-
-    struct Verified;
-
-    #[async_trait]
-    impl SpaceCommitVerificationPort for Verified {
-        async fn verify(
-            &self,
-            _: &str,
-            _: &str,
-            _: Option<&serde_json::Value>,
-        ) -> CommitVerification {
-            CommitVerification::Verified
-        }
-    }
-
-    fn listing(cursor: Option<&str>, rkeys: &[&str]) -> SpaceHostPage {
-        SpaceHostPage {
-            page: SpacePage {
-                ops: rkeys
-                    .iter()
-                    .map(|rkey| SpaceRepoOp {
-                        collection: POST_COLLECTION.to_owned(),
-                        rkey: (*rkey).to_owned(),
-                        cid: Some(
-                            "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
-                        ),
-                        value: Some(
-                            json!({ "$type": POST_COLLECTION, "createdAt": "1998-04-03T00:00:00.000Z" }),
-                        ),
-                    })
-                    .collect(),
-                next_cursor: cursor.map(str::to_owned),
-            },
-            commit: None,
-        }
-    }
-
     fn fixed_credential_clock() -> u64 {
         1_000
     }
@@ -1991,37 +1902,72 @@ mod tests {
         }
     }
 
-    async fn sync_faye(
-        lifecycle: &ControlLifecycle,
-        pages: Vec<SpaceHostPage>,
-    ) -> Vec<Option<String>> {
-        let host = HostPages {
-            pages: Arc::new(Mutex::new(pages.into())),
-            requested_cursors: Arc::new(Mutex::new(Vec::new())),
-        };
-        let synchronizer = PdsSpaceSynchronizer::new(
-            Arc::new(host.clone()),
+    /// Faye's repo on an in-process host, read by the real synchronizer. The
+    /// host proves how a cycle flows, not the cryptography.
+    struct FayeHost {
+        host: Arc<TestHost>,
+        synchronizer: PdsSpaceSynchronizer,
+    }
+
+    fn faye_host(rkeys: &[&str]) -> FayeHost {
+        let host = TestHost::serving(SPACE);
+        let mut repo = HostRepo::new(1);
+        for (index, rkey) in rkeys.iter().enumerate() {
+            repo.put(
+                2 + index as u32,
+                POST_COLLECTION,
+                rkey,
+                json!({ "$type": POST_COLLECTION, "createdAt": "1998-04-03T00:00:00.000Z" }),
+            );
+        }
+        host.hold(FAYE_VALENTINE, repo);
+        let source = TestSource::new(StaticKemKeys::new());
+        source.host_at(FAYE_PDS, Arc::clone(&host));
+        let synchronizer = PdsSpaceSynchronizer::with_clock(
+            source,
             Arc::new(SpaceCredentialManager::with_clock(
                 Arc::new(Issuer),
                 fixed_credential_clock,
             )),
-            Arc::new(Verified),
+            TestClock::new(),
         );
-        let target = PdsPollTarget {
+        FayeHost { host, synchronizer }
+    }
+
+    const FAYE_PDS: &str = "https://pds.example.test/";
+
+    fn faye_target(lifecycle: &ControlLifecycle) -> PdsPollTarget {
+        PdsPollTarget {
             space_uri: SPACE.to_owned(),
             boundary: SPACE_BOUNDARY.to_owned(),
             did: FAYE_VALENTINE.to_owned(),
-            host: "https://pds.example.test/".to_owned(),
+            host: FAYE_PDS.to_owned(),
             generation: lifecycle
                 .pds_member_generation(SPACE_BOUNDARY, FAYE_VALENTINE)
                 .unwrap()
                 .expect("faye is a current member"),
-        };
-        let observed_at = super::format_utc_millis(time::OffsetDateTime::now_utc());
-        let _ = synchronizer
-            .sync_target(lifecycle, &target, &observed_at, FAR_RETENTION)
-            .await;
-        host.requested_cursors.lock().unwrap().clone()
+        }
+    }
+
+    async fn sync_faye(lifecycle: &ControlLifecycle, host: &FayeHost) -> VerifiedSyncOutcome {
+        host.synchronizer
+            .sync_target(lifecycle, &faye_target(lifecycle), FAR_RETENTION)
+            .await
+    }
+
+    impl FayeHost {
+        fn rev(&self) -> String {
+            let mut rev = String::new();
+            self.host
+                .edit(FAYE_VALENTINE, |repo| rev = repo.rev().to_owned());
+            rev
+        }
+    }
+
+    fn faye_archive() -> Request {
+        Request::Archive {
+            did: FAYE_VALENTINE.to_owned(),
+        }
     }
 
     impl RecordScene {
@@ -2056,12 +2002,6 @@ mod tests {
                 .cursor
         }
 
-        fn faye_space_cursor(&self) -> Option<String> {
-            self.lifecycle
-                .pds_space_cursor(SPACE_BOUNDARY, SPACE, FAYE_VALENTINE)
-                .unwrap()
-        }
-
         fn reinstating_records(&self) -> Vec<String> {
             self.lifecycle.reinstating_records(10).unwrap()
         }
@@ -2075,6 +2015,10 @@ mod tests {
     }
 
     async fn pds_scene() -> RecordScene {
+        pds_scene_with_host().await.0
+    }
+
+    async fn pds_scene_with_host() -> (RecordScene, FayeHost) {
         let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
         store
             .replace_pds_space_members(
@@ -2085,16 +2029,13 @@ mod tests {
             .unwrap();
         let scene = RecordScene::new(store, SPACE_BOUNDARY).await;
         scene.catch_up_on_an_empty_log().await;
-        sync_faye(
-            &scene.lifecycle,
-            vec![
-                listing(Some("c1"), &["swordfish", "redtail"]),
-                listing(None, &[]),
-            ],
-        )
-        .await;
-        assert_eq!(scene.faye_space_cursor().as_deref(), Some("c1"));
-        scene
+        let host = faye_host(&["swordfish", "redtail"]);
+        assert_eq!(
+            sync_faye(&scene.lifecycle, &host).await,
+            VerifiedSyncOutcome::Replaced
+        );
+        assert_eq!(faye_verified_rev(&scene), Some(host.rev()));
+        (scene, host)
     }
 
     #[tokio::test]
@@ -2142,18 +2083,15 @@ mod tests {
         scene
             .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), true)])
             .await;
-        assert_eq!(scene.faye_space_cursor().as_deref(), Some("c1"));
+        assert!(faye_verified_rev(&scene).is_some());
 
         assert_eq!(scene.cycle().await, LabelCycle::CaughtUp);
 
-        assert_eq!(scene.faye_space_cursor(), None);
+        assert_eq!(faye_verified_rev(&scene), None);
         assert!(scene.reinstating_records().is_empty());
-        let requested = sync_faye(
-            &scene.lifecycle,
-            vec![listing(None, &["swordfish", "redtail"])],
-        )
-        .await;
-        assert_eq!(requested, [None]);
+        let host = faye_host(&["swordfish", "redtail"]);
+        sync_faye(&scene.lifecycle, &host).await;
+        assert_eq!(host.host.requests(), [faye_archive()]);
         assert!(scene.feed_lists(FAYE_SPACE_POST));
         assert!(scene.feed_lists(FAYE_SECOND_SPACE_POST));
     }
@@ -2172,11 +2110,9 @@ mod tests {
             RecordScene::new(store, SPACE_BOUNDARY).await
         };
         fresh.catch_up_on_an_empty_log().await;
-        let first_ingest = sync_faye(
-            &fresh.lifecycle,
-            vec![listing(None, &["swordfish", "redtail"])],
-        )
-        .await;
+        let first_host = faye_host(&["swordfish", "redtail"]);
+        sync_faye(&fresh.lifecycle, &first_host).await;
+        let first_ingest = first_host.host.requests();
 
         let scene = pds_scene().await;
         scene
@@ -2189,13 +2125,11 @@ mod tests {
             .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), true)])
             .await;
         scene.cycle().await;
-        let after_reset = sync_faye(
-            &scene.lifecycle,
-            vec![listing(None, &["swordfish", "redtail"])],
-        )
-        .await;
+        let reset_host = faye_host(&["swordfish", "redtail"]);
+        sync_faye(&scene.lifecycle, &reset_host).await;
+        let after_reset = reset_host.host.requests();
 
-        assert_eq!(first_ingest, [None]);
+        assert_eq!(first_ingest, [faye_archive()]);
         assert_eq!(after_reset, first_ingest);
         assert!(scene.feed_lists(FAYE_SPACE_POST));
         assert!(!scene.feed_lists(FAYE_SECOND_SPACE_POST));
@@ -2261,12 +2195,9 @@ mod tests {
                 "1998-04-03T00:00:00.000Z",
             )
             .unwrap();
-        sync_faye(
-            &scene.lifecycle,
-            vec![listing(Some("c2"), &[]), listing(None, &[])],
-        )
-        .await;
-        assert_eq!(scene.faye_space_cursor().as_deref(), Some("c2"));
+        let host = faye_host(&["swordfish", "redtail"]);
+        sync_faye(&scene.lifecycle, &host).await;
+        assert_eq!(faye_verified_rev(&scene), Some(host.rev()));
 
         scene
             .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), true)])
@@ -2276,7 +2207,7 @@ mod tests {
         scene.cycle().await;
 
         assert!(scene.reinstating_records().is_empty());
-        assert_eq!(scene.faye_space_cursor().as_deref(), Some("c2"));
+        assert_eq!(faye_verified_rev(&scene), Some(host.rev()));
     }
 
     #[tokio::test]
@@ -2710,110 +2641,45 @@ mod tests {
         assert_eq!(scene.lifecycle.reinstating_accounts(10).unwrap().len(), 2);
     }
 
-    /// Lists like `HostPages`, but holds its first page until released.
-    #[derive(Clone)]
-    struct HeldHostPages {
-        pages: HostPages,
-        entered: Arc<tokio::sync::Notify>,
-        release: Arc<tokio::sync::Notify>,
-        held: Arc<AtomicBool>,
-    }
-
-    #[async_trait]
-    impl SpacePageReader for HeldHostPages {
-        async fn list_page(
-            &self,
-            target: &PdsPollTarget,
-            cursor: Option<&str>,
-            limit: usize,
-        ) -> Result<SpaceHostPage, SpaceHostError> {
-            if !self.held.swap(true, Ordering::SeqCst) {
-                self.entered.notify_one();
-                self.release.notified().await;
-            }
-            self.pages.list_page(target, cursor, limit).await
-        }
-    }
-
-    #[async_trait]
-    impl SpacePageSource for HeldHostPages {
-        async fn connect(
-            &self,
-            _: &PdsPollTarget,
-            _: Arc<crate::space_credential::HeldSpaceCredential>,
-        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
-            Ok(Arc::new(self.clone()))
-        }
-    }
-
     #[tokio::test]
     async fn a_space_reset_wins_over_a_sync_already_in_flight() {
-        let scene = pds_scene().await;
+        let (scene, host) = pds_scene_with_host().await;
+        let base_rev = faye_verified_rev(&scene).expect("the scene syncs faye");
         scene
             .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), false)])
             .await;
         scene
             .publish_and_cycle(&[(Sub::Record(FAYE_SPACE_POST), true)])
             .await;
-        let held = HeldHostPages {
-            pages: HostPages {
-                pages: Arc::new(Mutex::new(
-                    vec![listing(Some("c9"), &["swordfish", "redtail"])].into(),
-                )),
-                requested_cursors: Arc::new(Mutex::new(Vec::new())),
-            },
-            entered: Arc::new(tokio::sync::Notify::new()),
-            release: Arc::new(tokio::sync::Notify::new()),
-            held: Arc::new(AtomicBool::new(false)),
-        };
-        let synchronizer = PdsSpaceSynchronizer::new(
-            Arc::new(held.clone()),
-            Arc::new(SpaceCredentialManager::with_clock(
-                Arc::new(Issuer),
-                fixed_credential_clock,
-            )),
-            Arc::new(Verified),
-        );
-        let target = PdsPollTarget {
-            space_uri: SPACE.to_owned(),
-            boundary: SPACE_BOUNDARY.to_owned(),
-            did: FAYE_VALENTINE.to_owned(),
-            host: "https://pds.example.test/".to_owned(),
-            generation: scene
-                .lifecycle
-                .pds_member_generation(SPACE_BOUNDARY, FAYE_VALENTINE)
-                .unwrap()
-                .expect("faye is a current member"),
-        };
+        host.host.edit(FAYE_VALENTINE, |repo| {
+            repo.put(
+                10,
+                POST_COLLECTION,
+                "ein",
+                json!({ "$type": POST_COLLECTION, "createdAt": "1998-04-03T00:00:00.000Z" }),
+            );
+        });
+        let held = Gate::new();
+        host.host
+            .script_pages(FAYE_VALENTINE, vec![PageStep::Gate(held.clone())]);
+        let host = Arc::new(host);
         let in_flight = tokio::spawn({
             let lifecycle = Arc::clone(&scene.lifecycle);
-            async move {
-                let observed_at = super::format_utc_millis(time::OffsetDateTime::now_utc());
-                synchronizer
-                    .sync_target(&lifecycle, &target, &observed_at, FAR_RETENTION)
-                    .await
-            }
+            let host = Arc::clone(&host);
+            async move { sync_faye(&lifecycle, &host).await }
         });
-        held.entered.notified().await;
+        held.reached.notified().await;
 
         assert_eq!(scene.cycle().await, LabelCycle::CaughtUp);
         assert!(scene.reinstating_records().is_empty());
         held.release.notify_one();
         let outcome = in_flight.await.unwrap();
 
-        assert_eq!(scene.faye_space_cursor(), None);
-        assert!(
-            matches!(
-                outcome,
-                Err(crate::pds_space_sync::PdsSpaceSyncError::Target(
-                    crate::space_sync::SpaceSyncError::UnauthorizedTarget
-                ))
-            ),
-            "{outcome:?}"
-        );
+        assert_eq!(faye_verified_rev(&scene), None);
+        assert_eq!(outcome, VerifiedSyncOutcome::Retry);
         assert_eq!(
-            held.pages.requested_cursors.lock().unwrap().clone(),
-            [Some("c1".to_owned())]
+            host.host.pages_requested(FAYE_VALENTINE),
+            [(Some(base_rev), None)]
         );
         assert!(
             scene
@@ -2823,12 +2689,15 @@ mod tests {
                 .is_some(),
             "faye stays a member"
         );
-        let next_pass = sync_faye(
-            &scene.lifecycle,
-            vec![listing(None, &["swordfish", "redtail"])],
-        )
-        .await;
-        assert_eq!(next_pass, [None]);
+        assert_eq!(
+            sync_faye(&scene.lifecycle, &host).await,
+            VerifiedSyncOutcome::Replaced
+        );
+        assert_eq!(
+            host.host.archives_requested(),
+            2,
+            "the scene's and this one"
+        );
         assert!(scene.feed_lists(FAYE_SPACE_POST));
     }
 

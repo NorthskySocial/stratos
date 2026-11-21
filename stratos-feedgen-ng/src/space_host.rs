@@ -3,12 +3,16 @@ use std::{env, future::Future, net::SocketAddr, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use cid::Cid;
 use reqwest::{Client, redirect::Policy};
-use serde::Deserialize;
-use serde_json::Value;
+use serde::{
+    Deserialize,
+    de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor},
+};
+use serde_json::{Map, Number, Value};
 use tokio::time::Instant;
 use url::Url;
 
 use crate::{
+    config::MAX_SPACE_POLL_BODY_BYTES,
     identifier::Did,
     identity::{PrivateCidr, is_public_address, parse_private_cidrs},
     space_archive::{
@@ -23,19 +27,15 @@ use crate::{
         verify_commit_response,
     },
     space_record::{RecordDecodeRefusal, decode_record},
-    space_sync::{MAX_SPACE_PAGE_OPS, SpacePage, SpaceRepoOp, is_projected_collection},
+    space_sync::{MAX_SPACE_PAGE_OPS, is_projected_collection},
     space_value_budget::{ValueBudget, count_values},
     store::VerifiedSpaceRecord,
 };
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_PAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_ERROR_BYTES: usize = 4 * 1024;
 const MAX_CURSOR_BYTES: usize = 4 * 1024;
 const MAX_REV_BYTES: usize = 512;
-const MAX_COLLECTION_BYTES: usize = 317;
-const MAX_RKEY_BYTES: usize = 512;
-const MAX_CID_BYTES: usize = 256;
 const STAR_CONTENT_TYPE: &str = "application/vnd.dasl.star";
 // The client-wide timeout covers the whole body and is sized for a page. An
 // archive can be sixteen times larger; the caller's absolute deadline is what
@@ -160,52 +160,6 @@ impl PinnedSpaceHostClient {
             client,
             proof,
         })
-    }
-
-    pub async fn list_repo_ops(
-        &self,
-        space_uri: &str,
-        actor_did: &str,
-        cursor: Option<&str>,
-        limit: usize,
-    ) -> Result<SpaceHostPage, SpaceHostError> {
-        let response = self
-            .repo_request(space_uri, actor_did, cursor, limit)
-            .await?
-            .send()
-            .await
-            .map_err(classify_request_error)?;
-        if !response.status().is_success() {
-            return Err(request_error(response).await);
-        }
-        let bytes = response_bytes(response, MAX_PAGE_BYTES).await?;
-        decode_page(&bytes)
-    }
-
-    async fn repo_request(
-        &self,
-        space_uri: &str,
-        actor_did: &str,
-        cursor: Option<&str>,
-        limit: usize,
-    ) -> Result<reqwest::RequestBuilder, SpaceHostError> {
-        validate_request(space_uri, actor_did, cursor, limit)?;
-        let limit = limit.to_string();
-        let mut parameters = vec![
-            ("space", space_uri),
-            ("repo", actor_did),
-            ("limit", limit.as_str()),
-        ];
-        if let Some(cursor) = cursor {
-            parameters.push(("cursor", cursor));
-        }
-        self.signed_request(
-            "com.atproto.space.listRepoOps",
-            &parameters,
-            actor_did,
-            "application/json",
-        )
-        .await
     }
 
     // One page of an authenticated read: `since` rides beside the cursor, and
@@ -512,9 +466,14 @@ impl RepoOpsTransport for PinnedSpaceHostClient {
             return Err(request_error(response).await);
         }
         let headers = commit_response_headers(&response);
-        let body = response_bytes(response, MAX_PAGE_BYTES).await?;
+        let body = read_page_body(response).await?;
         Ok(SignedReadResponse { body, headers })
     }
+}
+
+// A poll reads no more than its body limit in all, so no one page may be more.
+async fn read_page_body(response: reqwest::Response) -> Result<Vec<u8>, SpaceHostError> {
+    response_bytes(response, MAX_SPACE_POLL_BODY_BYTES).await
 }
 
 #[async_trait]
@@ -786,36 +745,158 @@ fn kem_lookup_failure(error: KemKeyLookupError) -> AuthenticatedReadError {
     }
 }
 
+// The host shapes the `commit` member, and it is read before the MAC is checked
+// or a value is counted, so it is never built whole.
 fn body_commit(body: &[u8]) -> Result<Value, AuthenticatedReadError> {
     #[derive(Deserialize)]
     struct CommitMember {
-        commit: Option<Value>,
+        commit: Option<BoundedCommit>,
     }
     serde_json::from_slice::<CommitMember>(body)
         .ok()
         .and_then(|member| member.commit)
+        .map(|commit| commit.0)
         .ok_or(AuthenticatedReadError::Host(
             SpaceHostError::InvalidResponse,
         ))
 }
 
-pub struct SpaceHostPage {
-    pub page: SpacePage,
-    pub commit: Option<SpaceCommit>,
+const COMMIT_SCALAR_MEMBERS: [&str; 4] = ["ver", "repo", "space", "rev"];
+const COMMIT_DATA_MEMBER: &str = "data";
+const BYTES_MEMBER: &str = "$bytes";
+
+/// A page's `commit` member holding only what the MAC verifier compares:
+/// `ver`, `repo`, `space` and `rev` when each is a scalar, and `data` when it
+/// is a map of `$bytes` alone. Anything else is parsed to its end and dropped
+/// unbuilt, or kept as `null` where the verifier would refuse what was there,
+/// so the verifier reaches the verdict the whole tree gave it.
+struct BoundedCommit(Value);
+
+impl<'de> Deserialize<'de> for BoundedCommit {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        CommitPart::Commit.deserialize(deserializer).map(Self)
+    }
 }
 
-pub struct SpaceCommit {
-    raw: Value,
+/// What a part of the commit member is read as. Every part is parsed the way a
+/// tree would be, so a body refused before is refused still; a later member of
+/// a name replaces an earlier one, as in a tree.
+#[derive(Clone, Copy)]
+enum CommitPart {
+    Commit,
+    Data,
+    Scalar,
+    Dropped,
 }
 
-impl SpaceCommit {
-    #[cfg(test)]
-    pub(crate) fn from_value(raw: Value) -> Self {
-        Self { raw }
+impl<'de> DeserializeSeed<'de> for CommitPart {
+    type Value = Value;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl CommitPart {
+    fn scalar_or_null(self, value: Value) -> Value {
+        match self {
+            Self::Scalar => value,
+            _ => Value::Null,
+        }
+    }
+}
+
+impl<'de> Visitor<'de> for CommitPart {
+    type Value = Value;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("any JSON value")
     }
 
-    pub fn as_value(&self) -> &Value {
-        &self.raw
+    fn visit_bool<E: de::Error>(self, value: bool) -> Result<Value, E> {
+        Ok(self.scalar_or_null(Value::Bool(value)))
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Value, E> {
+        Ok(self.scalar_or_null(Value::from(value)))
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Value, E> {
+        Ok(self.scalar_or_null(Value::from(value)))
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Value, E> {
+        Ok(self.scalar_or_null(Number::from_f64(value).map_or(Value::Null, Value::Number)))
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Value, E> {
+        match self {
+            Self::Scalar => Ok(Value::String(value.to_owned())),
+            _ => Ok(Value::Null),
+        }
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut items: A) -> Result<Value, A::Error> {
+        while items.next_element_seed(Self::Dropped)?.is_some() {}
+        Ok(Value::Null)
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut members: A) -> Result<Value, A::Error> {
+        let mut kept = Map::new();
+        let mut foreign_member = false;
+        while let Some(name) = members.next_key_seed(MemberName)? {
+            let part = match (self, name.as_deref()) {
+                (Self::Commit, Some(name)) if COMMIT_SCALAR_MEMBERS.contains(&name) => Self::Scalar,
+                (Self::Commit, Some(COMMIT_DATA_MEMBER)) => Self::Data,
+                (Self::Data, Some(BYTES_MEMBER)) => Self::Scalar,
+                _ => {
+                    foreign_member = true;
+                    Self::Dropped
+                }
+            };
+            let value = members.next_value_seed(part)?;
+            if !matches!(part, Self::Dropped)
+                && let Some(name) = name
+            {
+                kept.insert(name, value);
+            }
+        }
+        Ok(match self {
+            Self::Commit => Value::Object(kept),
+            // The verifier takes `data` only when `$bytes` is its one member.
+            Self::Data if !foreign_member => Value::Object(kept),
+            _ => Value::Null,
+        })
+    }
+}
+
+/// A member name, kept only when it is one the commit reads.
+struct MemberName;
+
+impl<'de> DeserializeSeed<'de> for MemberName {
+    type Value = Option<String>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_str(self)
+    }
+}
+
+impl<'de> Visitor<'de> for MemberName {
+    type Value = Option<String>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a member name")
+    }
+
+    fn visit_str<E: de::Error>(self, name: &str) -> Result<Self::Value, E> {
+        let read = COMMIT_SCALAR_MEMBERS.contains(&name)
+            || name == COMMIT_DATA_MEMBER
+            || name == BYTES_MEMBER;
+        Ok(read.then(|| name.to_owned()))
     }
 }
 
@@ -955,71 +1036,6 @@ struct XrpcError {
     error: Option<String>,
 }
 
-fn decode_page(bytes: &[u8]) -> Result<SpaceHostPage, SpaceHostError> {
-    let response: RawPage =
-        serde_json::from_slice(bytes).map_err(|_| SpaceHostError::InvalidResponse)?;
-    if response.ops.len() > MAX_SPACE_PAGE_OPS
-        || response
-            .cursor
-            .as_deref()
-            .is_some_and(|cursor| cursor.is_empty() || cursor.len() > MAX_CURSOR_BYTES)
-    {
-        return Err(SpaceHostError::InvalidResponse);
-    }
-    let mut ops = Vec::with_capacity(response.ops.len());
-    for op in response.ops {
-        if op.rev.is_empty()
-            || op.rev.len() > MAX_REV_BYTES
-            || op.collection.is_empty()
-            || op.rkey.is_empty()
-            || op.collection.len() > MAX_COLLECTION_BYTES
-            || op.rkey.len() > MAX_RKEY_BYTES
-            || op.cid.as_ref().is_some_and(|cid| cid.len() > MAX_CID_BYTES)
-        {
-            return Err(SpaceHostError::InvalidResponse);
-        }
-        ops.push(SpaceRepoOp {
-            collection: op.collection,
-            rkey: op.rkey,
-            cid: op.cid,
-            value: op.value,
-        });
-    }
-    if response
-        .commit
-        .as_ref()
-        .is_some_and(|commit| !commit.is_object())
-    {
-        return Err(SpaceHostError::InvalidResponse);
-    }
-    Ok(SpaceHostPage {
-        page: SpacePage {
-            ops,
-            next_cursor: response.cursor,
-        },
-        commit: response.commit.map(|raw| SpaceCommit { raw }),
-    })
-}
-
-#[derive(Deserialize)]
-struct RawPage {
-    ops: Vec<RawOp>,
-    #[serde(default)]
-    cursor: Option<String>,
-    #[serde(default)]
-    commit: Option<Value>,
-}
-
-#[derive(Deserialize)]
-struct RawOp {
-    rev: String,
-    collection: String,
-    rkey: String,
-    cid: Option<String>,
-    #[serde(default)]
-    value: Option<Value>,
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1030,8 +1046,8 @@ mod tests {
     use async_trait::async_trait;
 
     use super::{
-        HostResolver, PinnedSpaceHostClient, PrivateHostPolicy, SpaceCredentialProof,
-        SpaceHostError, decode_page, parse_origin, validate_addresses, validate_request,
+        HostResolver, PinnedSpaceHostClient, PrivateHostPolicy, RepoOpsQuery, SpaceCredentialProof,
+        SpaceHostError, parse_origin, validate_addresses, validate_request,
     };
     use crate::identity::parse_private_cidrs;
 
@@ -1047,6 +1063,23 @@ mod tests {
             crate::space_http_signature::SpaceHttpSignatureKey::generate()
                 .presentation_headers("credential", audience)
                 .map_err(|_| SpaceHostError::Proof)
+        }
+    }
+
+    const ACCEPT_SIGNATURE: &str = "sig1=(\"kem\")";
+
+    fn ops_query<'a>(
+        space_uri: &'a str,
+        actor_did: &'a str,
+        cursor: Option<&'a str>,
+        limit: usize,
+    ) -> RepoOpsQuery<'a> {
+        RepoOpsQuery {
+            space_uri,
+            actor_did,
+            since: None,
+            cursor,
+            limit,
         }
     }
 
@@ -1159,22 +1192,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_malformed_or_unbounded_pages() {
-        for body in [
-            br#"{}"#.as_slice(),
-            br#"{"ops":[{}]}"#.as_slice(),
-            br#"{"ops":[{"rev":"r","collection":"zone.stratos.feed.post","rkey":"k","cid":3}]}"#
-                .as_slice(),
-            br#"{"ops":[],"commit":false}"#.as_slice(),
-        ] {
-            assert!(matches!(
-                decode_page(body),
-                Err(SpaceHostError::InvalidResponse)
-            ));
-        }
-    }
-
-    #[test]
     fn distinguishes_invalid_request_inputs_from_host_responses() {
         assert_eq!(
             validate_request("", "did:plc:member", None, 1),
@@ -1182,13 +1199,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn decodes_a_bounded_repo_page() {
-        let page = decode_page(br#"{"ops":[{"rev":"r","collection":"zone.stratos.feed.post","rkey":"k","cid":null}],"cursor":"next","commit":{"rev":"r"}}"#).unwrap();
-        assert_eq!(page.page.ops.len(), 1);
-        assert_eq!(page.page.next_cursor.as_deref(), Some("next"));
-        assert!(page.commit.is_some());
-    }
     #[tokio::test]
     async fn binds_repo_reads_to_each_owner_not_the_shared_host() {
         use crate::{
@@ -1214,19 +1224,25 @@ mod tests {
         .unwrap();
         let space = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
         let rei = client
-            .repo_request(space, "did:plc:rei", None, 10)
+            .ops_request(&ops_query(space, "did:plc:rei", None, 10), ACCEPT_SIGNATURE)
             .await
             .unwrap()
             .build()
             .unwrap();
         let repeat = client
-            .repo_request(space, "did:plc:rei", Some("next"), 20)
+            .ops_request(
+                &ops_query(space, "did:plc:rei", Some("next"), 20),
+                ACCEPT_SIGNATURE,
+            )
             .await
             .unwrap()
             .build()
             .unwrap();
         let misato = client
-            .repo_request(space, "did:plc:misato", None, 10)
+            .ops_request(
+                &ops_query(space, "did:plc:misato", None, 10),
+                ACCEPT_SIGNATURE,
+            )
             .await
             .unwrap()
             .build()
@@ -1262,7 +1278,10 @@ mod tests {
         }
         assert!(
             client
-                .repo_request(space, "https://pds.example.test", None, 10)
+                .ops_request(
+                    &ops_query(space, "https://pds.example.test", None, 10),
+                    ACCEPT_SIGNATURE
+                )
                 .await
                 .is_err()
         );
@@ -1288,7 +1307,10 @@ mod tests {
             crate::credential_manager::boundary_to_space_uri("did:web:stratos.example.test/bebop")
                 .unwrap();
         let request = client
-            .repo_request(&space, "did:plc:rei", None, 10)
+            .ops_request(
+                &ops_query(&space, "did:plc:rei", None, 10),
+                ACCEPT_SIGNATURE,
+            )
             .await
             .unwrap()
             .build()
@@ -3015,5 +3037,300 @@ mod authenticated_read_tests {
             );
             assert_eq!(setup.host.requests(), 1, "{code}");
         }
+    }
+
+    // A page body's `commit` member: the MAC verifier is handed it, so a host
+    // decides its shape before anything about the page is trusted or counted.
+    const NO_TREE_THIS_LARGE: usize = 1024 * 1024;
+    const FIXED_EPHEMERAL_KEY: [u8; 32] = [0x44; 32];
+
+    fn page_with_commit(commit: &str) -> Vec<u8> {
+        format!("{{\"ops\":[],\"commit\":{commit}}}").into_bytes()
+    }
+
+    fn the_five_commit_members() -> String {
+        format!(
+            "\"ver\":1,\"repo\":\"{AUTHOR}\",\"space\":\"{SPACE}\",\"rev\":\"{REV}\",\"data\":{{\"$bytes\":\"{}\"}}",
+            STANDARD.encode(COMMIT_DATA).trim_end_matches('=')
+        )
+    }
+
+    // Two contexts made from one ephemeral key share one secret, so the same
+    // signed headers can be judged twice.
+    fn fixed_context() -> MacRequestContext {
+        let secret = crate::space_kem::encapsulate_with_ephemeral_key(
+            &public_key(&private_key(0x22)),
+            &FIXED_EPHEMERAL_KEY,
+        )
+        .expect("secret");
+        MacRequestContext::new(secret, AUTHOR, SPACE)
+    }
+
+    fn signed_headers() -> CommitResponseHeaders {
+        TestHost::holding(private_key(0x22), vec![]).commit_headers(
+            fixed_context().key_share(),
+            AUTHOR,
+            SPACE,
+            REV,
+            &STANDARD.encode(COMMIT_DATA),
+        )
+    }
+
+    fn verdict(
+        headers: &CommitResponseHeaders,
+        commit: Result<Value, AuthenticatedReadError>,
+    ) -> Result<MacVerifiedCommit, AuthenticatedReadError> {
+        verify_commit_response(fixed_context(), headers, &commit?)
+            .map_err(AuthenticatedReadError::Authentication)
+    }
+
+    // How the page read took the commit before it was bounded: the whole
+    // member, parsed into a tree.
+    fn commit_as_a_whole_tree(body: &[u8]) -> Result<Value, AuthenticatedReadError> {
+        #[derive(Deserialize)]
+        struct WholeCommit {
+            commit: Option<Value>,
+        }
+        serde_json::from_slice::<WholeCommit>(body)
+            .ok()
+            .and_then(|member| member.commit)
+            .ok_or(AuthenticatedReadError::Host(
+                SpaceHostError::InvalidResponse,
+            ))
+    }
+
+    #[test]
+    fn a_hostile_commit_member_is_judged_without_its_tree_being_built() {
+        let zeros = format!("[{}0]", "0,".repeat(2_999_999));
+        let nested_side_by_side = format!(
+            "[{}]",
+            vec![format!("{}0{}", "[".repeat(99), "]".repeat(99)); 2_000].join(",")
+        );
+        let past_the_parsers_depth = format!("{}{}", "[".repeat(100_000), "]".repeat(100_000));
+        let extra_members = format!(
+            "{{{},{}}}",
+            the_five_commit_members(),
+            (0..200_000)
+                .map(|at| format!("\"jet{at}\":0"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let malformed = || Err(authentication_failure(MacDefect::MalformedBodyCommit));
+        let cases = [
+            ("three million zeros", zeros, malformed()),
+            (
+                "two thousand arrays nested a hundred deep",
+                nested_side_by_side,
+                malformed(),
+            ),
+            (
+                "nesting past the parser's depth",
+                past_the_parsers_depth,
+                Err(AuthenticatedReadError::Host(
+                    SpaceHostError::InvalidResponse,
+                )),
+            ),
+            (
+                "two hundred thousand members beside the five",
+                extra_members,
+                Ok(MacVerifiedCommit::for_tests(
+                    AUTHOR,
+                    SPACE,
+                    REV,
+                    COMMIT_DATA,
+                )),
+            ),
+        ];
+        let headers = signed_headers();
+        let mut held_per_case = Vec::new();
+        for (name, commit, expected) in cases {
+            let body = page_with_commit(&commit);
+            let (read, held) =
+                crate::space_archive::counting::peak_growth_during(|| body_commit(&body));
+            held_per_case.push((name, held));
+            assert_eq!(verdict(&headers, read), expected, "{name}");
+        }
+        assert!(
+            held_per_case
+                .iter()
+                .all(|(_, held)| *held < NO_TREE_THIS_LARGE),
+            "bytes held: {held_per_case:?}"
+        );
+    }
+
+    // A seeded mix of the members a commit can carry, each written in shapes
+    // the verifier accepts and shapes it refuses, so the bounded read is held
+    // to the verdict the whole tree gave on inputs nobody picked by hand.
+    #[test]
+    fn the_bounded_commit_gets_the_verdict_the_whole_tree_got() {
+        let data = STANDARD.encode(COMMIT_DATA);
+        let unpadded = data.trim_end_matches('=').to_owned();
+        let members: [(&str, Vec<String>); 6] = [
+            (
+                "ver",
+                [
+                    "1",
+                    "1.0",
+                    "\"1\"",
+                    "[1]",
+                    "{\"v\":1}",
+                    "null",
+                    "2",
+                    "-1",
+                    "true",
+                    "1e400",
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+            ),
+            (
+                "repo",
+                vec![
+                    format!("\"{AUTHOR}\""),
+                    "5".to_owned(),
+                    format!("[\"{AUTHOR}\"]"),
+                    "null".to_owned(),
+                    "\"did:plc:spikespiegel\"".to_owned(),
+                    "\"\\ud800\"".to_owned(),
+                ],
+            ),
+            (
+                "space",
+                vec![
+                    format!("\"{SPACE}\""),
+                    format!("\"{OTHER_SPACE}\""),
+                    format!("{{\"uri\":\"{SPACE}\"}}"),
+                ],
+            ),
+            (
+                "rev",
+                vec![
+                    format!("\"{REV}\""),
+                    "\"not-a-tid\"".to_owned(),
+                    "{}".to_owned(),
+                ],
+            ),
+            (
+                "data",
+                vec![
+                    format!("{{\"$bytes\":\"{unpadded}\"}}"),
+                    format!("{{\"$bytes\":\"{data}\"}}"),
+                    format!("\"{data}\""),
+                    format!("{{\"$bytes\":\"{unpadded}\",\"extra\":1}}"),
+                    "{\"$bytes\":[1]}".to_owned(),
+                    "{}".to_owned(),
+                    format!("{{\"$bytes\":\"AAAA\",\"$bytes\":\"{unpadded}\"}}"),
+                    format!("{{\"$bytes\":\"{unpadded}\",\"$bytes\":7}}"),
+                    format!("{{\"other\":\"{unpadded}\"}}"),
+                    format!("{{\"\\u0024bytes\":\"{unpadded}\"}}"),
+                ],
+            ),
+            (
+                "note",
+                [
+                    "\"ignored\"",
+                    "[1,{\"a\":null}]",
+                    "1e400",
+                    "\"\\ud800\"",
+                    "{\"ver\":2}",
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+            ),
+        ];
+        let mut generator = 0x5EED_BEB0_u64;
+        let mut next = |bound: usize| {
+            generator = generator
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (generator >> 33) as usize % bound
+        };
+        let mut commits = vec![
+            format!("{{{}}}", the_five_commit_members()),
+            format!("{{{},\"note\":\"ignored\"}}", the_five_commit_members()),
+            format!("{{{},\"ver\":2}}", the_five_commit_members()),
+            format!("{{\"ver\":2,{}}}", the_five_commit_members()),
+            format!(
+                "{{{}}}",
+                the_five_commit_members().replace("\"ver\"", "\"\\u0076er\"")
+            ),
+            "[]".to_owned(),
+            "null".to_owned(),
+            "\"commit\"".to_owned(),
+            "7".to_owned(),
+        ];
+        for _ in 0..500 {
+            let mut chosen = Vec::new();
+            for (name, shapes) in &members {
+                // One of the five is left out one time in five and written
+                // twice one time in ten; the extra member is written one time
+                // in three. Half the time a member takes its accepted shape.
+                let times = match (*name, next(10)) {
+                    ("note", _) => usize::from(next(3) == 0),
+                    (_, 0 | 1) => 0,
+                    (_, 2) => 2,
+                    _ => 1,
+                };
+                for _ in 0..times {
+                    let shape = if next(2) == 0 { 0 } else { next(shapes.len()) };
+                    chosen.push(format!("\"{name}\":{}", shapes[shape]));
+                }
+            }
+            for at in (1..chosen.len()).rev() {
+                chosen.swap(at, next(at + 1));
+            }
+            commits.push(format!("{{{}}}", chosen.join(",")));
+        }
+        let headers = signed_headers();
+        let mut accepted = 0;
+        for commit in &commits {
+            let body = page_with_commit(commit);
+            let bounded = verdict(&headers, body_commit(&body));
+            accepted += usize::from(bounded.is_ok());
+            assert_eq!(
+                bounded,
+                verdict(&headers, commit_as_a_whole_tree(&body)),
+                "{commit}"
+            );
+        }
+        for body in [
+            b"{\"ops\":[]}".to_vec(),
+            format!(
+                "{{\"commit\":{{{0}}},\"commit\":{{{0}}}}}",
+                the_five_commit_members()
+            )
+            .into_bytes(),
+            b"{\"ops\":[],\"commit\":null}".to_vec(),
+        ] {
+            assert_eq!(
+                verdict(&headers, body_commit(&body)),
+                verdict(&headers, commit_as_a_whole_tree(&body)),
+                "{}",
+                String::from_utf8_lossy(&body)
+            );
+        }
+        assert!(accepted >= 10, "{accepted} commits verified");
+    }
+
+    #[tokio::test]
+    async fn a_page_body_over_the_poll_limit_is_refused_before_it_is_read() {
+        let limit = crate::config::MAX_SPACE_POLL_BODY_BYTES;
+        let response = |length: usize| {
+            reqwest::Response::from(axum::http::Response::new(reqwest::Body::from(vec![
+                b' ';
+                length
+            ])))
+        };
+
+        assert_eq!(
+            read_page_body(response(limit + 1))
+                .await
+                .map(|body| body.len()),
+            Err(SpaceHostError::ResponseTooLarge)
+        );
+        assert_eq!(
+            read_page_body(response(limit)).await.map(|body| body.len()),
+            Ok(limit)
+        );
     }
 }

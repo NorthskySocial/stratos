@@ -12,27 +12,13 @@ use crate::{
     config::ProjectionRetention,
     lifecycle::ControlLifecycle,
     membership_reconciler::{MembershipReconciler, MembershipReconciliationError},
-    pds_space_sync::{PdsSpaceSyncError, PdsSpaceSyncOutcome, PdsSpaceSynchronizer},
-    space_host::SpaceHostError,
-    telemetry::{FeedTelemetry, SpaceSyncOutcome},
+    pds_space_sync::{FailureReason, PdsSpaceSynchronizer, VerifiedSyncOutcome},
+    telemetry::{FeedTelemetry, SpaceSyncCounts, SpaceSyncOutcome},
 };
 
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_STATUS_AGE: Duration = Duration::from_secs(90);
 const MAX_TARGET_CONCURRENCY: usize = 4;
-// The only error names a host can answer with that reach the log, each with the
-// reason it is logged under. A name outside this list is logged as `other`, so
-// host-supplied text never reaches a log line.
-const LOGGED_HOST_REFUSALS: [(&str, &str); 5] = [
-    ("InvalidSpaceMac", "invalid_space_mac"),
-    ("InvalidSpaceUri", "invalid_space_uri"),
-    ("InvalidCredential", "invalid_credential"),
-    ("BadSpaceAudience", "bad_space_audience"),
-    ("RepoNotFound", "repo_not_found"),
-];
-const OTHER_HOST_REFUSAL: &str = "other";
-const MISSING_MEMBER_GENERATION: &str = "member_generation";
-const UNJOINED_TARGET_TASK: &str = "task";
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,8 +27,10 @@ pub struct PdsSpacePass {
     pub membership_failures: usize,
     pub targets: usize,
     pub promoted: usize,
+    pub unchanged: usize,
+    pub replaced: usize,
+    pub cleared: usize,
     pub deferred: usize,
-    pub rejected: usize,
     pub target_failures: usize,
 }
 
@@ -67,9 +55,7 @@ impl PdsSpaceSyncStatus {
             && self
                 .last_completed
                 .is_some_and(|completed| now.duration_since(completed) <= MAX_STATUS_AGE)
-            && self
-                .last_pass
-                .is_some_and(|pass| pass.membership_failures == 0 && pass.target_failures == 0)
+            && self.last_pass.as_ref().is_some_and(pass_is_healthy)
     }
 
     fn mark_running(&mut self) {
@@ -84,6 +70,12 @@ impl PdsSpaceSyncStatus {
     fn mark_stopped(&mut self) {
         self.running = false;
     }
+}
+
+/// A pass is healthy when no membership listing and no target failed. A target
+/// that was deferred or retried is not a failure.
+fn pass_is_healthy(pass: &PdsSpacePass) -> bool {
+    pass.membership_failures == 0 && pass.target_failures == 0
 }
 
 struct SchedulerTaskGuard {
@@ -197,33 +189,45 @@ async fn run_forever(
         );
         tokio::select! {
             completed = pass => {
-                let healthy = completed.membership_failures == 0 && completed.target_failures == 0;
+                let healthy = pass_is_healthy(&completed);
+                let progressed = completed.promoted
+                    + completed.unchanged
+                    + completed.replaced
+                    + completed.cleared
+                    + completed.deferred
+                    != 0;
                 telemetry.record_space_sync(
                     if healthy {
                         SpaceSyncOutcome::Ok
-                    } else if completed.promoted != 0 || completed.deferred != 0 || completed.rejected != 0 {
+                    } else if progressed {
                         SpaceSyncOutcome::Partial
                     } else {
                         SpaceSyncOutcome::Failed
                     },
                     started.elapsed(),
-                    completed.promoted,
-                    completed.target_failures,
-                    completed.deferred,
-                    completed.rejected,
+                    SpaceSyncCounts {
+                        promoted: completed.promoted,
+                        unchanged: completed.unchanged,
+                        replaced: completed.replaced,
+                        cleared: completed.cleared,
+                        deferred: completed.deferred,
+                        failed: completed.target_failures,
+                    },
                 );
                 status
                     .lock()
                     .expect("PDS space scheduler status poisoned")
                     .record(Instant::now(), completed);
                 eprintln!(
-                    "event=pds_space_sync_pass healthy={healthy} boundaries={} membership_failures={} targets={} promoted={} deferred={} rejected={} target_failures={}",
+                    "event=pds_space_sync_pass healthy={healthy} boundaries={} membership_failures={} targets={} promoted={} unchanged={} replaced={} cleared={} deferred={} target_failures={}",
                     completed.boundaries,
                     completed.membership_failures,
                     completed.targets,
                     completed.promoted,
+                    completed.unchanged,
+                    completed.replaced,
+                    completed.cleared,
                     completed.deferred,
-                    completed.rejected,
                     completed.target_failures,
                 );
             }
@@ -264,8 +268,8 @@ async fn run_pass(
 struct TargetFailureReasons(BTreeMap<&'static str, usize>);
 
 impl TargetFailureReasons {
-    fn record(&mut self, reason: &'static str) {
-        *self.0.entry(reason).or_default() += 1;
+    fn record(&mut self, reason: FailureReason) {
+        *self.0.entry(reason.as_str()).or_default() += 1;
     }
 
     fn log_line(&self) -> Option<String> {
@@ -340,7 +344,7 @@ async fn collect_pass(
         for mut target in snapshot.targets {
             let Some(member_generation) = generations.get(&target.did).copied() else {
                 pass.target_failures += 1;
-                reasons.record(MISSING_MEMBER_GENERATION);
+                reasons.record(FailureReason::MemberGeneration);
                 continue;
             };
             target.generation = member_generation;
@@ -350,11 +354,10 @@ async fn collect_pass(
             }
             let lifecycle = Arc::clone(&lifecycle);
             let synchronizer = Arc::clone(&synchronizer);
-            let observed_at = observed_at.clone();
             let retained_at = retained_at.clone();
             workers.spawn(async move {
                 synchronizer
-                    .sync_target(&lifecycle, &target, &observed_at, &retained_at)
+                    .sync_target(&lifecycle, &target, &retained_at)
                     .await
             });
         }
@@ -368,31 +371,33 @@ async fn collect_pass(
 fn record_target_result(
     pass: &mut PdsSpacePass,
     reasons: &mut TargetFailureReasons,
-    result: Option<
-        Result<
-            Result<PdsSpaceSyncOutcome, crate::pds_space_sync::PdsSpaceSyncError>,
-            tokio::task::JoinError,
-        >,
-    >,
+    result: Option<Result<VerifiedSyncOutcome, tokio::task::JoinError>>,
 ) {
     match result {
-        Some(Ok(Ok(PdsSpaceSyncOutcome::Promoted))) => pass.promoted += 1,
-        Some(Ok(Ok(PdsSpaceSyncOutcome::DeferredKeyResolution))) => pass.deferred += 1,
-        Some(Ok(Ok(PdsSpaceSyncOutcome::RejectedCommit))) => pass.rejected += 1,
-        Some(Ok(Err(error))) => {
-            pass.target_failures += 1;
-            reasons.record(failure_reason(&error));
-            eprintln!(
-                "event=pds_space_target_failed kind={}",
-                target_failure_kind(&error)
-            );
-        }
-        Some(Err(_)) | None => {
-            pass.target_failures += 1;
-            reasons.record(UNJOINED_TARGET_TASK);
-            eprintln!("event=pds_space_target_failed kind=task");
-        }
+        Some(Ok(VerifiedSyncOutcome::Promoted)) => pass.promoted += 1,
+        Some(Ok(VerifiedSyncOutcome::Unchanged)) => pass.unchanged += 1,
+        Some(Ok(VerifiedSyncOutcome::Replaced)) => pass.replaced += 1,
+        Some(Ok(VerifiedSyncOutcome::Cleared)) => pass.cleared += 1,
+        Some(Ok(VerifiedSyncOutcome::Deferred)) => pass.deferred += 1,
+        // The next cycle starts again; it is neither a count nor a failure.
+        Some(Ok(VerifiedSyncOutcome::Retry)) => {}
+        Some(Ok(VerifiedSyncOutcome::Failed(reason))) => record_failure(pass, reasons, reason),
+        Some(Err(_)) | None => record_failure(pass, reasons, FailureReason::Task),
     }
+}
+
+fn record_failure(
+    pass: &mut PdsSpacePass,
+    reasons: &mut TargetFailureReasons,
+    reason: FailureReason,
+) {
+    pass.target_failures += 1;
+    reasons.record(reason);
+    eprintln!("{}", target_failure_line(reason));
+}
+
+fn target_failure_line(reason: FailureReason) -> String {
+    format!("event=pds_space_target_failed kind={}", reason.as_str())
 }
 
 fn membership_failure_kind(error: &MembershipReconciliationError) -> &'static str {
@@ -403,32 +408,6 @@ fn membership_failure_kind(error: &MembershipReconciliationError) -> &'static st
         MembershipReconciliationError::CursorStalled => "cursor_stalled",
         MembershipReconciliationError::PageLimit => "page_limit",
         MembershipReconciliationError::Store(_) => "store",
-    }
-}
-
-// A host refusal is told apart by the error name the host sent, but only when
-// that name is one this service knows; every other failure keeps its kind.
-fn failure_reason(error: &PdsSpaceSyncError) -> &'static str {
-    match error {
-        PdsSpaceSyncError::Host(SpaceHostError::Request { code, .. }) => LOGGED_HOST_REFUSALS
-            .iter()
-            .find(|(name, _)| Some(*name) == code.as_deref())
-            .map_or(OTHER_HOST_REFUSAL, |(_, reason)| reason),
-        other => target_failure_kind(other),
-    }
-}
-
-fn target_failure_kind(error: &PdsSpaceSyncError) -> &'static str {
-    match error {
-        PdsSpaceSyncError::Credential(_) => "credential",
-        PdsSpaceSyncError::Host(_) => "host",
-        PdsSpaceSyncError::Target(_) => "target",
-        PdsSpaceSyncError::Stage(_) => "stage",
-        PdsSpaceSyncError::Store(_) => "store",
-        PdsSpaceSyncError::PageLimit => "page_limit",
-        PdsSpaceSyncError::OperationLimit => "operation_limit",
-        PdsSpaceSyncError::CursorStalled => "cursor_stalled",
-        PdsSpaceSyncError::TargetCapacity => "target_capacity",
     }
 }
 
@@ -454,12 +433,13 @@ fn format_utc_millis(value: OffsetDateTime) -> String {
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::VecDeque,
+        collections::{BTreeSet, VecDeque},
         sync::{Arc, Mutex},
         time::{Duration, Instant},
     };
 
     use async_trait::async_trait;
+    use serde_json::{Value, json};
     use tokio::sync::oneshot;
 
     use crate::{
@@ -470,26 +450,32 @@ mod tests {
         lifecycle::ControlLifecycle,
         membership_reconciler::MembershipReconciler,
         pds_space_sync::{
-            PdsSpaceSynchronizer, SpaceCommitVerificationPort, SpacePageReader, SpacePageSource,
+            FailureReason, PdsSpaceSynchronizer, VerifiedSyncOutcome,
+            test_host::{
+                ArchiveStep, HostRepo, PageStep, StaticKemKeys, TestClock, TestHost, TestSource,
+            },
         },
         readiness::FeedReadinessGate,
         service::ProjectionReader,
-        space_commit::CommitVerification,
-        space_host::{SpaceHostError, SpaceHostPage},
         space_http_signature::SpaceHttpSignatureKey,
         space_membership::{
             RepoCustody, SpaceMembershipClient, SpaceMembershipError, SpaceMembershipPage,
             SpaceRepoMember,
         },
-        space_sync::SpacePage,
-        store::{EncryptedStore, StorageKey},
+        store::{EncryptedStore, PdsSpaceMember, StorageKey},
     };
 
-    use super::{PdsSpacePass, PdsSpaceScheduler, PdsSpaceSyncStatus, run_pass};
+    use super::{
+        PdsSpacePass, PdsSpaceScheduler, PdsSpaceSyncStatus, TargetFailureReasons, collect_pass,
+        pass_is_healthy, record_target_result, run_pass,
+    };
 
+    const AUTHORITY: &str = "did:web:stratos.example.test";
     const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
     const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
     const DID: &str = "did:plc:fayevalentine";
+    const PDS: &str = "https://pds.example.test/";
+    const POST: &str = "zone.stratos.feed.post";
 
     struct Issuer;
 
@@ -533,14 +519,7 @@ mod tests {
                 .send(())
                 .unwrap();
             release.await.unwrap();
-            Ok(SpaceMembershipPage {
-                members: vec![SpaceRepoMember {
-                    did: DID.to_owned(),
-                    custody: RepoCustody::Pds,
-                    host: Some("https://pds.example.test/".to_owned()),
-                }],
-                next_cursor: None,
-            })
+            Ok(pds_members(&[DID]))
         }
     }
 
@@ -561,49 +540,31 @@ mod tests {
         }
     }
 
-    struct EmptyPages;
-
-    #[async_trait]
-    impl SpacePageReader for EmptyPages {
-        async fn list_page(
-            &self,
-            _: &crate::membership_reconciler::PdsPollTarget,
-            _: Option<&str>,
-            _: usize,
-        ) -> Result<SpaceHostPage, SpaceHostError> {
-            Ok(SpaceHostPage {
-                page: SpacePage {
-                    ops: Vec::new(),
-                    next_cursor: None,
-                },
-                commit: None,
-            })
+    fn pds_members(dids: &[&str]) -> SpaceMembershipPage {
+        SpaceMembershipPage {
+            members: dids
+                .iter()
+                .map(|did| SpaceRepoMember {
+                    did: (*did).to_owned(),
+                    custody: RepoCustody::Pds,
+                    host: Some(PDS.to_owned()),
+                })
+                .collect(),
+            next_cursor: None,
         }
     }
 
-    #[async_trait]
-    impl SpacePageSource for EmptyPages {
-        async fn connect(
-            &self,
-            _: &crate::membership_reconciler::PdsPollTarget,
-            _: Arc<crate::space_credential::HeldSpaceCredential>,
-        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
-            Ok(Arc::new(Self))
-        }
-    }
-
-    struct VerifiedCommit;
-
-    #[async_trait]
-    impl SpaceCommitVerificationPort for VerifiedCommit {
-        async fn verify(
-            &self,
-            _: &str,
-            _: &str,
-            _: Option<&serde_json::Value>,
-        ) -> CommitVerification {
-            CommitVerification::Verified
-        }
+    fn membership_listing(
+        dids: &[&str],
+        passes: usize,
+        credentials: &Arc<SpaceCredentialManager>,
+    ) -> Arc<MembershipReconciler> {
+        Arc::new(MembershipReconciler::new(
+            Arc::new(MembershipPages(Mutex::new(
+                (0..passes).map(|_| Ok(pds_members(dids))).collect(),
+            ))),
+            Arc::clone(credentials),
+        ))
     }
 
     fn fixed_now() -> u64 {
@@ -611,12 +572,16 @@ mod tests {
     }
 
     fn lifecycle() -> Arc<ControlLifecycle> {
-        Arc::new(ControlLifecycle::new(
-            ProjectionReader::new(
-                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
-            ),
-            Arc::new(Mutex::new(FeedReadinessGate::default())),
-        ))
+        Arc::new(
+            ControlLifecycle::for_authority(
+                ProjectionReader::new(
+                    EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+                ),
+                Arc::new(Mutex::new(FeedReadinessGate::default())),
+                AUTHORITY,
+            )
+            .unwrap(),
+        )
     }
 
     fn credentials() -> Arc<SpaceCredentialManager> {
@@ -630,8 +595,62 @@ mod tests {
         crate::config::ProjectionRetention {
             max_age: Duration::from_secs(60),
             max_bytes: 1_024,
-            stage_budget: crate::config::SpaceStageBudget::for_projection(1_024).unwrap(),
+            space_write_reserve_bytes: 512,
         }
+    }
+
+    fn post(text: &str) -> Value {
+        json!({ "$type": POST, "text": text, "createdAt": "1998-04-03T00:00:00.000Z" })
+    }
+
+    /// The in-process host of the synchronizer's tests behind the real
+    /// synchronizer; it proves how a pass flows, not the cryptography.
+    struct Pds {
+        host: Arc<TestHost>,
+        synchronizer: Arc<PdsSpaceSynchronizer>,
+    }
+
+    impl Pds {
+        fn holding(dids: &[&str], credentials: &Arc<SpaceCredentialManager>) -> Self {
+            let host = TestHost::serving(SPACE);
+            for did in dids {
+                let mut repo = HostRepo::new(1);
+                repo.put(2, POST, "ein", post("Woof"));
+                host.hold(did, repo);
+            }
+            let source = TestSource::new(StaticKemKeys::new());
+            source.host_at(PDS, Arc::clone(&host));
+            let synchronizer = Arc::new(PdsSpaceSynchronizer::with_clock(
+                source,
+                Arc::clone(credentials),
+                TestClock::new(),
+            ));
+            Self { host, synchronizer }
+        }
+    }
+
+    async fn pass_over(
+        dids: &[&str],
+        passes: usize,
+        pds: &Pds,
+        lifecycle: &Arc<ControlLifecycle>,
+        credentials: &Arc<SpaceCredentialManager>,
+    ) -> Vec<(PdsSpacePass, TargetFailureReasons)> {
+        let membership = membership_listing(dids, passes, credentials);
+        let mut results = Vec::new();
+        for _ in 0..passes {
+            results.push(
+                collect_pass(
+                    Arc::clone(lifecycle),
+                    Arc::clone(&membership),
+                    Arc::clone(&pds.synchronizer),
+                    &[BOUNDARY.to_owned()].into_iter().collect(),
+                    &retention(),
+                )
+                .await,
+            );
+        }
+        results
     }
 
     #[test]
@@ -666,43 +685,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refreshes_membership_before_promoting_an_authority_target() {
-        let initial_credentials = credentials();
-        let membership = Arc::new(MembershipReconciler::new(
-            Arc::new(MembershipPages(Mutex::new(
-                [Ok(SpaceMembershipPage {
-                    members: vec![SpaceRepoMember {
-                        did: DID.to_owned(),
-                        custody: RepoCustody::Pds,
-                        host: Some("https://pds.example.test/".to_owned()),
-                    }],
-                    next_cursor: None,
-                })]
-                .into(),
-            ))),
-            Arc::clone(&initial_credentials),
-        ));
-        let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
-            Arc::new(EmptyPages),
-            initial_credentials,
-            Arc::new(VerifiedCommit),
-        ));
+    async fn refreshes_membership_before_replacing_an_authority_target() {
+        let credentials = credentials();
+        let pds = Pds::holding(&[DID], &credentials);
         let lifecycle = lifecycle();
 
         let pass = run_pass(
             Arc::clone(&lifecycle),
-            membership,
-            synchronizer,
+            membership_listing(&[DID], 1, &credentials),
+            Arc::clone(&pds.synchronizer),
             &[BOUNDARY.to_owned()].into_iter().collect(),
             &retention(),
         )
         .await;
 
-        assert_eq!(pass.promoted, 1);
+        assert_eq!(pass.replaced, 1);
+        assert_eq!(pass.promoted, 0);
         assert_eq!(pass.membership_failures, 0);
-        assert_eq!(
-            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
-            None
+        let generation = lifecycle
+            .pds_member_generation(BOUNDARY, DID)
+            .unwrap()
+            .unwrap();
+        assert!(
+            lifecycle
+                .verified_space_base_at_generation(BOUNDARY, SPACE, DID, generation)
+                .unwrap()
+                .is_some(),
+            "the member's repo was read after the membership listing named it"
         );
     }
 
@@ -712,7 +721,7 @@ mod tests {
         lifecycle
             .replace_pds_space_members(
                 BOUNDARY,
-                vec![crate::store::PdsSpaceMember {
+                vec![PdsSpaceMember {
                     did: DID.to_owned(),
                 }],
                 "2026-09-22T00:00:00.000Z",
@@ -732,12 +741,9 @@ mod tests {
             }),
             Arc::clone(&initial_credentials),
         ));
-        let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
-            Arc::new(EmptyPages),
-            initial_credentials,
-            Arc::new(VerifiedCommit),
-        ));
+        let pds = Pds::holding(&[DID], &initial_credentials);
         let task_lifecycle = Arc::clone(&lifecycle);
+        let synchronizer = Arc::clone(&pds.synchronizer);
         let task = tokio::spawn(async move {
             run_pass(
                 task_lifecycle,
@@ -755,7 +761,7 @@ mod tests {
         lifecycle
             .replace_pds_space_members(
                 BOUNDARY,
-                vec![crate::store::PdsSpaceMember {
+                vec![PdsSpaceMember {
                     did: DID.to_owned(),
                 }],
                 "2026-09-22T00:02:00.000Z",
@@ -776,36 +782,17 @@ mod tests {
         );
 
         let credentials = credentials();
-        let membership = Arc::new(MembershipReconciler::new(
-            Arc::new(MembershipPages(Mutex::new(
-                [Ok(SpaceMembershipPage {
-                    members: vec![SpaceRepoMember {
-                        did: DID.to_owned(),
-                        custody: RepoCustody::Pds,
-                        host: Some("https://pds.example.test/".to_owned()),
-                    }],
-                    next_cursor: None,
-                })]
-                .into(),
-            ))),
-            Arc::clone(&credentials),
-        ));
-        let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
-            Arc::new(EmptyPages),
-            credentials,
-            Arc::new(VerifiedCommit),
-        ));
         let recovered = run_pass(
             Arc::clone(&lifecycle),
-            membership,
-            synchronizer,
+            membership_listing(&[DID], 1, &credentials),
+            Arc::clone(&pds.synchronizer),
             &[BOUNDARY.to_owned()].into_iter().collect(),
             &retention(),
         )
         .await;
         assert_eq!(recovered.membership_failures, 0);
         assert_eq!(recovered.targets, 1);
-        assert_eq!(recovered.promoted, 1);
+        assert_eq!(recovered.replaced, 1);
     }
 
     #[tokio::test]
@@ -816,132 +803,269 @@ mod tests {
             Arc::new(MembershipPages(Mutex::new(VecDeque::new()))),
             Arc::clone(&credentials),
         ));
-        let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
-            Arc::new(EmptyPages),
-            credentials,
-            Arc::new(VerifiedCommit),
-        ));
-        let scheduler =
-            PdsSpaceScheduler::start(lifecycle, membership, synchronizer, Vec::new(), retention());
+        let pds = Pds::holding(&[], &credentials);
+        let scheduler = PdsSpaceScheduler::start(
+            lifecycle,
+            membership,
+            pds.synchronizer,
+            Vec::new(),
+            retention(),
+        );
 
         tokio::time::timeout(Duration::from_millis(100), scheduler.stop())
             .await
             .expect("scheduler stop should interrupt its sleep");
     }
 
-    struct RefusingPages(std::collections::BTreeMap<String, Option<String>>);
+    const SPIKE: &str = "did:plc:spikespiegel";
+    const JET: &str = "did:plc:jetblack";
+    const ED: &str = "did:plc:radicaledward";
+    const VICIOUS: &str = "did:plc:viciousbebop";
+    const HOSTILE_NAME: &str = "Hostile\nName\u{1b}[31m";
 
-    #[async_trait]
-    impl SpacePageSource for RefusingPages {
-        async fn connect(
-            &self,
-            _: &crate::membership_reconciler::PdsPollTarget,
-            _: Arc<crate::space_credential::HeldSpaceCredential>,
-        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
-            Ok(Arc::new(Self(self.0.clone())))
-        }
-    }
-
-    #[async_trait]
-    impl SpacePageReader for RefusingPages {
-        async fn list_page(
-            &self,
-            target: &crate::membership_reconciler::PdsPollTarget,
-            _: Option<&str>,
-            _: usize,
-        ) -> Result<SpaceHostPage, SpaceHostError> {
-            Err(SpaceHostError::Request {
-                status: 400,
-                code: self.0.get(&target.did).cloned().flatten(),
-            })
-        }
-    }
-
-    const MEMBER_DIDS: [&str; 3] = [
-        "did:plc:spikespiegel",
-        "did:plc:jetblack",
-        "did:plc:fayevalentine",
-    ];
-
-    async fn cycle_where_hosts_refuse(
-        refusals: [Option<&str>; 3],
-    ) -> (PdsSpacePass, super::TargetFailureReasons) {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_pass_over_every_kind_of_outcome_counts_each_and_logs_one_reason_line() {
+        let members = [SPIKE, JET, FAYE_DID, ED, VICIOUS];
         let credentials = credentials();
-        let membership = Arc::new(MembershipReconciler::new(
-            Arc::new(MembershipPages(Mutex::new(
-                [Ok(SpaceMembershipPage {
-                    members: MEMBER_DIDS
-                        .iter()
-                        .map(|did| SpaceRepoMember {
-                            did: (*did).to_owned(),
-                            custody: RepoCustody::Pds,
-                            host: Some("https://pds.example.test/".to_owned()),
-                        })
-                        .collect(),
-                    next_cursor: None,
-                })]
-                .into(),
-            ))),
-            Arc::clone(&credentials),
-        ));
-        let pages = RefusingPages(
-            MEMBER_DIDS
-                .iter()
-                .zip(refusals)
-                .map(|(did, code)| ((*did).to_owned(), code.map(str::to_owned)))
-                .collect(),
-        );
-        let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
-            Arc::new(pages),
-            credentials,
-            Arc::new(VerifiedCommit),
-        ));
-        super::collect_pass(
-            lifecycle(),
-            membership,
-            synchronizer,
-            &[BOUNDARY.to_owned()].into_iter().collect(),
+        let pds = Pds::holding(&members, &credentials);
+        let lifecycle = lifecycle();
+        let membership = membership_listing(&members, 2, &credentials);
+        let boundaries: BTreeSet<String> = [BOUNDARY.to_owned()].into_iter().collect();
+
+        let (first, first_reasons) = collect_pass(
+            Arc::clone(&lifecycle),
+            Arc::clone(&membership),
+            Arc::clone(&pds.synchronizer),
+            &boundaries,
             &retention(),
         )
-        .await
+        .await;
+        assert_eq!((first.targets, first.replaced), (5, 5));
+        assert_eq!(first_reasons.log_line(), None);
+
+        pds.host.edit(JET, |repo| {
+            repo.put(3, POST, "redtail", post("Cowboy Bebop"));
+        });
+        pds.host.script_pages(
+            FAYE_DID,
+            vec![PageStep::Refused {
+                status: 400,
+                code: Some("RepoTakendown"),
+            }],
+        );
+        pds.host.script_pages(
+            ED,
+            vec![PageStep::Refused {
+                status: 400,
+                code: Some("RepoNotFound"),
+            }],
+        );
+        pds.host.script_pages(
+            VICIOUS,
+            vec![PageStep::Refused {
+                status: 400,
+                code: Some(HOSTILE_NAME),
+            }],
+        );
+        let (second, reasons) = collect_pass(
+            Arc::clone(&lifecycle),
+            membership,
+            Arc::clone(&pds.synchronizer),
+            &boundaries,
+            &retention(),
+        )
+        .await;
+
+        assert_eq!(
+            second,
+            PdsSpacePass {
+                boundaries: 1,
+                membership_failures: 0,
+                targets: 5,
+                promoted: 1,
+                unchanged: 1,
+                replaced: 0,
+                cleared: 1,
+                deferred: 0,
+                target_failures: 2,
+            }
+        );
+        assert_eq!(
+            reasons.log_line().as_deref(),
+            Some("event=pds_space_target_failures other=1 repo_takendown=1")
+        );
+        assert!(!pass_is_healthy(&second), "a failed target is unhealthy");
+    }
+
+    const FAYE_DID: &str = DID;
+
+    #[test]
+    fn every_outcome_lands_in_its_own_count_and_only_a_failure_is_one() {
+        let counted = |outcomes: &[VerifiedSyncOutcome]| {
+            let mut pass = PdsSpacePass::default();
+            let mut reasons = TargetFailureReasons::default();
+            for outcome in outcomes {
+                record_target_result(&mut pass, &mut reasons, Some(Ok(*outcome)));
+            }
+            (pass, reasons.log_line())
+        };
+
+        let (pass, line) = counted(&[
+            VerifiedSyncOutcome::Promoted,
+            VerifiedSyncOutcome::Unchanged,
+            VerifiedSyncOutcome::Unchanged,
+            VerifiedSyncOutcome::Replaced,
+            VerifiedSyncOutcome::Cleared,
+            VerifiedSyncOutcome::Deferred,
+            VerifiedSyncOutcome::Retry,
+        ]);
+        assert_eq!(
+            pass,
+            PdsSpacePass {
+                promoted: 1,
+                unchanged: 2,
+                replaced: 1,
+                cleared: 1,
+                deferred: 1,
+                ..PdsSpacePass::default()
+            }
+        );
+        assert_eq!(line, None, "none of these is a failure");
+        assert!(pass_is_healthy(&pass));
+
+        let (pass, line) = counted(&[
+            VerifiedSyncOutcome::Failed(FailureReason::Digest),
+            VerifiedSyncOutcome::Failed(FailureReason::Digest),
+            VerifiedSyncOutcome::Failed(FailureReason::ReplacementCooldown),
+        ]);
+        assert_eq!(pass.target_failures, 3);
+        assert_eq!(
+            line.as_deref(),
+            Some("event=pds_space_target_failures digest=2 replacement_cooldown=1")
+        );
+        assert!(!pass_is_healthy(&pass));
+    }
+
+    #[test]
+    fn a_pass_of_unchanged_and_retried_targets_is_healthy() {
+        let mut pass = PdsSpacePass::default();
+        let mut reasons = TargetFailureReasons::default();
+        for outcome in [
+            VerifiedSyncOutcome::Unchanged,
+            VerifiedSyncOutcome::Unchanged,
+            VerifiedSyncOutcome::Retry,
+        ] {
+            pass.targets += 1;
+            record_target_result(&mut pass, &mut reasons, Some(Ok(outcome)));
+        }
+        let mut status = PdsSpaceSyncStatus::default();
+        let now = Instant::now();
+        status.mark_running();
+        status.record(now, pass);
+
+        assert_eq!(
+            (pass.targets, pass.unchanged, pass.target_failures),
+            (3, 2, 0)
+        );
+        assert!(status.is_healthy_at(now));
+    }
+
+    #[test]
+    fn a_pass_reports_the_new_counts_and_no_rejected_count() {
+        let keys: BTreeSet<String> = serde_json::to_value(PdsSpacePass::default())
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+
+        assert_eq!(
+            keys,
+            [
+                "boundaries",
+                "membershipFailures",
+                "targets",
+                "promoted",
+                "unchanged",
+                "replaced",
+                "cleared",
+                "deferred",
+                "targetFailures",
+            ]
+            .map(str::to_owned)
+            .into_iter()
+            .collect()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_target_task_that_did_not_join_is_a_failure_under_its_own_word() {
+        let task = tokio::spawn(std::future::pending::<VerifiedSyncOutcome>());
+        task.abort();
+        let mut pass = PdsSpacePass::default();
+        let mut reasons = TargetFailureReasons::default();
+
+        record_target_result(&mut pass, &mut reasons, Some(task.await));
+        record_target_result(&mut pass, &mut reasons, None);
+
+        assert_eq!(pass.target_failures, 2);
+        assert_eq!(
+            reasons.log_line().as_deref(),
+            Some("event=pds_space_target_failures task=2")
+        );
     }
 
     #[tokio::test]
     async fn a_cycle_with_two_invalid_space_mac_refusals_and_an_unknown_name_logs_one_counted_line()
     {
-        let (pass, reasons) = cycle_where_hosts_refuse([
-            Some("InvalidSpaceMac"),
-            Some("InvalidSpaceMac"),
-            Some("Hostile\nName\u{1b}[31m"),
-        ])
-        .await;
+        let members = [SPIKE, JET, FAYE_DID];
+        let credentials = credentials();
+        let pds = Pds::holding(&members, &credentials);
+        for (did, code) in [
+            (SPIKE, "InvalidSpaceMac"),
+            (JET, "InvalidSpaceMac"),
+            (FAYE_DID, HOSTILE_NAME),
+        ] {
+            pds.host.script_archives(
+                did,
+                vec![ArchiveStep::Refused {
+                    status: 400,
+                    code: Some(code),
+                }],
+            );
+        }
+
+        let (pass, reasons) = pass_over(&members, 1, &pds, &lifecycle(), &credentials)
+            .await
+            .remove(0);
 
         assert_eq!(pass.targets, 3);
         assert_eq!(pass.target_failures, 3);
-        assert_eq!(pass.promoted, 0);
+        assert_eq!(pass.replaced, 0);
         assert_eq!(
             reasons.log_line().as_deref(),
             Some("event=pds_space_target_failures invalid_space_mac=2 other=1")
         );
     }
 
+    #[test]
+    fn a_failed_targets_line_holds_its_fixed_word_and_nothing_a_host_sent() {
+        let line = super::target_failure_line(FailureReason::RepoSuspended);
+        assert_eq!(line, "event=pds_space_target_failed kind=repo_suspended");
+        let other = super::target_failure_line(FailureReason::Other);
+        assert_eq!(other, "event=pds_space_target_failed kind=other");
+    }
+
     #[tokio::test]
     async fn a_cycle_without_failed_targets_logs_no_failure_line() {
         let credentials = credentials();
-        let membership = Arc::new(MembershipReconciler::new(
-            Arc::new(MembershipPages(Mutex::new(VecDeque::new()))),
-            Arc::clone(&credentials),
-        ));
-        let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
-            Arc::new(EmptyPages),
-            credentials,
-            Arc::new(VerifiedCommit),
-        ));
-        let (pass, reasons) = super::collect_pass(
+        let pds = Pds::holding(&[], &credentials);
+        let (pass, reasons) = collect_pass(
             lifecycle(),
-            membership,
-            synchronizer,
-            &std::collections::BTreeSet::new(),
+            membership_listing(&[], 1, &credentials),
+            Arc::clone(&pds.synchronizer),
+            &BTreeSet::new(),
             &retention(),
         )
         .await;
@@ -949,42 +1073,41 @@ mod tests {
         assert_eq!(reasons.log_line(), None);
     }
 
-    #[test]
-    fn only_the_listed_host_error_names_are_ever_logged() {
-        let refusal = |code: Option<&str>| {
-            crate::pds_space_sync::PdsSpaceSyncError::Host(SpaceHostError::Request {
-                status: 400,
-                code: code.map(str::to_owned),
-            })
-        };
-        for (name, reason) in [
-            ("InvalidSpaceMac", "invalid_space_mac"),
-            ("InvalidSpaceUri", "invalid_space_uri"),
-            ("InvalidCredential", "invalid_credential"),
-            ("BadSpaceAudience", "bad_space_audience"),
-            ("RepoNotFound", "repo_not_found"),
-        ] {
-            assert_eq!(super::failure_reason(&refusal(Some(name))), reason);
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_pass_where_every_target_needs_its_first_replacement_completes_them_all_one_archive_at_a_time()
+     {
+        let members: Vec<String> = (0..9)
+            .map(|index| format!("did:plc:spacecowboy{index}"))
+            .collect();
+        let member_refs: Vec<&str> = members.iter().map(String::as_str).collect();
+        let credentials = credentials();
+        let pds = Pds::holding(&member_refs, &credentials);
+        let lifecycle = lifecycle();
+
+        let started = Instant::now();
+        let (pass, reasons) = pass_over(&member_refs, 1, &pds, &lifecycle, &credentials)
+            .await
+            .remove(0);
+
+        assert_eq!(pass.targets, 9);
+        assert_eq!(pass.replaced, 9);
+        assert_eq!(pass.target_failures, 0);
+        assert_eq!(reasons.log_line(), None, "no target ran out of time");
+        assert!(started.elapsed() < crate::config::SPACE_TARGET_DEADLINE);
+        assert_eq!(pds.host.archives_requested(), 9);
+        assert_eq!(pds.host.most_archives_in_flight(), 1);
+        for did in &members {
+            let generation = lifecycle
+                .pds_member_generation(BOUNDARY, did)
+                .unwrap()
+                .unwrap();
+            assert!(
+                lifecycle
+                    .verified_space_base_at_generation(BOUNDARY, SPACE, did, generation)
+                    .unwrap()
+                    .is_some(),
+                "{did} has a verified base"
+            );
         }
-        for code in [
-            None,
-            Some("invalidspacemac"),
-            Some("InvalidSpaceMac "),
-            Some("InvalidSpaceMac\n"),
-            Some("InvalidRequest"),
-            Some(""),
-        ] {
-            assert_eq!(super::failure_reason(&refusal(code)), "other", "{code:?}");
-        }
-        assert_eq!(
-            super::failure_reason(&crate::pds_space_sync::PdsSpaceSyncError::Host(
-                SpaceHostError::Timeout
-            )),
-            "host"
-        );
-        assert_eq!(
-            super::failure_reason(&crate::pds_space_sync::PdsSpaceSyncError::CursorStalled),
-            "cursor_stalled"
-        );
     }
 }

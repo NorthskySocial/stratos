@@ -20,14 +20,13 @@ use stratos_feedgen_ng::{
     lifecycle::ControlLifecycle,
     membership_reconciler::MembershipReconciler,
     pds_space_scheduler::PdsSpaceScheduler,
-    pds_space_sync::{PdsSpaceSynchronizer, PinnedSpacePageSource},
+    pds_space_sync::{PdsSpaceSynchronizer, PinnedVerifiedReaderSource},
     readiness::FeedReadinessGate,
     retention::RetentionCompactor,
     runtime::open_projection_store,
     server,
     service::ProjectionReader,
     service_stream::{ServiceStream, ServiceStreamConfig},
-    space_commit::SpaceCommitVerifier,
     space_membership::HttpSpaceMembershipClient,
     telemetry::MetricsRuntime,
     writer_lock::WriterLock,
@@ -90,9 +89,8 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&credential_manager),
     ));
     let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
-        Arc::new(PinnedSpacePageSource),
+        Arc::new(PinnedVerifiedReaderSource::new(Arc::clone(&resolver) as _)),
         credential_manager,
-        Arc::new(SpaceCommitVerifier::new(Box::new(Arc::clone(&resolver)))),
     ));
     let blob_cache = Arc::new(Mutex::new(BlobCache::new(
         MAX_CACHE_BYTES,

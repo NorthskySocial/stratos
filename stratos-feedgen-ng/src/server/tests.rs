@@ -103,8 +103,7 @@ fn config() -> FeedgenConfig {
         retention: ProjectionRetention {
             max_age: std::time::Duration::from_secs(60 * 60),
             max_bytes: 16 * 1024 * 1024,
-            stage_budget: crate::config::SpaceStageBudget::for_projection(16 * 1024 * 1024)
-                .unwrap(),
+            space_write_reserve_bytes: 8 * 1024 * 1024,
         },
         actor_max_connections: 8,
         metrics_export: crate::config::MetricsExportConfig {

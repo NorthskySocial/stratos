@@ -44,11 +44,11 @@ use crate::{
     space_value_budget::ValueBudget,
 };
 
-pub(super) const STAR_CONTENT_TYPE: &str = "application/vnd.dasl.star";
+pub(crate) const STAR_CONTENT_TYPE: &str = "application/vnd.dasl.star";
 const ARCHIVE_CHUNK_BYTES: usize = 4_096;
 
 /// A revision the host can write, sorted as numbers are.
-pub(super) fn tid(number: u32) -> String {
+pub(crate) fn tid(number: u32) -> String {
     const DIGITS: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
     let mut text = [b'2'; 13];
     let mut rest = number;
@@ -59,12 +59,12 @@ pub(super) fn tid(number: u32) -> String {
     String::from_utf8(text.to_vec()).expect("ascii")
 }
 
-pub(super) fn cid_of(value: &Value) -> Cid {
+pub(crate) fn cid_of(value: &Value) -> Cid {
     record_cid(&encode_record(value).expect("encodable"))
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct LoggedOp {
+pub(crate) struct LoggedOp {
     pub rev: String,
     pub collection: String,
     pub rkey: String,
@@ -92,7 +92,7 @@ impl LoggedOp {
 /// One member's repo as the host holds it: its records and the log of the ops
 /// that made them.
 #[derive(Clone)]
-pub(super) struct HostRepo {
+pub(crate) struct HostRepo {
     rev: String,
     records: BTreeMap<(String, String), (Cid, Value)>,
     oplog: Vec<LoggedOp>,
@@ -182,11 +182,11 @@ impl HostRepo {
     }
 }
 
-pub(super) type Hook = Box<dyn FnOnce(&mut HostRepo) + Send>;
+pub(crate) type Hook = Box<dyn FnOnce(&mut HostRepo) + Send>;
 
 /// Lets a test stop the host inside a request and look at the store.
 #[derive(Clone)]
-pub(super) struct Gate {
+pub(crate) struct Gate {
     pub reached: Arc<Notify>,
     pub release: Arc<Notify>,
 }
@@ -206,7 +206,7 @@ impl Gate {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum Fault {
+pub(crate) enum Fault {
     Unreachable,
     Timeout,
     InvalidResponse,
@@ -224,7 +224,7 @@ impl Fault {
 
 /// What the host does with the next page request of a member; `Honest` when
 /// nothing is scripted.
-pub(super) enum PageStep {
+pub(crate) enum PageStep {
     Honest,
     /// An honest page, then `Hook` changes the repo before the next request.
     HonestThen(Hook),
@@ -238,6 +238,9 @@ pub(super) enum PageStep {
     },
     /// An honest page whose commit is signed over other data.
     WrongDigest([u8; 32]),
+    /// A page of no ops whose body carries this JSON text as its `commit`
+    /// member; the headers sign the commit the host holds.
+    CommitText(String),
     Refused {
         status: u16,
         code: Option<&'static str>,
@@ -247,7 +250,7 @@ pub(super) enum PageStep {
     Gate(Gate),
 }
 
-pub(super) enum ArchiveStep {
+pub(crate) enum ArchiveStep {
     Honest,
     WrongDigest([u8; 32]),
     /// An archive written as given; the host signs the commit it holds.
@@ -262,7 +265,7 @@ pub(super) enum ArchiveStep {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) enum Request {
+pub(crate) enum Request {
     Page {
         did: String,
         since: Option<String>,
@@ -279,7 +282,7 @@ struct Member {
     archive_steps: VecDeque<ArchiveStep>,
 }
 
-pub(super) struct TestHost {
+pub(crate) struct TestHost {
     secret_key: Mutex<SecretKey>,
     space_uri: String,
     members: Mutex<BTreeMap<String, Member>>,
@@ -288,13 +291,14 @@ pub(super) struct TestHost {
     key_shares: Mutex<Vec<String>>,
     archives_in_flight: Arc<AtomicUsize>,
     most_archives_in_flight: AtomicUsize,
+    on_next_request: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 fn host_secret_key() -> SecretKey {
     SecretKey::from_slice(&[0x22; 32]).expect("valid scalar")
 }
 
-pub(super) fn host_kem_key() -> AuthorKemKey {
+pub(crate) fn host_kem_key() -> AuthorKemKey {
     AuthorKemKey::from_sec1_bytes(
         host_secret_key()
             .public_key()
@@ -315,7 +319,22 @@ impl TestHost {
             key_shares: Mutex::new(Vec::new()),
             archives_in_flight: Arc::new(AtomicUsize::new(0)),
             most_archives_in_flight: AtomicUsize::new(0),
+            on_next_request: Mutex::new(None),
         })
+    }
+
+    /// Runs `then` once, when the next request arrives and before it is
+    /// answered; a test moves the synchronizer's clock with it.
+    pub fn on_next_request(&self, then: impl FnOnce() + Send + 'static) {
+        *self.on_next_request.lock().unwrap() = Some(Box::new(then));
+    }
+
+    fn note_request(&self, request: Request) {
+        self.requests.lock().unwrap().push(request);
+        let then = self.on_next_request.lock().unwrap().take();
+        if let Some(then) = then {
+            then();
+        }
     }
 
     pub fn hold(&self, did: &str, repo: HostRepo) {
@@ -455,7 +474,7 @@ impl TestHost {
 
 /// The body of a page: its ops, its cursor, the commit it carries, and
 /// `padding_bytes` of filler in a member the reader does not read.
-pub(super) fn page_body(
+pub(crate) fn page_body(
     space_uri: &str,
     did: &str,
     ops: &[Value],
@@ -483,7 +502,7 @@ pub(super) fn page_body(
     serde_json::to_vec(&body).unwrap()
 }
 
-pub(super) fn requested_key_share(accept_signature: &str) -> String {
+pub(crate) fn requested_key_share(accept_signature: &str) -> String {
     let dictionary = parse_dictionary(accept_signature).expect("accept-signature");
     let [member] = members_with_tag(&dictionary, "atproto-space-commit")
         .try_into()
@@ -515,7 +534,7 @@ impl RepoOpsTransport for TestHost {
     ) -> Result<SignedReadResponse, SpaceHostError> {
         let key_share = requested_key_share(accept_signature);
         self.key_shares.lock().unwrap().push(key_share.clone());
-        self.requests.lock().unwrap().push(Request::Page {
+        self.note_request(Request::Page {
             did: query.actor_did.to_owned(),
             since: query.since.map(str::to_owned),
             cursor: query.cursor.map(str::to_owned),
@@ -560,6 +579,15 @@ impl RepoOpsTransport for TestHost {
                     Served::Now(response)
                 }
                 PageStep::WrongDigest(data) => Served::Now(honest(member, &data)),
+                PageStep::CommitText(commit) => Served::Now(SignedReadResponse {
+                    body: format!("{{\"ops\":[],\"commit\":{commit}}}").into_bytes(),
+                    headers: self.commit_headers(
+                        &key_share,
+                        query.actor_did,
+                        member.repo.rev(),
+                        &member.repo.digest(),
+                    ),
+                }),
                 PageStep::Written {
                     ops,
                     cursor,
@@ -630,7 +658,7 @@ impl ArchiveBody for ScriptedBody {
 
 /// The archive a host writes: the commit as metadata, then each record in
 /// path order, then the end marker.
-pub(super) fn star_archive(
+pub(crate) fn star_archive(
     did: &str,
     space_uri: &str,
     rev: &str,
@@ -681,7 +709,7 @@ impl RepoArchiveTransport for TestHost {
     ) -> Result<SignedArchiveResponse, SpaceHostError> {
         let key_share = requested_key_share(accept_signature);
         self.key_shares.lock().unwrap().push(key_share.clone());
-        self.requests.lock().unwrap().push(Request::Archive {
+        self.note_request(Request::Archive {
             did: query.actor_did.to_owned(),
         });
         let in_flight = self.archives_in_flight.fetch_add(1, Ordering::SeqCst) + 1;
@@ -742,7 +770,7 @@ impl RepoArchiveTransport for TestHost {
 }
 
 /// The author's KEM key, as a resolver whose answer a test can withdraw.
-pub(super) struct StaticKemKeys {
+pub(crate) struct StaticKemKeys {
     key: AuthorKemKey,
     unavailable: AtomicBool,
 }
@@ -780,7 +808,7 @@ impl AuthorKemKeyResolver for StaticKemKeys {
 
 /// The reader the synchronizer is given: the production authenticated reads
 /// over the in-process host.
-pub(super) struct TestReader {
+pub(crate) struct TestReader {
     host: Arc<TestHost>,
     kem_keys: Arc<StaticKemKeys>,
 }
@@ -830,7 +858,7 @@ impl VerifiedSpaceReader for TestReader {
 }
 
 /// Hosts by the address the authority names for a member.
-pub(super) struct TestSource {
+pub(crate) struct TestSource {
     hosts: Mutex<BTreeMap<String, Arc<TestHost>>>,
     kem_keys: Arc<StaticKemKeys>,
 }
@@ -872,7 +900,7 @@ impl VerifiedSpaceReaderSource for TestSource {
 /// A clock a test moves by hand. The instants are real ones offset by what
 /// the test has advanced, so a deadline computed from it still means something
 /// to the timers.
-pub(super) struct TestClock {
+pub(crate) struct TestClock {
     base: Instant,
     advanced: Mutex<Duration>,
 }

@@ -224,9 +224,13 @@ into one large module.
 **Feed generator** (`stratos-feedgen-ng/src/`):
 
 The standalone Rust service subscribes to Stratos-custody actors and polls only
-authority-listed PDS-custody space members. It stages foreign repo changes
-until the terminal commit verifies, then stores bounded posts, boundaries, and
-cursors in a local SQLCipher projection. A viewer service-auth JWT identifies
+authority-listed PDS-custody space members. Every space response carries a MAC
+(`space_kem.rs`, `space_mac.rs`). Op pages (`space_ops.rs`) and `getRepo`
+archives (`space_archive.rs`) are trusted only when their set hash
+(`space_set_hash.rs`) equals the commit's `data`. The store keeps verified state
+per member and space (`store/space_verification.rs`) and writes each poll or
+archive in one transaction; nothing is staged. Posts, boundaries, and cursors
+live in a local SQLCipher projection. A viewer service-auth JWT identifies
 the requester; current authority enrollment determines readable boundaries.
 Outbound Stratos calls use feedgen-minted service-auth JWTs. The TypeScript
 `stratos-feedgen` remains available for rollback, but new design work belongs
@@ -238,7 +242,7 @@ in the Rust feed generator.
 | `server.rs`, `server/`                                                | Router, feed/blob handlers, identity endpoints, response policy, and viewer authorization |
 | `authority.rs`, `identity.rs`, `space_host.rs`, `space_membership.rs` | Bounded upstream adapters and identity resolution                                         |
 | `service_stream.rs`, `actor_stream.rs`, `pds_space_sync.rs`           | Custody-specific ingestion and verified space polling                                     |
-| `membership_reconciler.rs`, `space_sync.rs`, `space_commit.rs`        | Authority membership, space URI validation, and commit verification                       |
+| `membership_reconciler.rs`, `space_sync.rs`, `space_ops.rs`           | Authority membership, space record admission, and op page decoding                        |
 | `feed_service.rs`, `service.rs`, `lifecycle.rs`                       | Boundary-scoped feed reads, projection admission, and readiness transitions               |
 | `store.rs`, `store/`                                                  | SQLCipher key handling and actor, space, read, and retention storage operations           |
 | `blob_cache.rs`, `blob_service.rs`, `blob_upstream.rs`                | Bounded in-memory blob cache and authenticated upstream download                          |

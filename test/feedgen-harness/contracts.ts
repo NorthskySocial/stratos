@@ -22,8 +22,8 @@ const CONTRACT_TESTS: Record<RustContractKind, readonly string[]> = {
     'conformance::tests::serves_the_feed_view_pinned_in_the_shared_fixture',
   ],
   recovery: [
-    'store::tests::restarting_a_staged_page_requires_a_new_terminal_verification',
-    'store::tests::terminal_space_stage_stays_invisible_until_promotion',
+    'pds_space_sync::tests::a_crashed_poll_leaves_no_state_and_the_next_poll_starts_from_the_verified_rev',
+    'pds_space_sync::tests::the_records_of_a_poll_are_invisible_until_promotion',
     'service::tests::invalidation_between_query_and_release_rejects_the_page',
     'label_poller::tests::a_replayed_enroll_does_not_readmit_a_taken_down_account',
     'label_poller::tests::the_takedown_outlives_a_restart',
@@ -34,8 +34,8 @@ const CONTRACT_TESTS: Record<RustContractKind, readonly string[]> = {
     'label_poller::tests::a_catch_up_after_the_bound_reopens_feeds_without_a_restart',
     'lifecycle::tests::a_like_frame_is_stored_and_a_later_delete_frame_removes_it',
     'lifecycle::tests::a_replayed_frame_does_not_readmit_a_taken_down_like',
-    'space_sync::tests::a_staged_like_is_hidden_until_verification_and_takes_the_target_boundary',
-    'space_sync::tests::a_taken_down_accounts_staged_like_is_not_promoted',
+    'pds_space_sync::tests::a_like_takes_the_targets_boundary_and_is_invisible_until_promotion',
+    'pds_space_sync::tests::a_taken_down_accounts_like_is_not_promoted',
     'lifecycle::tests::a_like_with_an_unreadable_action_beside_a_post_keeps_the_post_and_advances_the_cursor',
   ],
 }
