@@ -2,8 +2,10 @@
 audience: Operators
 type: Upgrade procedure
 prerequisites: A running Stratos service, the Rust feed generator, and members on a spaces PDS
-status: current
+status: legacy
 ---
+
+> This page describes the October contract. No current build implements it.
 
 # October spaces rollout
 

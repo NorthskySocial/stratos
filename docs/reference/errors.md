@@ -121,15 +121,15 @@ the error name.
 
 ## Space credentials
 
-| Error                 | Status | Meaning                                                                                  |
-| --------------------- | ------ | ---------------------------------------------------------------------------------------- |
-| `AuthRequired`        | 400    | No session and no delegation token                                                       |
-| `InvalidToken`        | 400    | The delegation token or client attestation did not verify, or it names another space     |
-| `ProofRequired`       | 400    | No key proof to bind the credential to                                                   |
-| `UnknownSpace`        | 400    | The space URI is malformed or not a space of this service, or the boundary is not active |
-| `NotEnrolled`         | 400    | No active enrollment that holds the space's boundary                                     |
-| `AttestationRequired` | 400    | The space has an app allow-list and no attestation was presented                         |
-| `ClientNotAllowed`    | 400    | The attested `client_id` is not on the allow-list                                        |
+| Error                 | Status | Meaning                                                                                                                                     |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AuthRequired`        | 400    | No session and no delegation token                                                                                                          |
+| `InvalidToken`        | 400    | The delegation token or client attestation did not verify, or it names another space                                                        |
+| `ProofRequired`       | 400    | No key proof to bind the credential to                                                                                                      |
+| `UnknownSpace`        | 400    | The space URI is malformed, or not a space of this service, or the boundary is not active. A space URI in the earlier spelling is malformed |
+| `NotEnrolled`         | 400    | No active enrollment that holds the space's boundary                                                                                        |
+| `AttestationRequired` | 400    | The space has an app allow-list and no attestation was presented                                                                            |
+| `ClientNotAllowed`    | 400    | The attested `client_id` is not on the allow-list                                                                                           |
 
 These come from `zone.stratos.space.getSpaceCredential`. `UnknownSpace` is
 also the answer when the boundary changes while the request is authorized.

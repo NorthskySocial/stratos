@@ -1,8 +1,10 @@
 ---
 audience: Authority and syncer developers
 type: Decision record
-status: proposed
+status: legacy
 ---
+
+> This page describes the October contract. No current build implements it.
 
 # October writer sync contract <Badge type="info" text="proposed" />
 

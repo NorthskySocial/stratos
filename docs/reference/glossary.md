@@ -91,12 +91,20 @@ and blobs. A `pds`-custody user has no actor store on Stratos.
 The data structure the AT Protocol uses for a repository. Stratos keeps one
 signed MST repository per `stratos`-custody user.
 
+### Space URI
+
+The address of a space: `at:space/{authorityDid}/{type}/{skey}`. It is not an
+`at://` address. The `skey` is the boundary name. The boundary
+`did:web:stratos.example.com/engineering` is the space
+`at:space/did:web:stratos.example.com/zone.stratos.space.feed/engineering`.
+
 ### Record URI
 
-The `at://` address of a record. A Stratos-hosted record has three segments:
-`at://{authorDid}/{collection}/{rkey}`. A space record on a PDS has seven,
-starting with the authority:
-`at://{authorityDid}/space/{type}/{name}/{authorDid}/{collection}/{rkey}`.
+The address of a record. A Stratos-hosted record has three parts after `at://`:
+`at://{authorDid}/{collection}/{rkey}`. A space record on a PDS is its space URI
+plus the author, the collection and the record key, so `at:space/` and six
+parts, starting with the authority:
+`at:space/{authorityDid}/{type}/{skey}/{authorDid}/{collection}/{rkey}`.
 
 ### Service DID
 
@@ -120,6 +128,19 @@ generator.
 
 `zone.stratos.sync.listRepoOps` and `listRecordPaths`: the request/response
 way to follow a repository, for services that do not hold a stream open.
+
+### Verified state
+
+What the feed generator keeps for each member with `pds` custody, in each
+space: the last verified revision, a set hash, and the CID at every record
+path. A member's posts are readable only from a verified state. See
+[Verified sync of PDS members](/operator/feedgen-ng#verified-sync-of-pds-members).
+
+### Whole-repo read
+
+A read of a member's whole repo as an archive (`com.atproto.space.getRepo`),
+which replaces the member's verified state. The feed generator does it when
+incremental sync cannot work.
 
 ### DPoP
 

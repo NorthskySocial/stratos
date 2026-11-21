@@ -22,8 +22,8 @@ reference for client developers, not a product.
   for public posts.
 - **Read one feed** that mixes your public posts with private posts from the
   boundaries you hold.
-- **Inspect a record**: its URI, CID, and raw content, for public and private
-  posts alike.
+- **Inspect a record**: what is stored for a post, read from the place that
+  holds it. See [The record inspector](#the-record-inspector).
 
 ## What it demonstrates
 
@@ -40,6 +40,21 @@ Private feeds come from the feed generator. The webapp calls
 `zone.stratos.feedgen.getFeed` through your PDS, with an `atproto-proxy`
 header that names the feed generator. Attachments load the same way, through
 `zone.stratos.feedgen.getBlob`.
+
+### The record inspector
+
+The inspector reads the address of the post and the account you are signed in
+as. It then shows one of four states.
+
+| The address is                                            | The inspector shows                                                                                               |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| A Stratos-custody record (`at://` and three parts)        | Two panels: the public stub on the author's PDS, and the record Stratos holds                                     |
+| A space record that you wrote (`at:space/` and six parts) | Your record on your PDS, read with your sign-in. An error answer names the error and has a retry button           |
+| A space record that another member wrote                  | A panel titled "Feed snapshot". It is the copy the feed served, not a live read from the PDS. It sends no request |
+| Not a record address                                      | An error, "This record address is not valid", and no request                                                      |
+
+A feed snapshot is a copy. It can be stale, and the record can be gone from the
+author's PDS. The panel says that it is a copy and not a live read.
 
 ## Architecture
 
@@ -64,6 +79,7 @@ libraries:
 | `src/lib/feed.ts`          | Fetches public and private posts and merges them into one feed   |
 | `src/lib/Composer.svelte`  | The composer, including the custody-aware private write          |
 | `src/lib/post-deletion.ts` | Custody-aware delete                                             |
+| `src/lib/inspector.ts`     | Chooses where the inspector reads a post from                    |
 
 ## Local development
 

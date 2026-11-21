@@ -11,13 +11,13 @@ authentication each accepts, and the errors each returns.
 
 ## Authentication
 
-| Name             | Headers                                                                                    | Who uses it                                                          |
-| ---------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| DPoP             | `Authorization: DPoP <access_token>` and `DPoP: <proof>`                                   | A user's AT Protocol OAuth session                                   |
-| Optional DPoP    | The same, or no `Authorization` header                                                     | Anonymous callers are allowed, and see no private data               |
-| Service JWT      | `Authorization: Bearer <service-jwt>`                                                      | Another service, such as the feed generator                          |
-| Space credential | `Authorization: Atproto-Space <credential>` with HTTP signature, or the legacy `DPoP` form | A syncing service or app with a credential from `getSpaceCredential` |
-| Admin            | A server-side session cookie                                                               | Operators                                                            |
+| Name             | Headers                                                                                               | Who uses it                                                          |
+| ---------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| DPoP             | `Authorization: DPoP <access_token>` and `DPoP: <proof>`                                              | A user's AT Protocol OAuth session                                   |
+| Optional DPoP    | The same, or no `Authorization` header                                                                | Anonymous callers are allowed, and see no private data               |
+| Service JWT      | `Authorization: Bearer <service-jwt>`                                                                 | Another service, such as the feed generator                          |
+| Space credential | `Authorization: Atproto-Space-Credential <credential>` with HTTP signature, or the legacy `DPoP` form | A syncing service or app with a credential from `getSpaceCredential` |
+| Admin            | A server-side session cookie                                                                          | Operators                                                            |
 
 Stratos does not accept `Authorization: Bearer <access_token>` from a user.
 A user request without a DPoP proof answers `401 AuthenticationRequired`.
@@ -401,17 +401,18 @@ Errors: `BlobBlocked`, `RepoNotFound`, `BlobNotFound`.
 ### Get Space Record
 
 ```http
-GET /xrpc/zone.stratos.space.getRecord?space=<at-uri>&repo=<did>&collection=<nsid>&rkey=<rkey>
-Authorization: DPoP <access_token> | Atproto-Space <space-credential> | DPoP <space-credential>
+GET /xrpc/zone.stratos.space.getRecord?space=<space-uri>&repo=<did>&collection=<nsid>&rkey=<rkey>
+Authorization: DPoP <access_token> | Atproto-Space-Credential <space-credential> | DPoP <space-credential>
 DPoP: <proof>   (user sessions and legacy cnf.jkt credentials)
 Response: { "uri": "...", "cid": "...", "value": { ... } }
 ```
 
-Get a single record from a permissioned space (spec-shaped mirror of
-`com.atproto.space.getRecord`). Callable with standard user auth - the caller
-must be a member of the space - or with a space credential for that space (for
-syncing services). Standard `cnf.kid` credentials use `Atproto-Space` with HTTP
-signatures as described under Get Space Credential. A legacy credential is
+Get a single record from a permissioned space. This is a Stratos method, not the
+upstream `com.atproto.space.getRecord` of a similar name. Callable with standard
+user auth - the caller must be a member of the space - or with a space
+credential for that space (for syncing services). Standard `cnf.kid`
+credentials use `Atproto-Space-Credential` with HTTP signatures as described
+under Get Space Credential. A legacy credential is
 DPoP-key-bound (`cnf.jkt`): present it
 under the `DPoP` scheme with a per-request proof signed by the bound key and
 hash-bound to the credential (`ath`). The record must belong to the requested
@@ -424,14 +425,15 @@ This method reads records that Stratos hosts. It does not read a
 ### List Space Blobs
 
 ```http
-GET /xrpc/zone.stratos.space.listBlobs?space=<at-uri>&repo=<did>[&since=<rev>][&limit=<n>][&cursor=<cursor>]
-Authorization: DPoP <access_token> | Atproto-Space <space-credential> | DPoP <space-credential>
+GET /xrpc/zone.stratos.space.listBlobs?space=<space-uri>&repo=<did>[&since=<rev>][&limit=<n>][&cursor=<cursor>]
+Authorization: DPoP <access_token> | Atproto-Space-Credential <space-credential> | DPoP <space-credential>
 DPoP: <proof>   (user sessions and legacy cnf.jkt credentials)
 Response: { "cids": ["..."], "cursor": "..." }
 ```
 
 List the CIDs of blobs referenced by an account's records within a permissioned
-space (spec-shaped mirror of `com.atproto.space.listBlobs`). The same access
+space. This is a Stratos method, not the upstream `com.atproto.space.listBlobs`
+of a similar name. The same access
 rules as Get Space Record apply: standard user auth requires space membership, or
 a space credential for that space. `limit` is 1-1000 (default 500); a `cursor`
 is returned when a page is full.
@@ -439,8 +441,8 @@ is returned when a page is full.
 ### List Space Repos
 
 ```http
-GET /xrpc/zone.stratos.space.listRepos?space=<at-uri>[&limit=<n>][&cursor=<cursor>]
-Authorization: Bearer <service-jwt> | Atproto-Space <space-credential>
+GET /xrpc/zone.stratos.space.listRepos?space=<space-uri>[&limit=<n>][&cursor=<cursor>]
+Authorization: Bearer <service-jwt> | Atproto-Space-Credential <space-credential>
 Response: { "repos": [{ "did": "...", "custody": "...", "rev": "...", "host": "...", "hostSource": "..." }], "cursor": "..." }
 ```
 
@@ -457,7 +459,7 @@ POST /xrpc/zone.stratos.space.getSpaceCredential
 Authorization: DPoP <access_token>
 DPoP: <proof>
 Content-Type: application/json
-Body: { "space": "at://<space-did>/space/<type>/<skey>"[, "delegationToken": "<jwt>"][, "clientAttestation": "<jwt>"] }
+Body: { "space": "at:space/<space-did>/<type>/<skey>"[, "delegationToken": "<jwt>"][, "clientAttestation": "<jwt>"] }
 Response: { "credential": "<jwt>", "expiresAt": "<datetime>" }
 ```
 
@@ -480,16 +482,21 @@ Authorization: Bearer <delegation JWT>
 Signature-Input: atproto-space=("authorization");keyid="<P-256 did:key>"
 Signature: atproto-space=:<base64 compact signature>:
 Content-Type: application/json
-Body: { "space": "at://<authority-did>/space/<type>/<skey>" }
+Body: { "space": "at:space/<authority-did>/<type>/<skey>" }
 ```
+
+A delegation token and a client attestation carry the audience
+`<authority-did>#atproto_pds`. A bare DID, any other fragment and another
+authority's DID are refused.
 
 Do not combine HTTP signatures with a DPoP proof. Standard credentials bind
 `cnf.kid` and use a separate default-600/max-3600-second TTL. Legacy session,
 body-delegation, and Bearer-delegation-plus-DPoP minting remain supported with
 their existing TTL configuration, default 7200 seconds.
 
-For standard reads, send `Authorization: Atproto-Space <credential JWT>` and
-sign exactly `authorization` then `atproto-space-audience`. Set
+For standard reads, send `Authorization: Atproto-Space-Credential <credential JWT>`
+and sign exactly `authorization` then `atproto-space-audience`. The signature
+carries `tag="atproto-space-credential"`. Set
 `Atproto-Space-Audience` to the actual repo owner's DID, not its host, for repo
 operations. Use the bare authority DID for `zone.stratos.space.listRepos`.
 The same signature is reusable for the same credential and audience until
@@ -500,7 +507,7 @@ renew both together. Ordinary OAuth DPoP remains unchanged.
 This does not add an upstream `com.atproto.space.*` authority endpoint.
 Member removal prevents renewal but does not automatically revoke credentials
 already accepted by a foreign PDS. See the
-[compatibility and rollout limits](/operator/upgrades/october-spaces).
+[known gaps](/architecture/supported-versions#known-gaps).
 
 ## Export
 
@@ -602,11 +609,12 @@ the newest event. A cursor older than the kept events receives an
 
 ```http
 GET /xrpc/zone.stratos.sync.listRepoOps?did=<did>[&since=<rev>][&limit=<n>][&cursor=<c>][&excludeValues=true]
-Authorization: Bearer <service-jwt> | Atproto-Space <space-credential>
+Authorization: Bearer <service-jwt> | Atproto-Space-Credential <space-credential>
 ```
 
-Incremental pull sync of a repo's operation log, mirroring `com.atproto.space.listRepoOps`
-semantics. Returns record operations after the `since` revision, boundary-gated to the
+Incremental pull sync of a repo's operation log. This is a Stratos method, not the
+upstream `com.atproto.space.listRepoOps` of a similar name, and it does not take or
+return what that method does. Returns record operations after the `since` revision, boundary-gated to the
 caller's enrolled boundaries, with current record values inlined by default. Each op carries
 required-nullable `cid` and `prev` fields: `cid` null means delete, `prev` null means create
 (or that the superseded value predates the returned window). The response reaches the head
@@ -629,7 +637,7 @@ that fails the record-key format).
 
 ```http
 GET /xrpc/zone.stratos.sync.listRecordPaths?did=<did>[&collection=<nsid>][&limit=<n>][&cursor=<c>][&excludeValues=true]
-Authorization: Bearer <service-jwt> | Atproto-Space <space-credential>
+Authorization: Bearer <service-jwt> | Atproto-Space-Credential <space-credential>
 ```
 
 Enumerates a repo's record paths with their current CIDs (values inlined by default),

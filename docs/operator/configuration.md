@@ -553,10 +553,10 @@ caller can act as any member.
 Development mode also allows OAuth over plain HTTP and trusts loopback origins
 for redirects and admin requests. The value must be exactly `true` or `false`.
 
-## October Spaces rollout
+## November upgrade
 
-The October transport upgrade has its own procedure. See
-[October spaces rollout](/operator/upgrades/october-spaces).
+The upgrade to the November spaces contract has its own procedure. See
+[November upgrade and rollback](/operator/november-upgrade).
 
 ## Environment variable reference
 

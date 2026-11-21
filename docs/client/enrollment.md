@@ -455,6 +455,13 @@ satisfy the request.
 | Matching space read and create permissions       | `capable`          | `pds`                  |
 | Missing, partial, unrelated, or unreadable grant | `unknown`          | `stratos`              |
 
+A PDS older than the November release refuses a space type declaration that
+has no `name`. A member on such a PDS cannot grant the space scope, and
+enrollment ends with `invalid_scope`. It does not fall back to `stratos`
+custody. The operator's choice of how to publish the declaration decides
+whether these members can enroll. See
+[the space type declaration](/operator/november-upgrade#the-space-type-declaration).
+
 An absent grant can mean an ordinary PDS ignored the space request or a user
 withheld consent. It does not prove the PDS lacks spaces support. Stratos
 records `unknown`, and the user enrolls with `stratos` custody.

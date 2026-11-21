@@ -50,8 +50,9 @@ change on the sync stream. Nothing is written to the member's PDS.
 ### Private feed storage
 
 The feed generator collects posts hosted by Stratos and protected posts from
-PDS users whom Stratos lists as members. It checks each PDS user's signed
-update before adding those posts to its encrypted local database. A viewer
+PDS users whom Stratos lists as members. It adds a PDS user's posts to its
+encrypted local database only when the user's repo proves to be the state that
+the host's commit names. A viewer
 can read posts and attachments only from boundaries they currently belong to.
 See [Run the feed generator](/operator/feedgen-ng) for storage, access, and startup
 checks.
@@ -99,9 +100,12 @@ explains the model. The rest of this section covers what changes for you.
 member's PDS resolves that name before it grants a space scope.
 
 When the record is missing, authorization fails on the PDS with
-`invalid_scope`. Nothing in the Stratos logs explains why. Check this record
-first when enrollment breaks for every spaces PDS at once. See
-[the space type declaration](/architecture/permissioned-spaces#the-space-type-declaration).
+`invalid_scope`. Nothing in the Stratos logs explains why. A PDS older than the
+November release also refuses a declaration that has no `name`, and the member
+sees the same `invalid_scope`. Check this record first when enrollment breaks
+for every spaces PDS at once. See
+[the space type declaration](/architecture/permissioned-spaces#the-space-type-declaration)
+and [the operator's choice](/operator/november-upgrade#the-space-type-declaration).
 
 ### Find a member's custody
 

@@ -130,7 +130,7 @@ file. After the service starts, the document is at
     "https://stratos.example.com/oauth/callback",
     "https://stratos.example.com/admin/oauth/callback"
   ],
-  "scope": "atproto repo:zone.stratos.actor.enrollment space:zone.stratos.space.feed?authority=did%3Aweb%3Astratos.example.com&collection=zone.stratos.feed.post&action=create&action=read",
+  "scope": "atproto repo:zone.stratos.actor.enrollment space:zone.stratos.space.feed?authority=did%3Aweb%3Astratos.example.com&collection=zone.stratos.feed.post&collection=app.bsky.feed.like&collection=app.bsky.feed.repost&action=create&action=read",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",
@@ -141,7 +141,10 @@ file. After the service starts, the document is at
 
 The scope asks for two things. `repo:zone.stratos.actor.enrollment` lets
 Stratos publish the enrollment record. The `space:` scope lets a spaces PDS
-keep the member's posts. A PDS without spaces support ignores that scope.
+keep the member's posts, likes and reposts. A PDS older than the November
+release refuses a space type declaration that has no `name`. Members on such a
+PDS then fail enrollment with `invalid_scope`. See
+[the space type declaration](/operator/november-upgrade#the-space-type-declaration). A PDS without spaces support ignores that scope.
 
 Both redirect URIs come from `STRATOS_PUBLIC_URL`. Your proxy must route
 `/oauth/*` and `/admin/*` to the service.

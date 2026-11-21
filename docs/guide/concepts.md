@@ -76,7 +76,7 @@ Custody changes two things an app must handle.
 - **Where to write.** A `stratos`-custody user writes to the Stratos service.
   A `pds`-custody user writes to their own PDS.
 - **What a record address looks like.** The two custody classes use
-  different `at://` URI shapes. See [Space](#space) below.
+  different URI shapes. See [Space](#space) below.
 
 It never changes who decides membership. That is always Stratos.
 
@@ -90,13 +90,13 @@ Every Stratos boundary is a space, and Stratos is its authority:
 
 ```text
 boundary  did:web:stratos.example.com/writers
-space     at://did:web:stratos.example.com/space/zone.stratos.space.feed/writers
+space     at:space/did:web:stratos.example.com/zone.stratos.space.feed/writers
 ```
 
-A record kept on a user's PDS has a space record address. It has seven
-segments, and it starts with the authority, not the author. A record kept by
-Stratos has the familiar three-segment address. Select a segment to see what
-it holds:
+A record kept on a user's PDS has a space record address. It is `at:space/`
+plus six parts, and it starts with the authority, not the author. A record
+kept by Stratos has the familiar address, `at://` plus three parts. Select a
+part to see what it holds:
 
 <RecordUri kind="space" />
 

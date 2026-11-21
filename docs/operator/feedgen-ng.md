@@ -88,14 +88,187 @@ generator does this for each boundary in the feed list:
 2. Ask Stratos for the members of the space with
    `zone.stratos.space.listRepos`.
 3. For each member with `pds` custody, read
-   `com.atproto.space.listRepoOps` from the host that Stratos names.
+   `com.atproto.space.listRepoOps` from the host that Stratos names, or read
+   the whole repo with `com.atproto.space.getRepo` when that is not possible.
 
-Up to four members sync at once. Fetched pages wait in a staging area. They
-become readable only after the final signed commit verifies against the
-author's key. A rejected commit discards that member's staged pages.
+Up to four members sync at once. Each member's state is checked before it
+becomes readable. See [Verified sync of PDS members](#verified-sync-of-pds-members).
 
 A post from a PDS gets the boundary of the space it was read from. A
 boundary written inside the post is ignored.
+
+## Verified sync of PDS members
+
+The feed generator keeps a verified state for each member and space. The state
+is the last verified revision, a set-hash state, and the CID at every record
+path. A member's posts are readable only from a state that was verified.
+
+### What one cycle does
+
+Each member's cycle runs in this order. The whole cycle, including the wait for
+the member's lock, has a deadline of 60 seconds.
+
+1. Get a space credential for the boundary, or reuse the one held.
+2. Read the verified state. If the member has none, or the stored host or
+   membership generation is not the current one, go to step 6.
+3. Read `listRepoOps` pages with `since` set to the verified revision. Each page
+   is its own request with its own one-time key. Every response is
+   authenticated by a MAC. The MAC key comes from HPKE (export only), a one-time
+   key and the member's `#atproto_kem` key. A MAC mismatch makes the feed
+   generator read the member's `#atproto_kem` key again and send the request
+   once more. If the key is unchanged, or the second request also fails the
+   check, the member fails. The poll ends at the first page that carries no
+   cursor.
+4. Apply the ops of all pages in memory to the verified state, and compute the
+   set hash.
+5. Promote only when the set hash equals the `data` of the last page's commit.
+   The write is one transaction. A poll that changes nothing and ends at the
+   stored revision writes nothing. Nothing is staged: a failed check leaves the
+   stored state as it was.
+6. Read the whole repo as an archive (`getRepo`, authenticated the same way)
+   and replace the member's state, again only when the set hash equals the
+   commit's `data`.
+
+The feed generator reads the whole repo when:
+
+- the member has no verified state yet;
+- the stored host or membership generation is not the current one;
+- the last commit's revision is below the verified revision;
+- the ops do not follow the stored records, or the set hash does not equal the
+  commit's `data`;
+- the host answers `InvalidCursor` with status 400 to a page request;
+- a poll passes a limit in the table below;
+- a post, like or repost changed with no value in the op.
+
+Only one whole-repo read runs at a time across all members. After a failed
+whole-repo read, that member has no whole-repo read for 10 minutes
+(`SPACE_REPLACEMENT_COOLDOWN`). The cooldown is in memory. Incremental polls
+continue during it.
+
+A `RepoNotFound` answer with status 400 from the member's host clears that
+member's records in that space, and nothing else. The answer carries no MAC.
+The pinned TLS connection to the host that Stratos named is the only
+protection. Any other failure leaves the stored rows as they were.
+
+A host answer of `RepoTakendown`, `RepoSuspended` or `RepoDeactivated` fails
+the member and deletes nothing. The cached posts of that member stay served.
+
+### Limits
+
+| Limit                                                  | Value                            | Constant                                                      |
+| ------------------------------------------------------ | -------------------------------- | ------------------------------------------------------------- |
+| Ops in one poll, and ops in one page request           | 1,000                            | `MAX_POLL_OPS`, `MAX_SPACE_PAGE_OPS`                          |
+| Pages in one poll                                      | 1,000                            | `MAX_POLL_PAGES`                                              |
+| Page bodies in one poll, and one page response         | 16 MiB                           | `MAX_SPACE_POLL_BODY_BYTES`                                   |
+| Records of one member in one space                     | 20,000                           | `MAX_SPACE_REPO_RECORDS`                                      |
+| Record paths in the store, all members and spaces      | 500,000                          | `MAX_SPACE_VERIFICATION_ROWS`                                 |
+| Whole archive                                          | 16 MiB                           | `MAX_SPACE_ARCHIVE_BYTES`                                     |
+| One record in an archive                               | 1 MiB                            | `MAX_SPACE_ARCHIVE_VALUE_BYTES`                               |
+| Archive metadata, and one archive key                  | 64 KiB, 4 KiB                    | `MAX_SPACE_ARCHIVE_META_BYTES`, `MAX_SPACE_ARCHIVE_KEY_BYTES` |
+| Decoded JSON values one member's cycle may hold        | 2,000,000                        | `MAX_SPACE_CYCLE_VALUES`                                      |
+| One serialized projected record                        | 64 KiB. A larger one is removed. | `MAX_SPACE_RECORD_BYTES`                                      |
+| One member's whole cycle                               | 60 seconds                       | `SPACE_TARGET_DEADLINE`                                       |
+| One page request, and one archive request              | 10 seconds, 60 seconds           | `REQUEST_TIMEOUT`, `ARCHIVE_REQUEST_TIMEOUT`                  |
+| No whole-repo read after a failed one                  | 10 minutes                       | `SPACE_REPLACEMENT_COOLDOWN`                                  |
+| Members held in the lock list and in the cooldown list | 4,096 each                       | `MAX_TARGET_LOCKS`                                            |
+| Members syncing at once                                | 4                                | `MAX_TARGET_CONCURRENCY`                                      |
+| Time between passes                                    | 30 seconds                       | `DEFAULT_INTERVAL`                                            |
+
+A poll that passes the ops, pages or body limit recovers from the whole repo.
+A member that passes any other limit is a failed target. The store is never
+left truncated. The path rows do not count against the projection budget, and
+retention never deletes them.
+
+### The size budget and the write reserve
+
+`FEEDGEN_PROJECTION_MAX_BYTES` is the budget for published posts and
+interactions. Each compaction pass brings published bytes to that maximum less
+`FEEDGEN_SPACE_WRITE_RESERVE_BYTES`, or under. That leaves the reserve free for
+verified space writes. A space write that would push the projection over the
+whole maximum is refused with the reason `repo_over_budget`. It changes nothing
+and evicts nothing.
+
+`FEEDGEN_SPACE_WRITE_RESERVE_BYTES` is optional. It defaults to half of
+`FEEDGEN_PROJECTION_MAX_BYTES`. It must be a whole number above zero and below
+the maximum, or the feed generator does not start. The `ephemeral` profile has
+a fixed 16 MiB maximum, so its default reserve is 8 MiB.
+
+The four settings `FEEDGEN_STAGE_TARGET_MAX_ROWS`,
+`FEEDGEN_STAGE_GLOBAL_MAX_ROWS`, `FEEDGEN_STAGE_TARGET_MAX_BYTES` and
+`FEEDGEN_STAGE_GLOBAL_MAX_BYTES` are not read. A set one is ignored.
+
+### The database file
+
+The store is at schema version 11. Migration 10 deletes every post and
+suppression marker whose URI is not a Stratos-custody URI, every interaction
+whose URI or subject is not one, and the record takedown subjects of those
+URIs. It empties the four staged-page tables and the space cursor table. It
+resets the label cursor, so the feed generator reads the label log again from
+the start, and it creates the tables of verified state. Migration 11 drops the
+four staged-page tables, the space cursor table and the triggers on the
+staged-page tables. An older binary refuses a migrated file, so the only way back is the copy made before the upgrade. The
+effects and the steps are in
+[November upgrade and rollback](./november-upgrade.md).
+
+### Pass output and reasons
+
+`GET /health` reports `pdsSpaceSyncLastPass` with the counts of the last pass.
+The same counts are logged as `event=pds_space_sync_pass`. The members are
+`boundaries`, `membershipFailures`, `targets`, `promoted`, `unchanged`,
+`replaced`, `cleared`, `deferred` and `targetFailures`.
+
+| Member               | Counts                                                                                                               |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `boundaries`         | Boundaries the pass handled                                                                                          |
+| `membershipFailures` | Boundaries whose member list failed                                                                                  |
+| `targets`            | Members the pass started a cycle for                                                                                 |
+| `promoted`           | Members whose ops were proven and written                                                                            |
+| `unchanged`          | Members already at the revision the host reports                                                                     |
+| `replaced`           | Members whose state a whole-repo read replaced                                                                       |
+| `cleared`            | Members whose records a `RepoNotFound` answer cleared                                                                |
+| `deferred`           | Members whose DID document lookup did not complete, or answered an error other than not found; no failure is counted |
+| `targetFailures`     | Members that failed                                                                                                  |
+
+A member whose cycle a membership change or a moved base interrupted starts
+again in the next pass. It counts only in `targets`. It is not a failure.
+
+A failed member logs `event=pds_space_target_failed kind=<reason>`. A failure
+with the reason `member_generation` logs no line of its own, and it is not
+counted in `targets`. A pass with failed members logs one
+`event=pds_space_target_failures` line with `<reason>=<count>` pairs, which
+counts every reason. The reason is one of 27 fixed words. No host text reaches
+a log line.
+
+| Reason                                                                               | Meaning                                                                                                     |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `invalid_space_mac`, `invalid_space_uri`, `invalid_credential`, `bad_space_audience` | The host answered with that error name                                                                      |
+| `repo_not_found`                                                                     | The host answered `RepoNotFound` with a status other than 400                                               |
+| `repo_takendown`, `repo_suspended`, `repo_deactivated`                               | The host answered that account status. Nothing is deleted                                                   |
+| `invalid_cursor`                                                                     | The host answered `InvalidCursor` other than as a status 400 to a page                                      |
+| `mac`                                                                                | A response failed the MAC check, after the one retry                                                        |
+| `kem_key`                                                                            | The member's DID document has no usable `#atproto_kem` key, or is not found. No request is sent to the host |
+| `record_refused`                                                                     | A record value could not be admitted or held to its CID                                                     |
+| `archive`                                                                            | The archive was malformed, out of order, or had the wrong metadata                                          |
+| `repo_over_budget`                                                                   | A record, row, archive, value or projection budget would be passed                                          |
+| `digest`                                                                             | The set hash of a whole-repo read did not equal the commit's `data`                                         |
+| `deadline`                                                                           | The 60-second deadline passed                                                                               |
+| `replacement_cooldown`                                                               | A whole-repo read was refused because one failed in the last 10 minutes                                     |
+| `credential`                                                                         | No space credential could be obtained                                                                       |
+| `transport`                                                                          | The request did not complete                                                                                |
+| `page`                                                                               | A page could not be read, or an op's revision was out of range                                              |
+| `cursor_stalled`                                                                     | The host repeated a page cursor                                                                             |
+| `store`                                                                              | The store refused the write for another reason                                                              |
+| `target_capacity`, `cooldown_capacity`                                               | The lock list or the cooldown list is full (4,096)                                                          |
+| `member_generation`                                                                  | The membership pass gave no generation for the member                                                       |
+| `task`                                                                               | The member's task did not finish                                                                            |
+| `other`                                                                              | The host answered an error name that is not one of the nine it tells apart                                  |
+
+The words `host`, `target`, `stage`, `page_limit` and `operation_limit` are not
+reasons of a failed member, and the `outcome` label of the space sync metric
+has no `member_rejected` value. An alert keyed on one of the five as a
+member's reason, or on `member_rejected`, never fires. `page_limit`
+remains a `kind` of `pds_space_membership_failed`, for a membership listing
+that ran out of pages.
 
 ## Who can read
 
@@ -289,15 +462,19 @@ The feed generator signs a delegation JWT and sends it to
 P-256 key. Stratos returns a credential bound to that key.
 
 The feed generator then presents the credential with three parts: the
-`Authorization: Atproto-Space` header, the `Atproto-Space-Audience` header,
-and an HTTP signature over both. The audience is the Stratos DID for a
-member list. It is the member's DID for a read from that member's PDS.
+`Authorization: Atproto-Space-Credential` header, the `Atproto-Space-Audience`
+header, and an HTTP signature over both. The signature carries
+`tag="atproto-space-credential"` and covers `("authorization"
+"atproto-space-audience")`. The audience is the Stratos DID for a member list.
+It is the member's DID for a read from that member's PDS. The delegation names
+the audience `<Stratos DID>#atproto_pds`.
 
 The feed generator keeps credentials and their keys in memory only. It holds
-at most 128. It refreshes one five minutes before expiry. It rejects a
-credential that lasts longer than one hour. The Stratos side of this
-exchange is described in
-[October spaces rollout](/operator/upgrades/october-spaces).
+at most 128. It refreshes a credential five minutes before expiry, or a tenth
+of its remaining lifetime before expiry when that is shorter. With the default
+600-second lifetime that is 60 seconds. It rejects a credential that lasts
+longer than one hour. The Stratos side of this exchange is described in
+[Permissioned spaces](/architecture/permissioned-spaces#credential).
 
 ## Readiness
 
@@ -342,9 +519,11 @@ closed.
     "boundaries": 3,
     "membershipFailures": 0,
     "targets": 12,
-    "promoted": 12,
+    "promoted": 2,
+    "unchanged": 10,
+    "replaced": 0,
+    "cleared": 0,
     "deferred": 0,
-    "rejected": 0,
     "targetFailures": 0
   }
 }
@@ -435,47 +614,46 @@ level setting. Useful events:
 | `service_stream_session_ended`     | The stream dropped. `kind` gives the reason.  |
 | `pds_space_sync_pass`              | One PDS pass ended. Check `healthy`.          |
 | `pds_space_membership_failed`      | A member list failed. `kind` gives the stage. |
-| `pds_space_target_failed`          | One member's sync failed.                     |
+| `pds_space_target_failed`          | One member's sync failed. `kind` is a reason. |
+| `pds_space_target_failures`        | The failed members of a pass, by reason.      |
 
 ## Configuration reference
 
 Every variable the feed generator reads is in this table.
 
-| Variable                                 | Required                  | Default                       | Notes                                                  |
-| ---------------------------------------- | ------------------------- | ----------------------------- | ------------------------------------------------------ |
-| `FEEDGEN_SERVICE_DID`                    | Yes                       |                               | The feed generator's DID                               |
-| `FEEDGEN_PUBLIC_URL`                     | Yes                       |                               | Public base URL                                        |
-| `FEEDGEN_PUBLIC_KEY_MULTIBASE`           | Yes                       |                               | Must match the signing key                             |
-| `FEEDGEN_SIGNING_KEY`                    | One of the two            |                               | 64 hexadecimal characters, secp256k1                   |
-| `FEEDGEN_SIGNING_KEY_FILE`               | One of the two            |                               | Path to a file with the same value                     |
-| `STRATOS_SERVICE_URL`                    | Yes                       |                               | URL the feed generator uses to reach Stratos           |
-| `STRATOS_SERVICE_DID`                    | Yes                       |                               | DID of the Stratos service                             |
-| `STRATOS_PUBLIC_URL`                     | No                        | `STRATOS_SERVICE_URL`         | Public URL of Stratos, when it differs                 |
-| `FEEDGEN_FEEDS_FILE`                     | One of the three          |                               | Path to a `.json`, `.yaml`, or `.yml` feed list        |
-| `FEEDGEN_FEEDS_JSON`                     | One of the three          |                               | Inline JSON feed list                                  |
-| `FEEDGEN_FEEDS_YAML`                     | One of the three          |                               | Inline YAML feed list                                  |
-| `FEEDGEN_PORT`                           | No                        | `3000`                        | Listening port                                         |
-| `FEEDGEN_STORAGE_BACKEND`                | No                        | `sqlite`                      | `sqlite` is the only accepted value                    |
-| `FEEDGEN_STORAGE_PROFILE`                | No                        | `ephemeral`                   | `ephemeral` or `encrypted-volume`                      |
-| `FEEDGEN_SQLITE_PATH`                    | With `encrypted-volume`   |                               | Absolute database path                                 |
-| `FEEDGEN_STORAGE_KEY_PATH`               | With `encrypted-volume`   |                               | Absolute key path, outside the database directory      |
-| `FEEDGEN_WRITER_LOCK_PATH`               | No                        | `<database path>.writer-lock` | Absolute lock path                                     |
-| `FEEDGEN_PROJECTION_MAX_AGE_MS`          | With `encrypted-volume`   |                               | Whole seconds, at least `1000`                         |
-| `FEEDGEN_PROJECTION_MAX_BYTES`           | With `encrypted-volume`   |                               | Positive number of bytes                               |
-| `FEEDGEN_STAGE_TARGET_MAX_ROWS`          | No                        | `1024`                        | Staged rows per member. Maximum `1024`.                |
-| `FEEDGEN_STAGE_GLOBAL_MAX_ROWS`          | No                        | `8192`                        | Staged rows in total                                   |
-| `FEEDGEN_STAGE_TARGET_MAX_BYTES`         | No                        | A quarter of the byte limit   | Staged bytes per member. Maximum 8 MiB.                |
-| `FEEDGEN_STAGE_GLOBAL_MAX_BYTES`         | No                        | Half of the byte limit        | Staged bytes in total. Maximum half of the byte limit. |
-| `FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS`     | No                        | `8`                           | Author stream connections, `1` to `64`                 |
-| `FEEDGEN_OTLP_METRICS_ENDPOINT`          | No                        | Off                           | Private OTLP/HTTP endpoint ending in `/v1/metrics`     |
-| `PLC_DIRECTORY`                          | No                        | `https://plc.directory`       | PLC directory origin                                   |
-| `PLC_DIRECTORY_PRIVATE_CIDRS`            | No                        |                               | Private ranges allowed for the PLC directory           |
-| `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN` | No, set with the next one |                               | Exact HTTPS origin of one private PDS                  |
-| `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS`  | No, set with the previous |                               | Private ranges allowed for that PDS                    |
+| Variable                                 | Required                  | Default                       | Notes                                                       |
+| ---------------------------------------- | ------------------------- | ----------------------------- | ----------------------------------------------------------- |
+| `FEEDGEN_SERVICE_DID`                    | Yes                       |                               | The feed generator's DID                                    |
+| `FEEDGEN_PUBLIC_URL`                     | Yes                       |                               | Public base URL                                             |
+| `FEEDGEN_PUBLIC_KEY_MULTIBASE`           | Yes                       |                               | Must match the signing key                                  |
+| `FEEDGEN_SIGNING_KEY`                    | One of the two            |                               | 64 hexadecimal characters, secp256k1                        |
+| `FEEDGEN_SIGNING_KEY_FILE`               | One of the two            |                               | Path to a file with the same value                          |
+| `STRATOS_SERVICE_URL`                    | Yes                       |                               | URL the feed generator uses to reach Stratos                |
+| `STRATOS_SERVICE_DID`                    | Yes                       |                               | DID of the Stratos service                                  |
+| `STRATOS_PUBLIC_URL`                     | No                        | `STRATOS_SERVICE_URL`         | Public URL of Stratos, when it differs                      |
+| `FEEDGEN_FEEDS_FILE`                     | One of the three          |                               | Path to a `.json`, `.yaml`, or `.yml` feed list             |
+| `FEEDGEN_FEEDS_JSON`                     | One of the three          |                               | Inline JSON feed list                                       |
+| `FEEDGEN_FEEDS_YAML`                     | One of the three          |                               | Inline YAML feed list                                       |
+| `FEEDGEN_PORT`                           | No                        | `3000`                        | Listening port                                              |
+| `FEEDGEN_STORAGE_BACKEND`                | No                        | `sqlite`                      | `sqlite` is the only accepted value                         |
+| `FEEDGEN_STORAGE_PROFILE`                | No                        | `ephemeral`                   | `ephemeral` or `encrypted-volume`                           |
+| `FEEDGEN_SQLITE_PATH`                    | With `encrypted-volume`   |                               | Absolute database path                                      |
+| `FEEDGEN_STORAGE_KEY_PATH`               | With `encrypted-volume`   |                               | Absolute key path, outside the database directory           |
+| `FEEDGEN_WRITER_LOCK_PATH`               | No                        | `<database path>.writer-lock` | Absolute lock path                                          |
+| `FEEDGEN_PROJECTION_MAX_AGE_MS`          | With `encrypted-volume`   |                               | Whole seconds, at least `1000`                              |
+| `FEEDGEN_PROJECTION_MAX_BYTES`           | With `encrypted-volume`   |                               | Positive number of bytes                                    |
+| `FEEDGEN_SPACE_WRITE_RESERVE_BYTES`      | No                        | Half of the byte limit        | Bytes kept free for space writes. Above 0, below the limit. |
+| `FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS`     | No                        | `8`                           | Author stream connections, `1` to `64`                      |
+| `FEEDGEN_OTLP_METRICS_ENDPOINT`          | No                        | Off                           | Private OTLP/HTTP endpoint ending in `/v1/metrics`          |
+| `PLC_DIRECTORY`                          | No                        | `https://plc.directory`       | PLC directory origin                                        |
+| `PLC_DIRECTORY_PRIVATE_CIDRS`            | No                        |                               | Private ranges allowed for the PLC directory                |
+| `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN` | No, set with the next one |                               | Exact HTTPS origin of one private PDS                       |
+| `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS`  | No, set with the previous |                               | Private ranges allowed for that PDS                         |
 
-The per-member staging limits must fit inside the total staging limits. The
-`ephemeral` profile ignores the age and byte variables and uses its fixed
-limits.
+The `ephemeral` profile ignores the age and byte variables and uses its fixed
+limits. `FEEDGEN_STAGE_TARGET_MAX_ROWS`, `FEEDGEN_STAGE_GLOBAL_MAX_ROWS`,
+`FEEDGEN_STAGE_TARGET_MAX_BYTES` and `FEEDGEN_STAGE_GLOBAL_MAX_BYTES` are not
+read. A set one is ignored.
 
 The rehearsal compose file also reads `FEEDGEN_STATE_DIR` and
 `FEEDGEN_STORAGE_KEY_FILE`. Those are host paths for bind mounts. The feed
@@ -497,9 +675,13 @@ Before you route users to an instance:
 
 1. Fetch `/.well-known/did.json` through the public URL.
 2. Check that `/health` returns `200` and `pdsSpaceSyncHealthy` is `true`.
+   With members who have `pds` custody it is `false` until their hosts accept
+   the `at:space/` spelling. See
+   [What cannot work yet](./november-upgrade.md#what-cannot-work-yet).
 3. Make an authenticated `getFeed` request as an enrolled test viewer.
 
 See `stratos-feedgen-ng/README.md` for the space credential transport, the
-staging limits, and the metric list. See `stratos-feedgen-ng/CUTOVER.md` for
-a test switch and rollback. Do not reuse the TypeScript service's database or
+space sync limits, and the metric list. See `stratos-feedgen-ng/CUTOVER.md`
+for a test switch and rollback, and
+[November upgrade and rollback](./november-upgrade.md) for the upgrade. Do not reuse the TypeScript service's database or
 writer lock.

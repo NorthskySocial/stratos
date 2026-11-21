@@ -1,8 +1,10 @@
 ---
 audience: Maintainers and protocol implementers
 type: Decision record
-status: accepted
+status: legacy
 ---
+
+> This page describes the October contract. No current build implements it.
 
 # Credential revocation contract <Badge type="tip" text="accepted" />
 
@@ -47,7 +49,7 @@ Operators must continue to distinguish these controls:
 | Authority membership and ingestion generation | Stops selected repo reads and fences staged foreign work                                          | Preventing writes on a removed member's PDS            |
 | Proposed targeted revocation                  | Would deny one `(space, jti)` at a receiving host                                                 | Membership removal automatically sending notifications |
 
-See [the current spaces contract](./spaces-alignment.md) for the existing transport and custody limits.
+See [the current spaces contract](../architecture/spaces-alignment.md) for the existing transport and custody limits.
 Standard presentation signatures remain reusable for their audience until expiry. Credential IDs are not single-use nonces.
 
 ## Why hosting is separate from membership

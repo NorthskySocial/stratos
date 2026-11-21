@@ -17,31 +17,34 @@ boundaries, the AT Protocol community was designing its own model. The
 permissioned data proposal
 ([proposal 0016](https://github.com/bluesky-social/proposals/blob/main/0016-permissioned-data/README.md))
 calls the group a _space_: a named, membership-gated container of records,
-addressed by an `at://` URI and governed by a _space authority_ that decides
-who may read from it.
+addressed by an `at:space/` URI and governed by a _space authority_ that
+decides who may read from it.
 
-The two ideas turned out to be the same idea. So Stratos adopted the
-proposal's vocabulary and wire shapes. Every Stratos boundary is a space,
-Stratos is the authority for it, and the service exposes spec-shaped
-endpoints under `zone.stratos.space.*`.
+The two ideas are the same idea. Stratos uses the proposal's vocabulary and
+its credential, delegation and URI shapes. Every Stratos boundary is a space,
+Stratos is the authority for it, and the service has its own methods under
+`zone.stratos.space.*`.
 
 This page tells that story in order: how a boundary becomes a space, who
 keeps the records, how a reader proves they belong, and where Stratos still
-goes its own way. The exact contract we test against, including the pinned
-upstream revisions, lives in [Spaces alignment: current contract](./spaces-alignment.md).
+goes its own way. The exact contract Stratos tests against, including the
+pinned upstream revisions, lives in [Spaces alignment](./spaces-alignment.md).
 
 ## Why align with the spaces proposal
 
 Stratos and the proposal solve the same problem: records in the atproto
-identity and repository model that only an authorized group may read. Stratos
-shipped first. We did not wait for `com.atproto.space.*` to settle; we mirror
-its shapes under our own namespace and move with it.
+identity and repository model that only an authorized group may read. The
+`zone.stratos.space.*` methods are Stratos's own. They are not mirrors of the
+upstream `com.atproto.space.*` methods. Only the credential, delegation and
+URI shapes follow upstream.
 
 Alignment pays off in two places:
 
 - **A user's own PDS can keep their private posts.** When a PDS supports
-  spaces, the records stay there, and Stratos only decides who belongs. This
-  works today against the upstream alpha PDS.
+  spaces, the records stay there, and Stratos only decides who belongs. No
+  upstream host accepts the `at:space/` spelling yet, so this is proven at
+  package level only, pending a host that accepts the new spelling. See
+  [Supported versions](./supported-versions.md).
 - **The data model needs no rework.** Space URIs, sender-bound credentials,
   and reads that never leak existence all carry over as the proposal moves.
 
@@ -54,7 +57,7 @@ A Stratos boundary is a qualified string, `{serviceDid}/{domainName}`. A
 space URI is:
 
 ```text
-at://{spaceDid}/space/{spaceType}/{skey}
+at:space/{spaceDid}/{spaceType}/{skey}
 ```
 
 The two map onto each other field by field:
@@ -68,32 +71,34 @@ The two map onto each other field by field:
 So the boundary `did:web:stratos.example.com/engineering` is the space:
 
 ```text
-at://did:web:stratos.example.com/space/zone.stratos.space.feed/engineering
+at:space/did:web:stratos.example.com/zone.stratos.space.feed/engineering
 ```
 
-The literal `space` segment sits where a collection NSID appears in a public
-`at://` URI. An NSID always contains at least two dots and can never be the
-bare word `space`, so the two URI shapes cannot collide. Parsing is strict:
-canonical form is byte equality, with no case folding and no normalization.
+The scheme is `at:space/`, not `at://`. A space URI is not an `at://` URI, so
+it never goes to a parser for public record addresses. A space URI is exactly
+the form above. Nothing accepts or converts a URI in any other form. Parsing is
+strict: canonical
+form is byte equality, with no case folding and no normalization.
 The space key (`skey`) uses atproto record-key syntax and must be 1 to 512
 UTF-8 bytes. Domain names already satisfy that syntax, so every existing
 boundary name is a valid skey.
 
 The single source of truth for this grammar is
-`stratos-core/src/spaces/domain.ts`. `stratos-client` does not re-export the
-parser yet, so client code that needs it imports it from core.
+`stratos-core/src/spaces/domain.ts`. `stratos-client` exports
+`boundaryToSpaceUri`, `parseSpaceUri`, `parseSpaceRecordUri` and
+`parseRecordAddress`, so client code does not import the grammar from core.
 
 ### Two record addresses
 
 A record inside a space has a longer URI. It appends the author, the
-collection, and the record key. That is seven segments, and the first one is
-the **authority**, not the author. This is the address of a record that lives
-in a space repository on a member's PDS. A record that Stratos hosts keeps
-the familiar three-segment address.
+collection, and the record key. That is `at:space/` plus six parts, and the
+first part is the **authority**, not the author. This is the address of a
+record that lives in a space repository on a member's PDS. A record that
+Stratos hosts keeps the familiar address, `at://{author}/{collection}/{rkey}`.
 
 <RecordUri kind="space" />
 
-Code that takes the first segment of a URI as the author is wrong for a space
+Code that takes the first part of a URI as the author is wrong for a space
 record. Parse the URI; do not split it by hand.
 
 ### One record, one space
@@ -127,7 +132,7 @@ lexicon declares what the space contains. Stratos ships one, in
       "type": "space",
       "description": "A members-only Stratos post feed",
       "key": "any",
-      "name": "Stratos Feed",
+      "title": "Stratos Feed",
       "collections": [
         "zone.stratos.feed.post",
         "app.bsky.feed.like",
@@ -141,19 +146,27 @@ lexicon declares what the space contains. Stratos ships one, in
 `"key": "any"` means any valid skey names an instance of this space type.
 That is what lets every boundary name become a space without registration.
 
+`title` is the display name. The upstream schema takes it as optional, 1 to 64
+UTF-8 bytes when present. A PDS older than the November release requires a
+`name` member instead and refuses a declaration without it. The November
+release accepts a `name` beside `title` and ignores it. The file in the
+repository holds `title` only. How to publish it is the operator's choice; see
+[the space type declaration](/operator/november-upgrade#the-space-type-declaration).
+
 The declaration lists three collections. A member who hosts their own repo
 can write a like or repost only when the published record lists them and
-their OAuth grant covers them. The Stratos enrollment client already requests
-all three collections. The file in the repository lists them. The record that
-a PDS resolves does not, until the owner publishes the new version. Until then
-a PDS may return a partial grant, and the member must authorize again after the
-update.
+their OAuth grant covers them. The Stratos enrollment client requests all
+three collections. A PDS resolves the published record, not the file in the
+repository, so publish the record again whenever the file changes. Until then
+a PDS may return a partial grant, and the member must authorize again after
+the update.
 
 ::: warning Keep the space type published
 A spaces-capable PDS resolves `zone.stratos.space.feed` as a
 `com.atproto.lexicon.schema` record before it grants a space scope. If the
 record is missing, authorization fails with `invalid_scope`, and nothing in
-the Stratos logs explains why.
+the Stratos logs explains why. A declaration that the PDS refuses, such as one
+without `name` on a PDS older than the November release, fails the same way.
 :::
 
 ## Who keeps the records: custody
@@ -163,10 +176,10 @@ space and decides who is a member. But the authority does not have to be the
 place where the records sit. We call the answer to "who holds this user's
 records" their **custody**.
 
-| User's PDS     | Custody   | Repo host          | Who signs                    | Record URI     |
-| -------------- | --------- | ------------------ | ---------------------------- | -------------- |
-| non-spaces     | `stratos` | Stratos            | Stratos, per-actor P-256 key | three segments |
-| spaces-capable | `pds`     | the user's own PDS | the user's account key       | seven segments |
+| User's PDS     | Custody   | Repo host          | Who signs                    | Record URI                |
+| -------------- | --------- | ------------------ | ---------------------------- | ------------------------- |
+| non-spaces     | `stratos` | Stratos            | Stratos, per-actor P-256 key | `at://` and three parts   |
+| spaces-capable | `pds`     | the user's own PDS | the user's account key       | `at:space/` and six parts |
 
 Custody is decided once, at enrollment. The enrollment OAuth flow always asks
 the user's authorization server for a space scope on
@@ -202,7 +215,7 @@ host accepts.
 
 **A removed member's credential lives until it expires.** Stratos can refuse
 a credential on its own endpoints at once. A foreign PDS cannot be told. See
-[Credential revocation contract](./credential-revocation-contract.md).
+[the known gaps](./supported-versions.md#known-gaps).
 
 ## How access works
 
@@ -235,7 +248,7 @@ credential. Decoded, it looks like this:
 // payload
 {
   "iss": "did:web:stratos.example.com",
-  "sub": "at://did:web:stratos.example.com/space/zone.stratos.space.feed/engineering",
+  "sub": "at:space/did:web:stratos.example.com/zone.stratos.space.feed/engineering",
   "iat": 1753948800,
   "exp": 1753956000,
   "jti": "8e0d2a4f-6a5c-4b1e-9f3a-2c7d1e5b8a90",
@@ -269,10 +282,10 @@ credential also carries the boundary's revision. More on that under
 Stratos speaks two binding profiles. They exist because two kinds of caller
 arrive with two kinds of key.
 
-| Profile        | Bound by                     | Default lifetime                   | Presented as                                                                    | Typical caller                |
-| -------------- | ---------------------------- | ---------------------------------- | ------------------------------------------------------------------------------- | ----------------------------- |
-| DPoP           | `cnf.jkt`, a DPoP key        | 2 hours                            | `Authorization: DPoP <credential>` and a fresh `DPoP` proof                     | OAuth clients                 |
-| HTTP signature | `cnf.kid`, a P-256 `did:key` | 10 minutes, never more than 1 hour | `Authorization: Atproto-Space <credential>` and an RFC 9421 request `Signature` | Services, such as the feedgen |
+| Profile        | Bound by                     | Default lifetime                   | Presented as                                                                                                          | Typical caller                |
+| -------------- | ---------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| DPoP           | `cnf.jkt`, a DPoP key        | 2 hours                            | `Authorization: DPoP <credential>` and a fresh `DPoP` proof                                                           | OAuth clients                 |
+| HTTP signature | `cnf.kid`, a P-256 `did:key` | 10 minutes, never more than 1 hour | `Authorization: Atproto-Space-Credential <credential>`, `Atproto-Space-Audience`, and an RFC 9421 request `Signature` | Services, such as the feedgen |
 
 A **DPoP** proof is made per request. It carries the method, the URL, and a
 hash of the credential, and Stratos accepts each proof once.
@@ -281,7 +294,19 @@ An **HTTP signature** covers the `Authorization` header and an
 `Atproto-Space-Audience` header. The audience is the DID the caller means to
 read from: the repo owner for record and sync reads, the authority for a
 membership listing. A signature stays valid for that audience until the
-credential expires. This is the transport of the October upstream contract.
+credential expires. The signature is tagged `atproto-space-credential` and
+covers `authorization` then `atproto-space-audience`. Stratos checks the tag
+and the covered parts, not the signature label. This is the upstream
+presentation. No other scheme is accepted. On the five read routes
+(`zone.stratos.space.getRecord`, `zone.stratos.space.listBlobs`,
+`zone.stratos.space.listRepos`, `zone.stratos.sync.listRepoOps` and
+`zone.stratos.sync.listRecordPaths`), a request with the earlier
+`Authorization: Atproto-Space` scheme is not recognised and is refused with
+`401`. On `zone.stratos.repo.hydrateRecord` and `hydrateRecords`, such a request
+is answered as an anonymous request, which returns nothing private.
+
+The mint exchange has its own form. It is a `Bearer` delegation with one
+signature labelled `atproto-space` that covers `authorization`.
 
 A request that mixes the two proof families is rejected.
 
@@ -302,7 +327,10 @@ The caller's identity reaches the mint in one of two ways.
 - **A delegation token.** A service obtains a credential on a member's
   behalf. The token is a short-lived `atproto-space-delegation+jwt`, signed
   with the issuer's `#atproto` key, valid for at most five minutes, and
-  usable once. The caller sends it as `Authorization: Bearer` (or, on the
+  usable once. Its `aud` is the authority DID with the fragment
+  `#atproto_pds`, for example `did:web:stratos.example.com#atproto_pds`. A
+  client attestation names the same audience. The Stratos DID document offers
+  no such service entry. The caller sends it as `Authorization: Bearer` (or, on the
   older internal transport, in the request body; never both) together with a
   DPoP proof or an HTTP signature made by the key the credential will bind
   to.
@@ -399,34 +427,35 @@ the repositories it names and no others.
 
 ## Compatibility notes
 
-The `zone.stratos.space.*` methods are shaped as mirrors of the proposal, in
-a separate namespace:
+The `zone.stratos.space.*` and `zone.stratos.sync.*` methods are Stratos's own.
+None of them mirrors an upstream method. The table says what each one is and
+whether an upstream method of a similar name exists.
 
-| Stratos NSID                            | Proposal counterpart               | Status                                    | Note                           |
-| --------------------------------------- | ---------------------------------- | ----------------------------------------- | ------------------------------ |
-| `zone.stratos.space.feed`               | Space type declaration             | <Badge type="tip" text="standard" />      | A `type: space` lexicon        |
-| `zone.stratos.space.getSpaceCredential` | Space credential issuance          | <Badge type="tip" text="mirror" />        | Both binding profiles          |
-| `zone.stratos.space.getRecord`          | `com.atproto.space.getRecord`      | <Badge type="tip" text="mirror" />        | Stratos-hosted records only    |
-| `zone.stratos.space.listBlobs`          | `com.atproto.space.listBlobs`      | <Badge type="tip" text="mirror" />        |                                |
-| `zone.stratos.space.listRepos`          | `com.atproto.space.listRepos`      | <Badge type="warning" text="diverged" />  | Lists members, not writers     |
-| `zone.stratos.sync.listRepoOps`         | `com.atproto.space.listRepoOps`    | <Badge type="warning" text="diverged" />  | Recovery differs; see below    |
-| `zone.stratos.sync.listRecordPaths`     | `getRepo` / `listRecords` recovery | <Badge type="warning" text="diverged" />  | Recovery differs; see below    |
-| `zone.stratos.repo.hydrateRecord(s)`    | none                               | <Badge type="info" text="Stratos only" /> | Batch, boundary-filtered reads |
-| `zone.stratos.sync.subscribeRecords`    | none                               | <Badge type="info" text="Stratos only" /> | Actor-scoped stream            |
+| Stratos NSID                            | Upstream method of a similar name      | Status                                    | Note                                                                     |
+| --------------------------------------- | -------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------ |
+| `zone.stratos.space.feed`               | Space type declaration                 | <Badge type="tip" text="standard" />      | A `type: space` lexicon                                                  |
+| `zone.stratos.space.getSpaceCredential` | `com.atproto.space.authorizeSpaceSync` | <Badge type="info" text="Stratos only" /> | Not an alias. No notification, no writer revision. Both binding profiles |
+| `zone.stratos.space.getRecord`          | `com.atproto.space.getRecord`          | <Badge type="info" text="Stratos only" /> | Stratos-hosted records only. A member's PDS is never asked               |
+| `zone.stratos.space.listBlobs`          | `com.atproto.space.listBlobs`          | <Badge type="info" text="Stratos only" /> | Stratos-hosted blobs only                                                |
+| `zone.stratos.space.listRepos`          | none                                   | <Badge type="info" text="Stratos only" /> | Lists the active members of a boundary                                   |
+| `zone.stratos.sync.listRepoOps`         | `com.atproto.space.listRepoOps`        | <Badge type="info" text="Stratos only" /> | Takes and returns different shapes; recovery differs; see below          |
+| `zone.stratos.sync.listRecordPaths`     | none                                   | <Badge type="info" text="Stratos only" /> | Full-state recovery; see below                                           |
+| `zone.stratos.repo.hydrateRecord(s)`    | none                                   | <Badge type="info" text="Stratos only" /> | Batch, boundary-filtered reads                                           |
+| `zone.stratos.sync.subscribeRecords`    | none                                   | <Badge type="info" text="Stratos only" /> | Actor-scoped stream                                                      |
 
 Some caveats, stated plainly:
 
-| Caveat                                         | What it means                                                                                                                                                                                                                                                 |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The proposal is not final                      | We pin the upstream revisions we test against in the [current contract](./spaces-alignment.md). The mirrored NSIDs let us follow upstream without breaking deployed clients.                                                                                  |
-| Stratos is not a complete upstream authority   | It does not advertise the upstream `#atproto_space_host` role and does not claim upstream authority discovery. A generic spaces client cannot walk up to a Stratos service and read.                                                                          |
-| `listRepos` answers a different question       | The Stratos method lists the active members of a boundary. The upstream method reports writers, with space-revision cursors. A writer delta must never be used to revoke a member. See the [October writer sync contract](./october-writer-sync-contract.md). |
-| Pull sync diverges on recovery                 | Stratos reports a cursor it can no longer serve as `OplogTruncated`, and recovery goes through `listRecordPaths`.                                                                                                                                             |
-| Commit verification depends on custody         | A Stratos-custody commit verifies against the per-actor key in the enrollment record. A PDS-custody commit verifies against the account key in the author's DID document.                                                                                     |
-| The Stratos repo format is MST                 | It has durable signed commits. The format sits behind an internal seam, so a later change is one controlled cutover.                                                                                                                                          |
-| A valid credential is not a completeness proof | A signed response shows who served it. It does not show that the host returned every record the caller may read.                                                                                                                                              |
-| Records are not end-to-end encrypted           | They are access-controlled. The service and its authorized consumers handle plaintext by design.                                                                                                                                                              |
-| Hydration predates the proposal and stays      | See below.                                                                                                                                                                                                                                                    |
+| Caveat                                         | What it means                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The proposal is not final                      | Stratos pins the upstream revisions it tests against in [Spaces alignment](./spaces-alignment.md). The credential, delegation and URI shapes follow upstream. The methods do not, so an upstream change to a method does not break a deployed client.                                                                            |
+| Stratos is not a complete upstream authority   | It does not advertise a `#atproto_pds` service entry and does not claim upstream authority discovery. A generic spaces client cannot walk up to a Stratos service and read.                                                                                                                                                      |
+| `listRepos` answers a different question       | The Stratos method lists the active members of a boundary. Upstream has no such method at the pinned reference. Never use a writer list from a host to revoke a member.                                                                                                                                                          |
+| Pull sync diverges on recovery                 | Stratos reports a cursor it can no longer serve as `OplogTruncated`, and recovery goes through `listRecordPaths`.                                                                                                                                                                                                                |
+| Commit verification depends on custody         | A Stratos-custody commit verifies against the per-actor key in the enrollment record. The feed generator does not check the signature of a PDS-custody commit. It authenticates each response with a MAC and promotes state only when the set hash equals the commit's `data`. See [Feed generator design](./feed-generator.md). |
+| The Stratos repo format is MST                 | It has durable signed commits. The format sits behind an internal seam, so a later change is one controlled cutover.                                                                                                                                                                                                             |
+| A valid credential is not a completeness proof | A signed response shows who served it. It does not show that the host returned every record the caller may read.                                                                                                                                                                                                                 |
+| Records are not end-to-end encrypted           | They are access-controlled. The service and its authorized consumers handle plaintext by design.                                                                                                                                                                                                                                 |
+| Hydration predates the proposal and stays      | See below.                                                                                                                                                                                                                                                                                                                       |
 
 ## Design decisions Stratos keeps, and why
 
@@ -434,14 +463,14 @@ Alignment did not mean adopting the proposal wholesale. Several Stratos
 decisions predate it and stay in place on purpose. A dash means this page
 states no upstream position.
 
-| Decision                                 | Upstream                                            | Stratos                                                                                                          | Why                                                                                                                             |
-| ---------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Boundaries remain the internal model     | Records are addressed by space URI                  | Records carry a `boundary` field. The space URI is derived from it (`boundaryToSpaceUri` / `spaceUriToBoundary`) | The mapping is lossless. Deployed records need no rewrite as the proposal moves. Only the derivation changes if addressing does |
-| Membership lives in the enrollment store | Leans toward membership as records                  | Checked live against the enrollment store                                                                        | An operator's change takes effect at the next check. Short credential lifetimes bound the window, with no revocation list       |
-| Hydration stays beside spec-shaped reads | `space.getRecord` answers one record for one caller | Batch, boundary-filtered [hydration](./hydration.md)                                                             | A timeline beside public posts needs batch reads                                                                                |
-| Signed per-actor repositories            | —                                                   | MST commits and per-actor keys, even when Stratos hosts                                                          | Verifiable export, host-independent CIDs, and block-by-block checks follow from that structure                                  |
-| Actor-scoped sync                        | —                                                   | `subscribeRecords` is per actor. Pull sync is boundary-gated to the caller                                       | A service-wide firehose would leak activity across boundaries. We accept the slower fan-out                                     |
-| Custody follows the user's PDS           | Spaces live on a spaces-capable PDS                 | Members of both custody classes share one boundary                                                               | We do not force every member onto Stratos hosting, and we do not wait for every PDS to support spaces                           |
+| Decision                                       | Upstream                                                        | Stratos                                                                                                          | Why                                                                                                                             |
+| ---------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Boundaries remain the internal model           | Records are addressed by space URI                              | Records carry a `boundary` field. The space URI is derived from it (`boundaryToSpaceUri` / `spaceUriToBoundary`) | The mapping is lossless. Deployed records need no rewrite as the proposal moves. Only the derivation changes if addressing does |
+| Membership lives in the enrollment store       | Leans toward membership as records                              | Checked live against the enrollment store                                                                        | An operator's change takes effect at the next check. Short credential lifetimes bound the window, with no revocation list       |
+| Hydration stays beside the Stratos space reads | `com.atproto.space.getRecord` answers one record for one caller | Batch, boundary-filtered [hydration](./hydration.md)                                                             | A timeline beside public posts needs batch reads                                                                                |
+| Signed per-actor repositories                  | —                                                               | MST commits and per-actor keys, even when Stratos hosts                                                          | Verifiable export, host-independent CIDs, and block-by-block checks follow from that structure                                  |
+| Actor-scoped sync                              | —                                                               | `subscribeRecords` is per actor. Pull sync is boundary-gated to the caller                                       | A service-wide firehose would leak activity across boundaries. We accept the slower fan-out                                     |
+| Custody follows the user's PDS                 | Spaces live on a spaces-capable PDS                             | Members of both custody classes share one boundary                                                               | We do not force every member onto Stratos hosting, and we do not wait for every PDS to support spaces                           |
 
 Two limits come with these choices.
 

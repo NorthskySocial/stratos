@@ -170,11 +170,11 @@ async function createSpacePost(
 :::
 
 With `stratos` custody, `boundary` is the full value, such as `did:web:stratos.example.com/general`.
-The response is `{ uri, cid }`. The URI has three segments:
+The response is `{ uri, cid }`. The URI is `at://` plus three parts:
 `at://{userDid}/zone.stratos.feed.post/{rkey}`.
 
 With `pds` custody, the record carries no `boundary` field. The space names
-the boundary, and the record URI that comes back has seven segments.
+the boundary, and the record URI that comes back is `at:space/` plus six parts.
 
 ## Post with rich text
 

@@ -12,11 +12,7 @@
         {{ option.label }}
       </button>
     </div>
-    <p
-      class="uri-row"
-      role="group"
-      :aria-label="`${labelOf(current)} segments`"
-    >
+    <p class="uri-row" role="group" :aria-label="`${labelOf(current)} parts`">
       <button
         v-for="(segment, i) in segments"
         :key="`${current}-${i}`"
@@ -38,7 +34,7 @@
       <span>{{ segments[selected].detail }}</span>
     </figcaption>
     <details class="uri-all">
-      <summary>Every segment, as a list</summary>
+      <summary>Every part, as a list</summary>
       <dl>
         <template v-for="segment in segments" :key="segment.name">
           <dt>
@@ -72,11 +68,18 @@ const KINDS: { kind: UriKind; label: string }[] = [
   { kind: 'custody', label: 'Stratos custody: repo record' },
 ]
 
-const SCHEME: Segment = {
+const CUSTODY_SCHEME: Segment = {
   text: 'at://',
   name: 'Scheme',
   role: 'literal',
-  detail: 'Every AT Protocol record address starts here.',
+  detail: 'A public or Stratos-custody record address starts here.',
+}
+const SPACE_SCHEME: Segment = {
+  text: 'at:space/',
+  name: 'Scheme',
+  role: 'literal',
+  detail:
+    'A space record address starts here. It is not an at:// address, so a parser for public addresses must not receive it.',
 }
 const COLLECTION: Segment = {
   text: '/zone.stratos.feed.post',
@@ -93,27 +96,20 @@ const RKEY: Segment = {
 
 const URIS: Record<UriKind, Segment[]> = {
   space: [
-    SCHEME,
+    SPACE_SCHEME,
     {
       text: 'did:web:stratos.example.com',
       name: 'Authority DID',
       role: 'authority',
       detail:
-        'The Stratos service that decides membership. It comes first, not the author. Code that reads the first segment as the author is wrong for this shape.',
-    },
-    {
-      text: '/space',
-      name: 'Space marker',
-      role: 'literal',
-      detail:
-        'A literal segment where a collection NSID would sit. An NSID can never be the bare word space, so the two shapes cannot collide.',
+        'The Stratos service that decides membership. It comes first, not the author. Code that reads the first part as the author is wrong for this shape.',
     },
     {
       text: '/zone.stratos.space.feed',
       name: 'Space type',
       role: 'path',
       detail:
-        'Must stay published as a com.atproto.lexicon.schema record. If it is missing, the PDS answers invalid_scope.',
+        'Must stay published as a com.atproto.lexicon.schema record. If it is missing, or the PDS refuses it, the PDS answers invalid_scope.',
     },
     {
       text: '/engineering',
@@ -127,13 +123,13 @@ const URIS: Record<UriKind, Segment[]> = {
       name: 'Author DID',
       role: 'author',
       detail:
-        "The member who wrote the record, in segment five. The member's own PDS hosts the repository.",
+        "The member who wrote the record, in part four. The member's own PDS hosts the repository.",
     },
     COLLECTION,
     RKEY,
   ],
   custody: [
-    SCHEME,
+    CUSTODY_SCHEME,
     {
       text: 'did:plc:ewvi7nxzyoun6zhxrhs64oiz',
       name: 'Author DID',
@@ -154,12 +150,12 @@ const current = ref<UriKind>(props.kind)
 const selected = ref(1)
 const segments = computed(() => URIS[current.value])
 
-// The docs count segments after the scheme: seven for a space record, three
-// for a custody record. The scheme sits at index 0, so indexes match counts.
+// The docs count parts after the scheme: six for a space record, three for a
+// custody record. The scheme sits at index 0, so indexes match counts.
 const positionLabel = computed(() => {
-  const segmentCount = segments.value.length - 1
-  if (selected.value === 0) return 'The scheme, before the segments'
-  return `Segment ${selected.value} of ${segmentCount}`
+  const partCount = segments.value.length - 1
+  if (selected.value === 0) return 'The scheme, before the parts'
+  return `Part ${selected.value} of ${partCount}`
 })
 
 function labelOf(kind: UriKind): string {

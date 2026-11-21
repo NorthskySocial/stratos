@@ -257,21 +257,21 @@ not write into the space.
 | `zone.stratos.sync.subscribeRecords`    | Yes (WebSocket firehose)                                              |
 | `zone.stratos.sync.listRepoOps`         | Yes (pull oplog; falls back to `listRecordPaths` on `OplogTruncated`) |
 | `zone.stratos.sync.listRecordPaths`     | Yes (full-state recovery enumeration)                                 |
-| `zone.stratos.space.getSpaceCredential` | Yes (mints standard HTTP-signature or legacy DPoP space credentials)  |
+| `zone.stratos.space.getSpaceCredential` | Yes (mints HTTP-signature-bound or DPoP-bound space credentials)      |
 | `com.atproto.sync.getBlob`              | Yes (downloads blob content)                                          |
 
 `zone.stratos.space.getSpaceCredential` is a POST procedure. A client with a
 space delegation sends `Authorization: Bearer <delegation JWT>`, a standalone
 `DPoP` proof for this procedure, and a JSON body containing the `space` URI.
 The proof must omit `nonce` and `ath`. The delegation targets that exact space
-and is consumed after membership, app access, and proof checks pass. Existing
-clients may continue to send `delegationToken` in the JSON body with the same
-standalone `DPoP` proof and no `Authorization` header. A body delegation
+and is consumed after membership, app access, and proof checks pass. A client
+may instead send `delegationToken` in the JSON body with the same standalone
+`DPoP` proof and no `Authorization` header. A body delegation
 combined with any `Authorization` header, including a DPoP session token, is
 rejected. This custom Stratos endpoint does not advertise the
 upstream `com.atproto.space.*` namespace.
 
-The additive HTTP-signature profile sends the delegation as Bearer authorization
+The HTTP-signature profile sends the delegation as Bearer authorization
 and uses RFC 9421 `Signature-Input` and `Signature` headers with the
 `atproto-space` label. Exchange covers exactly `authorization` and requires a
 P-256 `did:key` in `keyid`. Do not send a DPoP header with this profile.
@@ -293,21 +293,22 @@ expiry. An optional presentation `keyid` must match `cnf.kid`; an optional
 
 Operators configure this profile with
 `STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS` (default 600, maximum 3600,
-positive integer seconds). Legacy `STRATOS_SPACE_CREDENTIAL_TTL_SECONDS`
-remains unchanged (default 7200). Existing OAuth-session minting, body delegation,
-and Bearer delegation with standalone DPoP continue to produce `cnf.jkt`
+positive integer seconds). A DPoP-bound credential lives for
+`STRATOS_SPACE_CREDENTIAL_TTL_SECONDS` (default 7200). OAuth-session minting,
+body delegation, and Bearer delegation with standalone DPoP produce `cnf.jkt`
 credentials. Keep each cached credential associated with its original key and
 profile. Failed HTTP verification never falls back to OAuth, service auth, or
-legacy DPoP. Ordinary OAuth DPoP and service JWT authentication are unchanged.
+DPoP.
 
-For a coordinated upgrade, discard cached grants and reacquire credentials with
-fresh keys. The Rust client has no legacy fallback; do not deploy it against an
-old receiver. October PDS hosts require the standard profile even though Stratos
-continues to support legacy clients. Roll back the receiver, client, and compatible
-PDS set together, then clear grant caches. See the
-[operator rollout procedure](../docs/operator/upgrades/october-spaces.md).
+Stratos accepts one audience and one presentation scheme, with no fallback. A
+delegation or client attestation must name `<service DID>#atproto_pds`; drop a
+cached attestation that names another audience and make a new one. An
+HTTP-signature-bound credential is accepted only when presented as
+`Atproto-Space-Credential`; the earlier `Atproto-Space` scheme is not
+recognised. A space URI is accepted only in the `at:space/` form. See the
+[operator upgrade and rollback procedure](../docs/operator/november-upgrade.md).
 
-The issued legacy credential covers one whole space until expiry (normally two
+A DPoP-bound credential covers one whole space until expiry (normally two
 hours), not just the member who requested it. Production reads require a fresh
 DPoP proof from the bound key; Bearer presentation is limited to development
 mode. Removing a member blocks new credentials and service-member requests,

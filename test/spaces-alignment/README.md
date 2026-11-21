@@ -182,7 +182,7 @@ backoff. Those tests do not prove actual storage atomicity, retry durability,
 forwarding delivery, or generation fencing. The live probe explicitly delivers
 the real signed head through real service authentication to avoid depending on
 immediate automatic-notification timing. It does not certify the retry worker or
-notification fanout. See the [design and follow-ups](../../docs/architecture/october-writer-sync-contract.md).
+notification fanout. See the [design and follow-ups](../../docs/history/october-writer-sync-contract.md).
 A reviewed clean-candidate runtime receipt remains required; unit tests alone
 are not acceptance.
 
@@ -211,7 +211,7 @@ the scoped record write and private blob retrieval both succeed.
 Select `--suite credential-revocation-contract` for the mandatory baseline and
 13 assertions against the actual pinned October Spaces alpha PDS receiver and unchanged Stratos
 unsupported route. This is not the future Stratos `credential-revocation`
-enforcement suite. See [the revocation contract](../../docs/architecture/credential-revocation-contract.md#bounded-design-probe)
+enforcement suite. See [the revocation contract](../../docs/history/credential-revocation-contract.md#bounded-design-probe)
 for every required assertion and exact typed denial.
 
 The probe uses Faye's real OAuth/exchange fixture, two distinct grants, the
