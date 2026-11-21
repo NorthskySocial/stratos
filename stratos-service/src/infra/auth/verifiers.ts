@@ -3,6 +3,7 @@ import { IdResolver } from '@atproto/identity'
 import {
   AuthRequiredError,
   InvalidRequestError,
+  parseReqNsid,
   type StreamAuthVerifier,
 } from '@atproto/xrpc-server'
 import { verifyServiceAuth } from './verifier.js'
@@ -46,6 +47,24 @@ export interface AuthVerifiers {
   service: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string; did: string; iss: string } }>
+  /** Allowlisted moderation service JWT bound to the called method via lxm */
+  moderationService: (
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
+  ) => Promise<{
+    credentials: { type: 'moderation-service'; did: string; iss: string }
+  }>
+  /**
+   * Verifies with {@link service} first, then routes on the verified `iss`: an
+   * allowlisted issuer is handed to {@link moderationService} alone, whose
+   * rejection is final; every other issuer keeps the service result.
+   */
+  moderationServiceOrService: (
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
+  ) => Promise<{
+    credentials:
+      | { type: 'moderation-service'; did: string; iss: string }
+      | { type: string; did: string; iss: string }
+  }>
   /** Optional user auth */
   optionalStandard: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
@@ -168,6 +187,12 @@ export function createAuthVerifiers(
     logger,
   })
   const service = createServiceVerifier({ serviceDid, idResolver })
+  const moderationService = createModerationServiceVerifier({
+    serviceDid,
+    idResolver,
+    allowedIssuers: cfg.moderationServiceDids,
+    logger,
+  })
   const optionalStandard = createOptionalStandardVerifier({
     devMode,
     idResolver,
@@ -180,6 +205,12 @@ export function createAuthVerifiers(
   return {
     standard,
     service,
+    moderationService,
+    moderationServiceOrService: routeByModerationIssuer(
+      service,
+      moderationService,
+      new Set(cfg.moderationServiceDids),
+    ),
     optionalStandard,
     spaceCredentialMint: createSpaceCredentialMintVerifier(optionalStandard),
     spaceCredential,
@@ -853,6 +884,78 @@ export function createSubscribeAuthVerifier(
         err instanceof Error ? err.message : 'Service authorization failed'
       throw new AuthRequiredError(message)
     }
+  }
+}
+
+const MODERATION_AUTH_FAILURE_MESSAGE =
+  'Moderation service authorization failed'
+
+/**
+ * Accepts a service JWT only from an allowlisted issuer, and only when its
+ * lxm names the method being called. Every failure carries one message so a
+ * caller cannot tell an unknown issuer from a wrong lxm.
+ */
+export function createModerationServiceVerifier(deps: {
+  serviceDid: string
+  idResolver: IdResolver
+  allowedIssuers: string[]
+  logger?: Logger
+}): AuthVerifiers['moderationService'] {
+  const allowedIssuers = new Set(deps.allowedIssuers)
+  const reject = (reason: string): never => {
+    deps.logger?.debug({ reason }, 'moderation service auth rejected')
+    throw new AuthRequiredError(MODERATION_AUTH_FAILURE_MESSAGE)
+  }
+
+  return async (ctx) => {
+    const authHeader = ctx.req.headers.authorization
+    if (!authHeader) return reject('missing authorization header')
+
+    let result: Awaited<ReturnType<typeof verifyServiceAuth>>
+    let nsid: string
+    try {
+      nsid = parseReqNsid(ctx.req)
+      result = await verifyServiceAuth(
+        authHeader,
+        deps.serviceDid,
+        nsid,
+        deps.idResolver,
+      )
+    } catch (err) {
+      return reject(
+        err instanceof Error ? err.message : 'service auth verification failed',
+      )
+    }
+
+    // verifyServiceAuth tolerates a missing lxm, so require it explicitly
+    if (result.lxm !== nsid) return reject('lxm missing or mismatched')
+    if (!allowedIssuers.has(result.iss)) return reject('issuer not allowlisted')
+
+    return {
+      credentials: {
+        type: 'moderation-service',
+        did: result.iss,
+        iss: result.iss,
+      },
+    }
+  }
+}
+
+// Routing on the verified `iss` means no second parse of the header can
+// disagree with service auth. An allowlisted issuer is re-checked by
+// moderationService, whose rejection is final, so it never ends as plain
+// service auth (which ignores lxm).
+function routeByModerationIssuer(
+  service: AuthVerifiers['service'],
+  moderationService: AuthVerifiers['moderationService'],
+  allowedIssuers: ReadonlySet<string>,
+): AuthVerifiers['moderationServiceOrService'] {
+  return async (ctx) => {
+    const result = await service(ctx)
+    if (allowedIssuers.has(result.credentials.iss)) {
+      return moderationService(ctx)
+    }
+    return result
   }
 }
 

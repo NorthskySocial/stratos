@@ -33,6 +33,7 @@ import {
   migrateServiceDb,
   ServiceDb,
 } from '../src/db/index.js'
+import { SqliteLabelStore } from '../src/features/moderation/index.js'
 import {
   listRecordPathsHandler,
   listRepoOpsHandler,
@@ -91,6 +92,7 @@ describe('space-credential acceptance', () => {
       cfg,
       actorStore,
       enrollmentStore,
+      labelStore: new SqliteLabelStore(db, join(dataDir, 'service.sqlite')),
       serviceDid: SERVICE_DID,
       signingKey,
       logger: {

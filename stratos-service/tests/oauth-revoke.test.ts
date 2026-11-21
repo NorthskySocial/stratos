@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleRevoke } from '../src/oauth/handlers/revoke.js'
+import { RepoWriteLocks } from '../src/shared/repo-write-lock.js'
 
 describe('OAuth Revoke Handler', () => {
   const mockEnrollmentStore = {
@@ -26,6 +27,7 @@ describe('OAuth Revoke Handler', () => {
     initRepo: vi.fn(),
     createSigningKey: vi.fn(),
     createAttestation: vi.fn(),
+    repoWriteLocks: new RepoWriteLocks(),
   }
 
   const authenticateRequest = vi.fn()

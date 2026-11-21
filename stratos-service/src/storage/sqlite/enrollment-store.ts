@@ -31,6 +31,7 @@ function toStoredEnrollment(row: Enrollment): StoredEnrollment {
     repoHost: row.repoHost ?? undefined,
     capabilityVerdict:
       (row.capabilityVerdict as SpacesCapability | null) ?? undefined,
+    operatorHold: row.operatorHold,
   }
 }
 
@@ -78,6 +79,8 @@ export class SqliteEnrollmentStore
         custody: record.custody ?? 'stratos',
         repoHost: record.repoHost ?? null,
         capabilityVerdict: record.capabilityVerdict ?? null,
+        // Insert only: a re-enroll must not clear the hold. Only an operator does.
+        operatorHold: record.operatorHold ?? false,
       })
       .onConflictDoUpdate({
         target: enrollment.did,
@@ -165,6 +168,8 @@ export class SqliteEnrollmentStore
     if ('repoHost' in updates) set.repoHost = updates.repoHost ?? null
     if ('capabilityVerdict' in updates)
       set.capabilityVerdict = updates.capabilityVerdict ?? null
+    if (updates.operatorHold !== undefined)
+      set.operatorHold = updates.operatorHold
 
     if (Object.keys(set).length > 0) {
       await this.db.update(enrollment).set(set).where(eq(enrollment.did, did))
@@ -254,6 +259,7 @@ export class SqliteEnrollmentStore
         custody: enrollment.custody,
         repoHost: enrollment.repoHost,
         capabilityVerdict: enrollment.capabilityVerdict,
+        operatorHold: enrollment.operatorHold,
       })
       .from(enrollment)
       .innerJoin(enrollmentBoundary, eq(enrollment.did, enrollmentBoundary.did))

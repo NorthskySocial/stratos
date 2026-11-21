@@ -236,6 +236,29 @@ const MIGRATIONS: &[Migration] = &[
         END;
     "#,
     },
+    // Label state belongs to the authority, not to membership, so unenroll and
+    // source cleanup never clear it.
+    Migration {
+        version: 8,
+        sql: r#"
+        CREATE TABLE label_cursor (
+          authority_did TEXT PRIMARY KEY,
+          sequence INTEGER NOT NULL CHECK (sequence >= 0),
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE label_subject (
+          authority_did TEXT NOT NULL,
+          subject_key TEXT NOT NULL,
+          subject_kind TEXT NOT NULL CHECK (subject_kind IN ('record', 'account')),
+          author_did TEXT NOT NULL,
+          label_sequence INTEGER NOT NULL CHECK (label_sequence >= 0),
+          state TEXT NOT NULL CHECK (state IN ('takedown', 'reinstating')),
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          PRIMARY KEY (authority_did, subject_key)
+        ) WITHOUT ROWID;
+        CREATE INDEX label_subject_author_idx ON label_subject(authority_did, author_did, state);
+    "#,
+    },
 ];
 
 pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
@@ -275,13 +298,13 @@ mod tests {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
         let migration_count: u32 = connection
             .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(migration_count, 7);
+        assert_eq!(migration_count, 8);
         let post_boundary_sql: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_boundary'",
@@ -461,7 +484,7 @@ mod tests {
     #[test]
     fn rejects_a_database_from_a_newer_store_format() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection.pragma_update(None, "user_version", 8).unwrap();
+        connection.pragma_update(None, "user_version", 9).unwrap();
 
         assert!(apply(&mut connection).is_err());
     }

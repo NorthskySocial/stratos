@@ -1,6 +1,10 @@
 import { EventEmitter } from 'node:events'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { decode } from '@atcute/cbor'
 import { encodeRecord } from '@northskysocial/stratos-core'
+import { StratosActorStore } from '../src/context.js'
+import { SqliteLabelStore } from '../src/features/moderation/index.js'
 import { createSubscribeRecordsHandler } from '../src/subscription/subscribe-records.js'
 import type { AppContext } from '../src/context.js'
 import {
@@ -10,6 +14,7 @@ import {
   setup,
   type Harness,
 } from './boundary-catalog/helpers.js'
+import { createMockBlobStore } from './utils/index.js'
 
 const CONSUMER = 'did:web:bebop.example'
 const AUTHOR = 'did:plc:spike'
@@ -63,7 +68,14 @@ describe('durable authorization of established sync streams', () => {
       getEventsSince: async (cursor: number) =>
         events.filter((event) => event.seq > cursor),
     }
+    const realActorStore = new StratosActorStore({
+      dataDir: h.dir,
+      blobstore: () => createMockBlobStore(),
+      cborToRecord: (content) => decode(content) as Record<string, unknown>,
+    })
+    await realActorStore.create(AUTHOR)
     ctx = {
+      labelStore: new SqliteLabelStore(h.db, join(h.dir, 'service.sqlite')),
       enrollmentStore: h.members,
       boundaryStore: h.store,
       enrollmentEvents: new EventEmitter(),
@@ -71,9 +83,15 @@ describe('durable authorization of established sync streams', () => {
       actorStore: {
         exists: async () => true,
         read: async (
-          _did: string,
-          read: (store: { sequence: typeof sequence }) => Promise<unknown>,
-        ) => read({ sequence }),
+          did: string,
+          read: (store: {
+            sequence: typeof sequence
+            record: unknown
+          }) => Promise<unknown>,
+        ) =>
+          realActorStore.read(did, (real) =>
+            read({ sequence, record: real.record }),
+          ),
       },
     } as unknown as AppContext
   })

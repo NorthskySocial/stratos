@@ -110,6 +110,29 @@ impl SpaceSyncOutcome {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LabelPollOutcome {
+    Ok,
+    CaughtUp,
+    Unavailable,
+    Authentication,
+    Rejected,
+    Store,
+}
+
+impl LabelPollOutcome {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::CaughtUp => "caught_up",
+            Self::Unavailable => "unavailable",
+            Self::Authentication => "authentication",
+            Self::Rejected => "rejected",
+            Self::Store => "store",
+        }
+    }
+}
+
 #[derive(Default)]
 struct RuntimeState {
     ready: AtomicBool,
@@ -136,6 +159,7 @@ pub struct FeedTelemetry {
     reconciliation_outcomes: Option<Counter<u64>>,
     space_sync_duration: Option<Histogram<f64>>,
     space_sync_outcomes: Option<Counter<u64>>,
+    label_polls: Option<Counter<u64>>,
     // These keep observable callbacks alive for the provider lifetime.
     _heartbeat: Option<ObservableGauge<u64>>,
     _readiness: Option<ObservableGauge<u64>>,
@@ -162,6 +186,7 @@ impl FeedTelemetry {
             reconciliation_outcomes: None,
             space_sync_duration: None,
             space_sync_outcomes: None,
+            label_polls: None,
             _heartbeat: None,
             _readiness: None,
             _connected: None,
@@ -172,7 +197,7 @@ impl FeedTelemetry {
         }
     }
 
-    fn enabled(provider: &SdkMeterProvider) -> Self {
+    pub(crate) fn enabled(provider: &SdkMeterProvider) -> Self {
         let meter = provider.meter(METER_SCOPE);
         let state = Arc::new(RuntimeState::default());
         let heartbeat_state = Arc::clone(&state);
@@ -257,6 +282,12 @@ impl FeedTelemetry {
                 meter
                     .u64_counter("stratos.feedgen.space_sync.outcomes")
                     .with_description("Space-sync pass and member outcomes.")
+                    .build(),
+            ),
+            label_polls: Some(
+                meter
+                    .u64_counter("stratos.feedgen.label_poll")
+                    .with_description("Moderation label poll outcomes.")
                     .build(),
             ),
             _heartbeat: Some(
@@ -461,6 +492,11 @@ impl FeedTelemetry {
             self.state
                 .last_space_sync_success
                 .store(unix_seconds(), Ordering::Relaxed);
+        }
+    }
+    pub fn record_label_poll(&self, outcome: LabelPollOutcome) {
+        if let Some(metric) = &self.label_polls {
+            metric.add(1, &[KeyValue::new("outcome", outcome.label())]);
         }
     }
     pub fn start(&self, stage: FeedReadStage) -> FeedReadStageTimer<'_> {

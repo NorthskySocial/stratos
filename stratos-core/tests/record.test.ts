@@ -523,3 +523,299 @@ describe('Record Transactor', () => {
     })
   })
 })
+
+describe('Record backlinks and takedown', () => {
+  let db: StratosDb
+  let transactor: StratosRecordTransactor
+  let testDir: string
+
+  const COLLECTION = 'zone.stratos.graph.follow'
+  const TARGET = 'did:plc:lain'
+  const liveUri = `at://did:plc:test/${COLLECTION}/ed`
+  const hiddenUri = `at://did:plc:test/${COLLECTION}/faye`
+  const newUri = `at://did:plc:test/${COLLECTION}/jet`
+  const otherCollectionUri = 'at://did:plc:test/zone.stratos.feed.like/spike'
+
+  const query = () =>
+    transactor.getRecordBacklinks({
+      collection: COLLECTION,
+      path: 'subject',
+      linkTo: TARGET,
+    })
+
+  const seedBacklinks = async (uris: string[]) => {
+    for (const uri of uris) {
+      await transactor.indexRecord(
+        new AtUri(uri),
+        await createCid({ uri }),
+        { subject: TARGET },
+        'create',
+        'rev1',
+      )
+    }
+    await transactor.addBacklinks(
+      uris.map((uri) => ({ uri, path: 'subject', linkTo: TARGET })),
+    )
+  }
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `stratos-backlink-test-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(testDir, { recursive: true })
+    db = createStratosDb(join(testDir, 'test.db'))
+    await migrateStratosDb(db)
+    transactor = new StratosRecordTransactor(db, decodeRecord)
+    await seedBacklinks([liveUri, hiddenUri, otherCollectionUri])
+    await transactor.updateRecordTakedown(hiddenUri, {
+      applied: true,
+      ref: 'TD-LAIN',
+    })
+  })
+
+  afterEach(async () => {
+    await closeStratosDb(db)
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('getRecordBacklinks omits taken-down records', async () => {
+    const rows = await query()
+
+    expect(rows.map((row) => row.uri)).toEqual([liveUri])
+  })
+
+  it('getRecordBacklinks returns a record again once the takedown is cleared', async () => {
+    const whileTakenDown = await query()
+    await transactor.updateRecordTakedown(hiddenUri, { applied: false })
+
+    const rows = await query()
+
+    expect(whileTakenDown.map((row) => row.uri)).toEqual([liveUri])
+    expect(rows.map((row) => row.uri).sort()).toEqual([liveUri, hiddenUri])
+  })
+
+  it('getBacklinkConflicts still reports taken-down records', async () => {
+    const conflicts = await transactor.getBacklinkConflicts(newUri, {
+      subject: TARGET,
+    })
+
+    expect(conflicts.map((conflict) => conflict.toString()).sort()).toEqual([
+      liveUri,
+      hiddenUri,
+    ])
+  })
+
+  it('getRecordBacklinks ignores records in other collections', async () => {
+    const rows = await query()
+
+    expect(rows.map((row) => row.uri)).not.toContain(otherCollectionUri)
+  })
+})
+
+describe('getRecordBoundaries', () => {
+  let db: StratosDb
+  let reader: StratosRecordReader
+  let transactor: StratosRecordTransactor
+  let testDir: string
+
+  const EVA = 'did:web:nerv.tokyo.jp/eva'
+  const ANGEL = 'did:web:nerv.tokyo.jp/angel'
+  const SEELE = 'did:web:nerv.tokyo.jp/seele'
+
+  const uriOf = (rkey: string) =>
+    new AtUri(`at://did:plc:misato/zone.stratos.feed.post/${rkey}`)
+
+  const bodyWith = (...boundaries: string[]) => ({
+    $type: 'zone.stratos.feed.post',
+    text: 'sync ratio',
+    boundary: {
+      $type: 'zone.stratos.boundary.defs#Domains',
+      values: boundaries.map((value) => ({ value })),
+    },
+  })
+
+  const index = async (rkey: string, ...boundaries: string[]) => {
+    const record = bodyWith(...boundaries)
+    await transactor.indexRecord(
+      uriOf(rkey),
+      await createCid(record),
+      record,
+      'create',
+      'rev1',
+    )
+  }
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `stratos-boundaries-test-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(testDir, { recursive: true })
+    db = createStratosDb(join(testDir, 'test.db'))
+    await migrateStratosDb(db)
+    reader = new StratosRecordReader(db, decodeRecord)
+    transactor = new StratosRecordTransactor(db, decodeRecord)
+  })
+
+  afterEach(async () => {
+    await closeStratosDb(db)
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('returns rows inserted out of order, sorted ascending', async () => {
+    const uri = uriOf('rei')
+    await db.insert(stratosRecordBoundary).values([
+      { recordUri: uri.toString(), boundary: SEELE },
+      { recordUri: uri.toString(), boundary: ANGEL },
+      { recordUri: uri.toString(), boundary: EVA },
+    ])
+
+    expect(await reader.getRecordBoundaries(uri)).toEqual([ANGEL, EVA, SEELE])
+  })
+
+  it('cannot store a boundary twice, so a record lists each once', async () => {
+    const uri = uriOf('asuka')
+    await db
+      .insert(stratosRecordBoundary)
+      .values({ recordUri: uri.toString(), boundary: EVA })
+
+    await expect(
+      db
+        .insert(stratosRecordBoundary)
+        .values({ recordUri: uri.toString(), boundary: EVA }),
+    ).rejects.toThrow()
+    expect(await reader.getRecordBoundaries(uri)).toEqual([EVA])
+  })
+
+  it('returns [] for a record without rows', async () => {
+    await index('shinji')
+
+    expect(await reader.getRecordBoundaries(uriOf('shinji'))).toEqual([])
+  })
+
+  it('returns [] for an unknown uri', async () => {
+    expect(await reader.getRecordBoundaries(uriOf('kaworu'))).toEqual([])
+  })
+
+  it('does not return rows of another record', async () => {
+    await index('ritsuko', EVA)
+    await index('maya', SEELE)
+
+    expect(await reader.getRecordBoundaries(uriOf('ritsuko'))).toEqual([EVA])
+    expect(await reader.getRecordBoundaries(uriOf('maya').toString())).toEqual([
+      SEELE,
+    ])
+  })
+
+  it('still returns boundaries of a taken-down record', async () => {
+    await index('gendo', EVA, ANGEL)
+    await transactor.updateRecordTakedown(uriOf('gendo').toString(), {
+      applied: true,
+      ref: 'TD-GENDO',
+    })
+
+    expect(await reader.getRecordBoundaries(uriOf('gendo'))).toEqual([
+      ANGEL,
+      EVA,
+    ])
+  })
+
+  it('returns stored rows, not the boundary claimed by the record body', async () => {
+    const uri = uriOf('kaji')
+    await index('kaji', EVA)
+    await transactor.replaceRecordBoundaries(uri, bodyWith(SEELE))
+
+    expect(await reader.getRecordBoundaries(uri)).toEqual([SEELE])
+  })
+})
+
+describe('getTakedownStates', () => {
+  let db: StratosDb
+  let reader: StratosRecordReader
+  let transactor: StratosRecordTransactor
+  let testDir: string
+
+  const uriOf = (rkey: string) =>
+    `at://did:plc:misato/zone.stratos.feed.post/${rkey}`
+
+  const index = async (rkey: string) => {
+    const record = { $type: 'zone.stratos.feed.post', text: rkey }
+    await transactor.indexRecord(
+      new AtUri(uriOf(rkey)),
+      await createCid(record),
+      record,
+      'create',
+      'rev1',
+    )
+  }
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `stratos-takedown-uris-test-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(testDir, { recursive: true })
+    db = createStratosDb(join(testDir, 'test.db'))
+    await migrateStratosDb(db)
+    reader = new StratosRecordReader(db, decodeRecord)
+    transactor = new StratosRecordTransactor(db, decodeRecord)
+  })
+
+  afterEach(async () => {
+    await closeStratosDb(db)
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('maps marked rows to true and unmarked rows to false, and omits unknown uris', async () => {
+    await index('rei')
+    await index('asuka')
+    await index('shinji')
+    await transactor.updateRecordTakedown(uriOf('rei'), {
+      applied: true,
+      ref: 'TD-REI',
+    })
+    await transactor.updateRecordTakedown(uriOf('shinji'), {
+      applied: true,
+      ref: 'TD-SHINJI',
+    })
+
+    const found = await reader.getTakedownStates([
+      uriOf('rei'),
+      uriOf('asuka'),
+      uriOf('shinji'),
+      uriOf('kaworu'),
+    ])
+
+    expect(found).toEqual(
+      new Map([
+        [uriOf('rei'), true],
+        [uriOf('asuka'), false],
+        [uriOf('shinji'), true],
+      ]),
+    )
+  })
+
+  it('reports a row as unmarked once its takedown is negated', async () => {
+    await index('rei')
+    await transactor.updateRecordTakedown(uriOf('rei'), {
+      applied: true,
+      ref: 'TD-REI',
+    })
+    await transactor.updateRecordTakedown(uriOf('rei'), { applied: false })
+
+    expect(await reader.getTakedownStates([uriOf('rei')])).toEqual(
+      new Map([[uriOf('rei'), false]]),
+    )
+  })
+
+  it('returns an empty map for an empty list', async () => {
+    await index('rei')
+    await transactor.updateRecordTakedown(uriOf('rei'), {
+      applied: true,
+      ref: 'TD-REI',
+    })
+
+    expect(await reader.getTakedownStates([])).toEqual(new Map())
+  })
+})

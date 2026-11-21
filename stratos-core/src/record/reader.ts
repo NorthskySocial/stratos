@@ -2,7 +2,19 @@ import type { Cid } from '@atproto/lex-data'
 import { parseCid } from '../atproto'
 import * as syntax from '@atproto/syntax'
 import { AtUri } from '@atproto/syntax'
-import { and, asc, desc, eq, gt, gte, isNull, lt, lte } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  type SQL,
+} from 'drizzle-orm'
 import {
   countAll,
   StratosBacklink,
@@ -10,6 +22,7 @@ import {
   StratosDbOrTx,
   StratosRecord,
   stratosRecord,
+  stratosRecordBoundary,
   stratosRepoBlock,
 } from '../db'
 import { Logger, StatusAttr } from '../types.js'
@@ -295,6 +308,33 @@ export class StratosRecordReader {
   }
 
   /**
+   * Reads, in one query, the takedown state of each given record URI.
+   * @param uris - Record URIs to check.
+   * @returns `true` for a row with a takedown marker, `false` for a row
+   * without one. A URI with no row is absent.
+   */
+  async getTakedownStates(uris: string[]): Promise<Map<string, boolean>> {
+    if (uris.length === 0) return new Map()
+    const rows = await this.db
+      .select({
+        uri: stratosRecord.uri,
+        takedownRef: stratosRecord.takedownRef,
+      })
+      .from(stratosRecord)
+      .where(inArray(stratosRecord.uri, uris))
+    return new Map(rows.map((row) => [row.uri, row.takedownRef !== null]))
+  }
+
+  async getRecordBoundaries(uri: string | AtUri): Promise<string[]> {
+    const rows = await this.db
+      .select({ boundary: stratosRecordBoundary.boundary })
+      .from(stratosRecordBoundary)
+      .where(eq(stratosRecordBoundary.recordUri, uri.toString()))
+      .orderBy(asc(stratosRecordBoundary.boundary))
+    return rows.map((row) => row.boundary)
+  }
+
+  /**
    * Retrieves the CID of the current version of a record by URI.
    * @param uri - The URI of the record to retrieve the CID for.
    * @returns The CID of the current version of the record, or null if not found.
@@ -315,6 +355,16 @@ export class StratosRecordReader {
    * @returns An array of backlinks for the specified record.
    */
   async getRecordBacklinks(opts: GetBacklinksOpts): Promise<StratosRecord[]> {
+    return this.selectBacklinkRows(opts, isNull(stratosRecord.takedownRef))
+  }
+
+  /**
+   * Conflict checks use the unfiltered rows so taken-down records still block.
+   */
+  private async selectBacklinkRows(
+    opts: GetBacklinksOpts,
+    extraCondition?: SQL,
+  ): Promise<StratosRecord[]> {
     const { collection, path, linkTo } = opts
     return this.db
       .select({
@@ -333,6 +383,7 @@ export class StratosRecordReader {
           eq(stratosBacklink.path, path),
           eq(stratosBacklink.linkTo, linkTo),
           eq(stratosRecord.collection, collection),
+          extraCondition,
         ),
       )
   }
@@ -351,7 +402,7 @@ export class StratosRecordReader {
     const atUri = typeof uri === 'string' ? new AtUri(uri) : uri
 
     for (const backlink of getStratosBacklinks(atUri, record)) {
-      const backlinks = await this.getRecordBacklinks({
+      const backlinks = await this.selectBacklinkRows({
         collection: atUri.collection,
         path: backlink.path,
         linkTo: backlink.linkTo,

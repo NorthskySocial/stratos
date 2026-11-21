@@ -57,8 +57,10 @@ import {
   type PdsSyncQueueStore,
 } from './features/enrollment/internal/pds-sync-store.js'
 import { StratosActorStore } from './storage/sqlite/actor-store.js'
+import { PgLabelStore, SqliteLabelStore } from './features/moderation/index.js'
 import type {
   EnrollmentStoreReader,
+  LabelStore,
   Logger,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from './actor-store-types.js'
@@ -75,6 +77,7 @@ export interface StorageContext {
   normalizeLegacyMemberships: () => Promise<void>
   actorStore: ActorStore
   enrollmentStore: EnrollmentStore & EnrollmentStoreReader
+  labelStore: LabelStore
   oauthStores: {
     sessionStore: OAuthSessionStoreBackend
     stateStore: OAuthStateStoreBackend
@@ -112,6 +115,7 @@ export async function createStorageContext(
   let adminUserStore: AdminUserStore
   let pdsSyncQueue: PdsSyncQueueStore
   let boundaryAudit: BoundaryAudit
+  let labelStore: LabelStore
   let actorStore: ActorStore
   let checkDbHealth: () => Promise<'ok' | 'error'>
   let destroy: () => Promise<void>
@@ -156,6 +160,7 @@ export async function createStorageContext(
     adminSessionStore = new PgAdminSessionStore(pgDb, logger)
     adminUserStore = new PgAdminUserStore(pgDb, logger)
     pdsSyncQueue = new PgPdsSyncQueueStore(pgDb)
+    labelStore = new PgLabelStore(pgDb)
     actorStore = new PostgresActorStore({
       connectionString: cfg.storage.postgresUrl,
       blobstore,
@@ -191,6 +196,7 @@ export async function createStorageContext(
     adminSessionStore = new SqliteAdminSessionStore(db, logger)
     adminUserStore = new SqliteAdminUserStore(db, logger)
     pdsSyncQueue = new SqlitePdsSyncQueueStore(db)
+    labelStore = new SqliteLabelStore(db, serviceDbPath)
     actorStore = new StratosActorStore({
       dataDir: path.join(cfg.storage.dataDir, 'actors'),
       blobstore,
@@ -232,6 +238,7 @@ export async function createStorageContext(
     boundaryStore,
     boundaryConfiguration,
     enrollmentStore,
+    labelStore,
     oauthStores,
     adminSessionStore,
     adminUserStore,

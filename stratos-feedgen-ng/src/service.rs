@@ -1,10 +1,12 @@
 use crate::{
     admission::{ReadAdmission, ReadToken},
     cursor::FeedCursor,
+    moderation_label::LabelPage,
     space_sync::{PreparedSpacePage, SpaceSyncError, SpaceSyncTarget, stage_space_page},
     store::{
         ActorEnrollment, ActorPage, ActorSyncState, EncryptedStore, EnrollmentReconciliation,
-        FeedPage, PdsSpaceMember, ProjectionCompaction, StoreError, StoreInterrupt,
+        FeedPage, LabelPageEffects, PdsSpaceMember, ProjectionCompaction, StoreError,
+        StoreInterrupt,
     },
 };
 use std::collections::BTreeSet;
@@ -217,6 +219,68 @@ impl ProjectionReader {
         }
         Ok(result)
     }
+    pub fn label_cursor(&self, authority_did: &str) -> Result<u64, StoreError> {
+        self.store.label_cursor(authority_did)
+    }
+    pub fn apply_label_page(
+        &mut self,
+        authority_did: &str,
+        page: &LabelPage,
+        updated_at: &str,
+    ) -> Result<LabelPageEffects, StoreError> {
+        let effects = self
+            .store
+            .apply_label_page(authority_did, page, updated_at)?;
+        for boundary in &effects.unenrolled_boundaries {
+            self.admission.invalidate_boundary(boundary);
+        }
+        for boundary in &effects.removed_record_boundaries {
+            self.admission.invalidate_boundary(boundary);
+        }
+        Ok(effects)
+    }
+    pub fn reinstating_accounts(
+        &self,
+        authority_did: &str,
+        limit: u16,
+    ) -> Result<Vec<(String, u32)>, StoreError> {
+        self.store.reinstating_accounts(authority_did, limit)
+    }
+    pub fn is_account_taken_down(&self, did: &str) -> Result<bool, StoreError> {
+        self.store.is_account_taken_down(did)
+    }
+    pub fn reinstating_records(
+        &self,
+        authority_did: &str,
+        limit: u16,
+    ) -> Result<Vec<String>, StoreError> {
+        self.store.reinstating_records(authority_did, limit)
+    }
+    pub fn reset_actor_cursor(&mut self, authority_did: &str, did: &str) -> Result<(), StoreError> {
+        self.store.reset_actor_cursor(authority_did, did)
+    }
+    pub fn reset_pds_member_space_state(
+        &mut self,
+        boundary: &str,
+        did: &str,
+    ) -> Result<(), StoreError> {
+        self.store.reset_pds_member_space_state(boundary, did)
+    }
+    pub fn finish_reinstatement(
+        &mut self,
+        authority_did: &str,
+        subject_key: &str,
+    ) -> Result<(), StoreError> {
+        self.store.finish_reinstatement(authority_did, subject_key)
+    }
+    pub fn record_reinstatement_attempt(
+        &mut self,
+        authority_did: &str,
+        subject_key: &str,
+    ) -> Result<(), StoreError> {
+        self.store
+            .record_reinstatement_attempt(authority_did, subject_key)
+    }
     pub fn revoke_boundary(&mut self, boundary: &str) -> Result<u64, StoreError> {
         self.admission.invalidate_boundary(boundary);
         self.store.purge_boundary(boundary)
@@ -314,8 +378,9 @@ impl ProjectionReader {
 #[cfg(test)]
 mod tests {
     use crate::{
+        moderation_label::{LabelPage, LabelSubject, ModerationLabel},
         service::{ProjectionReader, ReadRequest},
-        store::{ActorPage, EncryptedStore, ProjectionPost, StorageKey},
+        store::{ActorEnrollment, ActorPage, EncryptedStore, ProjectionPost, StorageKey},
     };
 
     fn actor_page(sequence: u64, boundaries: Vec<&str>) -> ActorPage {
@@ -440,6 +505,60 @@ mod tests {
             ..request
         };
         assert!(reader.prepare(red_tail).unwrap().is_some());
+    }
+
+    #[test]
+    fn an_account_takedown_between_query_and_release_rejects_the_page() {
+        let mut reader = ProjectionReader::new(
+            EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+        );
+        reader
+            .reconcile_actor_enrollment(
+                "did:plc:spike",
+                "1998-04-03T00:00:00.000Z",
+                Some(ActorEnrollment {
+                    did: "did:plc:spike".to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        reader
+            .apply_actor_page(actor_page(1, vec!["bebop"]))
+            .unwrap();
+        reader.establish_session();
+        let (token, page) = reader
+            .prepare(ReadRequest {
+                viewer: "did:plc:faye",
+                boundary: "bebop",
+                authority_expires_at: 100,
+                now: 1,
+                cursor: None,
+                limit: 50,
+                as_of: "1998-04-02T00:00:00.000Z",
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.posts.len(), 1);
+
+        reader
+            .apply_label_page(
+                "did:web:stratos.example.test",
+                &LabelPage {
+                    cursor: 1,
+                    labels: vec![ModerationLabel {
+                        seq: 1,
+                        subject: LabelSubject::Account {
+                            did: "did:plc:spike".to_owned(),
+                        },
+                        neg: false,
+                    }],
+                },
+                "2026-11-01T00:00:00.000Z",
+            )
+            .unwrap();
+
+        assert!(reader.release(token, page, 2).is_none());
     }
 
     #[test]

@@ -13,6 +13,7 @@ mod tests {
         feed_service::build_blob_url,
         feeds::FeedRegistry,
         identifier::RecordUri,
+        moderation_label::{LabelSubject, parse_label_page},
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         server,
     };
@@ -76,6 +77,14 @@ mod tests {
     }
 
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ModerationLabelFixture {
+        version: u8,
+        service_in_tokyo3: serde_json::Value,
+        moderation_service: serde_json::Value,
+    }
+
+    #[derive(Deserialize)]
     struct SpaceRecordFixture {
         version: u8,
         valid: Vec<ValidSpaceRecordCase>,
@@ -133,6 +142,7 @@ mod tests {
 
         for case in fixture.cases {
             let mut gate = FeedReadinessGate::default();
+            gate.mark_labels_current();
             let mut generation = None;
             for event in case.events {
                 match event {
@@ -286,5 +296,58 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let actual: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(actual, fixture.expected);
+    }
+
+    #[test]
+    fn reads_the_label_pages_stratos_serves_in_the_shared_fixture() {
+        const REI_POST: &str = "at://did:plc:rei-ayanami/zone.stratos.feed.post/eva-00";
+        const ASUKA_SPACE_POST: &str = "at://did:web:stratos.test/space/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/eva-02";
+        const GEOFRONT_POST: &str = "at://did:plc:shinji-ikari/zone.stratos.feed.post/eva-01";
+        let fixture: ModerationLabelFixture = serde_json::from_str(include_str!(
+            "../../stratos-feedgen/testdata/conformance/v1/moderation-labels.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture.version, 1);
+        let record = |uri: &str, author: &str| LabelSubject::Record {
+            uri: uri.to_owned(),
+            author_did: author.to_owned(),
+        };
+        let asuka = LabelSubject::Account {
+            did: "did:plc:asuka".to_owned(),
+        };
+        let subjects_of = |page: &serde_json::Value| {
+            let parsed = parse_label_page(&serde_json::to_vec(page).unwrap(), 0, 100).unwrap();
+            assert_eq!(parsed.cursor, 4);
+            parsed
+                .labels
+                .into_iter()
+                .map(|label| label.subject)
+                .collect::<Vec<_>>()
+        };
+
+        let scoped = subjects_of(&fixture.service_in_tokyo3);
+        let full = subjects_of(&fixture.moderation_service);
+
+        assert_eq!(
+            scoped,
+            [
+                record(REI_POST, "did:plc:rei-ayanami"),
+                record(ASUKA_SPACE_POST, "did:plc:asuka"),
+                asuka.clone(),
+            ]
+        );
+        assert!(!scoped.iter().any(|subject| matches!(
+            subject,
+            LabelSubject::Record { uri, .. } if uri == GEOFRONT_POST
+        )));
+        assert_eq!(
+            full,
+            [
+                record(REI_POST, "did:plc:rei-ayanami"),
+                record(ASUKA_SPACE_POST, "did:plc:asuka"),
+                record(GEOFRONT_POST, "did:plc:shinji-ikari"),
+                asuka,
+            ]
+        );
     }
 }

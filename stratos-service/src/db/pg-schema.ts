@@ -1,4 +1,5 @@
 import {
+  bigint,
   pgTable,
   text,
   boolean,
@@ -44,6 +45,7 @@ export const pgEnrollment = pgTable('enrollment', {
   custody: text('custody').notNull().default('stratos'),
   repoHost: text('repoHost'),
   capabilityVerdict: text('capabilityVerdict'),
+  operatorHold: boolean('operatorHold').notNull().default(false),
 })
 
 export const pgEnrollmentBoundary = pgTable(
@@ -75,6 +77,27 @@ export const pgEnrollmentPdsSync = pgTable(
   ],
 )
 
+export const pgModerationLabel = pgTable(
+  'moderation_label',
+  {
+    seq: bigint('seq', { mode: 'number' })
+      .generatedAlwaysAsIdentity()
+      .primaryKey(),
+    subjectKey: text('subjectKey').notNull(),
+    subjectKind: text('subjectKind').notNull(),
+    cid: text('cid'),
+    val: text('val').notNull(),
+    neg: boolean('neg').notNull(),
+    ref: text('ref'),
+    boundaries: text('boundaries').notNull(),
+    createdBy: text('createdBy').notNull(),
+    createdAt: text('createdAt').notNull(),
+  },
+  (table) => [
+    index('moderation_label_subject_seq_idx').on(table.subjectKey, table.seq),
+  ],
+)
+
 export type PgOAuthSession = typeof pgOauthSession.$inferSelect
 export type PgNewOAuthSession = typeof pgOauthSession.$inferInsert
 export type PgOAuthState = typeof pgOauthState.$inferSelect
@@ -87,3 +110,5 @@ export type PgEnrollmentBoundary = typeof pgEnrollmentBoundary.$inferSelect
 export type PgNewEnrollmentBoundary = typeof pgEnrollmentBoundary.$inferInsert
 export type PgEnrollmentPdsSync = typeof pgEnrollmentPdsSync.$inferSelect
 export type PgNewEnrollmentPdsSync = typeof pgEnrollmentPdsSync.$inferInsert
+export type PgModerationLabelRow = typeof pgModerationLabel.$inferSelect
+export type PgNewModerationLabelRow = typeof pgModerationLabel.$inferInsert

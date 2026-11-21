@@ -932,3 +932,154 @@ checkpoint for recovery after `BoundaryHistoryTruncated`. These are authority
 operations, separate from user-signed repository commits, and work with both
 Stratos and PDS custody. See [Boundary History](../docs/operator/boundary-history.md)
 for signature verification, replay, retention, and trust requirements.
+
+### Moderation takedown labels
+
+`zone.stratos.moderation.createLabel` is for an allowlisted moderation service,
+not for ordinary clients. The service calls it with an inter-service JWT whose
+`iss` is on the host's `STRATOS_MODERATION_SERVICE_DIDS` list and whose `lxm` is
+`zone.stratos.moderation.createLabel`. User, admin, plain service and
+space-credential callers get a 401.
+
+The procedure takes `subject`, `val`, and optional `neg` and `ref`. `val` must
+be `!takedown`. Set `neg: true` to lift a takedown.
+
+- **Hosted record:** use the repo-form URI, `at://{did}/{collection}/{rkey}`.
+  Reads stop serving the record at once. `SubjectNotFound` means the hosted record
+  does not exist. If the call fails after Stratos has hidden the record, it
+  stays hidden. Repeat the same request to finish it. A negation records its
+  label first and lifts the hiding after, so a failed negation also leaves the
+  record hidden.
+- **Member's PDS record:** use the seven-segment space-form URI. Stratos records
+  the label. Stratos cannot hide a record that it does not host.
+- **Account subject:** use `{ "$type": "zone.stratos.moderation.defs#accountSubject", "did": "{did}" }`.
+  A takedown deactivates the member's enrollment. A negation reactivates it only
+  when no operator hold is set. Stratos writes no record or blob marker.
+  `SubjectNotFound` means the DID has no enrollment. Stratos rejects a service
+  enrollment as an account subject. This works for both custody classes.
+
+Stratos rejects a space-form subject when:
+
+- its authority is another service;
+- its boundary is unknown;
+- the author is not an active member of the boundary;
+- the author's records are hosted by Stratos; use the repo-form URI.
+
+A negation of a takedown in force skips the membership check. It does not skip the custody check.
+
+The response `label` is absent when the request changed nothing and the subject
+has no label. A repeat of the label in force returns that label.
+
+To read labels back, see `queryLabels` below.
+
+#### Account takedowns and the operator hold
+
+A member has two separate holds. Either one leaves the member inactive.
+
+- An operator sets the operator hold with `zone.stratos.admin.setActive` and
+  `active: false`. `active: true` clears it.
+- An account takedown label sets the takedown hold. A negation clears it.
+- The holds are independent. Clearing one never clears the other.
+- While an account takedown is in force, `setActive` with `active: true` fails
+  with `AccountTakenDown`. It changes nothing.
+- `setActive` does not add an event to the sync streams.
+
+Members who were inactive when the operator hold was introduced became
+operator-held once.
+
+An inactive member cannot write. `createRecord`, `deleteRecord`,
+`applyWrites` and `uploadBlob` are all refused with `NotEnrolled` before the
+handler runs. Stratos has no separate `updateRecord` route. Updates go through
+`applyWrites`.
+
+An inactive member who completes OAuth gets 403 `EnrollmentDenied` with the
+message "Your enrollment on this Stratos service is not active". Nothing
+changes. An inactive member also cannot unenroll. `POST /oauth/revoke` and
+`zone.stratos.enrollment.unenroll` both refuse. The member can leave once the
+hold lifts.
+
+#### Reading labels with `queryLabels`
+
+`zone.stratos.moderation.queryLabels` pages the label log in `seq` order. `createLabel`
+writes the labels that this method returns.
+
+Parameters:
+
+- `cursor`: a label `seq` as a decimal string. Omit it to start at the
+  beginning.
+- `limit`: 1 to 250. The default is 50.
+- `subjects`: up to 100 record URIs or account DIDs. Stratos returns labels on
+  these subjects only. An empty list sent as repeated empty params is
+  rejected. A single empty `subjects=` or an omitted field reads the caller's
+  whole scoped log.
+
+The response always carries a `cursor`. Poll again from it. A page can hold
+fewer labels than `limit`, or none, while more remain.
+
+A subject matches the exact URI. A space-form subject must use the real URI of
+the record, including its space type. A subject that is out of scope looks the
+same as a subject with no labels.
+
+Moderation services must bind `lxm` to `zone.stratos.moderation.queryLabels`.
+Other services authenticate with ordinary service auth.
+
+A moderation service reads every label. A service that holds a service
+enrollment reads a record label only if it shares a boundary with the label. A
+record label with no boundaries is visible only to moderation services.
+
+An account label comes back with an `accountSubject` that carries the member's
+DID.
+
+A service that holds a service enrollment reads an account label if it shares a
+boundary with the member's enrollment. The enrollment can be active or not. It
+never reads an account label when the member has no enrollment. The reserved
+all-members boundary makes the account label of every enrolled member visible
+to every service holding a service enrollment. It also makes every record
+label that carries it visible.
+
+Errors:
+
+- `InvalidRequest`: the `cursor` or `subjects` is malformed. An empty
+  `subjects` list is malformed.
+- Auth errors: a service with no active enrollment, a service with no
+  boundaries, a caller whose enrollment is not a service enrollment (for
+  example a member who mints a service-auth JWT for their own DID), and every
+  user, admin and space-credential caller, get a 401. An operator grants a
+  service enrollment by listing the service in `STRATOS_SERVICE_ENROLLMENTS`.
+  A moderation service with a wrong audience, an expired token, or a bad
+  signature gets the ordinary service-auth message.
+
+#### Takedown and `subscribeRecords` and `listRepoOps`
+
+A takedown changes what the sync streams send. Stratos checks each record when
+it reads the frames.
+
+- `subscribeRecords` and `listRepoOps` leave out the create and update ops of a
+  record that is taken down now.
+- Stratos skips an event that has no ops left.
+- Delete ops always pass the takedown filter. The boundary scope rules still
+  apply to them. Your copy of a taken-down record can still be removed.
+- A takedown never adds an event to either stream. Read labels with
+  `queryLabels`.
+- After a negation, a replay serves the record again.
+
+A takedown applies to sync frames that Stratos reads after it. A page that
+Stratos already read can still deliver the record once. Apply labels in your
+consumer.
+
+Deleting a taken-down record that carries a boundary sends a delete event.
+Subscribers in the record's boundaries receive it. This holds for a single
+delete and for a delete in a batch.
+
+After a taken-down record is deleted, sync replays still leave out its create
+and update ops while the latest label is a takedown.
+
+One limit applies:
+
+- An author can delete a taken-down record and create a new one at the same
+  URI. The new record has no takedown, so Stratos serves it. While it exists,
+  sync replays serve it and the earlier history of that URI. If the author
+  deletes it again, replays leave out every create and update for the URI while
+  its latest label is a takedown. The delete op still arrives. If you apply
+  labels by URI, you still refuse the new record. A moderation service repeats
+  `createLabel` to hide it on the host.

@@ -1,0 +1,54 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.moderation.queryLabels",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Page the moderation label log in seq order. For allowlisted moderation services and enrolled services.",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "description": "A label seq as a decimal string. The response returns labels with a higher seq."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250,
+            "default": 50
+          },
+          "subjects": {
+            "type": "array",
+            "maxLength": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "description": "Only return labels on these subjects. Each item is a record URI in repo or space form, or an account DID."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["cursor", "labels"],
+          "properties": {
+            "cursor": {
+              "type": "string",
+              "description": "Poll again from `cursor`. For a log query, it is the last seq scanned for this request. For a `subjects` query, it is the log head when the page is not full. Otherwise it is the last seq returned. When nothing new exists, it is the input cursor, or \"0\". A page may hold fewer than `limit` labels, or none, while more remain."
+            },
+            "labels": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "zone.stratos.moderation.defs#label"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

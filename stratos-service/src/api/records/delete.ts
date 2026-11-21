@@ -84,7 +84,8 @@ export async function deleteRecord(
         // boundary-carrying removal can be sequenced. A plain delete op carries
         // no boundary and is dropped by the fail-closed scope gate for every
         // subscriber, so without this the deletion would never propagate.
-        const existing = await store.record.getRecord(uri, null)
+        // true: a taken-down record still needs its boundaries and swap check.
+        const existing = await store.record.getRecord(uri, null, true)
         if (
           input.swapRecord !== undefined &&
           existing?.cid !== input.swapRecord

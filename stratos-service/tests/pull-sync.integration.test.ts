@@ -14,6 +14,7 @@ import {
   migrateServiceDb,
   ServiceDb,
 } from '../src/db/index.js'
+import { SqliteLabelStore } from '../src/features/moderation/index.js'
 import {
   decodeSeqCursor,
   encodeSeqCursor,
@@ -22,6 +23,7 @@ import {
   OplogTruncatedError,
   readCurrentSignedCommit,
 } from '../src/features/pull-sync/index.js'
+import { SEQUENCE_DB_PAGE_SIZE } from '../src/subscription/sequence-paging.js'
 import { createMockBlobStore, createTestConfig } from './utils/index.js'
 
 // ── TIDs (lexicographically ascending) ──────────────────────────────────────
@@ -72,6 +74,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
       actorStore,
       enrollmentStore,
       serviceDid,
+      labelStore: new SqliteLabelStore(db, join(dataDir, 'service.sqlite')),
       logger: {
         debug: vi.fn(),
         info: vi.fn(),
@@ -394,6 +397,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
       // earlier compacted away) while the caller resumes from a cursor issued
       // before the compaction. Silently resuming would skip the trimmed ops
       // and report a false head.
+      await actorStore.create(repoDid)
       const rows = [10, 11, 12].map((seq, i) => ({
         seq,
         did: repoDid,
@@ -421,17 +425,20 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         ...ctx,
         actorStore: {
           exists: async () => true,
-          read: async (_did: string, fn: (store: unknown) => unknown) =>
-            fn({
-              sequence: {
-                getOldestSeq: async () => 10,
-                getLatestSeq: async () => 12,
-                getEventsSince: async (after: number, limit = 100) =>
-                  rows.filter((r) => r.seq > after).slice(0, limit),
-              },
-              // No commits yet - the head path tolerates a missing root.
-              repo: { getRootDetailed: async () => null },
-            }),
+          read: async (did: string, fn: (store: unknown) => unknown) =>
+            actorStore.read(did, (store: any) =>
+              fn({
+                sequence: {
+                  getOldestSeq: async () => 10,
+                  getLatestSeq: async () => 12,
+                  getEventsSince: async (after: number, limit = 100) =>
+                    rows.filter((r) => r.seq > after).slice(0, limit),
+                },
+                record: store.record,
+                // No commits yet - the head path tolerates a missing root.
+                repo: { getRootDetailed: async () => null },
+              }),
+            ),
         },
       } as unknown as AppContext
 
@@ -637,6 +644,441 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         expect(counts[k]).toBe(1)
       }
       expect(atHead).toBe(true)
+    })
+  })
+
+  // ── takedown filter ──────────────────────────────────────────────────────
+
+  describe('takedown filter', () => {
+    const POST = 'zone.stratos.feed.post'
+    const uriOf = (rkey: string) => `at://${repoDid}/${POST}/${rkey}`
+
+    async function indexPost(rkey: string) {
+      const { computeCid, parseCid } =
+        await import('@northskysocial/stratos-core')
+      const record = {
+        text: rkey,
+        boundary: { values: [{ value: 'nerv' }] },
+      }
+      const cid = parseCid((await computeCid(record)).toString())
+      await actorStore.transact(repoDid, async (store: any) => {
+        await store.record.indexRecord(uriOf(rkey), cid, record, 'create', 'r1')
+      })
+    }
+
+    async function setTakedown(rkey: string, applied: boolean) {
+      await actorStore.transact(repoDid, async (store: any) => {
+        await store.record.updateRecordTakedown(
+          uriOf(rkey),
+          applied ? { applied, ref: `TD-${rkey}` } : { applied },
+        )
+      })
+    }
+
+    async function commitPosts(rkeys: string[]) {
+      const { P256Keypair } = await import('@atproto/crypto')
+      const { buildCommit, computeCid, parseCid } =
+        await import('@northskysocial/stratos-core')
+      const { StratosBlockStoreReader, signAndPersistCommit } =
+        await import('../src/features/index.js')
+      const keypair = await P256Keypair.create({ exportable: true })
+      await actorStore.transact(repoDid, async (store: any) => {
+        const record = { text: 'commit', boundary: { values: [] } }
+        const recordCid = await computeCid(record)
+        const unsigned = await buildCommit(
+          new StratosBlockStoreReader(store.repo),
+          null,
+          {
+            did: repoDid,
+            writes: rkeys.map((rkey) => ({
+              action: 'create' as const,
+              collection: POST,
+              rkey,
+              cid: parseCid(recordCid).toString(),
+            })),
+          },
+        )
+        await store.repo.putBlock(recordCid, encodeRecord(record), unsigned.rev)
+        await signAndPersistCommit(
+          store.repo,
+          (bytes: Uint8Array) => keypair.sign(bytes),
+          unsigned,
+        )
+      })
+    }
+
+    const list = (
+      excludeValues: boolean,
+      extra: { limit?: number; cursor?: string } = {},
+    ) =>
+      listRepoOps(
+        ctx,
+        { did: repoDid, limit: extra.limit ?? 100, excludeValues, ...extra },
+        callerSet('nerv'),
+      )
+
+    it('omits a taken-down record and keeps the head commit unchanged (o1)', async () => {
+      await actorStore.create(repoDid)
+      await commitPosts(['ayanami', 'soryu'])
+      await appendEvent(repoDid, REV.r1, [
+        { action: 'create', path: `${POST}/ayanami`, cid: 'cidA' },
+      ])
+      await appendEvent(repoDid, REV.r2, [
+        { action: 'create', path: `${POST}/soryu`, cid: 'cidB' },
+      ])
+      await indexPost('ayanami')
+      await indexPost('soryu')
+      const commitBefore = await readCurrentSignedCommit(ctx, repoDid)
+
+      await setTakedown('ayanami', true)
+
+      for (const excludeValues of [false, true]) {
+        const res = await list(excludeValues)
+        expect(res.ops.map((op) => op.rkey)).toEqual(['soryu'])
+        expect(res.ops[0].cid).toBe('cidB')
+        expect(res.ops[0].value === undefined).toBe(excludeValues)
+        expect(res.cursor).toBeUndefined()
+        expect(commitBefore).not.toBeNull()
+        expect(res.commit).toEqual(commitBefore)
+      }
+    })
+
+    it('still returns the other op of a batch event (o2)', async () => {
+      await actorStore.create(repoDid)
+      await appendEvent(repoDid, REV.r1, [
+        { action: 'create', path: `${POST}/ayanami`, cid: 'cidA' },
+        { action: 'create', path: `${POST}/soryu`, cid: 'cidB' },
+      ])
+      await indexPost('ayanami')
+      await indexPost('soryu')
+      await setTakedown('ayanami', true)
+
+      const res = await list(false)
+
+      expect(res.ops.map((op) => [op.rev, op.rkey, op.cid])).toEqual([
+        [REV.r1, 'soryu', 'cidB'],
+      ])
+    })
+
+    it('skips an emptied event without counting it and pages on (o3)', async () => {
+      await actorStore.create(repoDid)
+      for (const [i, rkey] of [
+        'ayanami',
+        'soryu',
+        'katsuragi',
+        'ikari',
+      ].entries()) {
+        await appendEvent(repoDid, `3aaaa00000${i}t1`, [
+          { action: 'create', path: `${POST}/${rkey}`, cid: `cid-${rkey}` },
+        ])
+        await indexPost(rkey)
+      }
+      await setTakedown('ayanami', true)
+      await setTakedown('katsuragi', true)
+
+      const first = await list(false, { limit: 1 })
+      expect(first.ops.map((op) => op.rkey)).toEqual(['soryu'])
+      expect(first.cursor).toBe(encodeSeqCursor(2))
+
+      const second = await list(false, { limit: 1, cursor: first.cursor })
+      expect(second.ops.map((op) => op.rkey)).toEqual(['ikari'])
+      expect(second.cursor).toBe(encodeSeqCursor(4))
+
+      const third = await list(false, { limit: 1, cursor: second.cursor })
+      expect(third.ops).toEqual([])
+      expect(third.cursor).toBeUndefined()
+    })
+
+    it('serves the record again after a negation (o4)', async () => {
+      await actorStore.create(repoDid)
+      await appendEvent(repoDid, REV.r1, [
+        { action: 'create', path: `${POST}/ayanami`, cid: 'cidA' },
+      ])
+      await indexPost('ayanami')
+
+      await setTakedown('ayanami', true)
+      expect((await list(false)).ops).toEqual([])
+
+      await setTakedown('ayanami', false)
+      const res = await list(false)
+      expect(res.ops.map((op) => op.rkey)).toEqual(['ayanami'])
+      expect((res.ops[0].value as { text: string }).text).toBe('hello')
+    })
+
+    it('passes a delete of a taken-down record through (o5)', async () => {
+      await actorStore.create(repoDid)
+      await indexPost('ayanami')
+      await setTakedown('ayanami', true)
+      await appendEvent(repoDid, REV.r1, [
+        { action: 'create', path: `${POST}/soryu`, cid: 'cidB' },
+        { action: 'delete', path: `${POST}/ayanami` },
+      ])
+
+      const res = await list(false)
+
+      expect(res.ops.map((op) => [op.rkey, op.cid])).toEqual([
+        ['soryu', 'cidB'],
+        ['ayanami', null],
+      ])
+    })
+
+    it('looks up takedowns once per page with in-scope writes (o6)', async () => {
+      await actorStore.create(repoDid)
+      const pageSize = SEQUENCE_DB_PAGE_SIZE
+      // Page 1 and 3 hold in-scope creates; page 2 holds only creates in a
+      // boundary the caller lacks, so it has nothing to look up.
+      const total = pageSize * 2 + 30
+      await actorStore.transact(repoDid, async (store: any) => {
+        for (let i = 0; i < total; i++) {
+          const inScopePage = i < pageSize || i >= pageSize * 2
+          await store.sequence.appendEvent({
+            did: repoDid,
+            eventType: 'append',
+            event: encodeRecord({
+              rev: `3aaaa${String(i).padStart(6, '0')}t1`,
+              ops: [
+                {
+                  action: 'create',
+                  path: `${POST}/p${i}`,
+                  cid: `cid${i}`,
+                  record: {
+                    text: 'hello',
+                    boundary: {
+                      values: [{ value: inScopePage ? 'nerv' : 'seele' }],
+                    },
+                  },
+                },
+              ],
+            }),
+            invalidated: 0,
+            sequencedAt: new Date().toISOString(),
+          })
+        }
+      })
+      const lookups: string[][] = []
+      const countingCtx = {
+        ...ctx,
+        actorStore: {
+          exists: (did: string) => actorStore.exists(did),
+          read: (did: string, fn: (store: unknown) => unknown) =>
+            actorStore.read(did, (store: any) =>
+              fn({
+                ...store,
+                sequence: store.sequence,
+                repo: store.repo,
+                record: {
+                  getTakedownStates: (uris: string[]) => {
+                    lookups.push(uris)
+                    return store.record.getTakedownStates(uris)
+                  },
+                },
+              }),
+            ),
+        },
+      } as unknown as AppContext
+
+      const res = await listRepoOps(
+        countingCtx,
+        { did: repoDid, limit: 1000, excludeValues: true },
+        callerSet('nerv'),
+      )
+
+      expect(res.ops).toHaveLength(pageSize + 30)
+      expect(lookups.map((uris) => uris.length)).toEqual([pageSize, 30])
+    })
+    it('(r6a) delivers the delete of a record whose recreated value is taken down', async () => {
+      await actorStore.create(repoDid)
+      const appendRaw = async (
+        rev: string,
+        ops: Array<Record<string, unknown>>,
+      ) =>
+        actorStore.transact(repoDid, async (store: any) => {
+          await store.sequence.appendEvent({
+            did: repoDid,
+            eventType: 'append',
+            event: encodeRecord({ rev, ops }),
+            invalidated: 0,
+            sequencedAt: new Date().toISOString(),
+          })
+        })
+      const body = { text: 'hello', boundary: { values: [{ value: 'nerv' }] } }
+      const path = `${POST}/ayanami`
+      await appendRaw(REV.r1, [
+        { action: 'create', path, cid: 'cidOld', record: body },
+      ])
+      await appendRaw(REV.r2, [
+        { action: 'delete', path, boundary: { values: [{ value: 'nerv' }] } },
+      ])
+      await appendRaw(REV.r3, [
+        { action: 'create', path, cid: 'cidNew', record: body },
+      ])
+      await indexPost('ayanami')
+      await setTakedown('ayanami', true)
+
+      const first = await list(false, { limit: 1 })
+      expect(first.ops.map((op) => [op.rev, op.rkey, op.cid])).toEqual([
+        [REV.r2, 'ayanami', null],
+      ])
+      expect(first.cursor).toBe(encodeSeqCursor(2))
+
+      const second = await list(false, { limit: 1, cursor: first.cursor })
+      expect(second.ops).toEqual([])
+    })
+
+    describe('(e7) a page costs at most one record-state query and one label query', () => {
+      function budgetCtx() {
+        const calls = { states: 0, labels: [] as string[][] }
+        const budgetCtx = {
+          ...ctx,
+          actorStore: {
+            exists: (did: string) => actorStore.exists(did),
+            read: (did: string, fn: (store: unknown) => unknown) =>
+              actorStore.read(did, (store: any) =>
+                fn({
+                  ...store,
+                  record: {
+                    getTakedownStates: (uris: string[]) => {
+                      calls.states++
+                      return store.record.getTakedownStates(uris)
+                    },
+                  },
+                }),
+              ),
+          },
+          labelStore: {
+            latestTakedowns: (keys: string[]) => {
+              calls.labels.push([...keys].sort())
+              return ctx.labelStore.latestTakedowns(keys)
+            },
+          },
+        } as unknown as AppContext
+        return { calls, ctx: budgetCtx }
+      }
+
+      const listWith = (spyCtx: AppContext) =>
+        listRepoOps(
+          spyCtx,
+          { did: repoDid, limit: 100, excludeValues: false },
+          callerSet('nerv'),
+        )
+
+      it('makes one state call and no label call when every candidate has a row', async () => {
+        await actorStore.create(repoDid)
+        await appendEvent(repoDid, REV.r1, [
+          { action: 'create', path: `${POST}/ayanami`, cid: 'cidA' },
+        ])
+        await indexPost('ayanami')
+        const { calls, ctx: spyCtx } = budgetCtx()
+
+        await listWith(spyCtx)
+
+        expect(calls.states).toBe(1)
+        expect(calls.labels).toEqual([])
+      })
+
+      it('makes one state call and one label call, for the rowless URIs only', async () => {
+        await actorStore.create(repoDid)
+        await appendEvent(repoDid, REV.r1, [
+          { action: 'create', path: `${POST}/ayanami`, cid: 'cidA' },
+          { action: 'update', path: `${POST}/kaworu`, cid: 'cidB' },
+          { action: 'create', path: `${POST}/shinji`, cid: 'cidC' },
+        ])
+        await indexPost('ayanami')
+        const { calls, ctx: spyCtx } = budgetCtx()
+
+        await listWith(spyCtx)
+
+        expect(calls.states).toBe(1)
+        expect(calls.labels).toEqual([[uriOf('kaworu'), uriOf('shinji')]])
+      })
+
+      it('makes neither call when the page has no create or update candidates', async () => {
+        await actorStore.create(repoDid)
+        await actorStore.transact(repoDid, async (store: any) => {
+          await store.sequence.appendEvent({
+            did: repoDid,
+            eventType: 'append',
+            event: encodeRecord({
+              rev: REV.r1,
+              ops: [
+                {
+                  action: 'delete',
+                  path: `${POST}/ayanami`,
+                  boundary: { values: [{ value: 'nerv' }] },
+                },
+              ],
+            }),
+            invalidated: 0,
+            sequencedAt: new Date().toISOString(),
+          })
+        })
+        const { calls, ctx: spyCtx } = budgetCtx()
+
+        const res = await listWith(spyCtx)
+
+        expect(res.ops.map((op) => op.rkey)).toEqual(['ayanami'])
+        expect(calls.states).toBe(0)
+        expect(calls.labels).toEqual([])
+      })
+    })
+
+    it('rejects and returns no ops when the label read fails (e8)', async () => {
+      await actorStore.create(repoDid)
+      await appendEvent(repoDid, REV.r1, [
+        { action: 'create', path: `${POST}/ayanami`, cid: 'cidA' },
+        { action: 'create', path: `${POST}/kaworu`, cid: 'cidB' },
+      ])
+      await indexPost('ayanami')
+      vi.spyOn(ctx.labelStore, 'latestTakedowns').mockRejectedValue(
+        new Error('MAGI label log unreachable'),
+      )
+
+      await expect(
+        listRepoOps(
+          ctx,
+          { did: repoDid, limit: 100, excludeValues: false },
+          callerSet('nerv'),
+        ),
+      ).rejects.toThrow('MAGI label log unreachable')
+    })
+
+    it('looks up only the create and update URIs of a page (r6b)', async () => {
+      await actorStore.create(repoDid)
+      await appendEvent(repoDid, REV.r1, [
+        { action: 'create', path: `${POST}/ayanami`, cid: 'cidA' },
+        { action: 'update', path: `${POST}/soryu`, cid: 'cidB' },
+        { action: 'delete', path: `${POST}/katsuragi` },
+      ])
+      const lookups: string[][] = []
+      const spyCtx = {
+        ...ctx,
+        actorStore: {
+          exists: (did: string) => actorStore.exists(did),
+          read: (did: string, fn: (store: unknown) => unknown) =>
+            actorStore.read(did, (store: any) =>
+              fn({
+                ...store,
+                sequence: store.sequence,
+                repo: store.repo,
+                record: {
+                  getTakedownStates: (uris: string[]) => {
+                    lookups.push([...uris].sort())
+                    return store.record.getTakedownStates(uris)
+                  },
+                },
+              }),
+            ),
+        },
+      } as unknown as AppContext
+
+      const res = await listRepoOps(
+        spyCtx,
+        { did: repoDid, limit: 100, excludeValues: false },
+        callerSet('nerv'),
+      )
+
+      expect(res.ops).toHaveLength(3)
+      expect(lookups).toEqual([[uriOf('ayanami'), uriOf('soryu')]])
     })
   })
 

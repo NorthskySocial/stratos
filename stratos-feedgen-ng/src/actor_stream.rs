@@ -1,7 +1,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -98,6 +101,8 @@ pub struct ActorPool {
     service_did: String,
     failures: watch::Sender<u64>,
     commands: mpsc::Sender<PoolCommand>,
+    #[cfg(test)]
+    replays_completed: Arc<AtomicU64>,
     manager: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -118,15 +123,23 @@ impl ActorPool {
         let (commands, receiver) = mpsc::channel(32);
         let (failures, _) = watch::channel(0_u64);
         telemetry.set_actor_pool(0, 0, config.max_connections);
+        let replays_completed = Arc::new(AtomicU64::new(0));
         let pool = Arc::new(Self {
             lifecycle: Arc::clone(&lifecycle),
             service_did: config.service_did.clone(),
             failures: failures.clone(),
             commands,
+            #[cfg(test)]
+            replays_completed: Arc::clone(&replays_completed),
             manager: tokio::sync::Mutex::new(None),
         });
         let manager = tokio::spawn(run_manager(
-            config, lifecycle, failures, receiver, telemetry,
+            config,
+            lifecycle,
+            failures,
+            receiver,
+            telemetry,
+            replays_completed,
         ));
         *pool
             .manager
@@ -175,6 +188,26 @@ impl ActorPool {
             .await
             .map_err(|_| ActorPoolError::Stopped)?;
         result.await.map_err(|_| ActorPoolError::Stopped)?
+    }
+
+    /// Makes the actor's next connection read its stream from the start, once
+    /// any connection already open for it has ended.
+    pub async fn replay_actor(&self, did: &str) -> Result<ActorPoolStats, ActorPoolError> {
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(PoolCommand::Replay {
+                did: did.to_owned(),
+                reply,
+            })
+            .await
+            .map_err(|_| ActorPoolError::Stopped)?;
+        result.await.map_err(|_| ActorPoolError::Stopped)?
+    }
+
+    #[cfg(test)]
+    pub(crate) fn replays_completed(&self) -> u64 {
+        self.replays_completed
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub async fn stats(&self) -> Result<ActorPoolStats, ActorPoolError> {
@@ -227,6 +260,10 @@ enum PoolCommand {
         enrolled: bool,
         reply: oneshot::Sender<Result<ActorPoolStats, ActorPoolError>>,
     },
+    Replay {
+        did: String,
+        reply: oneshot::Sender<Result<ActorPoolStats, ActorPoolError>>,
+    },
     Stats {
         reply: oneshot::Sender<ActorPoolStats>,
     },
@@ -248,6 +285,8 @@ struct WorkerFinished {
 #[derive(Default)]
 struct Rotation {
     last_started: BTreeMap<String, u64>,
+    // A replay brings back a lifted takedown, so it does not wait its turn.
+    replayed: BTreeSet<String>,
     next_id: u64,
 }
 
@@ -257,12 +296,14 @@ async fn run_manager(
     failures: watch::Sender<u64>,
     mut commands: mpsc::Receiver<PoolCommand>,
     telemetry: Arc<FeedTelemetry>,
+    replays_completed: Arc<AtomicU64>,
 ) {
     let (finished, mut workers) = mpsc::unbounded_channel::<WorkerFinished>();
     let mut desired = BTreeSet::new();
     let mut active = BTreeMap::new();
     let mut rotation = Rotation::default();
     let mut stopping: Option<oneshot::Sender<()>> = None;
+    let mut replaying: BTreeMap<String, Vec<ReplayReply>> = BTreeMap::new();
 
     loop {
         if stopping.is_some() && active.is_empty() {
@@ -273,12 +314,25 @@ async fn run_manager(
         }
         tokio::select! {
             Some(completion) = workers.recv() => {
+                let mut replay_outcome = None;
                 if active.get(&completion.did).is_some_and(|worker: &ActiveWorker| worker.id == completion.id) {
                     active.remove(&completion.did);
+                    if let Some(waiters) = replaying.remove(&completion.did)
+                        && stopping.is_none()
+                    {
+                        let outcome = finish_replay(&lifecycle, &config.service_did, &completion.did, &mut desired, &mut rotation.replayed);
+                        if outcome.is_ok() {
+                            replays_completed.fetch_add(1, Ordering::SeqCst);
+                        }
+                        replay_outcome = Some((waiters, outcome));
+                    }
                 }
                 let stats = stats_for(&desired, &active, config.max_connections);
                 telemetry.set_actor_pool(stats.active, stats.waiting, stats.max_connections);
                 start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation, &telemetry);
+                if let Some((waiters, outcome)) = replay_outcome {
+                    answer_replays(waiters, outcome, || stats_for(&desired, &active, config.max_connections));
+                }
             }
             command = commands.recv() => {
                 let Some(command) = command else {
@@ -292,7 +346,11 @@ async fn run_manager(
                             continue;
                         }
                         desired = actors;
+                        for did in replaying.keys() {
+                            desired.remove(did);
+                        }
                         rotation.last_started.retain(|did, _| desired.contains(did));
+                        rotation.replayed.retain(|did| desired.contains(did));
                         stop_removed_workers(&active, &desired);
                         let stats = stats_for(&desired, &active, config.max_connections);
                         telemetry.set_actor_pool(stats.active, stats.waiting, stats.max_connections);
@@ -300,6 +358,11 @@ async fn run_manager(
                         let _ = reply.send(Ok(stats_for(&desired, &active, config.max_connections)));
                     }
                     PoolCommand::SetActor { did, enrolled, reply } => {
+                        if replaying.contains_key(&did) {
+                            // The replay re-reads enrollment when the worker ends.
+                            let _ = reply.send(Ok(stats_for(&desired, &active, config.max_connections)));
+                            continue;
+                        }
                         if enrolled {
                             if desired.len() == MAX_TRACKED_ACTORS && !desired.contains(&did) {
                                 let _ = reply.send(Err(ActorPoolError::CapacityExceeded));
@@ -309,6 +372,7 @@ async fn run_manager(
                         } else {
                             desired.remove(&did);
                             rotation.last_started.remove(&did);
+                            rotation.replayed.remove(&did);
                             if let Some(worker) = active.get(&did) {
                                 let _ = worker.shutdown.send(true);
                             }
@@ -318,16 +382,85 @@ async fn run_manager(
                         start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation, &telemetry);
                         let _ = reply.send(Ok(stats_for(&desired, &active, config.max_connections)));
                     }
+                    PoolCommand::Replay { did, reply } => {
+                        if let Some(waiters) = replaying.get_mut(&did) {
+                            waiters.push(reply);
+                            continue;
+                        }
+                        if let Some(worker) = active.get(&did) {
+                            // A connection still open could write the cursor again
+                            // after the reset, so the reset waits for it to end.
+                            desired.remove(&did);
+                            let _ = worker.shutdown.send(true);
+                            replaying.insert(did, vec![reply]);
+                            continue;
+                        }
+                        let outcome = finish_replay(&lifecycle, &config.service_did, &did, &mut desired, &mut rotation.replayed);
+                        if outcome.is_ok() {
+                            replays_completed.fetch_add(1, Ordering::SeqCst);
+                        }
+                        start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation, &telemetry);
+                        answer_replays(vec![reply], outcome, || stats_for(&desired, &active, config.max_connections));
+                    }
                     PoolCommand::Stats { reply } => {
                         let _ = reply.send(stats_for(&desired, &active, config.max_connections));
                     }
                     PoolCommand::Stop { reply } => {
                         desired.clear();
+                        replaying.clear();
                         stop_workers(&active);
                         telemetry.set_actor_pool(active.len(), 0, config.max_connections);
                         stopping = Some(reply);
                     }
                 }
+            }
+        }
+    }
+}
+
+type ReplayReply = oneshot::Sender<Result<ActorPoolStats, ActorPoolError>>;
+
+fn finish_replay(
+    lifecycle: &ControlLifecycle,
+    service_did: &str,
+    did: &str,
+    desired: &mut BTreeSet<String>,
+    replayed: &mut BTreeSet<String>,
+) -> Result<(), ActorPoolError> {
+    lifecycle
+        .reset_actor_cursor(did)
+        .map_err(ActorPoolError::Store)?;
+    let enrolled = lifecycle
+        .actor_sync_state(service_did, did)
+        .map_err(ActorPoolError::Store)?
+        .is_some();
+    if !enrolled {
+        return Ok(());
+    }
+    if desired.len() == MAX_TRACKED_ACTORS && !desired.contains(did) {
+        return Err(ActorPoolError::CapacityExceeded);
+    }
+    desired.insert(did.to_owned());
+    replayed.insert(did.to_owned());
+    Ok(())
+}
+
+fn answer_replays(
+    waiters: Vec<ReplayReply>,
+    outcome: Result<(), ActorPoolError>,
+    stats: impl Fn() -> ActorPoolStats,
+) {
+    match outcome {
+        Ok(()) => {
+            for waiter in waiters {
+                let _ = waiter.send(Ok(stats()));
+            }
+        }
+        Err(error) => {
+            // The store error cannot be cloned, so only the first caller sees it.
+            let mut failure = Some(error);
+            for waiter in waiters {
+                let _ = waiter.send(Err(failure.take().unwrap_or(ActorPoolError::Stopped)));
             }
         }
     }
@@ -371,7 +504,9 @@ fn start_waiting_workers(
     telemetry: &Arc<FeedTelemetry>,
 ) {
     while active.len() < usize::from(config.max_connections) {
-        let Some(did) = next_waiting_actor(desired, active, &rotation.last_started) else {
+        let Some(did) = next_replayed_actor(desired, active, &rotation.replayed)
+            .or_else(|| next_waiting_actor(desired, active, &rotation.last_started))
+        else {
             telemetry.set_actor_pool(
                 active.len(),
                 desired.len().saturating_sub(active.len()),
@@ -379,6 +514,7 @@ fn start_waiting_workers(
             );
             return;
         };
+        rotation.replayed.remove(&did);
         rotation.next_id = rotation.next_id.saturating_add(1);
         let id = rotation.next_id;
         rotation.last_started.insert(did.clone(), id);
@@ -407,6 +543,17 @@ fn start_waiting_workers(
         desired.len().saturating_sub(active.len()),
         config.max_connections,
     );
+}
+
+fn next_replayed_actor(
+    desired: &BTreeSet<String>,
+    active: &BTreeMap<String, ActiveWorker>,
+    replayed: &BTreeSet<String>,
+) -> Option<String> {
+    replayed
+        .iter()
+        .find(|did| desired.contains(*did) && !active.contains_key(*did))
+        .cloned()
 }
 
 fn next_waiting_actor(
@@ -624,6 +771,7 @@ mod tests {
         time::Duration,
     };
 
+    use futures_util::StreamExt;
     use time::OffsetDateTime;
 
     use crate::{
@@ -831,5 +979,296 @@ mod tests {
         .unwrap();
         assert!(*failures.borrow() > 0);
         assert!(telemetry.actor_reconnects() > 0);
+    }
+
+    const BEBOP_AUTHORITY: &str = "did:web:stratos.example.test";
+    const FAYE: &str = "did:plc:faye";
+    const SPIKE: &str = "did:plc:spikespiegel";
+
+    fn lifecycle_with_actors_at_cursor(actors: &[&str], cursor: u64) -> Arc<ControlLifecycle> {
+        let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+        for did in actors {
+            store
+                .reconcile_actor_enrollment(
+                    did,
+                    "1998-04-03T00:00:00.000Z",
+                    Some(ActorEnrollment {
+                        did: (*did).to_owned(),
+                        boundaries: vec![format!("{BEBOP_AUTHORITY}/bebop")],
+                        observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                    }),
+                )
+                .unwrap();
+            store
+                .apply_actor_page(crate::store::ActorPage {
+                    authority_did: BEBOP_AUTHORITY.to_owned(),
+                    actor_did: (*did).to_owned(),
+                    sequence: cursor,
+                    upserts: Vec::new(),
+                    deletes: Vec::new(),
+                    updated_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                })
+                .unwrap();
+        }
+        Arc::new(
+            ControlLifecycle::for_authority(
+                ProjectionReader::new(store),
+                Arc::new(Mutex::new(FeedReadinessGate::default())),
+                BEBOP_AUTHORITY,
+            )
+            .unwrap(),
+        )
+    }
+
+    fn pool_against(service_url: &str, lifecycle: &Arc<ControlLifecycle>) -> Arc<ActorPool> {
+        ActorPool::start(
+            ActorStreamConfig {
+                service_url: service_url.to_owned(),
+                service_did: BEBOP_AUTHORITY.to_owned(),
+                feedgen_did: "did:web:feedgen.example.test".to_owned(),
+                signing_key: crate::service_auth::ServiceSigningKey::from_hex(&"11".repeat(32))
+                    .unwrap(),
+                retention: Duration::from_secs(60),
+                max_connections: 1,
+            },
+            Arc::clone(lifecycle),
+        )
+        .unwrap()
+    }
+
+    fn stored_cursor(lifecycle: &ControlLifecycle, did: &str) -> Option<u64> {
+        lifecycle
+            .actor_sync_state(BEBOP_AUTHORITY, did)
+            .unwrap()
+            .expect("the actor is enrolled")
+            .cursor
+    }
+
+    #[tokio::test]
+    async fn replaying_an_actor_forgets_its_cursor_and_keeps_it_desired() {
+        let lifecycle = lifecycle_with_actors_at_cursor(&[FAYE], 42);
+        let pool = pool_against("http://127.0.0.1:9", &lifecycle);
+        pool.sync_from_store().await.unwrap();
+        assert_eq!(stored_cursor(&lifecycle, FAYE), Some(42));
+
+        let stats = pool.replay_actor(FAYE).await.unwrap();
+
+        assert_eq!(stored_cursor(&lifecycle, FAYE), None);
+        assert_eq!(stats.active + stats.waiting, 1);
+        assert_eq!(pool.replays_completed(), 1);
+        let after = pool.stats().await.unwrap();
+        assert_eq!(after.active + after.waiting, 1);
+        pool.stop().await;
+    }
+
+    #[tokio::test]
+    async fn replaying_resets_an_actor_that_is_waiting_for_a_slot() {
+        let lifecycle = lifecycle_with_actors_at_cursor(&[FAYE, SPIKE], 42);
+        let pool = pool_against("http://127.0.0.1:9", &lifecycle);
+        let stats = pool.sync_from_store().await.unwrap();
+        assert_eq!((stats.active, stats.waiting), (1, 1));
+
+        pool.replay_actor(FAYE).await.unwrap();
+        pool.replay_actor(SPIKE).await.unwrap();
+
+        assert_eq!(stored_cursor(&lifecycle, FAYE), None);
+        assert_eq!(stored_cursor(&lifecycle, SPIKE), None);
+        let after = pool.stats().await.unwrap();
+        assert_eq!(after.active + after.waiting, 2);
+        pool.stop().await;
+    }
+
+    #[tokio::test]
+    async fn replaying_an_actor_that_is_not_enrolled_is_a_no_op() {
+        let lifecycle = lifecycle_with_actors_at_cursor(&[FAYE], 42);
+        let pool = pool_against("http://127.0.0.1:9", &lifecycle);
+        pool.sync_from_store().await.unwrap();
+
+        let stats = pool.replay_actor(SPIKE).await.unwrap();
+
+        assert_eq!(stats.active + stats.waiting, 1);
+        assert_eq!(stored_cursor(&lifecycle, FAYE), Some(42));
+        pool.stop().await;
+    }
+
+    struct RequestRecorder(Arc<Mutex<Vec<String>>>);
+
+    impl tokio_tungstenite::tungstenite::handshake::server::Callback for RequestRecorder {
+        fn on_request(
+            self,
+            request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+            response: tokio_tungstenite::tungstenite::handshake::server::Response,
+        ) -> Result<
+            tokio_tungstenite::tungstenite::handshake::server::Response,
+            tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
+        > {
+            self.0.lock().unwrap().push(request.uri().to_string());
+            Ok(response)
+        }
+    }
+
+    struct StreamServer {
+        address: std::net::SocketAddr,
+        requests: Arc<Mutex<Vec<String>>>,
+        first_connection_closed: Arc<std::sync::atomic::AtomicBool>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for StreamServer {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    impl StreamServer {
+        async fn start() -> Self {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+            let first_connection_closed = Arc::new(AtomicBool::new(false));
+            let task = tokio::spawn({
+                let requests = Arc::clone(&requests);
+                let first_connection_closed = Arc::clone(&first_connection_closed);
+                async move {
+                    let mut connection = 0_usize;
+                    while let Ok((stream, _)) = listener.accept().await {
+                        let index = connection;
+                        connection += 1;
+                        let requests = Arc::clone(&requests);
+                        let closed = Arc::clone(&first_connection_closed);
+                        tokio::spawn(async move {
+                            let handshake = tokio_tungstenite::accept_hdr_async(
+                                stream,
+                                RequestRecorder(requests),
+                            )
+                            .await;
+                            let Ok(mut socket) = handshake else { return };
+                            while let Some(Ok(message)) = socket.next().await {
+                                if message.is_close() {
+                                    break;
+                                }
+                            }
+                            if index == 0 {
+                                closed.store(true, Ordering::SeqCst);
+                            }
+                        });
+                    }
+                }
+            });
+            Self {
+                address,
+                requests,
+                first_connection_closed,
+                task,
+            }
+        }
+
+        fn request_count(&self) -> usize {
+            self.requests.lock().unwrap().len()
+        }
+
+        fn closed_first_connection(&self) -> bool {
+            self.first_connection_closed
+                .load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    async fn wait_until_within(window: Duration, condition: impl Fn() -> bool) -> bool {
+        let deadline = tokio::time::Instant::now() + window;
+        while tokio::time::Instant::now() < deadline {
+            if condition() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        condition()
+    }
+
+    async fn wait_until(condition: impl Fn() -> bool) -> bool {
+        wait_until_within(Duration::from_secs(3), condition).await
+    }
+
+    #[tokio::test]
+    async fn a_replay_closes_the_live_connection_before_it_forgets_the_cursor() {
+        let server = StreamServer::start().await;
+        let lifecycle = lifecycle_with_actors_at_cursor(&[FAYE], 42);
+        let pool = pool_against(&format!("http://{}", server.address), &lifecycle);
+        pool.sync_from_store().await.unwrap();
+        assert!(wait_until(|| server.request_count() == 1).await);
+
+        pool.replay_actor(FAYE).await.unwrap();
+
+        // Closing takes a round trip, but only a worker stopped by the replay
+        // closes within this window; an idle rotation takes two seconds.
+        assert!(
+            wait_until_within(Duration::from_millis(500), || server
+                .closed_first_connection())
+            .await,
+            "the worker was still connected after the replay returned"
+        );
+        assert_eq!(stored_cursor(&lifecycle, FAYE), None);
+        assert!(wait_until(|| server.request_count() == 2).await);
+        let requests = server.requests.lock().unwrap().clone();
+        assert!(requests[0].contains("cursor=42"), "{}", requests[0]);
+        assert!(!requests[1].contains("cursor"), "{}", requests[1]);
+        pool.stop().await;
+    }
+
+    const ED: &str = "did:plc:edwardwong";
+    const JET: &str = "did:plc:jetblack";
+    // Long enough for one idle worker to rotate out and the next to connect.
+    const ROTATION_WINDOW: Duration = super::IDLE_ROTATION_AFTER.saturating_mul(2);
+
+    fn connected_actor(request: &str) -> String {
+        url::Url::parse(&format!("ws://stratos.example.test{request}"))
+            .unwrap()
+            .query_pairs()
+            .find(|(name, _)| name == "did")
+            .map(|(_, did)| did.into_owned())
+            .expect("the request names its actor")
+    }
+
+    #[tokio::test]
+    async fn a_replayed_actor_takes_its_own_freed_slot_before_waiting_actors() {
+        let server = StreamServer::start().await;
+        let lifecycle = lifecycle_with_actors_at_cursor(&[ED, FAYE, JET, SPIKE], 42);
+        let pool = pool_against(&format!("http://{}", server.address), &lifecycle);
+        pool.sync_from_store().await.unwrap();
+        assert!(wait_until(|| server.request_count() == 1).await);
+        let first = server.requests.lock().unwrap()[0].clone();
+        assert_eq!(connected_actor(&first), ED);
+
+        pool.replay_actor(ED).await.unwrap();
+
+        assert!(wait_until(|| server.request_count() == 2).await);
+        let second = server.requests.lock().unwrap()[1].clone();
+        assert_eq!(connected_actor(&second), ED, "{second}");
+        assert!(!second.contains("cursor"), "{second}");
+        // The head start is spent once; the rotation resumes after it.
+        assert!(wait_until_within(ROTATION_WINDOW, || server.request_count() == 3).await);
+        let third = server.requests.lock().unwrap()[2].clone();
+        assert_eq!(connected_actor(&third), FAYE, "{third}");
+        pool.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_replayed_actor_waiting_for_a_slot_starts_before_actors_waiting_their_turn() {
+        let server = StreamServer::start().await;
+        let lifecycle = lifecycle_with_actors_at_cursor(&[ED, FAYE, JET, SPIKE], 42);
+        let pool = pool_against(&format!("http://{}", server.address), &lifecycle);
+        pool.sync_from_store().await.unwrap();
+        // Ed runs first and rotates out idle; Faye takes the slot.
+        assert!(wait_until_within(ROTATION_WINDOW, || server.request_count() == 2).await);
+        let second = server.requests.lock().unwrap()[1].clone();
+        assert_eq!(connected_actor(&second), FAYE);
+
+        pool.replay_actor(ED).await.unwrap();
+
+        assert!(wait_until_within(ROTATION_WINDOW, || server.request_count() == 3).await);
+        let third = server.requests.lock().unwrap()[2].clone();
+        assert_eq!(connected_actor(&third), ED, "{third}");
+        assert!(!third.contains("cursor"), "{third}");
+        pool.stop().await;
     }
 }

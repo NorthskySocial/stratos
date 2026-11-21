@@ -65,7 +65,14 @@ export interface ActorRecordReader {
     includeSoftDeleted?: boolean,
   ): Promise<boolean>
   getRecordTakedownStatus(uri: string | AtUri): Promise<StatusAttr | null>
+  /**
+   * One query. `true` is a row with a takedown marker, `false` a row without
+   * one; a URI with no row is absent.
+   */
+  getTakedownStates(uris: string[]): Promise<Map<string, boolean>>
   getCurrentRecordCid(uri: string | AtUri): Promise<Cid | null>
+  /** Includes taken-down records; never reads the record body. */
+  getRecordBoundaries(uri: string | AtUri): Promise<string[]>
   getRecordBacklinks(opts: GetBacklinksOpts): Promise<
     Array<{
       uri: string

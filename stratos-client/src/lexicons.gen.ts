@@ -983,7 +983,11 @@ export const stratosLexicons: LexiconDoc[] = [
         }
       },
       "errors": [
-        { "name": "NotFound", "description": "The DID is not enrolled." }
+        { "name": "NotFound", "description": "The DID is not enrolled." },
+        {
+          "name": "AccountTakenDown",
+          "description": "An account takedown is in force, so the member cannot be activated."
+        }
       ]
     }
   }
@@ -1832,6 +1836,193 @@ export const stratosLexicons: LexiconDoc[] = [
               "description": "Boundary domains the user is enrolled in. Empty if not enrolled.",
               "items": {
                 "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.moderation.createLabel",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Apply or negate a moderation label on a record or an account. Only for allowlisted moderation services. The service derives the affected boundary itself.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["subject", "val"],
+          "properties": {
+            "subject": {
+              "type": "union",
+              "refs": [
+                "zone.stratos.moderation.defs#recordSubject",
+                "zone.stratos.moderation.defs#accountSubject"
+              ],
+              "closed": true,
+              "description": "What to label."
+            },
+            "val": {
+              "type": "string",
+              "maxLength": 128,
+              "knownValues": ["!takedown"],
+              "description": "The label value."
+            },
+            "neg": {
+              "type": "boolean",
+              "description": "If true, negate a prior label with the same subject and value. Absent means false."
+            },
+            "ref": {
+              "type": "string",
+              "maxLength": 512,
+              "description": "Optional moderation-service reference for this action, such as a report or case identifier."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "ref",
+              "ref": "zone.stratos.moderation.defs#label",
+              "description": "The resulting label. Absent only when the request changed nothing and the subject has no label."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "SubjectNotFound",
+          "description": "The subject record or account does not exist on this service."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.moderation.defs",
+  "defs": {
+    "label": {
+      "type": "object",
+      "description": "A moderation label applied by an allowlisted moderation service to a record or an account hosted by this Stratos service.",
+      "required": ["seq", "subject", "val", "createdAt"],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "description": "Position of this label in the service's label sequence."
+        },
+        "subject": {
+          "type": "union",
+          "refs": ["#recordSubject", "#accountSubject"],
+          "description": "What the label applies to."
+        },
+        "val": {
+          "type": "string",
+          "maxLength": 128,
+          "knownValues": ["!takedown"],
+          "description": "The label value. The service enforces which values it accepts."
+        },
+        "neg": {
+          "type": "boolean",
+          "description": "If true, this label negates (removes) a prior label with the same subject and value. Absent means false."
+        },
+        "ref": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Optional moderation-service reference for this action, such as a report or case identifier."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "When the label was created."
+        }
+      }
+    },
+    "recordSubject": {
+      "type": "object",
+      "description": "A record in this service's storage.",
+      "required": ["uri"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "The record's at:// URI, either at://{did}/{collection}/{rkey} or the space form at://{authority}/space/{type}/{skey}/{author}/{collection}/{rkey}. Declared as a plain string because the at-uri format rejects URIs with more than two path segments."
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid",
+          "description": "Optional CID pinning a specific version of the record."
+        }
+      }
+    },
+    "accountSubject": {
+      "type": "object",
+      "description": "An account hosted by this service.",
+      "required": ["did"],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "The DID of the account."
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.moderation.queryLabels",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Page the moderation label log in seq order. For allowlisted moderation services and enrolled services.",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "description": "A label seq as a decimal string. The response returns labels with a higher seq."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250,
+            "default": 50
+          },
+          "subjects": {
+            "type": "array",
+            "maxLength": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "description": "Only return labels on these subjects. Each item is a record URI in repo or space form, or an account DID."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["cursor", "labels"],
+          "properties": {
+            "cursor": {
+              "type": "string",
+              "description": "Poll again from `cursor`. For a log query, it is the last seq scanned for this request. For a `subjects` query, it is the log head when the page is not full. Otherwise it is the last seq returned. When nothing new exists, it is the input cursor, or \"0\". A page may hold fewer than `limit` labels, or none, while more remain."
+            },
+            "labels": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "zone.stratos.moderation.defs#label"
               }
             }
           }

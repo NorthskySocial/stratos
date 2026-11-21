@@ -70,12 +70,12 @@ could decide whether it may enroll.
 `zone.stratos.sync.subscribeRecords` needs a service-auth token from a service
 enrollment.
 
-| Message                                   | Cause                                                    |
-| ----------------------------------------- | -------------------------------------------------------- |
-| `Service auth required`                   | The token is missing or is not a service-auth token      |
-| `Enrollment is missing or deactivated`    | The caller has no active service enrollment              |
-| `Service is not enrolled in any boundary` | Grant the service identity a boundary in **Enrollments** |
-| `Subscription authorization changed`      | The caller's membership changed. Reconnect               |
+| Message                                   | Cause                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------- |
+| `Service auth required`                   | The token is missing or is not a service-auth token                             |
+| `Enrollment is missing or deactivated`    | The caller has no active service enrollment. An operator hold can deactivate it |
+| `Service is not enrolled in any boundary` | Grant the service identity a boundary in **Enrollments**                        |
+| `Subscription authorization changed`      | The caller's membership changed. Reconnect                                      |
 
 When the stream is open but silent:
 

@@ -11,6 +11,7 @@ export {
   enrollment,
   enrollmentBoundary,
   enrollmentPdsSync,
+  moderationLabel,
 } from './schema.js'
 export type {
   OAuthSession,
@@ -25,6 +26,8 @@ export type {
   NewEnrollmentBoundary,
   EnrollmentPdsSync,
   NewEnrollmentPdsSync,
+  ModerationLabelRow,
+  NewModerationLabelRow,
 } from './schema.js'
 
 export type ServiceDb = LibSQLDatabase<typeof schema> & {
@@ -71,6 +74,31 @@ async function addEnrollmentColumn(
   }
 }
 
+/**
+ * Add `operatorHold` and mark the rows that are inactive right now as held.
+ *
+ * The backfill runs only in the migration that adds the column. Every inactive
+ * row at that point was deactivated by an operator. From then on a takedown
+ * also leaves a member inactive with no operator hold, so a backfill on a
+ * later start would mark that member as operator-held and lifting the takedown
+ * would not reactivate them. The two statements run as one batch, which the
+ * driver executes in a single transaction, so a crash cannot leave the column
+ * added and the backfill never run. An interactive `db.transaction` is avoided
+ * because on a `:memory:` database it discards every table created so far.
+ */
+async function addOperatorHoldColumn(db: ServiceDb): Promise<void> {
+  const columns = await db.all<{ name: string }>(
+    sql`SELECT name FROM pragma_table_info('enrollment')`,
+  )
+  if (columns.some((column) => column.name === 'operatorHold')) return
+  await db.batch([
+    db.run(
+      sql`ALTER TABLE enrollment ADD COLUMN operatorHold INTEGER NOT NULL DEFAULT 0`,
+    ),
+    db.run(sql`UPDATE enrollment SET operatorHold = (active = 'false')`),
+  ])
+}
+
 /** True when `err`, or anything it wraps, is SQLite's duplicate-column error. */
 function isDuplicateColumn(err: unknown): boolean {
   let current: unknown = err
@@ -79,6 +107,27 @@ function isDuplicateColumn(err: unknown): boolean {
     current = current.cause
   }
   return false
+}
+
+async function migrateModerationLabelTable(db: ServiceDb): Promise<void> {
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS moderation_label (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      subjectKey TEXT NOT NULL,
+      subjectKind TEXT NOT NULL,
+      cid TEXT,
+      val TEXT NOT NULL,
+      neg INTEGER NOT NULL,
+      ref TEXT,
+      boundaries TEXT NOT NULL,
+      createdBy TEXT NOT NULL,
+      createdAt TEXT NOT NULL
+    )
+  `)
+
+  await db.run(sql`
+    CREATE INDEX IF NOT EXISTS moderation_label_subject_seq_idx ON moderation_label(subjectKey, seq)
+  `)
 }
 
 export async function migrateServiceDb(db: ServiceDb): Promise<void> {
@@ -128,7 +177,8 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
       isService INTEGER NOT NULL DEFAULT 0,
       custody TEXT NOT NULL DEFAULT 'stratos',
       repoHost TEXT,
-      capabilityVerdict TEXT
+      capabilityVerdict TEXT,
+      operatorHold INTEGER NOT NULL DEFAULT 0
     )
   `)
 
@@ -161,6 +211,8 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
     db,
     sql`ALTER TABLE enrollment ADD COLUMN capabilityVerdict TEXT`,
   )
+
+  await addOperatorHoldColumn(db)
 
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS enrollment_boundary (
@@ -196,6 +248,8 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
   await db.run(sql`
     CREATE INDEX IF NOT EXISTS enrollment_boundary_boundary_idx ON enrollment_boundary(boundary)
   `)
+
+  await migrateModerationLabelTable(db)
 }
 
 /**
