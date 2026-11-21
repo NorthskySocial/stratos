@@ -9,6 +9,7 @@ import {
   StratosValidationError,
   StratosValidator,
 } from '../src/index.js'
+import { assertNoCrossNamespaceEmbed } from '../src/validation/post-rules.js'
 
 describe('stratos-validation', () => {
   const validConfig: StratosConfig = {
@@ -993,5 +994,134 @@ describe('isBskyUri against the upstream parser', () => {
         expect(StratosValidator.isBskyUri(uri)).toBe(true)
       }),
     )
+  })
+})
+
+describe('the public post guard against loosely spelled Stratos references', () => {
+  const config: StratosConfig = {
+    serviceDid: 'did:web:nerv.tokyo.jp',
+    allowedDomains: ['did:web:nerv.tokyo.jp/example-com'],
+    retentionDays: 90,
+  }
+  const validator = new StratosValidator(config)
+  const boundary = { values: [{ value: 'did:web:nerv.tokyo.jp/example-com' }] }
+  const corpus = JSON.parse(
+    readFileSync(
+      new URL(
+        '../../test/spaces-alignment/november/fixtures/space-uri-conformance.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+  ) as { invalid: Array<{ name: string; input: string }> }
+  const earlierSpelling = corpus.invalid.find(
+    (entry) => entry.name === 'the old spelling of a record',
+  )?.input as string
+  const earlierSpellingOfBskyRecord = earlierSpelling.replace(
+    '/zone.stratos.feed.post/',
+    '/app.bsky.feed.post/',
+  )
+  const looseStratosUris: Array<[string, string]> = [
+    ['an upper-case scheme', 'AT://did:plc:rei/zone.stratos.feed.post/eva00'],
+    ['a mixed-case scheme', 'At://did:plc:rei/zone.stratos.feed.post/eva00'],
+    ['no scheme', 'did:plc:rei/zone.stratos.feed.post/eva00'],
+    ['an extra part', 'at://did:plc:rei/zone.stratos.feed.post/eva00/unit01'],
+    ['no record key', 'at://did:plc:rei/zone.stratos.feed.post'],
+    ['an empty part', 'at://did:plc:rei//zone.stratos.feed.post/eva00'],
+    ['an empty collection part', 'at://did:plc:rei//zone.stratos.feed.post'],
+  ]
+
+  it.each(looseStratosUris)(
+    'a public post cannot embed a Stratos record spelled with %s',
+    (_name, uri) => {
+      expect(() =>
+        StratosValidator.assertBskyNoCrossNamespaceEmbed(
+          { text: 'Get in the robot', embed: { record: { uri } } },
+          'app.bsky.feed.post',
+        ),
+      ).toThrow(expect.objectContaining({ code: 'CrossNamespaceEmbed' }))
+    },
+  )
+
+  it.each(looseStratosUris)(
+    'a public post cannot embed one spelled with %s beside its media',
+    (_name, uri) => {
+      expect(() =>
+        StratosValidator.assertBskyNoCrossNamespaceEmbed(
+          { embed: { media: { record: { uri } } } },
+          'app.bsky.feed.post',
+        ),
+      ).toThrow(expect.objectContaining({ code: 'CrossNamespaceEmbed' }))
+    },
+  )
+
+  it.each(looseStratosUris)(
+    'the embed rule refuses one spelled with %s in the public direction',
+    (_name, uri) => {
+      expect(() =>
+        assertNoCrossNamespaceEmbed({ record: { uri } }, 'bsky'),
+      ).toThrow(expect.objectContaining({ code: 'CrossNamespaceEmbed' }))
+    },
+  )
+
+  it.each(looseStratosUris)(
+    'a Stratos post may still embed one spelled with %s',
+    (_name, uri) => {
+      expect(() =>
+        validator.assertValid(
+          { text: 'Sortie', boundary, embed: { record: { uri, cid: 'c' } } },
+          'zone.stratos.feed.post',
+        ),
+      ).not.toThrow()
+    },
+  )
+
+  // No reader recognises the earlier spelling, so the upstream reader takes
+  // `space` for its collection and neither guard classifies it.
+  it.each([
+    ['Stratos', earlierSpelling, '/zone.stratos.feed.post/'],
+    ['bsky', earlierSpellingOfBskyRecord, '/app.bsky.feed.post/'],
+  ])(
+    'passes the earlier spelling of a %s record in both embed directions',
+    (_name, uri, collectionPart) => {
+      expect(uri).toContain(collectionPart)
+      expect(() =>
+        StratosValidator.assertBskyNoCrossNamespaceEmbed(
+          { embed: { record: { uri } } },
+          'app.bsky.feed.post',
+        ),
+      ).not.toThrow()
+      expect(() =>
+        assertNoCrossNamespaceEmbed({ record: { uri } }, 'bsky'),
+      ).not.toThrow()
+      expect(() =>
+        validator.assertValid(
+          { text: 'Sortie', boundary, embed: { record: { uri, cid: 'c' } } },
+          'zone.stratos.feed.post',
+        ),
+      ).not.toThrow()
+    },
+  )
+
+  it.each([
+    ['the earlier space spelling', earlierSpelling],
+    ['an upper-case scheme', 'AT://did:plc:rei/zone.stratos.feed.post/eva00'],
+    ['an extra part', 'at://did:plc:rei/zone.stratos.feed.post/eva00/unit01'],
+    ['an empty collection part', 'at://did:plc:rei//zone.stratos.feed.post'],
+  ])('still refuses %s as a reply parent', (_name, uri) => {
+    const good = {
+      uri: 'at://did:plc:rei/zone.stratos.feed.post/eva00',
+      cid: 'c',
+    }
+    expect(() =>
+      validator.assertValid(
+        {
+          text: 'Sortie',
+          boundary,
+          reply: { parent: { uri, cid: 'c' }, root: good },
+        },
+        'zone.stratos.feed.post',
+      ),
+    ).toThrow(expect.objectContaining({ code: 'CrossNamespaceReply' }))
   })
 })

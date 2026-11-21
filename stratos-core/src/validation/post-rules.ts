@@ -22,7 +22,11 @@ export function recordUriCollection(uri: unknown): string | undefined {
   const spaceRecord = parseRecordUri(uri)
   if (spaceRecord.ok) return spaceRecord.value.collection
   if (!uri.startsWith(AT_SCHEME)) return undefined
-  if (uri.slice(AT_SCHEME.length).split('/').length !== REPO_URI_PART_COUNT) {
+  const repoUriParts = uri.slice(AT_SCHEME.length).split('/')
+  // `AtUri` skips an empty part, so it would read the record key of
+  // `at://{repo}//{rkey}` as the collection.
+  const collectionPartIsEmpty = repoUriParts[1] === ''
+  if (repoUriParts.length !== REPO_URI_PART_COUNT || collectionPartIsEmpty) {
     return undefined
   }
   try {
@@ -35,11 +39,24 @@ export function recordUriCollection(uri: unknown): string | undefined {
 /**
  * Checks if a URI references a stratos collection.
  *
+ * Strict, because a reply has to point at a record by a URI that addresses
+ * it. The embed guard on public posts reads more loosely, see
+ * {@link isStratosEmbedUri}.
+ *
  * @param uri - The URI to check
  * @returns true if the URI references a stratos collection, false otherwise
  */
 export function isStratosUri(uri: string): boolean {
   return recordUriCollection(uri)?.startsWith('zone.stratos.') ?? false
+}
+
+/**
+ * Reads as loosely as {@link isBskyUri}, so a public post cannot embed a
+ * Stratos record in any spelling the upstream parser reads.
+ */
+function isStratosEmbedUri(uri: string): boolean {
+  const collection = recordUriCollection(uri) ?? lenientUriCollection(uri)
+  return collection?.startsWith('zone.stratos.') ?? false
 }
 
 /**
@@ -54,9 +71,9 @@ export function isBskyUri(uri: string): boolean {
 }
 
 /**
- * The embed guard has to refuse every spelling the upstream parser reads
+ * The embed guards have to refuse every spelling the upstream parser reads
  * (any scheme case, no scheme, any depth), not only the strict forms, because
- * it is the only guard on the legacy write path.
+ * they are the only guard on the legacy write path.
  */
 function lenientUriCollection(uri: string): string | undefined {
   try {
@@ -81,7 +98,7 @@ export function assertNoCrossNamespaceEmbed(
     return
   }
 
-  const isInvalidUri = namespace === 'stratos' ? isBskyUri : isStratosUri
+  const isInvalidUri = namespace === 'stratos' ? isBskyUri : isStratosEmbedUri
   const errorMessage =
     namespace === 'stratos'
       ? 'cannot embed bsky content'

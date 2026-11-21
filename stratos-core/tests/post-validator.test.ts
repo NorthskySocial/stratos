@@ -272,3 +272,56 @@ describe('PostValidator', () => {
     })
   })
 })
+
+describe('PostValidator with loosely spelled Stratos references', () => {
+  const validator = new PostValidator({
+    serviceDid: 'did:web:nerv.tokyo.jp',
+    allowedDomains: ['engineering'],
+    retentionDays: 90,
+  })
+  const boundary = { values: [{ value: 'engineering' }] }
+  const looseStratosUris: Array<[string, string]> = [
+    ['an upper-case scheme', 'AT://did:plc:rei/zone.stratos.feed.post/eva00'],
+    ['a mixed-case scheme', 'At://did:plc:rei/zone.stratos.feed.post/eva00'],
+    ['no scheme', 'did:plc:rei/zone.stratos.feed.post/eva00'],
+    ['an extra part', 'at://did:plc:rei/zone.stratos.feed.post/eva00/unit01'],
+    ['no record key', 'at://did:plc:rei/zone.stratos.feed.post'],
+    ['an empty collection part', 'at://did:plc:rei//zone.stratos.feed.post'],
+  ]
+
+  it.each(looseStratosUris)(
+    'lets a Stratos post embed one spelled with %s',
+    (_name, uri) => {
+      expect(() =>
+        validator.validate({ boundary, embed: { record: { uri, cid: 'c' } } }),
+      ).not.toThrow()
+    },
+  )
+
+  it('lets a Stratos post embed a record of a collection in neither namespace, as the post rule does', () => {
+    expect(() =>
+      validator.validate({
+        boundary,
+        embed: {
+          record: { uri: 'at://did:plc:rei/com.example.misc/eva00', cid: 'c' },
+        },
+      }),
+    ).not.toThrow()
+  })
+
+  it.each(looseStratosUris)(
+    'refuses one spelled with %s as a reply root',
+    (_name, uri) => {
+      const good = {
+        uri: 'at://did:plc:rei/zone.stratos.feed.post/eva00',
+        cid: 'c',
+      }
+      expect(() =>
+        validator.validate({
+          boundary,
+          reply: { parent: good, root: { uri, cid: 'c' } },
+        }),
+      ).toThrow(expect.objectContaining({ code: 'CrossNamespaceReply' }))
+    },
+  )
+})

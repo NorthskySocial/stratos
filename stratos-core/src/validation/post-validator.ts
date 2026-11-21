@@ -1,6 +1,6 @@
 import { StratosValidationError } from '../types.js'
 import { BaseValidator, type RepoRecord } from './base.js'
-import { isBskyUri, isStratosUri, recordUriCollection } from './post-rules.js'
+import { isBskyUri, isStratosUri } from './post-rules.js'
 
 interface ReplyRef {
   root?: { uri?: unknown }
@@ -95,17 +95,14 @@ export class PostValidator extends BaseValidator {
 
     const embeddedUri = e.record?.uri
     if (embeddedUri) {
-      const collection = recordUriCollection(embeddedUri)
-      const isStratos = collection?.startsWith('zone.stratos.')
-      const refusedAsNonStratos =
-        collection === undefined ? isBskyUri(embeddedUri) : !isStratos
-      if (namespace === 'stratos' && refusedAsNonStratos) {
+      // Same answer as the post rule, which is the check the service runs.
+      if (namespace === 'stratos' && isBskyUri(embeddedUri)) {
         throw new StratosValidationError(
           'Stratos records cannot embed non-Stratos content',
           'CrossNamespaceEmbed',
         )
       }
-      if (namespace === 'bsky' && isStratos) {
+      if (namespace === 'bsky' && isStratosUri(embeddedUri)) {
         throw new StratosValidationError(
           'Non-Stratos records cannot embed Stratos content',
           'CrossNamespaceEmbed',
