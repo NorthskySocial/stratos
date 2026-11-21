@@ -328,3 +328,28 @@ describe('custody-aware room posting', () => {
     expect(fetchHandler).not.toHaveBeenCalled()
   })
 })
+
+describe('room posting for a room named like an inherited property', () => {
+  it.each([
+    'constructor',
+    'toString',
+    'hasOwnProperty',
+    'valueOf',
+    '__proto__',
+  ])(
+    'sends nothing for the room %s when an ordinary config object has no space for it',
+    async (roomId) => {
+      const fetchHandler = vi.fn()
+      await expect(
+        createRoomPost({
+          session: { sub: 'did:plc:asuka', fetchHandler } as never,
+          custody: 'pds',
+          roomId,
+          text: 'I am here.',
+          config: { pdsSpaceUriByRoom: {} },
+        }),
+      ).rejects.toBeInstanceOf(RoomPostConfigurationError)
+      expect(fetchHandler).not.toHaveBeenCalled()
+    },
+  )
+})

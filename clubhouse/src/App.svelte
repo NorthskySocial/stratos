@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte'
   import { fetchRoomCatalog } from './lib/catalog'
   import { loadClubhouseConfig, roomCatalogEndpoint } from './lib/config'
+  import { ownValue } from './lib/dictionary'
   import IconaMoon from './lib/components/IconaMoon.svelte'
   import Entrance from './lib/components/Entrance.svelte'
   import ErrorState from './lib/components/ErrorState.svelte'
@@ -229,13 +230,14 @@
           )
           if (requestEpoch !== accessRequestEpoch) return
           viewerCustody = activeIntegration.viewerCustody?.() ?? null
-          const nextStates: Record<string, RoomAccessState> = {}
+          const nextStates: Array<[string, RoomAccessState]> = []
           for (const room of entries) {
-            const resolvedState = resolved[room.id]
-            if (resolvedState) nextStates[room.id] = resolvedState
-            else if (identity) nextStates[room.id] = 'status-error'
+            const resolvedState = ownValue(resolved, room.id)
+            if (resolvedState) nextStates.push([room.id, resolvedState])
+            else if (identity) nextStates.push([room.id, 'status-error'])
           }
-          states = nextStates
+          // Built from entries, so a room named `__proto__` keeps its state.
+          states = Object.fromEntries(nextStates)
         } catch {
           if (requestEpoch !== accessRequestEpoch) return
           viewerCustody = null

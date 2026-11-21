@@ -238,6 +238,37 @@ describe('inspector sources', () => {
       expect(publicRequests).toEqual([])
     },
   )
+
+  it.each([
+    ['a custody record', `${CUSTODY_POST}\n`],
+    ['a custody record', `${CUSTODY_POST}\r\n`],
+    ['an own space record', `${OWN_POST}\n`],
+    ['an own space record', `${OWN_POST}\r\n`],
+    ['another author space record', `${OTHER_POST}\n`],
+  ])(
+    'says the address is not valid for %s ending in a line terminator and sends nothing',
+    async (_label, uri) => {
+      const { session, requests } = sessionFor(SPIKE, () => new Response('{}'))
+      mountInspector(session, {
+        uri,
+        record: { text: 'See you, space cowboy.' },
+      })
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'This record address is not valid',
+      )
+      expect(screen.queryByText('Public Record')).not.toBeInTheDocument()
+      expect(
+        screen.queryByText('Private Hydrated Record'),
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByText('Your record on your PDS'),
+      ).not.toBeInTheDocument()
+      expect(screen.queryByText('Feed snapshot')).not.toBeInTheDocument()
+      expect(requests).toEqual([])
+      expect(publicRequests).toEqual([])
+    },
+  )
 })
 
 describe('late answers and changed sessions', () => {

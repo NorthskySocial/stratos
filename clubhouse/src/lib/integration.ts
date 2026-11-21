@@ -6,6 +6,7 @@ import {
   roomStatusEndpoint,
   type ClubhouseConfig,
 } from './config'
+import { emptyDictionary, ownValue } from './dictionary'
 import { resolveAuthenticatedHandle } from './enrollment'
 import { getFeed, type FeedPage } from './feedgen'
 import { rememberRoomReturn, roomJoinUrl } from './join'
@@ -47,7 +48,7 @@ function parseRoomStates(
 ): Readonly<Record<string, RoomAccessState>> {
   if (!Array.isArray(payload.rooms)) return {}
   const known = new Set(knownRoomIds)
-  const states: Record<string, RoomAccessState> = {}
+  const states = emptyDictionary<RoomAccessState>()
   for (const item of payload.rooms) {
     if (typeof item !== 'object' || item === null) continue
     const { id, state } = item as { id?: unknown; state?: unknown }
@@ -233,7 +234,7 @@ export function createClubhouseIntegration(
 
   async function getRoomState(roomId: string): Promise<RoomAccessState> {
     const states = await getRoomStates([roomId])
-    return states[roomId] ?? (session ? 'status-error' : 'unjoined')
+    return ownValue(states, roomId) ?? (session ? 'status-error' : 'unjoined')
   }
 
   async function getRoomStates(

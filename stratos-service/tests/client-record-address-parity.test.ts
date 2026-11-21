@@ -78,6 +78,16 @@ const collection = fc.constantFrom(
   'app.bsky.feed.like',
 )
 
+// Line terminators and control characters arrive with copied or pasted
+// addresses; JavaScript's `$` must never let one through at the end.
+const LINE_TERMINATORS = ['\n', '\r', '\r\n', '\u2028', '\u2029']
+const CONTROL_CHARACTERS = ['\u0000', '\t', '\u000b', '\u000c', '\u0085']
+const CORRUPTIONS = [
+  ...['/', '%', ':', ' ', '?', '#', 'é', '\ud800', 'a'],
+  ...LINE_TERMINATORS,
+  ...CONTROL_CHARACTERS,
+]
+
 const validAddress = fc.oneof(
   fc
     .tuple(spaceDid, key, spaceDid, collection, key)
@@ -109,7 +119,7 @@ describe('client record address classifier against stratos-core', () => {
       fc.property(
         validAddress,
         fc.nat(),
-        fc.constantFrom('/', '%', ':', ' ', '?', '#', 'é', '\ud800', 'a'),
+        fc.constantFrom(...CORRUPTIONS),
         (address, position, replacement) => {
           expect(clientClassification(address)).toEqual(
             coreClassification(address),
@@ -120,6 +130,22 @@ describe('client record address classifier against stratos-core', () => {
             address.slice(0, at) + replacement + address.slice(at + 1)
           expect(clientClassification(corrupted)).toEqual(
             coreClassification(corrupted),
+          )
+        },
+      ),
+      { numRuns: 200 },
+    )
+  })
+
+  it('agrees on 200 generated addresses with a character appended', () => {
+    fc.assert(
+      fc.property(
+        validAddress,
+        fc.constantFrom(...CORRUPTIONS),
+        (address, appended) => {
+          const extended = address + appended
+          expect(clientClassification(extended)).toEqual(
+            coreClassification(extended),
           )
         },
       ),

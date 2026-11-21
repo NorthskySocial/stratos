@@ -726,3 +726,26 @@ describe('Clubhouse integration', () => {
     expect(fetchHandler).not.toHaveBeenCalled()
   })
 })
+
+describe('room state for a room named like an inherited property', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it.each([
+    'constructor',
+    'toString',
+    'hasOwnProperty',
+    'valueOf',
+    '__proto__',
+  ])(
+    'reads the room %s as unjoined for a visitor who is not signed in',
+    async (roomId) => {
+      mocks.auth.init.mockResolvedValue(null)
+      const integration = createClubhouseIntegration({ pdsSpaceUriByRoom: {} })
+      await integration.initialize()
+
+      await expect(integration.getRoomState(roomId)).resolves.toBe('unjoined')
+    },
+  )
+})

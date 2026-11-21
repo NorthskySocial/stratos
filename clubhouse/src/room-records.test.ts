@@ -862,3 +862,253 @@ describe('deleting a post kept somewhere else than the member posts', () => {
     },
   )
 })
+
+describe('a record address ending in a line terminator', () => {
+  const topic = pictured(spacePost(FAYE, '3kswordfish', 'Who has the bounty?'))
+
+  it.each([
+    ['a line feed', '\n'],
+    ['a carriage return and line feed', '\r\n'],
+  ])(
+    'refuses a topic link ending in %s, opens no thread and sends nothing',
+    async (_label, terminator) => {
+      await openRoom({
+        custody: 'pds',
+        posts: [topic],
+        path: `/rooms/bebop?topic=${encodeURIComponent(topic.uri + terminator)}`,
+      })
+
+      expect(document.querySelector('.thread-view')).toBeNull()
+      const notices = regionsWithRole('status', TOPIC_REFUSED)
+      expect(notices).toHaveLength(1)
+      expect(notices[0].textContent?.trim()).toBe(TOPIC_REFUSED)
+      expect(requests).toEqual([])
+      expect(publicRequests).toEqual([])
+    },
+  )
+
+  it('refuses to open a feed post whose address ends in a line feed', async () => {
+    const odd = { ...topic, uri: `${topic.uri}\n` }
+    await openRoom({ custody: 'pds', posts: [odd] })
+
+    button('Open topic').click()
+    await tick()
+
+    expect(document.querySelector('.thread-view')).toBeNull()
+    expect(regionsWithRole('status', TOPIC_REFUSED)).toHaveLength(1)
+    expect(window.location.search).toBe('')
+    expect(requests).toEqual([])
+    expect(publicRequests).toEqual([])
+  })
+
+  it.each([
+    ['a PDS-custody member and a space address', 'pds', 'space', '\n'],
+    ['a PDS-custody member and a space address', 'pds', 'space', '\r\n'],
+    [
+      'a Stratos-custody member and a custody address',
+      'stratos',
+      'custody',
+      '\n',
+    ],
+    [
+      'a Stratos-custody member and a custody address',
+      'stratos',
+      'custody',
+      '\r\n',
+    ],
+  ] as const)(
+    'refuses the delete for %s ending in a line terminator and sends nothing',
+    async (_label, custody, kind, terminator) => {
+      const post = pictured(
+        kind === 'custody'
+          ? custodyPost(SPIKE, '3kswordfish', 'Bang.')
+          : spacePost(SPIKE, '3kswordfish', 'Bang.'),
+      )
+      await openRoom({
+        custody,
+        posts: [{ ...post, uri: post.uri + terminator }],
+      })
+
+      button('Delete').click()
+      await tick()
+      button('Delete now').click()
+      await vi.waitFor(() =>
+        expect(document.querySelector('.delete-error')?.textContent).toBe(
+          'The post reference is invalid.',
+        ),
+      )
+      expect(requests).toEqual([])
+      expect(publicRequests).toEqual([])
+      expect(document.body.textContent).toContain('Bang.')
+    },
+  )
+})
+
+describe('rooms named like the properties every object inherits', () => {
+  const INHERITED_NAMES = [
+    'constructor',
+    'toString',
+    'hasOwnProperty',
+    'valueOf',
+    '__proto__',
+  ]
+  const INVALID_SPACE =
+    'at://did:web:stratos.example/zone.stratos.space.feed/bebop'
+  const problemFor = (roomId: string) =>
+    `Posting is not set up for the room "${roomId}": the space it was given is not a valid space address. Ask whoever runs this Clubhouse to correct it.`
+
+  // The configured value is written as JSON text, so a `__proto__` key reaches
+  // the reader exactly as an operator would write it.
+  function spacesJson(entries: Array<[string, string]>): string {
+    return JSON.stringify(Object.fromEntries(entries))
+  }
+
+  async function openNamedRoom(
+    roomId: string,
+    custody: RoomCustody,
+    configuredSpaces: string,
+  ) {
+    vi.stubEnv('VITE_STRATOS_URL', 'https://stratos.example')
+    vi.stubEnv('VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON', configuredSpaces)
+    respondTo = (request) =>
+      request.url === STATUS_URL
+        ? new Response(
+            JSON.stringify({
+              rooms: [{ id: roomId, state: 'joined' }],
+              custody,
+            }),
+            { status: 200 },
+          )
+        : new Response('{}', { status: 200 })
+    mocks.session = {
+      sub: SPIKE,
+      fetchHandler: async (url: string, init?: RequestInit) => {
+        const request: RecordedRequest = {
+          url,
+          method: init?.method ?? 'GET',
+          ...(typeof init?.body === 'string'
+            ? { body: JSON.parse(init.body) as unknown }
+            : {}),
+        }
+        requests.push(request)
+        return respondTo(request)
+      },
+    }
+    const getFeed = vi.fn(async () => ({ posts: [] }))
+    const integration = {
+      ...createClubhouseIntegration(loadClubhouseConfig()),
+      getFeed,
+    }
+    window.history.replaceState({}, '', `/rooms/${encodeURIComponent(roomId)}`)
+    component = mount(App, {
+      target: document.body,
+      props: {
+        integration,
+        catalogFetcher: vi.fn().mockResolvedValue([
+          {
+            id: roomId,
+            displayName: 'Bebop',
+            description: 'The crew lounge',
+            available: true,
+          },
+        ]),
+      },
+    })
+    await vi.waitFor(() =>
+      expect(document.querySelector('.feed-panel')).not.toBeNull(),
+    )
+    await vi.waitFor(() => expect(getFeed).toHaveBeenCalled())
+    await tick()
+    requests.length = 0
+  }
+
+  async function postBang(roomId: string) {
+    respondTo = (request) =>
+      request.url === STATUS_URL
+        ? new Response(
+            JSON.stringify({
+              rooms: [{ id: roomId, state: 'joined' }],
+              custody: 'pds',
+            }),
+            { status: 200 },
+          )
+        : new Response(
+            JSON.stringify({
+              uri: `${SPACE}/${SPIKE}/zone.stratos.feed.post/3knew`,
+              cid: 'cid-new',
+            }),
+            { status: 200 },
+          )
+    const field = await type('#room-post', 'Bang.')
+    submit(field)
+    return field
+  }
+
+  it.each(INHERITED_NAMES)(
+    'shows no alert for the room %s with a valid space, and posts with that space',
+    async (roomId) => {
+      await openNamedRoom(roomId, 'pds', spacesJson([[roomId, SPACE]]))
+      expect(regionsWithRole('alert', '')).toEqual([])
+      expect(document.body.textContent).not.toContain('Posting is not set up')
+
+      await postBang(roomId)
+      await vi.waitFor(() => expect(requests).toHaveLength(2))
+      expect(requests[0]).toEqual({ url: STATUS_URL, method: 'GET' })
+      expect(requests[1]).toMatchObject({
+        url: '/xrpc/com.atproto.space.createRecord',
+        method: 'POST',
+        body: {
+          space: SPACE,
+          repo: SPIKE,
+          collection: 'zone.stratos.feed.post',
+          record: { text: 'Bang.' },
+        },
+      })
+      expect(publicRequests).toEqual([])
+    },
+  )
+
+  it.each(INHERITED_NAMES)(
+    'names the room %s when its space is invalid, to a PDS-custody member',
+    async (roomId) => {
+      await openNamedRoom(roomId, 'pds', spacesJson([[roomId, INVALID_SPACE]]))
+      const alerts = regionsWithRole('alert', '')
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].textContent?.trim()).toBe(problemFor(roomId))
+      expect(requests).toEqual([])
+      expect(publicRequests).toEqual([])
+    },
+  )
+
+  it.each(INHERITED_NAMES)(
+    'shows no alert for the room %s with an invalid space to a Stratos-custody member',
+    async (roomId) => {
+      await openNamedRoom(
+        roomId,
+        'stratos',
+        spacesJson([[roomId, INVALID_SPACE]]),
+      )
+      expect(regionsWithRole('alert', '')).toEqual([])
+      expect(document.body.textContent).not.toContain('Posting is not set up')
+    },
+  )
+
+  it.each(INHERITED_NAMES)(
+    'shows nothing and sends no post for the room %s when no space is configured for it',
+    async (roomId) => {
+      await openNamedRoom(roomId, 'pds', spacesJson([['bebop', SPACE]]))
+      expect(regionsWithRole('alert', '')).toEqual([])
+      expect(document.body.textContent).not.toContain('Posting is not set up')
+
+      const field = await postBang(roomId)
+      await vi.waitFor(() =>
+        expect(document.querySelector('#room-post-message')?.textContent).toBe(
+          'Posting needs service configuration for this room.',
+        ),
+      )
+      expect(requests).toEqual([{ url: STATUS_URL, method: 'GET' }])
+      expect(field.value).toBe('Bang.')
+      expect(publicRequests).toEqual([])
+    },
+  )
+})

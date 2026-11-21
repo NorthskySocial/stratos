@@ -26,3 +26,26 @@ describe('room UI state', () => {
     )
   })
 })
+
+describe('room UI state for rooms named like inherited properties', () => {
+  it.each([
+    'constructor',
+    'toString',
+    'hasOwnProperty',
+    'valueOf',
+    '__proto__',
+  ])(
+    'falls back to the default state for the room %s when no state was given for it',
+    (roomId) => {
+      expect(stateForRoom({ ...available, id: roomId }, {})).toBe('unjoined')
+    },
+  )
+
+  it.each(['constructor', '__proto__'])(
+    'uses the state given for the room %s',
+    (roomId) => {
+      const states = Object.fromEntries([[roomId, 'joined' as const]])
+      expect(stateForRoom({ ...available, id: roomId }, states)).toBe('joined')
+    },
+  )
+})

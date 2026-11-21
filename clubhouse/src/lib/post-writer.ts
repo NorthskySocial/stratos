@@ -1,6 +1,7 @@
 import type { OAuthSession } from '@atproto/oauth-client-browser'
 import { parseRecordAddress } from '@northskysocial/stratos-client'
 import type { ClubhouseConfig } from './config'
+import { ownValue } from './dictionary'
 import type { RoomCustody } from './types'
 
 const POST_COLLECTION = 'zone.stratos.feed.post'
@@ -103,7 +104,7 @@ export async function createRoomPost(input: RoomPostInput): Promise<PostRef> {
     })
   }
 
-  const space = input.config.pdsSpaceUriByRoom[input.roomId]
+  const space = ownValue(input.config.pdsSpaceUriByRoom, input.roomId)
   if (!space) throw new RoomPostConfigurationError()
   const response = await input.session.fetchHandler(
     '/xrpc/com.atproto.space.createRecord',

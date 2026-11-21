@@ -548,7 +548,8 @@ Each helper returns `{ ok: true, value }` or `{ ok: false, reason }`.
   `at://{did}/{collection}/{rkey}`, with a valid DID, an NSID collection, a valid record key and
   exactly three parts, it returns `{ ok: true, value: { kind: 'custody', author, collection, rkey } }`.
   Every other string, including a handle authority, a query or fragment, a space URI, or a string
-  with surrounding spaces, is `{ ok: false, reason: 'not a record address' }`, the same reason
+  with a space, a line break or another control character anywhere, the end included, is
+  `{ ok: false, reason: 'not a record address' }`, the same reason
   every time. Nothing is decoded, trimmed or case-folded: decode a link yourself first, and note
   that `decodeURIComponent` throws on a bad escape while `URLSearchParams` keeps it and turns a `+`
   into a space. A DID can itself hold a percent escape, such as the port in

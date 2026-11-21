@@ -1,5 +1,10 @@
 import { AtUri } from '@atproto/syntax'
-import { AT_SCHEME, parseRecordUri } from '../spaces/domain.js'
+import {
+  AT_SCHEME,
+  isValidNsidStr,
+  isValidRkey,
+  parseRecordUri,
+} from '../spaces/domain.js'
 import { StratosConfig, StratosValidationError } from '../types.js'
 import type { RepoRecord } from './base.js'
 import type { RecordRule, RecordRuleInput } from './registry.js'
@@ -23,12 +28,11 @@ export function recordUriCollection(uri: unknown): string | undefined {
   if (spaceRecord.ok) return spaceRecord.value.collection
   if (!uri.startsWith(AT_SCHEME)) return undefined
   const repoUriParts = uri.slice(AT_SCHEME.length).split('/')
-  // `AtUri` skips an empty part, so it would read the record key of
-  // `at://{repo}//{rkey}` as the collection.
-  const collectionPartIsEmpty = repoUriParts[1] === ''
-  if (repoUriParts.length !== REPO_URI_PART_COUNT || collectionPartIsEmpty) {
-    return undefined
-  }
+  if (repoUriParts.length !== REPO_URI_PART_COUNT) return undefined
+  // `AtUri` takes any character but whitespace, `?` and `#` after the
+  // authority, so a NUL or another control character would pass through it.
+  const [, collection, rkey] = repoUriParts
+  if (!isValidNsidStr(collection) || !isValidRkey(rkey)) return undefined
   try {
     return new AtUri(uri).collection
   } catch {

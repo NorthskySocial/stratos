@@ -132,3 +132,69 @@ describe('Clubhouse room space configuration', () => {
     expect(loadClubhouseConfig({}).pdsSpaceProblemByRoom ?? {}).toEqual({})
   })
 })
+
+describe('room names that every object inherits', () => {
+  const INHERITED_NAMES = [
+    'constructor',
+    'toString',
+    'hasOwnProperty',
+    'valueOf',
+    '__proto__',
+  ]
+  const VALID_SPACE =
+    'at:space/did:web:nerv.example/zone.stratos.space.feed/tokyo-3'
+  const INVALID_SPACE =
+    'at://did:web:nerv.example/zone.stratos.space.feed/tokyo-3'
+
+  // JSON text, as an operator writes it: `JSON.parse` makes a `__proto__` key
+  // an own property, which the reader then keeps as the room of that name.
+  const configFromJson = (json: string) =>
+    loadClubhouseConfig({ VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON: json })
+  const jsonWith = (roomId: string, value: string) =>
+    JSON.stringify(Object.fromEntries([[roomId, value]]))
+
+  it.each(INHERITED_NAMES)(
+    'keeps a valid space for the room %s and finds no problem for it',
+    (roomId) => {
+      const config = configFromJson(jsonWith(roomId, VALID_SPACE))
+      expect(Object.entries(config.pdsSpaceUriByRoom)).toEqual([
+        [roomId, VALID_SPACE],
+      ])
+      expect(config.pdsSpaceUriByRoom[roomId]).toBe(VALID_SPACE)
+      expect(Object.entries(config.pdsSpaceProblemByRoom ?? {})).toEqual([])
+      expect(config.pdsSpaceProblemByRoom?.[roomId]).toBeUndefined()
+    },
+  )
+
+  it.each(INHERITED_NAMES)(
+    'names the room %s when its space is invalid and keeps no space for it',
+    (roomId) => {
+      const config = configFromJson(jsonWith(roomId, INVALID_SPACE))
+      const problem = `Posting is not set up for the room "${roomId}": the space it was given is not a valid space address. Ask whoever runs this Clubhouse to correct it.`
+      expect(Object.entries(config.pdsSpaceProblemByRoom ?? {})).toEqual([
+        [roomId, problem],
+      ])
+      expect(config.pdsSpaceProblemByRoom?.[roomId]).toBe(problem)
+      expect(Object.entries(config.pdsSpaceUriByRoom)).toEqual([])
+      expect(config.pdsSpaceUriByRoom[roomId]).toBeUndefined()
+    },
+  )
+
+  it.each(INHERITED_NAMES)(
+    'has neither a space nor a problem for the room %s when only another room is configured',
+    (roomId) => {
+      const config = configFromJson(jsonWith('bebop', VALID_SPACE))
+      expect(config.pdsSpaceUriByRoom[roomId]).toBeUndefined()
+      expect(config.pdsSpaceProblemByRoom?.[roomId]).toBeUndefined()
+    },
+  )
+
+  it.each(INHERITED_NAMES)(
+    'has neither a space nor a problem for the room %s when nothing is configured',
+    (roomId) => {
+      const config = loadClubhouseConfig({})
+      expect(config.pdsSpaceUriByRoom[roomId]).toBeUndefined()
+      expect(config.pdsSpaceProblemByRoom?.[roomId]).toBeUndefined()
+    },
+  )
+})

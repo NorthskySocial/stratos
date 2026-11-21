@@ -1,4 +1,5 @@
 import { parseSpaceUri } from '@northskysocial/stratos-client'
+import { emptyDictionary } from './dictionary'
 
 /** Public deployment settings injected by Vite at build time. */
 export interface ClubhouseConfig {
@@ -62,14 +63,19 @@ function spaceProblem(roomId: string): string {
 function parseSpaceUris(
   value: string | undefined,
 ): Pick<ClubhouseConfig, 'pdsSpaceUriByRoom' | 'pdsSpaceProblemByRoom'> {
-  const none = { pdsSpaceUriByRoom: {}, pdsSpaceProblemByRoom: {} }
+  const none = {
+    pdsSpaceUriByRoom: emptyDictionary<string>(),
+    pdsSpaceProblemByRoom: emptyDictionary<string>(),
+  }
   if (!value) return none
   try {
     const parsed: unknown = JSON.parse(value)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
       return none
-    const spaces: Record<string, string> = {}
-    const problems: Record<string, string> = {}
+    const spaces = emptyDictionary<string>()
+    const problems = emptyDictionary<string>()
+    // `JSON.parse` gives a `__proto__` key as an own property, so it is read
+    // here as the room of that name.
     for (const [roomId, uri] of Object.entries(parsed)) {
       if (typeof uri === 'string' && parseSpaceUri(uri).ok) spaces[roomId] = uri
       else problems[roomId] = spaceProblem(roomId)
