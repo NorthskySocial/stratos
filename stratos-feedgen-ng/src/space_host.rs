@@ -1,6 +1,7 @@
 use std::{env, future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use cid::Cid;
 use reqwest::{Client, redirect::Policy};
 use serde::Deserialize;
 use serde_json::Value;
@@ -10,6 +11,10 @@ use url::Url;
 use crate::{
     identifier::Did,
     identity::{PrivateCidr, is_public_address, parse_private_cidrs},
+    space_archive::{
+        ArchiveItem, ArchiveReader, ArchiveRefusal, RecordOrderRefusal, check_record_order,
+        commit_from_metadata,
+    },
     space_http_signature::SpaceHttpSignatureHeaders,
     space_identity::{AuthorKemKeyResolver, KemKeyLookupError},
     space_kem::{AuthorKemKey, encapsulate},
@@ -17,7 +22,10 @@ use crate::{
         CommitResponseHeaders, MacRequestContext, MacVerifiedCommit, MacVerifyError,
         verify_commit_response,
     },
-    space_sync::{MAX_SPACE_PAGE_OPS, SpacePage, SpaceRepoOp},
+    space_record::{RecordDecodeRefusal, decode_record},
+    space_sync::{MAX_SPACE_PAGE_OPS, SpacePage, SpaceRepoOp, is_projected_collection},
+    space_value_budget::{ValueBudget, count_values},
+    store::VerifiedSpaceRecord,
 };
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -28,6 +36,11 @@ const MAX_REV_BYTES: usize = 512;
 const MAX_COLLECTION_BYTES: usize = 317;
 const MAX_RKEY_BYTES: usize = 512;
 const MAX_CID_BYTES: usize = 256;
+const STAR_CONTENT_TYPE: &str = "application/vnd.dasl.star";
+// The client-wide timeout covers the whole body and is sized for a page. An
+// archive can be sixteen times larger; the caller's absolute deadline is what
+// bounds the read, so this only has to be no shorter than that deadline.
+const ARCHIVE_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum SpaceHostError {
@@ -177,23 +190,95 @@ impl PinnedSpaceHostClient {
         limit: usize,
     ) -> Result<reqwest::RequestBuilder, SpaceHostError> {
         validate_request(space_uri, actor_did, cursor, limit)?;
-        let endpoint = self.endpoint_url("com.atproto.space.listRepoOps")?;
-        let mut url = endpoint;
-        {
-            let mut query = url.query_pairs_mut();
-            query.append_pair("space", space_uri);
-            query.append_pair("repo", actor_did);
-            query.append_pair("limit", &limit.to_string());
-            if let Some(cursor) = cursor {
-                query.append_pair("cursor", cursor);
-            }
+        let limit = limit.to_string();
+        let mut parameters = vec![
+            ("space", space_uri),
+            ("repo", actor_did),
+            ("limit", limit.as_str()),
+        ];
+        if let Some(cursor) = cursor {
+            parameters.push(("cursor", cursor));
         }
+        self.signed_request(
+            "com.atproto.space.listRepoOps",
+            &parameters,
+            actor_did,
+            "application/json",
+        )
+        .await
+    }
+
+    // One page of an authenticated read: `since` rides beside the cursor, and
+    // the MAC is asked for in the request itself.
+    async fn ops_request(
+        &self,
+        query: &RepoOpsQuery<'_>,
+        accept_signature: &str,
+    ) -> Result<reqwest::RequestBuilder, SpaceHostError> {
+        validate_request(query.space_uri, query.actor_did, query.cursor, query.limit)?;
+        if query
+            .since
+            .is_some_and(|since| since.is_empty() || since.len() > MAX_REV_BYTES)
+        {
+            return Err(SpaceHostError::InvalidRequest);
+        }
+        let limit = query.limit.to_string();
+        let mut parameters = vec![
+            ("space", query.space_uri),
+            ("repo", query.actor_did),
+            ("limit", limit.as_str()),
+        ];
+        if let Some(since) = query.since {
+            parameters.push(("since", since));
+        }
+        if let Some(cursor) = query.cursor {
+            parameters.push(("cursor", cursor));
+        }
+        Ok(self
+            .signed_request(
+                "com.atproto.space.listRepoOps",
+                &parameters,
+                query.actor_did,
+                "application/json",
+            )
+            .await?
+            .header("accept-signature", accept_signature))
+    }
+
+    async fn archive_request(
+        &self,
+        query: &RepoArchiveQuery<'_>,
+        accept_signature: &str,
+    ) -> Result<reqwest::RequestBuilder, SpaceHostError> {
+        validate_identifiers(query.space_uri, query.actor_did)?;
+        Ok(self
+            .signed_request(
+                "com.atproto.space.getRepo",
+                &[("space", query.space_uri), ("repo", query.actor_did)],
+                query.actor_did,
+                STAR_CONTENT_TYPE,
+            )
+            .await?
+            .header("accept-signature", accept_signature)
+            .timeout(ARCHIVE_REQUEST_TIMEOUT))
+    }
+
+    // The credential presentation is bound to the repo's owner, not to the host.
+    async fn signed_request(
+        &self,
+        lxm: &str,
+        parameters: &[(&str, &str)],
+        actor_did: &str,
+        accept: &str,
+    ) -> Result<reqwest::RequestBuilder, SpaceHostError> {
+        let mut url = self.endpoint_url(lxm)?;
+        url.query_pairs_mut().extend_pairs(parameters);
         let audience = Did::parse(actor_did).map_err(|_| SpaceHostError::InvalidRequest)?;
         let headers = self.proof.presentation_headers(&audience).await?;
         Ok(self
             .client
             .get(url)
-            .header("accept", "application/json")
+            .header("accept", accept)
             .header("authorization", headers.authorization())
             .header("atproto-space-audience", audience.as_str())
             .header("signature-input", headers.signature_input())
@@ -209,14 +294,18 @@ impl PinnedSpaceHostClient {
 
 impl PinnedSpaceHostClient {
     /// `listRepoOps` with the response authenticated: the body is returned only
-    /// with the commit its MAC covers. A stale KEM key is refreshed once and
-    /// the whole request is sent again with a new key share; every wait is
-    /// bounded by `deadline`.
+    /// with the commit its MAC covers. `since` is the revision of the base the
+    /// caller already holds (absent when it holds none) and rides on every page
+    /// beside that page's cursor. A stale KEM key is refreshed once and the
+    /// whole request is sent again with a new key share; every wait is bounded
+    /// by `deadline`.
+    #[allow(clippy::too_many_arguments)] // One page request names each of its parts.
     pub async fn list_repo_ops_authenticated(
         &self,
         kem_keys: &dyn AuthorKemKeyResolver,
         space_uri: &str,
         actor_did: &str,
+        since: Option<&str>,
         cursor: Option<&str>,
         limit: usize,
         deadline: Instant,
@@ -224,10 +313,35 @@ impl PinnedSpaceHostClient {
         let query = RepoOpsQuery {
             space_uri,
             actor_did,
+            since,
             cursor,
             limit,
         };
         authenticated_read(self, kem_keys, &query, deadline).await
+    }
+
+    /// `getRepo` with the response authenticated: the member's whole repo in the
+    /// space, returned only when the archive ended cleanly, its metadata commit
+    /// carries the response's MAC, and every record decoded and followed the
+    /// one before it in path order. The retry and deadline rules are those of
+    /// the page read. The records are not yet checked against the commit's
+    /// `data`: the store does that. A record in a collection the projection
+    /// does not read is held to its CID and returned without its value; the
+    /// values of the others are charged to `budget` as each is decoded, and an
+    /// archive that would pass it is refused whole.
+    pub async fn read_repo_archive_authenticated(
+        &self,
+        kem_keys: &dyn AuthorKemKeyResolver,
+        space_uri: &str,
+        actor_did: &str,
+        deadline: Instant,
+        budget: &ValueBudget,
+    ) -> Result<AuthenticatedArchive, AuthenticatedReadError> {
+        let query = RepoArchiveQuery {
+            space_uri,
+            actor_did,
+        };
+        authenticated_archive_read(self, kem_keys, &query, deadline, &decode_record, budget).await
     }
 }
 
@@ -248,13 +362,40 @@ impl AuthenticatedPage {
     }
 }
 
+/// A member's whole repo in a space with the commit that was verified for it.
+/// There is no way to take the records without the commit, and none to make one
+/// from an archive that was not read to its end marker with the MAC verified.
+pub struct AuthenticatedArchive {
+    commit: MacVerifiedCommit,
+    records: Vec<VerifiedSpaceRecord>,
+}
+
+impl AuthenticatedArchive {
+    pub fn commit(&self) -> &MacVerifiedCommit {
+        &self.commit
+    }
+
+    pub fn records(&self) -> &[VerifiedSpaceRecord] {
+        &self.records
+    }
+
+    pub fn into_parts(self) -> (MacVerifiedCommit, Vec<VerifiedSpaceRecord>) {
+        (self.commit, self.records)
+    }
+}
+
 /// `KemKeyUnavailable` defers the target; every other variant fails it.
+/// `Archive`, `ArchiveRecord` and `ArchiveOrder` carry fixed reasons only.
 #[derive(Debug, Eq, PartialEq)]
 pub enum AuthenticatedReadError {
     KemKeyUnavailable,
     KemKeyInvalid,
     Host(SpaceHostError),
     Authentication(MacVerifyError),
+    Archive(ArchiveRefusal),
+    ArchiveRecord(RecordDecodeRefusal),
+    ArchiveOrder(RecordOrderRefusal),
+    OverBudget,
     DeadlineExceeded,
 }
 
@@ -271,6 +412,12 @@ impl std::fmt::Display for AuthenticatedReadError {
             Self::KemKeyInvalid => formatter.write_str("author has no usable KEM key"),
             Self::Host(error) => error.fmt(formatter),
             Self::Authentication(error) => error.fmt(formatter),
+            Self::Archive(error) => error.fmt(formatter),
+            Self::ArchiveRecord(error) => error.fmt(formatter),
+            Self::ArchiveOrder(error) => error.fmt(formatter),
+            Self::OverBudget => {
+                formatter.write_str("archive holds more decoded values than allowed")
+            }
             Self::DeadlineExceeded => formatter.write_str("authenticated read ran out of time"),
         }
     }
@@ -280,18 +427,49 @@ impl std::error::Error for AuthenticatedReadError {}
 
 /// One page request, as it is sent and as the response's commit is bound to it.
 pub(crate) struct RepoOpsQuery<'a> {
-    space_uri: &'a str,
-    actor_did: &'a str,
-    cursor: Option<&'a str>,
-    limit: usize,
+    pub(crate) space_uri: &'a str,
+    pub(crate) actor_did: &'a str,
+    pub(crate) since: Option<&'a str>,
+    pub(crate) cursor: Option<&'a str>,
+    pub(crate) limit: usize,
+}
+
+/// One archive request.
+pub(crate) struct RepoArchiveQuery<'a> {
+    pub(crate) space_uri: &'a str,
+    pub(crate) actor_did: &'a str,
 }
 
 /// A success response: its body and the raw lines of the three headers that
 /// authenticate it. Nothing outside this module reads the body from it.
 #[derive(Clone)]
 pub(crate) struct SignedReadResponse {
-    body: Vec<u8>,
-    headers: CommitResponseHeaders,
+    pub(crate) body: Vec<u8>,
+    pub(crate) headers: CommitResponseHeaders,
+}
+
+/// A success response to an archive request. The body is not collected: it is
+/// read chunk by chunk, so the archive is never held whole beside its records.
+pub(crate) struct SignedArchiveResponse {
+    pub(crate) content_type: Option<String>,
+    pub(crate) headers: CommitResponseHeaders,
+    pub(crate) body: Box<dyn ArchiveBody>,
+}
+
+/// The chunks of an archive body, until `None`.
+#[async_trait]
+pub(crate) trait ArchiveBody: Send {
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, SpaceHostError>;
+}
+
+#[async_trait]
+impl ArchiveBody for reqwest::Response {
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, SpaceHostError> {
+        self.chunk()
+            .await
+            .map(|chunk| chunk.map(|bytes| bytes.to_vec()))
+            .map_err(classify_request_error)
+    }
 }
 
 /// Sending one request and collecting a success response. The pinned client
@@ -306,6 +484,17 @@ pub(crate) trait RepoOpsTransport: Send + Sync {
     ) -> Result<SignedReadResponse, SpaceHostError>;
 }
 
+/// Sending one archive request and handing back the response before its body
+/// is read.
+#[async_trait]
+pub(crate) trait RepoArchiveTransport: Send + Sync {
+    async fn send_archive(
+        &self,
+        query: &RepoArchiveQuery<'_>,
+        accept_signature: &str,
+    ) -> Result<SignedArchiveResponse, SpaceHostError>;
+}
+
 #[async_trait]
 impl RepoOpsTransport for PinnedSpaceHostClient {
     async fn send(
@@ -314,22 +503,49 @@ impl RepoOpsTransport for PinnedSpaceHostClient {
         accept_signature: &str,
     ) -> Result<SignedReadResponse, SpaceHostError> {
         let response = self
-            .repo_request(query.space_uri, query.actor_did, query.cursor, query.limit)
+            .ops_request(query, accept_signature)
             .await?
-            .header("accept-signature", accept_signature)
             .send()
             .await
             .map_err(classify_request_error)?;
         if !response.status().is_success() {
             return Err(request_error(response).await);
         }
-        let headers = CommitResponseHeaders {
-            commit: header_lines(&response, "atproto-space-commit"),
-            signature_input: header_lines(&response, "signature-input"),
-            signature: header_lines(&response, "signature"),
-        };
+        let headers = commit_response_headers(&response);
         let body = response_bytes(response, MAX_PAGE_BYTES).await?;
         Ok(SignedReadResponse { body, headers })
+    }
+}
+
+#[async_trait]
+impl RepoArchiveTransport for PinnedSpaceHostClient {
+    async fn send_archive(
+        &self,
+        query: &RepoArchiveQuery<'_>,
+        accept_signature: &str,
+    ) -> Result<SignedArchiveResponse, SpaceHostError> {
+        let response = self
+            .archive_request(query, accept_signature)
+            .await?
+            .send()
+            .await
+            .map_err(classify_request_error)?;
+        if !response.status().is_success() {
+            return Err(request_error(response).await);
+        }
+        Ok(SignedArchiveResponse {
+            content_type: header_lines(&response, "content-type").into_iter().next(),
+            headers: commit_response_headers(&response),
+            body: Box::new(response),
+        })
+    }
+}
+
+fn commit_response_headers(response: &reqwest::Response) -> CommitResponseHeaders {
+    CommitResponseHeaders {
+        commit: header_lines(response, "atproto-space-commit"),
+        signature_input: header_lines(response, "signature-input"),
+        signature: header_lines(response, "signature"),
     }
 }
 
@@ -343,20 +559,56 @@ fn header_lines(response: &reqwest::Response, name: &str) -> Vec<String> {
         .collect()
 }
 
-async fn authenticated_read(
+pub(crate) async fn authenticated_read(
     transport: &dyn RepoOpsTransport,
     kem_keys: &dyn AuthorKemKeyResolver,
     query: &RepoOpsQuery<'_>,
     deadline: Instant,
 ) -> Result<AuthenticatedPage, AuthenticatedReadError> {
-    let first_key = before(deadline, kem_keys.author_kem_key(query.actor_did))
+    read_with_key_refresh(kem_keys, query.actor_did, deadline, |kem_key| {
+        attempt(transport, kem_key, query, deadline)
+    })
+    .await
+}
+
+pub(crate) type RecordDecoder<'a> =
+    dyn Fn(&[u8]) -> Result<(Cid, Value), RecordDecodeRefusal> + Sync + 'a;
+
+pub(crate) async fn authenticated_archive_read(
+    transport: &dyn RepoArchiveTransport,
+    kem_keys: &dyn AuthorKemKeyResolver,
+    query: &RepoArchiveQuery<'_>,
+    deadline: Instant,
+    decode: &RecordDecoder<'_>,
+    budget: &ValueBudget,
+) -> Result<AuthenticatedArchive, AuthenticatedReadError> {
+    read_with_key_refresh(kem_keys, query.actor_did, deadline, |kem_key| {
+        archive_attempt(transport, kem_key, query, deadline, decode, budget)
+    })
+    .await
+}
+
+// The retry rule both reads share: only a MAC mismatch is taken for a stale
+// key, the key is refreshed once, and an unchanged key fails without a second
+// request. `attempt` makes its own ephemeral key and context each time.
+async fn read_with_key_refresh<T, Attempt, Pending>(
+    kem_keys: &dyn AuthorKemKeyResolver,
+    actor_did: &str,
+    deadline: Instant,
+    attempt: Attempt,
+) -> Result<T, AuthenticatedReadError>
+where
+    Attempt: Fn(AuthorKemKey) -> Pending,
+    Pending: Future<Output = Result<T, AuthenticatedReadError>>,
+{
+    let first_key = before(deadline, kem_keys.author_kem_key(actor_did))
         .await?
         .map_err(kem_lookup_failure)?;
-    match attempt(transport, &first_key, query, deadline).await {
+    match attempt(first_key.clone()).await {
         Err(AuthenticatedReadError::Authentication(MacVerifyError::MacMismatch)) => {}
         outcome => return outcome,
     }
-    let refreshed_key = before(deadline, kem_keys.refreshed_author_kem_key(query.actor_did))
+    let refreshed_key = before(deadline, kem_keys.refreshed_author_kem_key(actor_did))
         .await?
         .map_err(kem_lookup_failure)?;
     if refreshed_key == first_key {
@@ -364,17 +616,17 @@ async fn authenticated_read(
             MacVerifyError::MacMismatch,
         ));
     }
-    attempt(transport, &refreshed_key, query, deadline).await
+    attempt(refreshed_key).await
 }
 
 // Each attempt makes its own ephemeral key and consumes its own context.
 async fn attempt(
     transport: &dyn RepoOpsTransport,
-    kem_key: &AuthorKemKey,
+    kem_key: AuthorKemKey,
     query: &RepoOpsQuery<'_>,
     deadline: Instant,
 ) -> Result<AuthenticatedPage, AuthenticatedReadError> {
-    let secret = encapsulate(kem_key).map_err(|_| AuthenticatedReadError::KemKeyInvalid)?;
+    let secret = encapsulate(&kem_key).map_err(|_| AuthenticatedReadError::KemKeyInvalid)?;
     let context = MacRequestContext::new(secret, query.actor_did, query.space_uri);
     let accept_signature = context.accept_signature();
     let response = before(deadline, transport.send(query, &accept_signature))
@@ -387,6 +639,132 @@ async fn attempt(
         body: response.body,
         commit: verified,
     })
+}
+
+// The MAC is checked on the metadata, the first thing the archive holds, before
+// a record is looked at; what follows is collected locally and handed out only
+// when the archive has ended cleanly.
+async fn archive_attempt(
+    transport: &dyn RepoArchiveTransport,
+    kem_key: AuthorKemKey,
+    query: &RepoArchiveQuery<'_>,
+    deadline: Instant,
+    decode: &RecordDecoder<'_>,
+    budget: &ValueBudget,
+) -> Result<AuthenticatedArchive, AuthenticatedReadError> {
+    let secret = encapsulate(&kem_key).map_err(|_| AuthenticatedReadError::KemKeyInvalid)?;
+    let context = MacRequestContext::new(secret, query.actor_did, query.space_uri);
+    let accept_signature = context.accept_signature();
+    let mut response = before(deadline, transport.send_archive(query, &accept_signature))
+        .await?
+        .map_err(AuthenticatedReadError::Host)?;
+    if !is_star_content_type(response.content_type.as_deref()) {
+        return Err(AuthenticatedReadError::Host(
+            SpaceHostError::InvalidResponse,
+        ));
+    }
+    let mut reader = ArchiveReader::new();
+    let mut collector = ArchiveCollector {
+        unverified: Some((context, response.headers)),
+        verified: None,
+    };
+    while let Some(chunk) = before(deadline, response.body.next_chunk())
+        .await?
+        .map_err(AuthenticatedReadError::Host)?
+    {
+        reader
+            .push(&chunk)
+            .map_err(AuthenticatedReadError::Archive)?;
+        while let Some(item) = reader
+            .next_item()
+            .map_err(AuthenticatedReadError::Archive)?
+        {
+            collector.accept(item, decode, budget)?;
+        }
+    }
+    reader.finish().map_err(AuthenticatedReadError::Archive)?;
+    collector.finished()
+}
+
+struct VerifiedPrefix {
+    commit: MacVerifiedCommit,
+    records: Vec<VerifiedSpaceRecord>,
+    previous_path: Option<Vec<u8>>,
+}
+
+struct ArchiveCollector {
+    unverified: Option<(MacRequestContext, CommitResponseHeaders)>,
+    verified: Option<VerifiedPrefix>,
+}
+
+impl ArchiveCollector {
+    fn accept(
+        &mut self,
+        item: ArchiveItem,
+        decode: &RecordDecoder<'_>,
+        budget: &ValueBudget,
+    ) -> Result<(), AuthenticatedReadError> {
+        match item {
+            ArchiveItem::Metadata(metadata) => {
+                let (context, headers) = self
+                    .unverified
+                    .take()
+                    .ok_or(AuthenticatedReadError::Archive(ArchiveRefusal::BadMetadata))?;
+                let commit =
+                    commit_from_metadata(metadata).map_err(AuthenticatedReadError::Archive)?;
+                let commit = verify_commit_response(context, &headers, &commit)
+                    .map_err(AuthenticatedReadError::Authentication)?;
+                self.verified = Some(VerifiedPrefix {
+                    commit,
+                    records: Vec::new(),
+                    previous_path: None,
+                });
+            }
+            ArchiveItem::Record { path, value } => {
+                let prefix = self
+                    .verified
+                    .as_mut()
+                    .ok_or(AuthenticatedReadError::Archive(ArchiveRefusal::BadMetadata))?;
+                let path_of_record = check_record_order(prefix.previous_path.as_deref(), &path)
+                    .map_err(AuthenticatedReadError::ArchiveOrder)?;
+                let (cid, value) = decode(&value).map_err(AuthenticatedReadError::ArchiveRecord)?;
+                // The record was held to its bytes by the decoder; the digest
+                // covers its CID, so a value nothing will project is dropped
+                // here, uncounted, instead of being held until the store sees it.
+                let value = if is_projected_collection(path_of_record.collection()) {
+                    budget
+                        .charge(count_values(&value))
+                        .map_err(|_| AuthenticatedReadError::OverBudget)?;
+                    Some(value)
+                } else {
+                    None
+                };
+                prefix.records.push(VerifiedSpaceRecord {
+                    path: path_of_record,
+                    cid,
+                    value,
+                });
+                prefix.previous_path = Some(path);
+            }
+        }
+        Ok(())
+    }
+
+    fn finished(self) -> Result<AuthenticatedArchive, AuthenticatedReadError> {
+        let prefix = self.verified.ok_or(AuthenticatedReadError::Archive(
+            ArchiveRefusal::UnexpectedEnd,
+        ))?;
+        Ok(AuthenticatedArchive {
+            commit: prefix.commit,
+            records: prefix.records,
+        })
+    }
+}
+
+fn is_star_content_type(content_type: Option<&str>) -> bool {
+    content_type
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case(STAR_CONTENT_TYPE))
 }
 
 async fn before<T>(
@@ -510,13 +888,21 @@ fn validate_request(
     cursor: Option<&str>,
     limit: usize,
 ) -> Result<(), SpaceHostError> {
+    validate_identifiers(space_uri, actor_did)?;
+    if cursor.is_some_and(|value| value.is_empty() || value.len() > MAX_CURSOR_BYTES)
+        || limit == 0
+        || limit > MAX_SPACE_PAGE_OPS
+    {
+        return Err(SpaceHostError::InvalidRequest);
+    }
+    Ok(())
+}
+
+fn validate_identifiers(space_uri: &str, actor_did: &str) -> Result<(), SpaceHostError> {
     if space_uri.is_empty()
         || space_uri.len() > 2_048
         || actor_did.is_empty()
         || actor_did.len() > 2_048
-        || cursor.is_some_and(|value| value.is_empty() || value.len() > MAX_CURSOR_BYTES)
-        || limit == 0
-        || limit > MAX_SPACE_PAGE_OPS
     {
         return Err(SpaceHostError::InvalidRequest);
     }
@@ -930,6 +1316,7 @@ mod tests {
 mod authenticated_read_tests {
     use std::{
         collections::VecDeque,
+        net::SocketAddr,
         sync::{
             Mutex,
             atomic::{AtomicUsize, Ordering},
@@ -947,11 +1334,18 @@ mod authenticated_read_tests {
     use crate::{
         auth::IdentityResolutionError,
         identity::{DidDocumentSource, HttpIdentityKeyResolver},
+        space_archive::ArchiveLimit,
         space_identity::AuthorKemKeyResolver,
         space_kem::{AuthorKemKey, decapsulate},
         space_mac::{MacDefect, MacVerifyError},
         space_signature_fields::{members_with_tag, parse_dictionary},
     };
+
+    const REPO_ARCHIVE: &str =
+        include_str!("../../test/spaces-alignment/november/fixtures/repo-archive.json");
+    const RECORD_CID: &str =
+        include_str!("../../test/spaces-alignment/november/fixtures/record-cid.json");
+    const ARCHIVE_CHUNK_BYTES: usize = 97;
 
     const AUTHOR: &str = "did:plc:fayevalentine";
     const SPACE: &str = "at:space/did:web:bebop.example/zone.stratos.space.feed/crew";
@@ -1049,7 +1443,9 @@ mod authenticated_read_tests {
     struct TestHost {
         private_key: Mutex<SecretKey>,
         script: Mutex<VecDeque<Answer>>,
+        archive_script: Mutex<VecDeque<ArchiveAnswer>>,
         key_shares: Mutex<Vec<String>>,
+        page_positions: Mutex<Vec<(Option<String>, Option<String>)>>,
         first_response: Mutex<Option<SignedReadResponse>>,
     }
 
@@ -1058,9 +1454,20 @@ mod authenticated_read_tests {
             Arc::new(Self {
                 private_key: Mutex::new(private_key),
                 script: Mutex::new(script.into()),
+                archive_script: Mutex::new(VecDeque::new()),
                 key_shares: Mutex::new(Vec::new()),
+                page_positions: Mutex::new(Vec::new()),
                 first_response: Mutex::new(None),
             })
+        }
+
+        fn serving_archives(&self, script: Vec<ArchiveAnswer>) {
+            *self.archive_script.lock().unwrap() = script.into();
+        }
+
+        // The `since` and cursor of each page request, in the order sent.
+        fn page_positions(&self) -> Vec<(Option<String>, Option<String>)> {
+            self.page_positions.lock().unwrap().clone()
         }
 
         fn requests(&self) -> usize {
@@ -1097,20 +1504,7 @@ mod authenticated_read_tests {
             body_rev: &str,
             data_text: &str,
         ) -> SignedReadResponse {
-            let secret = decapsulate(&self.private_key.lock().unwrap(), key_share).unwrap();
-            let commit_header = format!(
-                "ver=1, repo=\"{repo}\", space=\"{space}\", rev=\"{REV}\", data=:{data_text}:"
-            );
-            let params = format!(
-                "(\"atproto-space-commit\";sf);keyid=\"{key_share}\";tag=\"atproto-space-commit\""
-            );
-            let mut mac = Hmac::<Sha256>::new_from_slice(secret.secret()).unwrap();
-            mac.update(
-                format!(
-                    "\"atproto-space-commit\";sf: {commit_header}\n\"@signature-params\": {params}"
-                )
-                .as_bytes(),
-            );
+            let headers = self.commit_headers(key_share, repo, space, REV, data_text);
             let body = json!({
                 "ops": [{ "text": BODY_MARKER }],
                 "commit": {
@@ -1123,14 +1517,39 @@ mod authenticated_read_tests {
             });
             SignedReadResponse {
                 body: serde_json::to_vec(&body).unwrap(),
-                headers: CommitResponseHeaders {
-                    commit: vec![commit_header],
-                    signature_input: vec![format!("mac={params}")],
-                    signature: vec![format!(
-                        "mac=:{}:",
-                        STANDARD.encode(mac.finalize().into_bytes())
-                    )],
-                },
+                headers,
+            }
+        }
+
+        fn commit_headers(
+            &self,
+            key_share: &str,
+            repo: &str,
+            space: &str,
+            rev: &str,
+            data_text: &str,
+        ) -> CommitResponseHeaders {
+            let secret = decapsulate(&self.private_key.lock().unwrap(), key_share).unwrap();
+            let commit_header = format!(
+                "ver=1, repo=\"{repo}\", space=\"{space}\", rev=\"{rev}\", data=:{data_text}:"
+            );
+            let params = format!(
+                "(\"atproto-space-commit\";sf);keyid=\"{key_share}\";tag=\"atproto-space-commit\""
+            );
+            let mut mac = Hmac::<Sha256>::new_from_slice(secret.secret()).unwrap();
+            mac.update(
+                format!(
+                    "\"atproto-space-commit\";sf: {commit_header}\n\"@signature-params\": {params}"
+                )
+                .as_bytes(),
+            );
+            CommitResponseHeaders {
+                commit: vec![commit_header],
+                signature_input: vec![format!("mac={params}")],
+                signature: vec![format!(
+                    "mac=:{}:",
+                    STANDARD.encode(mac.finalize().into_bytes())
+                )],
             }
         }
     }
@@ -1160,6 +1579,10 @@ mod authenticated_read_tests {
         ) -> Result<SignedReadResponse, SpaceHostError> {
             let key_share = requested_key_share(accept_signature);
             self.key_shares.lock().unwrap().push(key_share.clone());
+            self.page_positions.lock().unwrap().push((
+                query.since.map(str::to_owned),
+                query.cursor.map(str::to_owned),
+            ));
             let answer = self
                 .script
                 .lock()
@@ -1221,6 +1644,192 @@ mod authenticated_read_tests {
         }
     }
 
+    #[derive(Clone)]
+    struct Edit {
+        at: usize,
+        remove: usize,
+        insert: Vec<u8>,
+    }
+
+    fn hex_bytes(text: &str) -> Vec<u8> {
+        (0..text.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&text[at..at + 2], 16).expect("hex digit"))
+            .collect()
+    }
+
+    fn archive_fixture() -> Value {
+        serde_json::from_str(REPO_ARCHIVE).expect("fixture")
+    }
+
+    fn fixture_archive(section: &str) -> Vec<u8> {
+        STANDARD
+            .decode(archive_fixture()[section]["bytes"].as_str().unwrap())
+            .unwrap()
+    }
+
+    fn fixture_edits() -> Vec<(String, Edit)> {
+        archive_fixture()["refused"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                (
+                    row["name"].as_str().unwrap().to_owned(),
+                    Edit {
+                        at: row["at"].as_u64().unwrap() as usize,
+                        remove: row["remove"].as_u64().unwrap() as usize,
+                        insert: hex_bytes(row["insert"].as_str().unwrap()),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn edited(archive: &[u8], edit: &Edit) -> Vec<u8> {
+        let mut bytes = archive[..edit.at].to_vec();
+        bytes.extend_from_slice(&edit.insert);
+        bytes.extend_from_slice(&archive[edit.at + edit.remove..]);
+        bytes
+    }
+
+    // The metadata's own repo, space, rev and data, which an honest host signs.
+    fn commit_of_archive(archive: &[u8]) -> (String, String, String, String) {
+        let mut reader = ArchiveReader::new();
+        reader.push(archive).unwrap();
+        let Some(ArchiveItem::Metadata(metadata)) = reader.next_item().unwrap() else {
+            panic!("an archive starts with its metadata");
+        };
+        let text = |name: &str| metadata[name].as_str().unwrap().to_owned();
+        let data = base64::engine::general_purpose::STANDARD_NO_PAD
+            .decode(metadata["data"]["$bytes"].as_str().unwrap())
+            .unwrap();
+        (
+            text("repo"),
+            text("space"),
+            text("rev"),
+            STANDARD.encode(data),
+        )
+    }
+
+    #[derive(Clone)]
+    enum ArchiveAnswer {
+        Honest,
+        // The header signs the fixture's commit; the body is another archive.
+        Body(Vec<u8>),
+        // An honest host answering with another archive and signing its commit.
+        SignedBody(Vec<u8>),
+        HeaderForRev(&'static str),
+        ContentType(Option<&'static str>),
+        Refused { status: u16, code: &'static str },
+        StallsAfterFirstChunk,
+        BodyFailsAfterFirstChunk,
+    }
+
+    enum AfterChunks {
+        End,
+        Stall,
+        Fail,
+    }
+
+    struct ScriptedBody {
+        chunks: VecDeque<Vec<u8>>,
+        after: AfterChunks,
+    }
+
+    #[async_trait]
+    impl ArchiveBody for ScriptedBody {
+        async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, SpaceHostError> {
+            if let Some(chunk) = self.chunks.pop_front() {
+                return Ok(Some(chunk));
+            }
+            match self.after {
+                AfterChunks::End => Ok(None),
+                AfterChunks::Stall => {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    Ok(None)
+                }
+                AfterChunks::Fail => Err(SpaceHostError::Unreachable),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl RepoArchiveTransport for TestHost {
+        async fn send_archive(
+            &self,
+            _query: &RepoArchiveQuery<'_>,
+            accept_signature: &str,
+        ) -> Result<SignedArchiveResponse, SpaceHostError> {
+            let key_share = requested_key_share(accept_signature);
+            self.key_shares.lock().unwrap().push(key_share.clone());
+            let answer = self
+                .archive_script
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or(ArchiveAnswer::Honest);
+            let fixture = fixture_archive("archive");
+            let signed_for = |archive: &[u8], rev: Option<&str>| {
+                let (repo, space, own_rev, data) = commit_of_archive(archive);
+                self.commit_headers(&key_share, &repo, &space, rev.unwrap_or(&own_rev), &data)
+            };
+            let (body, headers, content_type, after) = match answer {
+                ArchiveAnswer::Honest => {
+                    let headers = signed_for(&fixture, None);
+                    (fixture, headers, Some(STAR_CONTENT_TYPE), AfterChunks::End)
+                }
+                ArchiveAnswer::Body(body) => {
+                    let headers = signed_for(&fixture, None);
+                    (body, headers, Some(STAR_CONTENT_TYPE), AfterChunks::End)
+                }
+                ArchiveAnswer::SignedBody(body) => {
+                    let headers = signed_for(&body, None);
+                    (body, headers, Some(STAR_CONTENT_TYPE), AfterChunks::End)
+                }
+                ArchiveAnswer::HeaderForRev(rev) => {
+                    let headers = signed_for(&fixture, Some(rev));
+                    (fixture, headers, Some(STAR_CONTENT_TYPE), AfterChunks::End)
+                }
+                ArchiveAnswer::ContentType(content_type) => {
+                    let headers = signed_for(&fixture, None);
+                    (fixture, headers, content_type, AfterChunks::End)
+                }
+                ArchiveAnswer::Refused { status, code } => {
+                    return Err(SpaceHostError::Request {
+                        status,
+                        code: Some(code.to_owned()),
+                    });
+                }
+                ArchiveAnswer::StallsAfterFirstChunk => {
+                    let headers = signed_for(&fixture, None);
+                    (
+                        fixture,
+                        headers,
+                        Some(STAR_CONTENT_TYPE),
+                        AfterChunks::Stall,
+                    )
+                }
+                ArchiveAnswer::BodyFailsAfterFirstChunk => {
+                    let headers = signed_for(&fixture, None);
+                    (fixture, headers, Some(STAR_CONTENT_TYPE), AfterChunks::Fail)
+                }
+            };
+            let mut chunks: VecDeque<Vec<u8>> = body
+                .chunks(ARCHIVE_CHUNK_BYTES)
+                .map(<[u8]>::to_vec)
+                .collect();
+            if !matches!(after, AfterChunks::End) {
+                chunks.truncate(1);
+            }
+            Ok(SignedArchiveResponse {
+                content_type: content_type.map(str::to_owned),
+                headers,
+                body: Box::new(ScriptedBody { chunks, after }),
+            })
+        }
+    }
+
     struct Setup {
         directory: Arc<Directory>,
         resolver: HttpIdentityKeyResolver,
@@ -1251,6 +1860,7 @@ mod authenticated_read_tests {
             &RepoOpsQuery {
                 space_uri: SPACE,
                 actor_did: AUTHOR,
+                since: None,
                 cursor: None,
                 limit: 100,
             },
@@ -1474,5 +2084,936 @@ mod authenticated_read_tests {
         assert_eq!(error, AuthenticatedReadError::KemKeyInvalid);
         assert!(!error.is_deferred());
         assert_eq!(setup.host.requests(), 0);
+    }
+    // Positions in the request.
+
+    #[tokio::test]
+    async fn since_and_cursor_reach_the_request_as_given() {
+        let setup = setup(vec![]);
+        let query = |since, cursor| RepoOpsQuery {
+            space_uri: SPACE,
+            actor_did: AUTHOR,
+            since,
+            cursor,
+            limit: 100,
+        };
+        let deadline = Instant::now() + ROOMY_DEADLINE;
+        let keys = &setup.resolver as &dyn AuthorKemKeyResolver;
+        let host = setup.host.as_ref();
+
+        authenticated_read(host, keys, &query(None, None), deadline)
+            .await
+            .unwrap();
+        authenticated_read(host, keys, &query(Some("3jzfcijpj2z2a"), None), deadline)
+            .await
+            .unwrap();
+        authenticated_read(
+            host,
+            keys,
+            &query(Some("3jzfcijpj2z2a"), Some("3jzfcijpj2z2c/4")),
+            deadline,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            setup.host.page_positions(),
+            vec![
+                (None, None),
+                (Some("3jzfcijpj2z2a".to_owned()), None),
+                (
+                    Some("3jzfcijpj2z2a".to_owned()),
+                    Some("3jzfcijpj2z2c/4".to_owned())
+                ),
+            ]
+        );
+    }
+
+    async fn client_with_grant() -> PinnedSpaceHostClient {
+        use crate::{
+            space_credential::GrantedSpaceCredential, space_http_signature::SpaceHttpSignatureKey,
+        };
+        PinnedSpaceHostClient::connect_with_resolver(
+            "https://pds.example.test",
+            Arc::new(
+                GrantedSpaceCredential::new("rei".to_owned(), SpaceHttpSignatureKey::generate())
+                    .unwrap(),
+            ),
+            &FixedAddress,
+        )
+        .await
+        .unwrap()
+    }
+
+    struct FixedAddress;
+
+    #[async_trait]
+    impl HostResolver for FixedAddress {
+        async fn resolve(&self, _: &str, _: u16) -> Result<Vec<SocketAddr>, SpaceHostError> {
+            Ok(vec!["1.1.1.1:443".parse().unwrap()])
+        }
+    }
+
+    fn pairs(request: &reqwest::Request) -> Vec<(String, String)> {
+        request
+            .url()
+            .query_pairs()
+            .map(|(name, value)| (name.into_owned(), value.into_owned()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn the_page_request_carries_since_beside_the_cursor_and_asks_for_the_mac() {
+        let client = client_with_grant().await;
+        let ops_request = |since, cursor| {
+            let client = &client;
+            async move {
+                client
+                    .ops_request(
+                        &RepoOpsQuery {
+                            space_uri: SPACE,
+                            actor_did: AUTHOR,
+                            since,
+                            cursor,
+                            limit: 50,
+                        },
+                        "mac=(\"@method\");keyid=\"k\";tag=\"atproto-space-commit\"",
+                    )
+                    .await
+                    .unwrap()
+                    .build()
+                    .unwrap()
+            }
+        };
+
+        let both = ops_request(Some("3jzfcijpj2z2a"), Some("3jzfcijpj2z2c/4")).await;
+        let neither = ops_request(None, None).await;
+
+        let names = |request: &reqwest::Request| -> Vec<String> {
+            pairs(request).into_iter().map(|(name, _)| name).collect()
+        };
+        assert_eq!(
+            pairs(&both),
+            [
+                ("space", SPACE),
+                ("repo", AUTHOR),
+                ("limit", "50"),
+                ("since", "3jzfcijpj2z2a"),
+                ("cursor", "3jzfcijpj2z2c/4"),
+            ]
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        );
+        assert_eq!(names(&neither), ["space", "repo", "limit"]);
+        for request in [&both, &neither] {
+            assert_eq!(request.url().path(), "/xrpc/com.atproto.space.listRepoOps");
+            assert_eq!(request.headers()["accept"], "application/json");
+            assert_eq!(
+                request.headers()["accept-signature"],
+                "mac=(\"@method\");keyid=\"k\";tag=\"atproto-space-commit\""
+            );
+            assert_eq!(request.headers()["atproto-space-audience"], AUTHOR);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_since_that_cannot_be_a_revision_is_not_sent() {
+        let client = client_with_grant().await;
+        for since in ["", &"3".repeat(MAX_REV_BYTES + 1)] {
+            let outcome = client
+                .ops_request(
+                    &RepoOpsQuery {
+                        space_uri: SPACE,
+                        actor_did: AUTHOR,
+                        since: Some(since),
+                        cursor: None,
+                        limit: 50,
+                    },
+                    "mac",
+                )
+                .await;
+            assert_eq!(outcome.err(), Some(SpaceHostError::InvalidRequest));
+        }
+    }
+
+    #[tokio::test]
+    async fn the_archive_request_asks_for_a_star_body_and_the_mac_like_a_page_does() {
+        let client = client_with_grant().await;
+        let accept_signature = "mac=(\"@method\");keyid=\"k\";tag=\"atproto-space-commit\"";
+        let archive = client
+            .archive_request(
+                &RepoArchiveQuery {
+                    space_uri: SPACE,
+                    actor_did: AUTHOR,
+                },
+                accept_signature,
+            )
+            .await
+            .unwrap()
+            .build()
+            .unwrap();
+        let page = client
+            .ops_request(
+                &RepoOpsQuery {
+                    space_uri: SPACE,
+                    actor_did: AUTHOR,
+                    since: None,
+                    cursor: None,
+                    limit: 50,
+                },
+                accept_signature,
+            )
+            .await
+            .unwrap()
+            .build()
+            .unwrap();
+
+        assert_eq!(archive.url().path(), "/xrpc/com.atproto.space.getRepo");
+        assert_eq!(
+            pairs(&archive),
+            [("space", SPACE), ("repo", AUTHOR)]
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        );
+        assert_eq!(archive.headers()["accept"], "application/vnd.dasl.star");
+        for name in [
+            "accept-signature",
+            "authorization",
+            "atproto-space-audience",
+        ] {
+            assert_eq!(archive.headers()[name], page.headers()[name], "{name}");
+        }
+        assert!(archive.headers().contains_key("signature"));
+        assert!(archive.headers().contains_key("signature-input"));
+        assert_eq!(archive.timeout(), Some(&ARCHIVE_REQUEST_TIMEOUT));
+    }
+
+    // The archive read.
+
+    fn archive_setup(script: Vec<ArchiveAnswer>) -> Setup {
+        let setup = setup(vec![]);
+        setup.host.serving_archives(script);
+        setup
+    }
+
+    async fn read_archive_before(
+        setup: &Setup,
+        deadline: Instant,
+        decode: &RecordDecoder<'_>,
+    ) -> Result<AuthenticatedArchive, AuthenticatedReadError> {
+        authenticated_archive_read(
+            setup.host.as_ref(),
+            &setup.resolver as &dyn AuthorKemKeyResolver,
+            &RepoArchiveQuery {
+                space_uri: SPACE,
+                actor_did: AUTHOR,
+            },
+            deadline,
+            decode,
+            &ValueBudget::unlimited_for_tests(),
+        )
+        .await
+    }
+
+    async fn read_archive(setup: &Setup) -> Result<AuthenticatedArchive, AuthenticatedReadError> {
+        read_archive_before(setup, Instant::now() + ROOMY_DEADLINE, &decode_record).await
+    }
+
+    fn oracle_record(name: &str) -> (Cid, Value) {
+        let vectors: Value = serde_json::from_str(RECORD_CID).unwrap();
+        let row = vectors["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["name"] == name)
+            .unwrap();
+        let cid = row["oracle"].as_str().unwrap().rsplit(' ').next().unwrap();
+        (
+            Cid::try_from(cid).unwrap(),
+            serde_json::from_str(row["json"].as_str().unwrap()).unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn the_fixture_archive_is_read_to_its_commit_and_its_records() {
+        let setup = archive_setup(vec![]);
+
+        let archive = read_archive(&setup).await.expect("verified archive");
+
+        let (repo, space, rev, data) = commit_of_archive(&fixture_archive("archive"));
+        assert_eq!(archive.commit().repo(), repo);
+        assert_eq!(archive.commit().space(), space);
+        assert_eq!(archive.commit().rev(), rev);
+        assert_eq!(
+            STANDARD.encode(archive.commit().data()),
+            data,
+            "the commit is the metadata's, as the MAC covered it"
+        );
+        let expected = [
+            ("app.bsky.feed.like", "ed", "a like with a strong reference"),
+            ("app.bsky.feed.repost", "jet", "a repost"),
+            ("app.bsky.graph.follow", "faye", "a follow"),
+            ("zone.stratos.feed.post", "swordfish", "a post"),
+        ];
+        let read: Vec<_> = archive
+            .records()
+            .iter()
+            .map(|record| (record.path.collection(), record.path.rkey()))
+            .collect();
+        assert_eq!(
+            read,
+            expected.map(|(collection, rkey, _)| (collection, rkey))
+        );
+        for (record, (collection, _, name)) in archive.records().iter().zip(expected) {
+            let (cid, value) = oracle_record(name);
+            let kept = is_projected_collection(collection).then_some(&value);
+            assert_eq!((record.cid, record.value.as_ref()), (cid, kept), "{name}");
+        }
+        assert_eq!(setup.host.requests(), 1);
+        let (commit, records) = archive.into_parts();
+        assert_eq!(commit.repo(), AUTHOR);
+        assert_eq!(records.len(), 4);
+    }
+
+    fn star_varint(mut value: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        while value >= 0x80 {
+            bytes.push((value % 0x80) as u8 | 0x80);
+            value /= 0x80;
+        }
+        bytes.push(value as u8);
+        bytes
+    }
+
+    fn star_framed(bytes: &[u8]) -> Vec<u8> {
+        let mut out = star_varint(bytes.len());
+        out.extend_from_slice(bytes);
+        out
+    }
+
+    // An archive of `records` over the repo and space the tests use, in path
+    // order, with a commit the in-process host signs as it is. The commit's data
+    // is not the records' hash: the store checks that, not the read.
+    fn archive_of_records(records: &[(&str, &str, Value)]) -> Vec<u8> {
+        archive_of_record_bytes(
+            records
+                .iter()
+                .map(|(collection, rkey, value)| {
+                    (
+                        format!("{collection}/{rkey}"),
+                        crate::space_record::encode_record(value).expect("encodes"),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    fn archive_of_record_bytes(mut pairs: Vec<(String, Vec<u8>)>) -> Vec<u8> {
+        let metadata = crate::space_record::encode_record(&json!({
+            "$type": crate::space_archive::REPO_ARCHIVE_TYPE,
+            "ver": 1,
+            "repo": AUTHOR,
+            "space": SPACE,
+            "rev": REV,
+            "data": { "$bytes": STANDARD.encode(COMMIT_DATA).trim_end_matches('=') },
+        }))
+        .expect("encodes");
+        pairs.sort();
+        let mut archive = vec![0x2a, 0x6c, 0x01, 0x00];
+        archive.extend(star_framed(&metadata));
+        for (path, bytes) in pairs {
+            archive.push(0x01);
+            archive.extend(star_framed(path.as_bytes()));
+            archive.extend(star_framed(&bytes));
+        }
+        archive.push(0x00);
+        archive
+    }
+
+    async fn read_archive_within(
+        setup: &Setup,
+        decode: &RecordDecoder<'_>,
+        budget: &ValueBudget,
+    ) -> Result<AuthenticatedArchive, AuthenticatedReadError> {
+        authenticated_archive_read(
+            setup.host.as_ref(),
+            &setup.resolver as &dyn AuthorKemKeyResolver,
+            &RepoArchiveQuery {
+                space_uri: SPACE,
+                actor_did: AUTHOR,
+            },
+            Instant::now() + ROOMY_DEADLINE,
+            decode,
+            budget,
+        )
+        .await
+    }
+
+    fn follow_of(name: &str) -> Value {
+        json!({ "$type": "app.bsky.graph.follow", "subject": format!("did:plc:{name}"), "tags": ["bounty", "hunter"] })
+    }
+
+    fn post_of(text: &str) -> Value {
+        json!({ "$type": "zone.stratos.feed.post", "text": text, "langs": ["en", "ja"] })
+    }
+
+    #[tokio::test]
+    async fn the_records_of_a_collection_the_projection_does_not_read_come_back_without_a_value() {
+        let follows = [
+            ("app.bsky.graph.follow", "faye", follow_of("fayevalentine")),
+            ("app.bsky.graph.follow", "jet", follow_of("jetblack")),
+            (
+                "moe.bebop.crew",
+                "spike",
+                json!({ "$type": "moe.bebop.crew", "name": "Spike" }),
+            ),
+        ];
+        let archive = archive_of_records(&follows);
+        let setup = archive_setup(vec![ArchiveAnswer::SignedBody(archive)]);
+        let budget = ValueBudget::with_limit(0);
+
+        let read = read_archive_within(&setup, &decode_record, &budget)
+            .await
+            .expect("verified archive");
+
+        assert_eq!(read.records().len(), 3);
+        for (record, (_, _, value)) in read.records().iter().zip(
+            // Archive order is the bytes of the joined path.
+            [&follows[0], &follows[1], &follows[2]],
+        ) {
+            assert_eq!(record.value, None);
+            assert_eq!(
+                record.cid,
+                crate::space_record::record_cid(
+                    &crate::space_record::encode_record(value).unwrap()
+                )
+            );
+        }
+        assert_eq!(budget.used(), 0, "dropped values are not counted");
+    }
+
+    #[tokio::test]
+    async fn a_value_is_dropped_only_after_it_was_decoded_and_held_to_its_bytes() {
+        // A follow whose map keys are out of canonical order is still refused:
+        // the value is dropped after the check, not instead of it.
+        let archive = archive_of_record_bytes(vec![(
+            "app.bsky.graph.follow/faye".to_owned(),
+            vec![0xa2, 0x61, 0x62, 0x01, 0x61, 0x61, 0x02],
+        )]);
+        let setup = archive_setup(vec![ArchiveAnswer::SignedBody(archive)]);
+        let calls = AtomicUsize::new(0);
+
+        let error = read_archive_within(&setup, &counting(&calls), &ValueBudget::with_limit(0))
+            .await
+            .err()
+            .expect("refused");
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(
+            matches!(error, AuthenticatedReadError::ArchiveRecord(_)),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_values_of_the_records_it_reads_are_charged_nested_values_included() {
+        let records = [
+            ("zone.stratos.feed.post", "ein", post_of("Woof")),
+            (
+                "zone.stratos.feed.post",
+                "swordfish",
+                post_of("See you space cowboy"),
+            ),
+            (
+                "app.bsky.feed.like",
+                "ed",
+                json!({ "$type": "app.bsky.feed.like", "subject": { "uri": "at://did:plc:a/zone.stratos.feed.post/b" } }),
+            ),
+        ];
+        // Two posts of a map, its type, its text and a two-item list (six
+        // each) and a like of a map, its type and a map and its uri (four).
+        let values = 6 + 6 + 4;
+        let archive = archive_of_records(&records);
+
+        let exact = ValueBudget::with_limit(values);
+        let setup = archive_setup(vec![ArchiveAnswer::SignedBody(archive.clone())]);
+        let read = read_archive_within(&setup, &decode_record, &exact)
+            .await
+            .expect("exactly at the limit is accepted");
+        assert_eq!(exact.used(), values);
+        assert!(read.records().iter().all(|record| record.value.is_some()));
+
+        let short = ValueBudget::with_limit(values - 1);
+        let setup = archive_setup(vec![ArchiveAnswer::SignedBody(archive)]);
+        let error = read_archive_within(&setup, &decode_record, &short)
+            .await
+            .err()
+            .expect("one value over");
+        assert_eq!(error, AuthenticatedReadError::OverBudget);
+    }
+
+    #[tokio::test]
+    async fn an_archive_past_the_budget_is_refused_at_the_record_that_passes_it_and_no_later_one_is_decoded()
+     {
+        let records: Vec<(&str, String, Value)> = (0..6)
+            .map(|at| {
+                (
+                    "zone.stratos.feed.post",
+                    format!("post{at}"),
+                    post_of("Bang"),
+                )
+            })
+            .collect();
+        let borrowed: Vec<(&str, &str, Value)> = records
+            .iter()
+            .map(|(collection, rkey, value)| (*collection, rkey.as_str(), value.clone()))
+            .collect();
+        let per_record = crate::space_value_budget::count_values(&post_of("Bang"));
+        // Two records fit; the third passes the limit.
+        let budget = ValueBudget::with_limit(per_record * 2 + per_record - 1);
+        let setup = archive_setup(vec![ArchiveAnswer::SignedBody(archive_of_records(
+            &borrowed,
+        ))]);
+        let calls = AtomicUsize::new(0);
+
+        let error = read_archive_within(&setup, &counting(&calls), &budget)
+            .await
+            .err()
+            .expect("over budget");
+
+        assert_eq!(error, AuthenticatedReadError::OverBudget);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            3,
+            "the third is the last decoded"
+        );
+        assert_eq!(
+            budget.used(),
+            per_record * 2,
+            "the refused record took nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_fixture_archive_replaces_to_the_rows_it_did_when_every_value_was_kept() {
+        use crate::store::{
+            EncryptedStore, PdsSpaceMember, StorageKey, VerifiedSpaceRecord, VerifiedSpaceTarget,
+        };
+        const BOUNDARY: &str = "did:web:bebop.example/crew";
+        const OBSERVED: &str = "2026-09-22T00:00:00.000Z";
+        const RETAINED: &str = "2026-09-23T00:00:00.000Z";
+        let replaced = |records: Vec<VerifiedSpaceRecord>, commit: &MacVerifiedCommit| {
+            let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+            store
+                .replace_pds_space_members(
+                    BOUNDARY,
+                    vec![PdsSpaceMember {
+                        did: AUTHOR.to_owned(),
+                    }],
+                    OBSERVED,
+                )
+                .unwrap();
+            let target = VerifiedSpaceTarget {
+                boundary: BOUNDARY.to_owned(),
+                space_uri: SPACE.to_owned(),
+                actor_did: AUTHOR.to_owned(),
+                host: "https://pds.bebop.example".to_owned(),
+                generation: store
+                    .pds_member_generation(BOUNDARY, AUTHOR)
+                    .unwrap()
+                    .unwrap(),
+            };
+            store
+                .replace_verified_space_repo(&target, commit, &records, RETAINED, OBSERVED)
+                .expect("the fixture archive's records hash to its commit");
+            let posts = store
+                .list_posts_by_boundary(BOUNDARY, None, 50, "2026-09-22T12:00:00.000Z")
+                .unwrap()
+                .posts
+                .into_iter()
+                .map(|post| (post.uri, post.cid))
+                .collect::<Vec<_>>();
+            (
+                store.verified_space_base(SPACE, AUTHOR).unwrap(),
+                store.interaction_rows(),
+                posts,
+            )
+        };
+        let setup = archive_setup(vec![]);
+        let archive = read_archive(&setup).await.expect("verified archive");
+        let (commit, read) = archive.into_parts();
+        assert_eq!(
+            read.iter().filter(|record| record.value.is_none()).count(),
+            1
+        );
+        let with_every_value: Vec<VerifiedSpaceRecord> = [
+            ("app.bsky.feed.like", "ed", "a like with a strong reference"),
+            ("app.bsky.feed.repost", "jet", "a repost"),
+            ("app.bsky.graph.follow", "faye", "a follow"),
+            ("zone.stratos.feed.post", "swordfish", "a post"),
+        ]
+        .into_iter()
+        .map(|(collection, rkey, name)| {
+            let (cid, value) = oracle_record(name);
+            VerifiedSpaceRecord {
+                path: crate::space_set_hash::RecordPath::parse(collection, rkey).unwrap(),
+                cid,
+                value: Some(value),
+            }
+        })
+        .collect();
+
+        let without_the_follow = replaced(read, &commit);
+        let with_every = replaced(with_every_value, &commit);
+
+        assert_eq!(without_the_follow, with_every);
+        assert_eq!(without_the_follow.0.as_ref().unwrap().record_count, 4);
+        assert_eq!(without_the_follow.1.len(), 2, "the like and the repost");
+        assert_eq!(without_the_follow.2.len(), 1, "the post");
+    }
+
+    #[tokio::test]
+    async fn an_archive_of_an_empty_repo_is_a_verified_commit_and_no_records() {
+        let setup = archive_setup(vec![ArchiveAnswer::SignedBody(fixture_archive("empty"))]);
+
+        let archive = read_archive(&setup).await.expect("verified archive");
+
+        assert!(archive.records().is_empty());
+        assert_eq!(archive.commit().repo(), AUTHOR);
+    }
+
+    #[tokio::test]
+    async fn two_archive_reads_send_two_different_key_shares() {
+        let setup = archive_setup(vec![]);
+        read_archive(&setup).await.expect("first");
+        read_archive(&setup).await.expect("second");
+        let shares = setup.host.key_shares();
+        assert_eq!(shares.len(), 2);
+        assert_ne!(shares[0], shares[1]);
+    }
+
+    fn counting<'a>(
+        calls: &'a AtomicUsize,
+    ) -> impl Fn(&[u8]) -> Result<(Cid, Value), RecordDecodeRefusal> + Sync + 'a {
+        move |bytes| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            decode_record(bytes)
+        }
+    }
+
+    #[tokio::test]
+    async fn metadata_that_differs_from_the_mac_header_is_refused_before_a_record_is_decoded() {
+        let calls = AtomicUsize::new(0);
+        let setup = archive_setup(vec![ArchiveAnswer::HeaderForRev("3jzfcijpj2z2c")]);
+
+        let error = read_archive_before(&setup, Instant::now() + ROOMY_DEADLINE, &counting(&calls))
+            .await
+            .err()
+            .expect("refused");
+
+        assert_eq!(
+            error,
+            authentication_failure(MacDefect::CommitDiffersFromSignedHeader)
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no record was decoded");
+        assert_eq!(setup.host.requests(), 1, "not a stale key");
+
+        let honest = archive_setup(vec![]);
+        read_archive_before(&honest, Instant::now() + ROOMY_DEADLINE, &counting(&calls))
+            .await
+            .expect("honest");
+        assert_eq!(calls.load(Ordering::SeqCst), 4, "the counter does count");
+    }
+
+    #[tokio::test]
+    async fn an_archive_for_another_repo_or_space_is_refused_even_when_its_mac_is_good() {
+        let archive = fixture_archive("archive");
+        let replaced = |from: &[u8], to: &[u8]| {
+            assert_eq!(from.len(), to.len());
+            let at = archive
+                .windows(from.len())
+                .position(|window| window == from)
+                .expect("in the metadata");
+            assert!(at < 190, "in the metadata, not in a record");
+            edited(
+                &archive,
+                &Edit {
+                    at,
+                    remove: from.len(),
+                    insert: to.to_vec(),
+                },
+            )
+        };
+        for other in [
+            replaced(b"did:plc:fayevalentine", b"did:plc:jetblack12345"),
+            replaced(
+                b"zone.stratos.space.feed/crew",
+                b"zone.stratos.space.feed/ein0",
+            ),
+        ] {
+            let setup = archive_setup(vec![ArchiveAnswer::SignedBody(other)]);
+            let error = read_archive(&setup).await.err().expect("refused");
+            assert_eq!(error, authentication_failure(MacDefect::RequestMismatch));
+            assert_eq!(setup.host.requests(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stale_kem_key_gets_one_refresh_and_one_new_archive_request() {
+        let setup = archive_setup(vec![]);
+        let rotated = private_key(0x44);
+        *setup.host.private_key.lock().unwrap() = rotated.clone();
+        setup.resolver.author_kem_key(AUTHOR).await.unwrap();
+        setup.directory.publish(public_key(&rotated));
+
+        let archive = read_archive(&setup)
+            .await
+            .expect("verified after the retry");
+
+        let shares = setup.host.key_shares();
+        assert_eq!(shares.len(), 2, "exactly two requests");
+        assert_ne!(shares[0], shares[1]);
+        assert_eq!(archive.records().len(), 4);
+        assert_eq!(setup.directory.fetches(), 2, "one lookup, one refresh");
+    }
+
+    #[tokio::test]
+    async fn an_archive_whose_mac_fails_twice_fails_after_exactly_two_requests() {
+        let setup = archive_setup(vec![]);
+        *setup.host.private_key.lock().unwrap() = private_key(0x55);
+        setup.resolver.author_kem_key(AUTHOR).await.unwrap();
+        setup.directory.publish(public_key(&private_key(0x66)));
+
+        let error = read_archive(&setup).await.err().expect("still wrong");
+
+        assert_eq!(
+            error,
+            AuthenticatedReadError::Authentication(MacVerifyError::MacMismatch)
+        );
+        assert_eq!(setup.host.requests(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_key_after_the_refresh_fails_an_archive_without_a_second_request() {
+        let setup = archive_setup(vec![]);
+        *setup.host.private_key.lock().unwrap() = private_key(0x44);
+
+        let error = read_archive(&setup).await.err().expect("mismatch");
+
+        assert_eq!(
+            error,
+            AuthenticatedReadError::Authentication(MacVerifyError::MacMismatch)
+        );
+        assert_eq!(setup.host.requests(), 1);
+        assert_eq!(setup.directory.fetches(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_wrong_content_type_returns_no_records_and_is_not_a_stale_key() {
+        for content_type in [
+            Some("application/json"),
+            Some("application/vnd.dasl.star+json"),
+            Some("application/vnd.dasl.stars"),
+            None,
+        ] {
+            let setup = archive_setup(vec![ArchiveAnswer::ContentType(content_type)]);
+            let error = read_archive(&setup).await.err().expect("refused");
+            assert_eq!(
+                error,
+                AuthenticatedReadError::Host(SpaceHostError::InvalidResponse),
+                "{content_type:?}"
+            );
+            assert_eq!(setup.host.requests(), 1);
+        }
+        let setup = archive_setup(vec![ArchiveAnswer::ContentType(Some(
+            "Application/Vnd.DASL.Star; q=1",
+        ))]);
+        assert_eq!(read_archive(&setup).await.unwrap().records().len(), 4);
+    }
+
+    // What each edit of the oracle's archive is to the reader. Every one is
+    // refused mid-stream, in 97-byte chunks, and returns no record; the one
+    // edit it cannot see is a changed value byte, which only the store's digest
+    // check catches.
+    #[tokio::test]
+    async fn every_refused_edit_of_the_fixture_archive_fails_the_read_and_returns_no_records() {
+        let archive = fixture_archive("archive");
+        let outcomes: Vec<(&str, Option<AuthenticatedReadError>)> = vec![
+            (
+                "cut before the end marker",
+                Some(AuthenticatedReadError::Archive(
+                    ArchiveRefusal::UnexpectedEnd,
+                )),
+            ),
+            (
+                "cut inside a value",
+                Some(AuthenticatedReadError::Archive(
+                    ArchiveRefusal::UnexpectedEnd,
+                )),
+            ),
+            (
+                "an unknown control byte",
+                Some(AuthenticatedReadError::Archive(
+                    ArchiveRefusal::UnknownControl,
+                )),
+            ),
+            (
+                "one byte after the end",
+                Some(AuthenticatedReadError::Archive(
+                    ArchiveRefusal::TrailingBytes,
+                )),
+            ),
+            (
+                "two records swapped",
+                Some(AuthenticatedReadError::ArchiveOrder(
+                    RecordOrderRefusal::OutOfOrder,
+                )),
+            ),
+            (
+                "a record repeated",
+                Some(AuthenticatedReadError::ArchiveOrder(
+                    RecordOrderRefusal::OutOfOrder,
+                )),
+            ),
+            (
+                "a path that is not collection/rkey",
+                Some(AuthenticatedReadError::ArchiveOrder(
+                    RecordOrderRefusal::InvalidPath,
+                )),
+            ),
+            ("one value byte changed", None),
+            (
+                "a non-canonical encoding of the record",
+                Some(AuthenticatedReadError::ArchiveRecord(
+                    RecordDecodeRefusal::NotCanonical,
+                )),
+            ),
+            (
+                "metadata type changed",
+                Some(AuthenticatedReadError::Archive(
+                    ArchiveRefusal::WrongMetadataType,
+                )),
+            ),
+            (
+                "metadata revision changed",
+                Some(authentication_failure(
+                    MacDefect::CommitDiffersFromSignedHeader,
+                )),
+            ),
+            (
+                "a metadata length above the limit",
+                Some(AuthenticatedReadError::Archive(
+                    ArchiveRefusal::LimitExceeded(ArchiveLimit::Metadata),
+                )),
+            ),
+            (
+                "a key length above the limit",
+                Some(AuthenticatedReadError::Archive(
+                    ArchiveRefusal::LimitExceeded(ArchiveLimit::Key),
+                )),
+            ),
+            (
+                "a value length above the limit, no bytes",
+                Some(AuthenticatedReadError::Archive(
+                    ArchiveRefusal::LimitExceeded(ArchiveLimit::Value),
+                )),
+            ),
+        ];
+        let edits = fixture_edits();
+        assert_eq!(
+            edits.len(),
+            outcomes.len(),
+            "every fixture row has a verdict here"
+        );
+
+        for ((name, edit), (expected_name, expected)) in edits.iter().zip(outcomes) {
+            assert_eq!(name, expected_name);
+            let setup = archive_setup(vec![ArchiveAnswer::Body(edited(&archive, edit))]);
+            let outcome = read_archive(&setup).await;
+            match expected {
+                Some(error) => assert_eq!(outcome.err(), Some(error), "{name}"),
+                None => {
+                    let read = outcome.expect("the reader cannot see a changed value");
+                    let (original_cid, _) = oracle_record("a post");
+                    let post = read.records().last().unwrap();
+                    assert_ne!(post.cid, original_cid, "{name}");
+                }
+            }
+            assert_eq!(setup.host.requests(), 1, "{name}: not retried");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_deadline_that_passes_during_the_body_fails_and_returns_no_records() {
+        let setup = archive_setup(vec![ArchiveAnswer::StallsAfterFirstChunk]);
+
+        let started = Instant::now();
+        let error = read_archive_before(
+            &setup,
+            Instant::now() + Duration::from_millis(300),
+            &decode_record,
+        )
+        .await
+        .err()
+        .expect("late");
+
+        assert_eq!(error, AuthenticatedReadError::DeadlineExceeded);
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_eq!(setup.host.requests(), 1, "no retry after the deadline");
+    }
+
+    #[tokio::test]
+    async fn a_body_that_breaks_off_fails_with_the_host_error_and_returns_no_records() {
+        let setup = archive_setup(vec![ArchiveAnswer::BodyFailsAfterFirstChunk]);
+        let error = read_archive(&setup).await.err().expect("broken");
+        assert_eq!(
+            error,
+            AuthenticatedReadError::Host(SpaceHostError::Unreachable)
+        );
+        assert_eq!(setup.host.requests(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_archive_deadline_that_has_passed_sends_nothing() {
+        let setup = archive_setup(vec![]);
+        let error = read_archive_before(&setup, Instant::now(), &decode_record)
+            .await
+            .err()
+            .expect("late");
+        assert_eq!(error, AuthenticatedReadError::DeadlineExceeded);
+        assert_eq!(setup.host.requests(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_kem_lookup_defers_an_archive_and_sends_nothing() {
+        let setup = archive_setup(vec![]);
+        setup.directory.list_as(Listing::Unreachable);
+        let error = read_archive(&setup).await.err().expect("deferred");
+        assert!(error.is_deferred());
+        assert_eq!(setup.host.requests(), 0);
+    }
+
+    // The error names a host answers with are the caller's to classify; the
+    // read adds nothing to them and never retries one.
+    #[tokio::test]
+    async fn an_error_answer_comes_back_with_its_name_and_is_not_retried() {
+        for (status, code) in [
+            (400, "RepoNotFound"),
+            (400, "RepoTakendown"),
+            (400, "RepoSuspended"),
+            (400, "RepoDeactivated"),
+            (400, "SpaceNotFound"),
+            (400, "InvalidSpaceMac"),
+            (502, "UpstreamFailure"),
+        ] {
+            let setup = archive_setup(vec![ArchiveAnswer::Refused { status, code }]);
+            let error = read_archive(&setup).await.err().expect("refused");
+            assert_eq!(
+                error,
+                AuthenticatedReadError::Host(SpaceHostError::Request {
+                    status,
+                    code: Some(code.to_owned()),
+                })
+            );
+            assert_eq!(setup.host.requests(), 1, "{code}");
+        }
     }
 }

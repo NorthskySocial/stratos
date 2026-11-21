@@ -4,17 +4,20 @@
 //! `@atproto/lex-json` reader and `@atproto/lex-cbor` encoder (fixture
 //! `record-cid.json` and an edge table in the tests); it refuses on purpose
 //! what that pair accepts and Stratos does not, and the fixture or the table
-//! labels each such input. Nothing here is called by the synchronizer yet.
+//! labels each such input.
 
 use std::fmt;
 
 use base64::{
     Engine,
     alphabet::STANDARD,
-    engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
+    engine::{
+        DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig, general_purpose::STANDARD_NO_PAD,
+    },
 };
 use cid::Cid;
 use multihash::Multihash;
+use serde_cbor::Value as CborValue;
 use serde_json::{Map, Number, Value};
 use sha2::{Digest, Sha256};
 
@@ -133,6 +136,116 @@ pub fn check_cid_text(text: &str, expected: &Cid) -> Result<(), CidTextRefusal> 
         return Err(CidTextRefusal::NamesAnotherCid);
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecordDecodeRefusal {
+    TooLarge,
+    Malformed,
+    NotAMap,
+    Float,
+    UnsupportedTag,
+    InvalidLink,
+    NonTextKey,
+    IntegerOutOfRange,
+    Unencodable(RecordRefusal),
+    NotCanonical,
+}
+
+impl fmt::Display for RecordDecodeRefusal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooLarge => formatter.write_str("the record bytes are too large"),
+            Self::Malformed => formatter.write_str("the record bytes are not one CBOR value"),
+            Self::NotAMap => formatter.write_str("the record is not a map"),
+            Self::Float => formatter.write_str("the record holds a floating point number"),
+            Self::UnsupportedTag => formatter.write_str("the record holds a tag other than 42"),
+            Self::InvalidLink => formatter.write_str("a tag 42 value is not a CID"),
+            Self::NonTextKey => formatter.write_str("a map key is not text"),
+            Self::IntegerOutOfRange => formatter.write_str("an integer does not fit 64 bits"),
+            Self::Unencodable(refusal) => write!(formatter, "the JSON form is refused: {refusal}"),
+            Self::NotCanonical => {
+                formatter.write_str("the record is not the canonical encoding of its content")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RecordDecodeRefusal {}
+
+/// The CID and the JSON form of a record received as DAG-CBOR bytes, in the
+/// form `encode_record` reads. The CID is that of the received bytes. The
+/// decoder is trusted for nothing the last step does not confirm: the JSON is
+/// returned only when `encode_record` turns it back into exactly the received
+/// bytes, so what the host sent, what the set hash covers and what Stratos
+/// holds are one record.
+pub fn decode_record(bytes: &[u8]) -> Result<(Cid, Value), RecordDecodeRefusal> {
+    if bytes.len() > MAX_RECORD_BYTES {
+        return Err(RecordDecodeRefusal::TooLarge);
+    }
+    let decoded: CborValue =
+        serde_cbor::from_slice(bytes).map_err(|_| RecordDecodeRefusal::Malformed)?;
+    if !matches!(decoded, CborValue::Map(_)) {
+        return Err(RecordDecodeRefusal::NotAMap);
+    }
+    let record = json_of_cbor(decoded)?;
+    let canonical = encode_record(&record).map_err(RecordDecodeRefusal::Unencodable)?;
+    if canonical != bytes {
+        return Err(RecordDecodeRefusal::NotCanonical);
+    }
+    Ok((record_cid(bytes), record))
+}
+
+fn json_of_cbor(value: CborValue) -> Result<Value, RecordDecodeRefusal> {
+    Ok(match value {
+        CborValue::Null => Value::Null,
+        CborValue::Bool(flag) => Value::Bool(flag),
+        CborValue::Integer(integer) => Value::Number(Number::from(
+            i64::try_from(integer).map_err(|_| RecordDecodeRefusal::IntegerOutOfRange)?,
+        )),
+        CborValue::Float(_) => return Err(RecordDecodeRefusal::Float),
+        CborValue::Text(text) => Value::String(text),
+        CborValue::Bytes(bytes) => {
+            let mut wrapper = Map::new();
+            wrapper.insert(
+                BYTES_KEY.to_owned(),
+                Value::String(STANDARD_NO_PAD.encode(bytes)),
+            );
+            Value::Object(wrapper)
+        }
+        CborValue::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(json_of_cbor)
+                .collect::<Result<_, _>>()?,
+        ),
+        CborValue::Map(entries) => {
+            let mut members = Map::new();
+            for (key, member) in entries {
+                let CborValue::Text(name) = key else {
+                    return Err(RecordDecodeRefusal::NonTextKey);
+                };
+                members.insert(name, json_of_cbor(member)?);
+            }
+            Value::Object(members)
+        }
+        CborValue::Tag(CID_TAG, inner) => link_of_cbor(*inner)?,
+        CborValue::Tag(_, _) => return Err(RecordDecodeRefusal::UnsupportedTag),
+        _ => return Err(RecordDecodeRefusal::Malformed),
+    })
+}
+
+fn link_of_cbor(inner: CborValue) -> Result<Value, RecordDecodeRefusal> {
+    let CborValue::Bytes(payload) = inner else {
+        return Err(RecordDecodeRefusal::InvalidLink);
+    };
+    let Some((&MULTIBASE_IDENTITY_PREFIX, cid_bytes)) = payload.split_first() else {
+        return Err(RecordDecodeRefusal::InvalidLink);
+    };
+    let link = Cid::try_from(cid_bytes).map_err(|_| RecordDecodeRefusal::InvalidLink)?;
+    let mut wrapper = Map::new();
+    wrapper.insert(LINK_KEY.to_owned(), Value::String(link.to_string()));
+    Ok(Value::Object(wrapper))
 }
 
 fn parse_cid(text: &str) -> Option<Cid> {
@@ -440,6 +553,1472 @@ mod tests {
             check_cid_text("bafyreih2", &expected),
             Err(CidTextRefusal::NotACid)
         );
+    }
+
+    // Decoding: the bytes of an archive record back to the JSON a host sends.
+
+    fn bytes_of_hex(text: &str) -> Vec<u8> {
+        assert_eq!(text.len() % 2, 0, "{text}");
+        (0..text.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&text[at..at + 2], 16).expect("hex"))
+            .collect()
+    }
+
+    #[test]
+    fn every_record_vector_decodes_to_the_oracle_json_and_cid() {
+        let records = rows("records");
+        assert!(records.len() >= 14);
+        for row in &records {
+            let name = row["name"].as_str().expect("name");
+            let Oracle::Accepted { bytes_hex, cid } =
+                oracle_outcome(row["oracle"].as_str().expect("oracle"))
+            else {
+                panic!("{name}: the vector is an accepted record");
+            };
+            let expected: Value =
+                serde_json::from_str(row["json"].as_str().expect("json")).expect("json");
+            let (decoded_cid, decoded) = decode_record(&bytes_of_hex(&bytes_hex))
+                .unwrap_or_else(|refusal| panic!("{name}: refused: {refusal}"));
+            assert_eq!(decoded, expected, "{name}: value");
+            assert_eq!(decoded_cid.to_string(), cid, "{name}: cid");
+        }
+    }
+
+    // Decoding edge table. The oracle column is the pinned `@atproto/lex-cbor`
+    // decoder (strict, no indefinite items, duplicate keys refused) that the
+    // upstream archive reader runs on each record, followed by its
+    // `@atproto/lex-data` CID of the received bytes; `accepted` gives its JSON
+    // (`@atproto/lex-json`) and CID, `refused` its message. Node 24.22.0; the
+    // decoder reads no base64 and uses no runtime facility that differs between
+    // runtimes. `stratos` is the refusal expected here, `None` meaning the
+    // oracle's JSON and CID. An input the oracle accepts and Stratos refuses
+    // carries its reason; one the oracle refuses must be refused here too.
+
+    struct DecodeRow {
+        name: &'static str,
+        hex: &'static str,
+        oracle: &'static str,
+        stratos: Option<RecordDecodeRefusal>,
+        stricter_because: Option<&'static str>,
+    }
+
+    const DECODE_ROWS: &[DecodeRow] = &[
+        DecodeRow {
+            name: "float64 1.5 in a map",
+            hex: "a16161fb3ff8000000000000",
+            oracle: "accepted {\"a\":1.5} bafyreic6v65kiate4qj6lsdjvf2qjul5frowyn4kgtjp7fpbm7jjfz4mfm",
+            stratos: Some(RecordDecodeRefusal::Float),
+            stricter_because: Some(
+                "Stratos refuses floating point numbers; the record encoder has no float, so no record Stratos holds contains one.",
+            ),
+        },
+        DecodeRow {
+            name: "float16 1.0 in a map",
+            hex: "a16161f93c00",
+            oracle: "accepted {\"a\":1} bafyreiem7o7s4vxfuq5iuupcqt53zvftoud6cpm6f54lgyswaaohktrukq",
+            stratos: Some(RecordDecodeRefusal::Float),
+            stricter_because: Some(
+                "Stratos refuses floating point numbers; the record encoder has no float, so no record Stratos holds contains one.",
+            ),
+        },
+        DecodeRow {
+            name: "float32 1.5 in a map",
+            hex: "a16161fa3fc00000",
+            oracle: "accepted {\"a\":1.5} bafyreigkqqgoo5rf62nahwenqjulof2wk4h42g77voruwvunm6emwj3jye",
+            stratos: Some(RecordDecodeRefusal::Float),
+            stricter_because: Some(
+                "Stratos refuses floating point numbers; the record encoder has no float, so no record Stratos holds contains one.",
+            ),
+        },
+        DecodeRow {
+            name: "float64 NaN",
+            hex: "a16161fb7ff8000000000000",
+            oracle: "refused: CBOR decode error: NaN values are not supported",
+            stratos: Some(RecordDecodeRefusal::Float),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "float64 infinity",
+            hex: "a16161fb7ff0000000000000",
+            oracle: "refused: CBOR decode error: Infinity values are not supported",
+            stratos: Some(RecordDecodeRefusal::Float),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "float64 of an integral value, 3.0",
+            hex: "a16161fb4008000000000000",
+            oracle: "accepted {\"a\":3} bafyreiaqyuval3helnqdxwcyxiuqsmfvqryrkylpqovtmjt4f4772uctdm",
+            stratos: Some(RecordDecodeRefusal::Float),
+            stricter_because: Some(
+                "Stratos refuses floating point numbers; the record encoder has no float, so no record Stratos holds contains one.",
+            ),
+        },
+        DecodeRow {
+            name: "indefinite-length map",
+            hex: "bf616101ff",
+            oracle: "refused: CBOR decode error: indefinite length items not allowed",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "indefinite-length array value",
+            hex: "a161619f01ff",
+            oracle: "refused: CBOR decode error: indefinite length items not allowed",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "indefinite-length text value",
+            hex: "a161617f6178ff",
+            oracle: "refused: CBOR decode error: indefinite length bytes/strings are not supported",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "indefinite-length byte string value",
+            hex: "a161615f4101ff",
+            oracle: "refused: CBOR decode error: indefinite length bytes/strings are not supported",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "keys out of order, same length (b then a)",
+            hex: "a2616201616102",
+            oracle: "accepted {\"b\":1,\"a\":2} bafyreibwqtyzplcfcsvwtqi3tb3b6lemdpv3k2hys62l5nlc45h2n6qxe4",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: Some(
+                "The upstream decoder does not check key order and hashes the received bytes, so it accepts a record whose keys are not in canonical order; Stratos holds only records whose canonical encoding is the received bytes.",
+            ),
+        },
+        DecodeRow {
+            name: "keys out of order, length first (aa then b)",
+            hex: "a262616101616202",
+            oracle: "accepted {\"aa\":1,\"b\":2} bafyreihm64me2e2bhk3rxpryi3hcgjjfwnihvntdqokp3vqhj5p2snlqyy",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: Some(
+                "The upstream decoder does not check key order and hashes the received bytes, so it accepts a record whose keys are not in canonical order; Stratos holds only records whose canonical encoding is the received bytes.",
+            ),
+        },
+        DecodeRow {
+            name: "canonical order (a then b)",
+            hex: "a2616101616202",
+            oracle: "accepted {\"a\":1,\"b\":2} bafyreifa2oxz5bxfkf7xfg5nazl6frxtw7idrgmjjsgwwm3vsb2mre5v4m",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "duplicate key",
+            hex: "a2616101616102",
+            oracle: "refused: CBOR decode error: found repeat map key \"a\"",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "duplicate key, same value",
+            hex: "a2616101616101",
+            oracle: "refused: CBOR decode error: found repeat map key \"a\"",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "integer 1 as one extra byte",
+            hex: "a161611801",
+            oracle: "refused: CBOR decode error: integer encoded in more bytes than necessary (strict decode)",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "integer 1 as two extra bytes",
+            hex: "a16161190001",
+            oracle: "refused: CBOR decode error: integer encoded in more bytes than necessary (strict decode)",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "integer 255 in the shortest form",
+            hex: "a1616118ff",
+            oracle: "accepted {\"a\":255} bafyreiev6nwpttnwg2ztyxd5qdypo7eenry2wp45x7uav2vwj3q7rnfmze",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "integer 24 as two extra bytes",
+            hex: "a16161190018",
+            oracle: "refused: CBOR decode error: integer encoded in more bytes than necessary (strict decode)",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "negative integer -1 as one extra byte",
+            hex: "a161613800",
+            oracle: "refused: CBOR decode error: integer encoded in more bytes than necessary (strict decode)",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "text length in a longer form",
+            hex: "a16161780178",
+            oracle: "refused: CBOR decode error: integer encoded in more bytes than necessary (strict decode)",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "key length in a longer form",
+            hex: "a178016101",
+            oracle: "refused: CBOR decode error: integer encoded in more bytes than necessary (strict decode)",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "map head in a longer form",
+            hex: "b801616101",
+            oracle: "refused: CBOR decode error: integer encoded in more bytes than necessary (strict decode)",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "array head in a longer form",
+            hex: "a16161980101",
+            oracle: "refused: CBOR decode error: integer encoded in more bytes than necessary (strict decode)",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "integer 2^53 - 1",
+            hex: "a161611b001fffffffffffff",
+            oracle: "accepted {\"a\":9007199254740991} bafyreiemyxo6bul5nma7ry5q567sqwucqzluyfid44ftq26riqfr22wj64",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "integer 2^53",
+            hex: "a161611b0020000000000000",
+            oracle: "accepted (a BigInt, not JSON) bafyreihzuvx7wmexu2frdnehbtvri6txwviwnxifrrvy2jt2z3a7grsx4e",
+            stratos: Some(RecordDecodeRefusal::Unencodable(
+                RecordRefusal::IntegerOutOfRange,
+            )),
+            stricter_because: Some(
+                "Stratos refuses integers outside the safe integer range (the encoder rule); the upstream decoder reads them as BigInt.",
+            ),
+        },
+        DecodeRow {
+            name: "integer -2^53",
+            hex: "a161613b001fffffffffffff",
+            oracle: "accepted (a BigInt, not JSON) bafyreiaorcmjpdstfzllnfj3ymwszymf6fddnxmy6ixsn7hp4yhcriqyt4",
+            stratos: Some(RecordDecodeRefusal::Unencodable(
+                RecordRefusal::IntegerOutOfRange,
+            )),
+            stricter_because: Some(
+                "Stratos refuses integers outside the safe integer range (the encoder rule); the upstream decoder reads them as BigInt.",
+            ),
+        },
+        DecodeRow {
+            name: "integer 2^64 - 1",
+            hex: "a161611bffffffffffffffff",
+            oracle: "accepted (a BigInt, not JSON) bafyreifghzrzpu3uhgw7ra62tnusl6gtlavvvbfupfva7kgvgpmygnneam",
+            stratos: Some(RecordDecodeRefusal::IntegerOutOfRange),
+            stricter_because: Some(
+                "Stratos refuses integers that do not fit 64 bits signed; the upstream decoder reads them as BigInt.",
+            ),
+        },
+        DecodeRow {
+            name: "integer -2^64",
+            hex: "a161613bffffffffffffffff",
+            oracle: "accepted (a BigInt, not JSON) bafyreiaajwt6mbssjlwpjeblzhwkefey3ji2ii4zs2nrw3bt37zsoqquxy",
+            stratos: Some(RecordDecodeRefusal::IntegerOutOfRange),
+            stricter_because: Some(
+                "Stratos refuses integers that do not fit 64 bits signed; the upstream decoder reads them as BigInt.",
+            ),
+        },
+        DecodeRow {
+            name: "tag 42 over a canonical cid",
+            hex: "a16161d82a58250001711220abababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"bafyreiflvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvm\"}} bafyreideiboj3c6rvdvthpy3u37naslxro7lyfxcouh5datn3dsdydfytm",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over bytes without the leading zero",
+            hex: "a16161d82a582401711220abababababababababababababababababababababababababababababababab",
+            oracle: "refused: Invalid CID for CBOR tag 42; expected leading 0x00",
+            stratos: Some(RecordDecodeRefusal::InvalidLink),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over bytes with a leading 01",
+            hex: "a16161d82a58250101711220abababababababababababababababababababababababababababababababab",
+            oracle: "refused: Invalid CID for CBOR tag 42; expected leading 0x00",
+            stratos: Some(RecordDecodeRefusal::InvalidLink),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over an empty byte string",
+            hex: "a16161d82a40",
+            oracle: "refused: Invalid CID for CBOR tag 42; expected leading 0x00",
+            stratos: Some(RecordDecodeRefusal::InvalidLink),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over only the zero byte",
+            hex: "a16161d82a4100",
+            oracle: "refused: RangeError: Could not decode varint",
+            stratos: Some(RecordDecodeRefusal::InvalidLink),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a text string",
+            hex: "a16161d82a6178",
+            oracle: "refused: Invalid CID for CBOR tag 42; expected leading 0x00",
+            stratos: Some(RecordDecodeRefusal::InvalidLink),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a truncated cid",
+            hex: "a16161d82a58050001711220",
+            oracle: "refused: CBOR decode error: integer encoded in more bytes than necessary (strict decode)",
+            stratos: Some(RecordDecodeRefusal::InvalidLink),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a cid with trailing bytes",
+            hex: "a16161d82a58260001711220abababababababababababababababababababababababababababababababab00",
+            oracle: "refused: Incorrect length",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a version 0 cid",
+            hex: "a16161d82a5823001220abababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"QmZtnFaddFtzGNT8BxdHVbQrhSFdq1pWxud5z4fA4kxfDt\"}} bafyreidtlg6jvfgr45rblon7zt6amq2xkal73acomey7xt47cd2skz425m",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a cid whose version is a two byte varint",
+            hex: "a16161d82a5826008100711220abababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"bafyreiflvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvm\"}} bafyreibcutogcqgcgcsi7cckjisb24t7g3ltsqrtgkdbyhkdizxzdk7qlq",
+            stratos: Some(RecordDecodeRefusal::InvalidLink),
+            stricter_because: Some(
+                "Stratos refuses a CID written with a non-minimal varint (the cid crate); the upstream decoder keeps the bytes as received.",
+            ),
+        },
+        DecodeRow {
+            name: "tag 42 over a cid whose multihash length is a two byte varint",
+            hex: "a16161d82a582600017112a000abababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"bafyrfiaavov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvovq\"}} bafyreib3w25ejemuulflfabg7rjyayoyhupnqalxqmxirc5gnrzknpyala",
+            stratos: Some(RecordDecodeRefusal::InvalidLink),
+            stricter_because: Some(
+                "Stratos refuses a CID written with a non-minimal varint (the cid crate); the upstream decoder keeps the bytes as received.",
+            ),
+        },
+        DecodeRow {
+            name: "tag 42 over a cid with a digest of 33 bytes",
+            hex: "a16161d82a58260001711221ababababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"bafyreinlvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvovq\"}} bafyreidlj2vijwhwoq7dkpnemxvfzvl6xkvzgv6vkbmfqgz6lm3nloppim",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a raw-codec cid",
+            hex: "a16161d82a58250001551220abababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"bafkreiflvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvm\"}} bafyreihhci4a5frek33saxtfqri7cvkzky4eo7pbbmg3cgbxwlhlgwj4py",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a sha-512 cid",
+            hex: "a16161d82a58450001711340abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"bafyrgqflvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2w\"}} bafyreibxtbvlic4m2qamvgh3xhcf6hpzb4vhzdzd2xw3c2ukyqmhj72qn4",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 written with a one byte head the long way",
+            hex: "a16161d9002a58250001711220abababababababababababababababababababababababababababababababab",
+            oracle: "refused: CBOR decode error: integer encoded in more bytes than necessary (strict decode)",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 as a map key",
+            hex: "a1d82a58250001711220abababababababababababababababababababababababababababababababab01",
+            oracle: "refused: CBOR decode error: non-string keys not supported (got object)",
+            stratos: Some(RecordDecodeRefusal::NonTextKey),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 as the whole record",
+            hex: "d82a58250001711220abababababababababababababababababababababababababababababababab",
+            oracle: "refused: not a plain object",
+            stratos: Some(RecordDecodeRefusal::NotAMap),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 0 over a text",
+            hex: "a16161c074323032362d31312d32315430303a30303a30305a",
+            oracle: "refused: CBOR decode error: tag not supported (0)",
+            stratos: Some(RecordDecodeRefusal::UnsupportedTag),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 1 over an integer",
+            hex: "a16161c101",
+            oracle: "refused: CBOR decode error: tag not supported (1)",
+            stratos: Some(RecordDecodeRefusal::UnsupportedTag),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 2 over a byte string",
+            hex: "a16161c24101",
+            oracle: "refused: CBOR decode error: tag not supported (2)",
+            stratos: Some(RecordDecodeRefusal::UnsupportedTag),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 24 over a byte string",
+            hex: "a16161d8184101",
+            oracle: "refused: CBOR decode error: tag not supported (24)",
+            stratos: Some(RecordDecodeRefusal::UnsupportedTag),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 55799 self-describe over a map",
+            hex: "d9d9f7a0",
+            oracle: "refused: CBOR decode error: tag not supported (55799)",
+            stratos: Some(RecordDecodeRefusal::NotAMap),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 nested in an array",
+            hex: "a1616181d82a58250001711220abababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":[{\"$link\":\"bafyreiflvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvm\"}]} bafyreidtjf46wmcvlad346xb7czxh2dfk34vbh556h77lnfietdkn2bkx4",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 43 over bytes",
+            hex: "a16161d82b4101",
+            oracle: "refused: CBOR decode error: tag not supported (43)",
+            stratos: Some(RecordDecodeRefusal::UnsupportedTag),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a byte string key",
+            hex: "a1416101",
+            oracle: "refused: CBOR decode error: non-string keys not supported (got object)",
+            stratos: Some(RecordDecodeRefusal::NonTextKey),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "an integer key",
+            hex: "a10101",
+            oracle: "refused: CBOR decode error: non-string keys not supported (got number)",
+            stratos: Some(RecordDecodeRefusal::NonTextKey),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a negative integer key",
+            hex: "a12001",
+            oracle: "refused: CBOR decode error: non-string keys not supported (got number)",
+            stratos: Some(RecordDecodeRefusal::NonTextKey),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a null key",
+            hex: "a1f601",
+            oracle: "refused: CBOR decode error: non-string keys not supported (got object)",
+            stratos: Some(RecordDecodeRefusal::NonTextKey),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "an array key",
+            hex: "a18001",
+            oracle: "refused: CBOR decode error: non-string keys not supported (got object)",
+            stratos: Some(RecordDecodeRefusal::NonTextKey),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a map key",
+            hex: "a1a001",
+            oracle: "refused: CBOR decode error: non-string keys not supported (got object)",
+            stratos: Some(RecordDecodeRefusal::NonTextKey),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "the empty text key",
+            hex: "a16001",
+            oracle: "accepted {\"\":1} bafyreicpenwudzeykexckbwbtymbw7276kmxqnhs4f36iko3nml2lyi5ne",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "key __proto__",
+            hex: "a1695f5f70726f746f5f5f01",
+            oracle: "accepted {} bafyreibbmhratf7zb4hokfirm7ihhfumau2xcxqlysz6z3rgjxnaszufxq",
+            stratos: Some(RecordDecodeRefusal::Unencodable(RecordRefusal::ProtoKey)),
+            stricter_because: Some(
+                "The upstream decoder drops a __proto__ key from the value while its CID still covers it; Stratos refuses the key as the encoder does.",
+            ),
+        },
+        DecodeRow {
+            name: "key __proto__ nested",
+            hex: "a16161a1695f5f70726f746f5f5f01",
+            oracle: "accepted {\"a\":{}} bafyreiar3npnwehcybclehatc4vptcjrvgnuay7xcuzb5zbpqhr5e4nf5a",
+            stratos: Some(RecordDecodeRefusal::Unencodable(RecordRefusal::ProtoKey)),
+            stricter_because: Some(
+                "The upstream decoder drops a __proto__ key from the value while its CID still covers it; Stratos refuses the key as the encoder does.",
+            ),
+        },
+        DecodeRow {
+            name: "key __proto__ beside the other keys, in order",
+            hex: "a2616101695f5f70726f746f5f5f02",
+            oracle: "accepted {\"a\":1} bafyreid5yvxkt2ayxlnlsrtjyatyfbk7x7hzkti36fam7gcm3nqhzblczi",
+            stratos: Some(RecordDecodeRefusal::Unencodable(RecordRefusal::ProtoKey)),
+            stricter_because: Some(
+                "The upstream decoder drops a __proto__ key from the value while its CID still covers it; Stratos refuses the key as the encoder does.",
+            ),
+        },
+        DecodeRow {
+            name: "key constructor",
+            hex: "a16b636f6e7374727563746f7201",
+            oracle: "accepted {\"constructor\":1} bafyreidzs23prirtkcwtl4t53thphkjcfvwpvvwhd2zkrl26wcfrnmm44u",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a map of one $link text key",
+            hex: "a165246c696e6b6178",
+            oracle: "accepted {\"$link\":\"x\"} bafyreidogezktpqpaobhd3moki3ed5rwiivcpeh2sk74rzozy3dagknq2q",
+            stratos: Some(RecordDecodeRefusal::Unencodable(RecordRefusal::InvalidLink)),
+            stricter_because: Some(
+                "The JSON form cannot tell a map of one $link or $bytes text member from a link or a byte string, so Stratos refuses it; the upstream decoder reads a plain map.",
+            ),
+        },
+        DecodeRow {
+            name: "a map of $bytes text member",
+            hex: "a1662462797465736178",
+            oracle: "accepted {\"$bytes\":\"x\"} bafyreiex3r6gvumivm4vb5dg3xincz3jr3xsd273x7cje4o3mmamgg4abi",
+            stratos: Some(RecordDecodeRefusal::Unencodable(
+                RecordRefusal::InvalidBytes,
+            )),
+            stricter_because: Some(
+                "The JSON form cannot tell a map of one $link or $bytes text member from a link or a byte string, so Stratos refuses it; the upstream decoder reads a plain map.",
+            ),
+        },
+        DecodeRow {
+            name: "simple value undefined",
+            hex: "a16161f7",
+            oracle: "accepted {\"a\":null} bafyreihrrgdnvxrl7bgul7pd3tgrlvg2adfslrjwwfdywsmplfoiq5cf4q",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: Some(
+                "The upstream decoder reads undefined as null; the canonical null is a different byte, so the byte comparison refuses it.",
+            ),
+        },
+        DecodeRow {
+            name: "simple value 16",
+            hex: "a16161f0",
+            oracle: "refused: CBOR decode error: simple values are not supported",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "simple value 255 (two bytes)",
+            hex: "a16161f8ff",
+            oracle: "refused: CBOR decode error: simple values are not supported",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a break byte as a value",
+            hex: "a16161ff",
+            oracle: "refused: CBOR decode error: indefinite length items not allowed",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "text that is not utf-8",
+            hex: "a1616161ff",
+            oracle: "accepted {\"a\":\"�\"} bafyreiakt5ao5tj54yetdclk3ycioins5micxx2gvo4tyuog3ex44xqavy",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: Some(
+                "The upstream decoder replaces invalid UTF-8 with U+FFFD; Stratos refuses text that is not UTF-8.",
+            ),
+        },
+        DecodeRow {
+            name: "text with an overlong utf-8 sequence",
+            hex: "a1616162c080",
+            oracle: "accepted {\"a\":\"��\"} bafyreigxnguf7mnetblnxobxnirz4ahlyghxwle46wao3gre634zzhpz5q",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: Some(
+                "The upstream decoder replaces invalid UTF-8 with U+FFFD; Stratos refuses text that is not UTF-8.",
+            ),
+        },
+        DecodeRow {
+            name: "a lone surrogate encoded as utf-8",
+            hex: "a1616163eda080",
+            oracle: "accepted {\"a\":\"���\"} bafyreibselo5mdrdycf2l3qfar7eux2c2bvossttdi5stbgxnddjsoxr2a",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: Some(
+                "The upstream decoder replaces invalid UTF-8 with U+FFFD; Stratos refuses text that is not UTF-8.",
+            ),
+        },
+        DecodeRow {
+            name: "a byte string value",
+            hex: "a1616143010203",
+            oracle: "accepted {\"a\":{\"$bytes\":\"AQID\"}} bafyreiecdlroy3cd4fjrnm4iiykbkccdz4exrwuzi5hmcayogdoyugktvu",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "an empty byte string value",
+            hex: "a1616140",
+            oracle: "accepted {\"a\":{\"$bytes\":\"\"}} bafyreift6b7yk7nekqxmw4c2ttplw2dzkvb4mpeumffmzevk5l4ovu6d3m",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "an array of one of each kind",
+            hex: "a1616187012061784101f5f4f6",
+            oracle: "accepted {\"a\":[1,-1,\"x\",{\"$bytes\":\"AQ\"},true,false,null]} bafyreidsxr3qzidflerjfnj3ymkirllbnlgjtmc6eh3lna2ykymcqzzykm",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "an empty input",
+            hex: "",
+            oracle: "refused: CBOR decode error: did not find any content to decode",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "an empty map",
+            hex: "a0",
+            oracle: "accepted {} bafyreigbtj4x7ip5legnfznufuopl4sg4knzc2cof6duas4b3q2fy6swua",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a top level array",
+            hex: "80",
+            oracle: "refused: not a plain object",
+            stratos: Some(RecordDecodeRefusal::NotAMap),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a top level integer",
+            hex: "01",
+            oracle: "refused: not a plain object",
+            stratos: Some(RecordDecodeRefusal::NotAMap),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a top level text",
+            hex: "6178",
+            oracle: "refused: not a plain object",
+            stratos: Some(RecordDecodeRefusal::NotAMap),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a top level byte string",
+            hex: "4101",
+            oracle: "refused: not a plain object",
+            stratos: Some(RecordDecodeRefusal::NotAMap),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a top level null",
+            hex: "f6",
+            oracle: "refused: not a plain object",
+            stratos: Some(RecordDecodeRefusal::NotAMap),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "trailing byte after the map",
+            hex: "a000",
+            oracle: "refused: CBOR decode error: too many terminals, data makes no sense",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "trailing complete value after the map",
+            hex: "a0a0",
+            oracle: "refused: CBOR decode error: too many terminals, data makes no sense",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "trailing garbage byte ff after the map",
+            hex: "a0ff",
+            oracle: "refused: CBOR decode error: too many terminals, data makes no sense",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "truncated in the map head",
+            hex: "b900",
+            oracle: "refused: CBOR decode error: not enough data for type",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a map of one pair with no key",
+            hex: "a1",
+            oracle: "refused: CBOR decode error: found map but not enough entries (got 0 [no key], expected 1)",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a map of one pair with no value",
+            hex: "a16161",
+            oracle: "refused: CBOR decode error: found map but not enough entries (got 0 [no value], expected 1)",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a key cut inside its bytes",
+            hex: "a16261",
+            oracle: "refused: CBOR decode error: not enough data for type",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a value cut inside its bytes",
+            hex: "a161616278",
+            oracle: "refused: CBOR decode error: not enough data for type",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a head cut inside its argument",
+            hex: "a161611900",
+            oracle: "refused: CBOR decode error: not enough data for type",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a map declaring two pairs and giving one",
+            hex: "a2616101",
+            oracle: "refused: CBOR decode error: found map but not enough entries (got 1 [no key], expected 2)",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a text declaring 2^32 - 1 bytes and giving none",
+            hex: "a161617affffffff",
+            oracle: "refused: CBOR decode error: not enough data for type",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a byte string declaring 2^64 - 1 bytes and giving none",
+            hex: "a161615bffffffffffffffff",
+            oracle: "refused: CBOR decode error: 64-bit integer bytes lengths not supported",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "an array declaring 2^32 - 1 items and giving none",
+            hex: "a161619affffffff",
+            oracle: "refused: CBOR decode error: found array but not enough entries (got 0, expected 4294967295)",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a map declaring 2^32 - 1 pairs and giving none",
+            hex: "a16161baffffffff",
+            oracle: "refused: CBOR decode error: found map but not enough entries (got 0 [no key], expected 4294967295)",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a reserved additional information 28",
+            hex: "a161611c",
+            oracle: "refused: CBOR decode error: encountered invalid minor (28) for major 0",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a reserved additional information 30",
+            hex: "a161611e",
+            oracle: "refused: CBOR decode error: encountered invalid minor (30) for major 0",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "nesting 32 containers deep (a map holding 31 arrays)",
+            hex: "a1616181818181818181818181818181818181818181818181818181818181818180",
+            oracle: "accepted {\"a\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]} bafyreig6f7egtggh5va5i4z7j4fjqaivb4vo6sxzh4ajz2qbnms2ar3dx4",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "nesting 33 containers deep (a map holding 32 arrays)",
+            hex: "a161618181818181818181818181818181818181818181818181818181818181818180",
+            oracle: "accepted {\"a\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]} bafyreif7qgpokie5dujmd4wz2glzmiaugu4xoplswxjzmhvc4hqonrk2my",
+            stratos: Some(RecordDecodeRefusal::Unencodable(RecordRefusal::TooDeep)),
+            stricter_because: Some(
+                "Stratos refuses nesting deeper than 32 containers; the upstream decoder has no limit.",
+            ),
+        },
+        DecodeRow {
+            name: "nesting 64 containers deep (a map holding 63 arrays)",
+            hex: "a16161818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818180",
+            oracle: "accepted {\"a\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]} bafyreia3gb7yvuk2fss3lhgsbx2ovcicud56hxsx65zjizh4hfzqkzeaa4",
+            stratos: Some(RecordDecodeRefusal::Unencodable(RecordRefusal::TooDeep)),
+            stricter_because: Some(
+                "Stratos refuses nesting deeper than 32 containers; the upstream decoder has no limit.",
+            ),
+        },
+        DecodeRow {
+            name: "nesting 127 containers deep (a map holding 126 arrays)",
+            hex: "a16161818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818180",
+            oracle: "accepted {\"a\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]} bafyreie2l2z2fe33gultsjy54en2mlp6qvivq2dahcf7xnnjf65s5hjxuu",
+            stratos: Some(RecordDecodeRefusal::Unencodable(RecordRefusal::TooDeep)),
+            stricter_because: Some(
+                "Stratos refuses nesting deeper than 32 containers; the upstream decoder has no limit.",
+            ),
+        },
+        DecodeRow {
+            name: "nesting 128 containers deep (a map holding 127 arrays)",
+            hex: "a1616181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818180",
+            oracle: "accepted {\"a\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]} bafyreiacxlcr6m23icbz7tiuf6bedub3imh5pdskr77x3y6iizs7r7rqpe",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: Some(
+                "Stratos refuses nesting deeper than 32 containers, and the CBOR reader stops at 128; the upstream decoder has no limit.",
+            ),
+        },
+        DecodeRow {
+            name: "nesting 129 containers deep (a map holding 128 arrays)",
+            hex: "a161618181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818180",
+            oracle: "accepted {\"a\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]} bafyreia2an4bty3tqgibz6aebdpoak3jqmzveyx5c6shnxh2zao6dfuoxi",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: Some(
+                "Stratos refuses nesting deeper than 32 containers, and the CBOR reader stops at 128; the upstream decoder has no limit.",
+            ),
+        },
+        DecodeRow {
+            name: "nesting 200 containers deep (a map holding 199 arrays)",
+            hex: "a1616181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818180",
+            oracle: "accepted {\"a\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]} bafyreibito7fgx7stknfuvmrwkvhswnuwkpbt4xrzprnrxu7g3hcpjguaq",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: Some(
+                "Stratos refuses nesting deeper than 32 containers, and the CBOR reader stops at 128; the upstream decoder has no limit.",
+            ),
+        },
+        DecodeRow {
+            name: "tag 42 over a cid with an identity multihash",
+            hex: "a16161d82a490001710004deadbeef",
+            oracle: "accepted {\"a\":{\"$link\":\"bafyqabg6vw7o6\"}} bafyreifemhouuedbg4iqgdcfnbw5df3xkus5p76kadz6kfrdd24fbaiv2e",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a cid with the sha-256 code and a 2 byte digest",
+            hex: "a16161d82a470001711202abcd",
+            oracle: "accepted {\"a\":{\"$link\":\"bafyreavlzu\"}} bafyreihzr2d2lk7tmwdjlxlsrt2fwfobmdrpckgkjeum67qtyrfuvjrsje",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a cid with an unknown hash code",
+            hex: "a16161d82a4a000171800104deadbeef",
+            oracle: "accepted {\"a\":{\"$link\":\"bafyyaaie32w353y\"}} bafyreibhkknxcemwj56qtkywevgbkprohuemg56ezwnfsuq54krbrtla4i",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a cid with a digest of 64 bytes",
+            hex: "a16161d82a58450001711240abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"bafyreqflvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2w\"}} bafyreiaxreuaawgmxp2pawv3r3kyv47kjbfdxkl6cfkwv5u33dp4mhbq3e",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a cid with a digest of 65 bytes",
+            hex: "a16161d82a58460001711241ababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"bafyreqnlvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xky\"}} bafyreig2cbzqdpkjwo4dv3rmpnv52ao2ppglv2o2xmzjvluoaxt4gim2ry",
+            stratos: Some(RecordDecodeRefusal::InvalidLink),
+            stricter_because: Some(
+                "The CID type holds a digest of at most 64 bytes, and no record CID or blob reference a PDS writes has a longer one; the upstream decoder keeps any length.",
+            ),
+        },
+        DecodeRow {
+            name: "tag 42 over a cid of version 2",
+            hex: "a16161d82a58250002711220abababababababababababababababababababababababababababababababab",
+            oracle: "refused: RangeError: Invalid CID version 2",
+            stratos: Some(RecordDecodeRefusal::InvalidLink),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a cid of version 0 with a 33 byte digest",
+            hex: "a16161d82a5824001221ababababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"2ow2EKpEWbUKhqcQKqqTJiemproyZyfMSXqU634PkpuWsYug\"}} bafyreicomdwa7noeimki565bm5bfz7futvk67qvvixoo3uc33wpm5pnqd4",
+            stratos: Some(RecordDecodeRefusal::InvalidLink),
+            stricter_because: Some(
+                "CID version 0 is a SHA-256 digest of 32 bytes; Stratos refuses the 33 byte form the upstream decoder keeps.",
+            ),
+        },
+        DecodeRow {
+            name: "tag 42 over a cid with a dag-pb codec",
+            hex: "a16161d82a58250001701220abababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"bafybeiflvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvm\"}} bafyreif5kkxqye637ik2fyk5ixsrkwbytj577z7gtbwgxo4mggzui3vqui",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "tag 42 over a cid with a codec in a two byte varint",
+            hex: "a16161d82a5826000181711220abababababababababababababababababababababababababababababababab",
+            oracle: "accepted {\"a\":{\"$link\":\"bagaxceravov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvov2xk5lvovq\"}} bafyreig4p5dp77lzu6ntv5jtb6s2vhrviwv6foubhu5wsfe6gtxksylwvm",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "simple value false written as f8 14",
+            hex: "a16161f814",
+            oracle: "refused: CBOR decode error: simple values are not supported",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "simple value null written as f8 16",
+            hex: "a16161f816",
+            oracle: "refused: CBOR decode error: simple values are not supported",
+            stratos: Some(RecordDecodeRefusal::Malformed),
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a plain map of one $link text that is a canonical cid",
+            hex: "a16161a165246c696e6b783b626166797265696879706733757678337363373534723232656d6b7736756a7069716a6f7a6965367075756d34696534656774326a71787a367761",
+            oracle: "accepted {\"a\":{\"$link\":\"bafyreihypg3uvx3sc754r22emkw6ujpiqjozie6puum4ie4egt2jqxz6wa\"}} bafyreicoeykx3hnic4vnlbhrpdgmtqeyrr52nviekbyoo7qyq72hkoum64",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: Some(
+                "The JSON form cannot tell a map of one $link or $bytes text member from a link or a byte string, so Stratos refuses it; the upstream decoder reads a plain map.",
+            ),
+        },
+        DecodeRow {
+            name: "a plain map of one $link text that is not a cid",
+            hex: "a16161a165246c696e6b6178",
+            oracle: "accepted {\"a\":{\"$link\":\"x\"}} bafyreiclyohcrtvttuy5hcgvxil62z3idl6bkhag2cjwkpzrz22bnzy3ce",
+            stratos: Some(RecordDecodeRefusal::Unencodable(RecordRefusal::InvalidLink)),
+            stricter_because: Some(
+                "The JSON form cannot tell a map of one $link or $bytes text member from a link or a byte string, so Stratos refuses it; the upstream decoder reads a plain map.",
+            ),
+        },
+        DecodeRow {
+            name: "a plain map of one $bytes text",
+            hex: "a16161a1662462797465736441514944",
+            oracle: "accepted {\"a\":{\"$bytes\":\"AQID\"}} bafyreig26xm4i7rel7n257ea2rae3nfhn7t25wij4iw3gi7ec6ft76wk3u",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: Some(
+                "The JSON form cannot tell a map of one $link or $bytes text member from a link or a byte string, so Stratos refuses it; the upstream decoder reads a plain map.",
+            ),
+        },
+        DecodeRow {
+            name: "a plain map of $link holding a number",
+            hex: "a16161a165246c696e6b05",
+            oracle: "accepted {\"a\":{\"$link\":5}} bafyreib7zxjefatj4dctmkfxlvqfuyon35jsycfarql64obw4z7g465jpm",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a plain map of $link holding a map",
+            hex: "a16161a165246c696e6ba1616201",
+            oracle: "accepted {\"a\":{\"$link\":{\"b\":1}}} bafyreicvjijv4xal4h46tz5e36wayysqa52bijljx3wvxk4l6o5cbc2wva",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a plain map of $link and another member",
+            hex: "a16161a261790165246c696e6b6178",
+            oracle: "accepted {\"a\":{\"y\":1,\"$link\":\"x\"}} bafyreifr67xozpdze7flikje4zjd4acjhl5rn6f2zxpqevouwm5niu652i",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a plain map of $bytes and another member",
+            hex: "a16161a2617901662462797465736441514944",
+            oracle: "accepted {\"a\":{\"y\":1,\"$bytes\":\"AQID\"}} bafyreic3vc5xurbxcrbhyyo4ionp6fobg6suc4qcwvgr46mztafwqyoiq4",
+            stratos: None,
+            stricter_because: None,
+        },
+        DecodeRow {
+            name: "a top level plain map of one $link text",
+            hex: "a165246c696e6b783b626166797265696879706733757678337363373534723232656d6b7736756a7069716a6f7a6965367075756d34696534656774326a71787a367761",
+            oracle: "accepted {\"$link\":\"bafyreihypg3uvx3sc754r22emkw6ujpiqjozie6puum4ie4egt2jqxz6wa\"} bafyreiaj5vv4a3be6me7plq6c52fnsxbhj5spzoinzfsdlc3bbdwjgictu",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: Some(
+                "The JSON form cannot tell a map of one $link or $bytes text member from a link or a byte string, so Stratos refuses it; the upstream decoder reads a plain map.",
+            ),
+        },
+        DecodeRow {
+            name: "a top level plain map of one $bytes text",
+            hex: "a1662462797465736441514944",
+            oracle: "accepted {\"$bytes\":\"AQID\"} bafyreictje6qj7ugremlfla4ndrvscc6wh3ifp23wuuritioqkmbpscp7m",
+            stratos: Some(RecordDecodeRefusal::NotCanonical),
+            stricter_because: Some(
+                "The JSON form cannot tell a map of one $link or $bytes text member from a link or a byte string, so Stratos refuses it; the upstream decoder reads a plain map.",
+            ),
+        },
+    ];
+
+    fn oracle_accepts(row: &DecodeRow) -> Option<(&'static str, &'static str)> {
+        let rest = row.oracle.strip_prefix("accepted ")?;
+        let (json, cid) = rest.rsplit_once(' ').expect("json and cid");
+        Some((json, cid))
+    }
+
+    // The row's disagreement with its recorded expectation, if any.
+    fn decode_disagreement(row: &DecodeRow) -> Option<String> {
+        let outcome = decode_record(&bytes_of_hex(row.hex));
+        if outcome.as_ref().err().copied() != row.stratos {
+            return Some(format!("{}: got {outcome:?}", row.name));
+        }
+        match (oracle_accepts(row), &outcome) {
+            (Some((json, cid)), Ok((decoded_cid, decoded))) => {
+                let oracle_value: Value = serde_json::from_str(json)
+                    .unwrap_or_else(|_| panic!("{}: oracle json {json}", row.name));
+                if decoded_cid.to_string() != cid {
+                    Some(format!("{}: cid {decoded_cid}", row.name))
+                } else if decoded != &oracle_value {
+                    Some(format!("{}: value {decoded}", row.name))
+                } else if row.stricter_because.is_some() {
+                    Some(format!("{}: labelled stricter but accepted", row.name))
+                } else {
+                    None
+                }
+            }
+            (Some(_), Err(_)) => row
+                .stricter_because
+                .is_none_or(str::is_empty)
+                .then(|| format!("{}: stricter without a reason", row.name)),
+            (None, Ok(_)) => Some(format!(
+                "{}: the oracle refuses it, Stratos accepted",
+                row.name
+            )),
+            (None, Err(_)) => row
+                .stricter_because
+                .is_some()
+                .then(|| format!("{}: labelled stricter but the oracle refuses", row.name)),
+        }
+    }
+
+    #[test]
+    fn every_decode_edge_input_gets_the_oracle_verdict_or_its_labelled_refusal() {
+        assert!(DECODE_ROWS.len() >= 120);
+        let mut names = std::collections::BTreeSet::new();
+        for row in DECODE_ROWS {
+            assert!(names.insert(row.name), "{}: named twice", row.name);
+        }
+        let disagreements: Vec<String> =
+            DECODE_ROWS.iter().filter_map(decode_disagreement).collect();
+        assert_eq!(disagreements, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_decode_row_the_oracle_accepts_as_bigint_has_no_json_to_compare() {
+        let bigint_rows: Vec<&str> = DECODE_ROWS
+            .iter()
+            .filter(|row| row.oracle.contains("(a BigInt"))
+            .map(|row| row.name)
+            .collect();
+        assert_eq!(
+            bigint_rows,
+            [
+                "integer 2^53",
+                "integer -2^53",
+                "integer 2^64 - 1",
+                "integer -2^64"
+            ]
+        );
+        for row in DECODE_ROWS
+            .iter()
+            .filter(|row| bigint_rows.contains(&row.name))
+        {
+            assert!(
+                decode_record(&bytes_of_hex(row.hex)).is_err(),
+                "{}",
+                row.name
+            );
+        }
+    }
+
+    // Every proper prefix of each vector record, and each of the 256 bytes
+    // appended to it, was run through the oracle: none was accepted (14 records,
+    // 0 of 1 089 prefixes, 0 of 3 584 appended).
+
+    #[test]
+    fn no_prefix_of_a_record_and_no_record_with_a_byte_appended_decodes() {
+        let mut prefixes = 0;
+        let mut appended = 0;
+        for row in rows("records") {
+            let Oracle::Accepted { bytes_hex, .. } =
+                oracle_outcome(row["oracle"].as_str().expect("oracle"))
+            else {
+                panic!("a vector record is accepted");
+            };
+            let bytes = bytes_of_hex(&bytes_hex);
+            for end in 0..bytes.len() {
+                prefixes += 1;
+                assert!(
+                    decode_record(&bytes[..end]).is_err(),
+                    "{}: prefix {end}",
+                    row["name"]
+                );
+            }
+            for extra in 0..=u8::MAX {
+                appended += 1;
+                let mut longer = bytes.clone();
+                longer.push(extra);
+                assert!(
+                    decode_record(&longer).is_err(),
+                    "{}: byte {extra}",
+                    row["name"]
+                );
+            }
+        }
+        assert_eq!((prefixes, appended), (1089, 3584));
+    }
+
+    // The oracle's CID of the bytes its own encoder writes for each shape at
+    // every length where the head of CBOR changes size (23 and 24, 255 and 256,
+    // 65 535 and 65 536) and at 0 and 1. A text has n bytes, a byte string n
+    // bytes of 0x61, an array n zeros, a map n members named k00000 and up.
+
+    const BOUNDARY_CIDS: &[(&str, usize, &str)] = &[
+        (
+            "text",
+            0,
+            "bafyreiccddvifu7msegt35iqfbdkugtfk6rswloo6xmsyinknia43ajsry",
+        ),
+        (
+            "bytes",
+            0,
+            "bafyreifh3zz54azi5ab66xr2lneccgs23ocacug2x4fmlpcbqamvqa5hba",
+        ),
+        (
+            "array",
+            0,
+            "bafyreicxch36nnljjpnf2uxvnvgslrtlvyonnt2a2ivgbjzqpby7fgu3yi",
+        ),
+        (
+            "map",
+            0,
+            "bafyreighzouz6e3be62myggjblhjjg2fvj6bi4kyr3466arloayrutq3zy",
+        ),
+        (
+            "text",
+            1,
+            "bafyreigj7i6pss2yn74fr4vmlld7yeagyqvspbvd3th47v3ivkap2epgju",
+        ),
+        (
+            "bytes",
+            1,
+            "bafyreiatxevgymi5dwhdrflre2gtwvsfiuebca2m524bw5pyjgojfgyj7e",
+        ),
+        (
+            "array",
+            1,
+            "bafyreieyat4i4lq2eln4lmsllvoi5re7fwmyqcszdoik75kzn4h3fogmhu",
+        ),
+        (
+            "map",
+            1,
+            "bafyreiagqdia6s2qmuvh6ltx5w3ff6dtiq2gofm5lfeldnqexepofmsfdu",
+        ),
+        (
+            "text",
+            23,
+            "bafyreig6lvorboyy7zmm7usnkaszsd27wgc7zriytile4frmreidjmuuly",
+        ),
+        (
+            "bytes",
+            23,
+            "bafyreifuiz4vy62arci5auipqsjzcswgw4mvvrwp5h673ptf4spmkdfnhy",
+        ),
+        (
+            "array",
+            23,
+            "bafyreicysavd7z6wrt6bussjzjh6z3y4aiclxqusfzoucxvgoihsfgj5oy",
+        ),
+        (
+            "map",
+            23,
+            "bafyreifha2atd5d4ldrrl6ilchoiuvao4mwuyqm5ueozckx5mo25wpn2ny",
+        ),
+        (
+            "text",
+            24,
+            "bafyreihw7d5sus7gdn3pfbyd5olvk66iubiieersyqztp3ac572bqrs7vm",
+        ),
+        (
+            "bytes",
+            24,
+            "bafyreiceeatd3bjktas3w552otrzgmgluqcsgfcubyglr2q3dadbvipmve",
+        ),
+        (
+            "array",
+            24,
+            "bafyreib4cnexxtickyuzo2rfq7vqnv2hnp6m2wwxl7gknon5tevgjf3y5u",
+        ),
+        (
+            "map",
+            24,
+            "bafyreibls3nylrcqxnyq6bzh4hi37mzoajnwu2skdi3ocekckktgrh62hu",
+        ),
+        (
+            "text",
+            255,
+            "bafyreifukuamlhtarntyflacg7ktrbh2ilc6ifghoqtuns6jsqymnvupju",
+        ),
+        (
+            "bytes",
+            255,
+            "bafyreihn5d2fizfp3zyolujx6zhag26t5xazi64kgbnlwrkvkmxo2igioi",
+        ),
+        (
+            "array",
+            255,
+            "bafyreifm3rak2xyrfvnkik4jotm4seucjfxzc3xoe7klgbu7h6wttxq6ru",
+        ),
+        (
+            "map",
+            255,
+            "bafyreibt2bghjled7g3shbn2b3cplsyjjgqmhvgyntehim7ettbb335mci",
+        ),
+        (
+            "text",
+            256,
+            "bafyreibzdosp4yqzq7dpzqufdto6eh6btgk3ezsdbtdbesqqqx2g5dneie",
+        ),
+        (
+            "bytes",
+            256,
+            "bafyreicxhf45je6j4fjv2scwco3gxyqgpizkibm5odtnyoosv2tpzkrhc4",
+        ),
+        (
+            "array",
+            256,
+            "bafyreigh2py6ygaj6utoqftu4ysd57rskrxgq6sjkm7hwupabstawm2x4a",
+        ),
+        (
+            "map",
+            256,
+            "bafyreigi5urcngokmti4vqv2kcdidfpcxa22oekntp5n2cnrtlfipomfnq",
+        ),
+        (
+            "text",
+            65535,
+            "bafyreia6rtj6svee7floypell2fodzqyacwid6ofgs2p543dqqteujyugy",
+        ),
+        (
+            "bytes",
+            65535,
+            "bafyreihe6s6wbnnaxxg6avpcuum3jj27hsnd2hs4z7v5nlnj3e52oupspa",
+        ),
+        (
+            "array",
+            65535,
+            "bafyreic56sbgb7bmlj7h2o2iarrkdkwqeugivsvmianpaybbzu5kvhwl4i",
+        ),
+        (
+            "map",
+            65535,
+            "bafyreicp77d75emzcouae67c4irls6s3wrgo3oqho2mgofkluwzwsq2teu",
+        ),
+        (
+            "text",
+            65536,
+            "bafyreicom3fq6cjal37mshn64bjzubrilb6indprjostxspox3y6jhzrze",
+        ),
+        (
+            "bytes",
+            65536,
+            "bafyreifnimzpaiy5k7vrkrzos6uluozwradjiyrvaf26wwib65oapanycy",
+        ),
+        (
+            "array",
+            65536,
+            "bafyreiey7kmxp6pw6ubla5fc4r2vfvgpjgceunuhisbssylfykns6nekgq",
+        ),
+        (
+            "map",
+            65536,
+            "bafyreibcwvdgsffck25a2j26z6jr5ah4pzht5umon5bqrow57u5rx5q4yy",
+        ),
+    ];
+
+    fn boundary_record(shape: &str, length: usize) -> Value {
+        match shape {
+            "text" => serde_json::json!({ "s": "a".repeat(length) }),
+            "bytes" => serde_json::json!({
+                "b": { "$bytes": STANDARD_NO_PAD.encode(vec![0x61u8; length]) }
+            }),
+            "array" => serde_json::json!({ "l": vec![0; length] }),
+            "map" => {
+                let members: Map<String, Value> = (0..length)
+                    .map(|at| (format!("k{at:05}"), Value::from(0)))
+                    .collect();
+                serde_json::json!({ "m": members })
+            }
+            other => panic!("no shape {other}"),
+        }
+    }
+
+    #[test]
+    fn records_at_every_head_size_boundary_decode_to_the_oracle_cid() {
+        assert_eq!(BOUNDARY_CIDS.len(), 32);
+        for (shape, length, cid) in BOUNDARY_CIDS {
+            let record = boundary_record(shape, *length);
+            let bytes = encode_record(&record).expect("encodes");
+            let (decoded_cid, decoded) = decode_record(&bytes)
+                .unwrap_or_else(|refusal| panic!("{shape} {length}: {refusal}"));
+            assert_eq!(decoded, record, "{shape} {length}");
+            assert_eq!(decoded_cid.to_string(), *cid, "{shape} {length}: cid");
+        }
+    }
+
+    // Size: the oracle's decoder has no limit; the archive reader refuses a
+    // value over 1 MiB before the decoder sees it. The CIDs are the oracle's
+    // for a map of one text member filling that many bytes.
+
+    #[test]
+    fn a_record_of_exactly_one_mebibyte_decodes_and_one_byte_more_is_refused_before_decoding() {
+        let at_limit = encode_record(&record_with_text_filling(MAX_RECORD_BYTES)).expect("fits");
+        let (cid, _) = decode_record(&at_limit).expect("decodes");
+        assert_eq!(
+            cid.to_string(),
+            "bafyreiasatg6xhcbromqn3perhjt6knwxkxfgooryj4vdswvfhocmyvuia"
+        );
+        // The oracle decoder accepts these bytes too, with the CID
+        // bafyreiab5d3x2muoosp7t4wdbv6qf6vkdsomlmqrgtrz2kbqlr53aqkuey; upstream
+        // refuses them in the archive reader's value limit instead.
+        let mut over = at_limit;
+        over.push(0);
+        assert_eq!(decode_record(&over), Err(RecordDecodeRefusal::TooLarge));
+        let mut oversized_garbage = vec![0xffu8; MAX_RECORD_BYTES + 1];
+        oversized_garbage[0] = 0xa1;
+        assert_eq!(
+            decode_record(&oversized_garbage),
+            Err(RecordDecodeRefusal::TooLarge)
+        );
+    }
+
+    // Seeded loop: records built from the JSON side, as a host's records are.
+
+    fn random_text(generator: &mut Lcg, longest: usize) -> String {
+        const PIECES: [&str; 8] = ["a", "Z", "7", " ", "é", "日", "🛸", "-"];
+        let length = generator.below(longest + 1);
+        (0..length)
+            .map(|_| PIECES[generator.below(PIECES.len())])
+            .collect()
+    }
+
+    fn random_key(generator: &mut Lcg) -> String {
+        let key = random_text(generator, 40);
+        match key.as_str() {
+            "__proto__" | "$link" | "$bytes" => format!("{key}x"),
+            _ => key,
+        }
+    }
+
+    fn random_link(generator: &mut Lcg) -> Value {
+        let seed: Vec<u8> = (0..8).map(|_| generator.below(256) as u8).collect();
+        let cid = record_cid(&seed);
+        serde_json::json!({ "$link": cid.to_string() })
+    }
+
+    fn random_bytes(generator: &mut Lcg) -> Value {
+        let length = generator.below(300);
+        let bytes: Vec<u8> = (0..length).map(|_| generator.below(256) as u8).collect();
+        serde_json::json!({ "$bytes": STANDARD_NO_PAD.encode(bytes) })
+    }
+
+    fn random_integer(generator: &mut Lcg) -> Value {
+        const EDGES: [i64; 14] = [
+            0,
+            -1,
+            23,
+            24,
+            255,
+            256,
+            65_535,
+            65_536,
+            4_294_967_295,
+            4_294_967_296,
+            -24,
+            -25,
+            MAX_SAFE_INTEGER,
+            -MAX_SAFE_INTEGER,
+        ];
+        if generator.below(2) == 0 {
+            Value::from(EDGES[generator.below(EDGES.len())])
+        } else {
+            Value::from(generator.below(1 << 20) as i64 - (1 << 19))
+        }
+    }
+
+    fn random_value(generator: &mut Lcg, depth: usize) -> Value {
+        let kinds = if depth >= 4 { 6 } else { 8 };
+        match generator.below(kinds) {
+            0 => Value::Null,
+            1 => Value::Bool(generator.below(2) == 0),
+            2 => random_integer(generator),
+            3 => Value::String(random_text(generator, 300)),
+            4 => random_link(generator),
+            5 => random_bytes(generator),
+            6 => Value::Array(
+                (0..generator.below(8))
+                    .map(|_| random_value(generator, depth + 1))
+                    .collect(),
+            ),
+            _ => random_map(generator, depth + 1),
+        }
+    }
+
+    fn random_map(generator: &mut Lcg, depth: usize) -> Value {
+        let mut members = Map::new();
+        for _ in 0..generator.below(8) {
+            let key = random_key(generator);
+            let member = random_value(generator, depth);
+            members.insert(key, member);
+        }
+        Value::Object(members)
+    }
+
+    #[test]
+    fn two_hundred_seeded_records_encode_and_decode_to_the_same_json_and_cid() {
+        let mut generator = Lcg(0x5eed_0044);
+        let mut longest = 0;
+        let (mut links, mut byte_strings) = (0, 0);
+        for round in 0..200 {
+            let record = random_map(&mut generator, 0);
+            let bytes = encode_record(&record).expect("a generated record encodes");
+            let (cid, decoded) = decode_record(&bytes)
+                .unwrap_or_else(|refusal| panic!("round {round}: refused: {refusal}"));
+            assert_eq!(decoded, record, "round {round}");
+            assert_eq!(cid, record_cid(&bytes), "round {round}");
+            let text = record.to_string();
+            longest = longest.max(bytes.len());
+            links += usize::from(text.contains("\"$link\""));
+            byte_strings += usize::from(text.contains("\"$bytes\""));
+        }
+        assert!(longest > 2_000, "the loop never built a large record");
+        assert!(links > 20 && byte_strings > 20, "{links} {byte_strings}");
+    }
+
+    #[test]
+    fn a_decoded_record_encodes_to_the_bytes_it_came_from() {
+        for row in rows("records") {
+            let Oracle::Accepted { bytes_hex, .. } =
+                oracle_outcome(row["oracle"].as_str().expect("oracle"))
+            else {
+                panic!("a vector record is accepted");
+            };
+            let bytes = bytes_of_hex(&bytes_hex);
+            let (_, decoded) = decode_record(&bytes).expect("decodes");
+            assert_eq!(encode_record(&decoded).expect("encodes"), bytes);
+        }
     }
 
     // Cross-check: the CID is the CID of the bytes, whatever made them.

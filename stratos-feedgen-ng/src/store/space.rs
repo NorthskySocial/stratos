@@ -238,12 +238,10 @@ pub(super) fn stage_usage(
     Ok(usage)
 }
 
-fn enforce_stage_budget(
-    transaction: &rusqlite::Transaction<'_>,
-    space_uri: &str,
-    actor_did: &str,
-) -> Result<StageUsage, StoreError> {
-    let maximum: i64 = transaction
+/// The configured projection maximum, which a write counts the bytes it adds
+/// and the bytes already published against.
+fn projection_maximum(transaction: &rusqlite::Transaction<'_>) -> Result<i64, StoreError> {
+    Ok(transaction
         .query_row(
             "SELECT value FROM retention_metadata WHERE key = 'projection_max_bytes'",
             [],
@@ -251,11 +249,56 @@ fn enforce_stage_budget(
         )
         .optional()
         .map_err(StoreError::Open)?
-        .unwrap_or(crate::config::MEMORY_RETENTION_MAX_BYTES as i64);
+        .unwrap_or(crate::config::MEMORY_RETENTION_MAX_BYTES as i64))
+}
+
+/// Whether `added_bytes` and what is already published together pass `maximum`.
+fn projection_would_exceed(
+    transaction: &rusqlite::Transaction<'_>,
+    maximum: i64,
+    added_bytes: i64,
+) -> Result<bool, StoreError> {
+    let published_bytes = super::interactions::published_bytes(transaction)?;
+    Ok(added_bytes
+        .checked_add(published_bytes)
+        .is_none_or(|used| used > maximum))
+}
+
+pub(super) fn exceeds_projection_maximum(
+    transaction: &rusqlite::Transaction<'_>,
+    added_bytes: i64,
+) -> Result<bool, StoreError> {
+    let maximum = projection_maximum(transaction)?;
+    projection_would_exceed(transaction, maximum, added_bytes)
+}
+
+/// What one row of `space_sync_stage` is counted as: the length of each column
+/// `stage_usage` sums, so a row counts the same before it is stored as after.
+pub(super) fn stage_row_bytes(space_uri: &str, actor_did: &str, row: &SpaceStageRow) -> i64 {
+    let text = |value: &str| value.chars().count();
+    let optional_text = |value: &Option<String>| value.as_deref().map_or(0, text);
+    let optional_blob = |value: &Option<Vec<u8>>| value.as_ref().map_or(0, Vec::len);
+    (text(space_uri)
+        + text(actor_did)
+        + text(&row.uri)
+        + text(&row.boundary)
+        + optional_text(&row.cid)
+        + optional_text(&row.sort_at)
+        + optional_text(&row.indexed_at)
+        + optional_blob(&row.record_json)
+        + optional_blob(&row.blob_refs_json)
+        + text(&row.updated_at)) as i64
+}
+
+fn enforce_stage_budget(
+    transaction: &rusqlite::Transaction<'_>,
+    space_uri: &str,
+    actor_did: &str,
+) -> Result<StageUsage, StoreError> {
+    let maximum = projection_maximum(transaction)?;
     let budget = stage_budget(transaction, maximum)?;
     let target = stage_usage(transaction, Some(space_uri), Some(actor_did))?;
     let global = stage_usage(transaction, None, None)?;
-    let published_bytes = super::interactions::published_bytes(transaction)?;
     let reason = if target.rows > budget.target_rows {
         Some("target_rows")
     } else if target.bytes > budget.target_bytes {
@@ -264,11 +307,7 @@ fn enforce_stage_budget(
         Some("global_rows")
     } else if global.bytes > budget.global_bytes {
         Some("global_bytes")
-    } else if global
-        .bytes
-        .checked_add(published_bytes)
-        .is_none_or(|used| used > maximum)
-    {
+    } else if projection_would_exceed(transaction, maximum, global.bytes)? {
         Some("projection_bytes")
     } else {
         None
@@ -970,6 +1009,22 @@ impl EncryptedStore {
             )
             .map_err(StoreError::Open)?;
         transaction.commit().map_err(StoreError::Open)
+    }
+
+    /// Every boundary the member is a current PDS-custody member of.
+    pub fn pds_member_boundaries(&self, did: &str) -> Result<Vec<String>, StoreError> {
+        crate::identifier::Did::parse(did.to_owned())
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        self.connection
+            .prepare(
+                "SELECT boundary FROM membership_baseline
+                 WHERE did = ?1 AND custody = 'pds' ORDER BY boundary",
+            )
+            .map_err(StoreError::Open)?
+            .query_map([did], |row| row.get(0))
+            .map_err(StoreError::Open)?
+            .collect::<Result<_, _>>()
+            .map_err(StoreError::Open)
     }
 
     pub fn is_current_pds_space_member(

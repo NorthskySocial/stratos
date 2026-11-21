@@ -4,17 +4,19 @@
 //                                          [--stratos-produced]
 //                                          [--commit-mac] [--kem-keys]
 //                                          [--record-cid] [--op-pages]
+//                                          [--repo-archive]
 //
 // Without a flag every file but token-audiences.json, stratos-produced.json,
-// commit-mac.json, kem-keys.json, record-cid.json and op-pages.json is written,
-// and the output is the same on every run. token-audiences.json holds tokens the oracle stamps with the clock
-// and a random jti, so it is written only with --tokens and then kept.
+// commit-mac.json, kem-keys.json, record-cid.json, op-pages.json and
+// repo-archive.json is written, and the output is the same on every run.
+// token-audiences.json holds tokens the oracle stamps with the clock and a
+// random jti, so it is written only with --tokens and then kept.
 // stratos-produced.json takes its inputs from constants copied out of Stratos
 // tests (named beside each one) and is written only with --stratos-produced.
-// commit-mac.json, kem-keys.json, record-cid.json and op-pages.json are
-// reproducible and each has its own flag. The last two also need
-// @atproto/lex-json at the oracle version, installed beside @atproto/space in
-// the oracle directory: the JSON-to-data-model step is that package's.
+// commit-mac.json, kem-keys.json, record-cid.json, op-pages.json and
+// repo-archive.json are reproducible and each has its own flag. The last three
+// also need @atproto/lex-json at the oracle version, installed beside
+// @atproto/space in the oracle directory: the JSON-to-data-model step is that package's.
 //
 // Every file's header pins this generator's hash. Changing this file means
 // running again, and a file that is not rewritten has to have that one header
@@ -76,6 +78,7 @@ const writeCommitMac = flags.includes('--commit-mac')
 const writeKemKeys = flags.includes('--kem-keys')
 const writeRecordCid = flags.includes('--record-cid')
 const writeOpPages = flags.includes('--op-pages')
+const writeRepoArchive = flags.includes('--repo-archive')
 const KNOWN_FLAGS = [
   '--tokens',
   '--stratos-produced',
@@ -83,6 +86,7 @@ const KNOWN_FLAGS = [
   '--kem-keys',
   '--record-cid',
   '--op-pages',
+  '--repo-archive',
 ]
 if (!oracleDirectory || flags.some((flag) => !KNOWN_FLAGS.includes(flag))) {
   console.error(
@@ -1735,8 +1739,10 @@ if (writeKemKeys) {
   )
 }
 
-if (writeRecordCid || writeOpPages) {
-  const lexJson = await loadLexJson('--record-cid and --op-pages')
+if (writeRecordCid || writeOpPages || writeRepoArchive) {
+  const lexJson = await loadLexJson(
+    '--record-cid, --op-pages and --repo-archive',
+  )
   const { lexParse, lexToJson } = lexJson
   const { cidForRawBytes, parseCidSafe } = await importFrom('@atproto/lex-data')
   // multiformats is a dependency of lex-data only and exports no base58 entry
@@ -2092,6 +2098,283 @@ if (writeRecordCid || writeOpPages) {
         note: 'Three pages in the wire shape of listRepoOps over a hand-written new-form space string. Each commit is made by the oracle RepoCommit after that page, so its data is the set hash digest of the repo then. Values and cids are those of record-cid.json.',
         pages,
         stateAfterLastPage: bytesField(repoState.setHash.state()),
+      },
+    )
+  }
+
+  if (writeRepoArchive) {
+    const ARCHIVE_SPACE =
+      'at:space/did:web:bebop.example/zone.stratos.space.feed/crew'
+    const FOLLOW = 'app.bsky.graph.follow'
+    // Strict byte order of the paths, as the archive requires.
+    const archiveRecords = [
+      [LIKE, 'ed', 'a like with a strong reference'],
+      [REPOST, 'jet', 'a repost'],
+      [FOLLOW, 'faye', 'a follow'],
+      [FEED_POST, 'swordfish', 'a post'],
+    ].map(([collection, rkey, name]) => {
+      const found = records.find((entry) => entry.name === name)
+      if (!found) throw new Error(`no record named ${name}`)
+      return {
+        collection,
+        rkey,
+        name,
+        bytes: found.parsed.bytes,
+        cid: found.parsed.cid,
+      }
+    })
+
+    const judge = (bytes, commit, headers) =>
+      verdictOf(() =>
+        space.verifyRepoStarFull([bytes], {
+          space: commit.space,
+          repo: commit.repo,
+          keyShare,
+          sharedSecret,
+          headers: new Headers(headers),
+        }),
+      )
+    const archiveOf = async (commit, list) => {
+      const chunks = []
+      for await (const chunk of space.writeRepoStar(commit, list))
+        chunks.push(chunk)
+      const { headers } = space.createCommitMacHeaders(commit, {
+        ...macRequest,
+        sharedSecret,
+      })
+      return { chunks, bytes: Buffer.concat(chunks), headers, commit }
+    }
+    const varint = (value) => {
+      const out = []
+      let rest = value
+      while (rest >= 0x80) {
+        out.push((rest % 0x80) | 0x80)
+        rest = Math.floor(rest / 0x80)
+      }
+      out.push(rest)
+      return Buffer.from(out)
+    }
+    const hexOf = (bytes) => Buffer.from(bytes).toString('hex')
+
+    // The archives and the edits that make the refused variants, for one
+    // spelling of the space. Offsets come from the writer's own chunks: magic,
+    // meta length, meta, then five chunks for each pair (control, key length,
+    // key, value length, value).
+    const familyFor = async (spaceString) => {
+      const commitFor = (rev, list) =>
+        new space.RepoCommit()
+          .applyOps(
+            list.map(({ collection, rkey, cid }) => ({
+              collection,
+              rkey,
+              cid,
+              prev: null,
+            })),
+          )
+          .toCommit({ space: spaceString, repo: REPO, rev })
+      const full = await archiveOf(
+        commitFor(REVISIONS[3], archiveRecords),
+        archiveRecords,
+      )
+      const empty = await archiveOf(commitFor(REVISIONS[0], []), [])
+
+      let at = 0
+      const next = (chunk) => {
+        const start = at
+        at += chunk.length
+        return start
+      }
+      const [magic, metaLength, meta, ...rest] = full.chunks
+      next(magic)
+      next(metaLength)
+      const metaAt = next(meta)
+      const pairs = []
+      for (let i = 0; i + 5 < rest.length; i += 5) {
+        const start = next(rest[i])
+        next(rest[i + 1])
+        const keyAt = next(rest[i + 2])
+        const valueLengthAt = next(rest[i + 3])
+        const valueAt = next(rest[i + 4])
+        pairs.push({
+          start,
+          keyAt,
+          valueLengthAt,
+          valueAt,
+          end: at,
+          key: Buffer.from(rest[i + 2]),
+          value: Buffer.from(rest[i + 4]),
+        })
+      }
+      if (pairs.length !== archiveRecords.length)
+        throw new Error('the writer did not give one pair per record')
+      if (metaAt !== 4 + metaLength.length || pairs[0].key.length >= 0x80)
+        throw new Error('the archive is not laid out as the edits assume')
+
+      const whole = full.bytes
+      const find = (text, within = whole) => {
+        const found = within.indexOf(Buffer.from(text))
+        if (found < 0) throw new Error(`no ${text} in the archive`)
+        return found
+      }
+      const post = pairs[3]
+      const textMember = post.value.subarray(1, 1 + 1 + 4 + 1 + 20)
+      if (textMember.subarray(0, 5).toString('hex') !== '6474657874')
+        throw new Error('the post is not laid out as expected')
+      const typeFirst = Buffer.concat([
+        post.value.subarray(0, 1),
+        post.value.subarray(1 + textMember.length),
+        textMember,
+      ])
+      const revAt = find(
+        full.commit.rev,
+        whole.subarray(0, metaAt + meta.length),
+      )
+      const typeText = 'atproto-space-repo'
+      const slashAt = pairs[0].keyAt + pairs[0].key.indexOf('/')
+      const textAt = post.valueAt + find('See you', post.value)
+      const wholePair = (pair) => hexOf(whole.subarray(pair.start, pair.end))
+
+      const edits = [
+        ['cut before the end marker', whole.length - 1, 1, ''],
+        ['cut inside a value', whole.length - 5, 5, ''],
+        ['an unknown control byte', pairs[0].start, 1, '02'],
+        ['one byte after the end', whole.length, 0, '00'],
+        [
+          'two records swapped',
+          pairs[2].start,
+          pairs[3].end - pairs[2].start,
+          wholePair(pairs[3]) + wholePair(pairs[2]),
+        ],
+        ['a record repeated', pairs[2].end, 0, wholePair(pairs[2])],
+        ['a path that is not collection/rkey', slashAt, 1, hexOf('.')],
+        ['one value byte changed', textAt, 1, hexOf('T')],
+        [
+          'a non-canonical encoding of the record',
+          post.valueAt,
+          post.value.length,
+          hexOf(typeFirst),
+        ],
+        [
+          'metadata type changed',
+          find(typeText) + typeText.length - 2,
+          1,
+          hexOf('x'),
+        ],
+        [
+          'metadata revision changed',
+          revAt + full.commit.rev.length - 1,
+          1,
+          hexOf('e'),
+        ],
+        [
+          'a metadata length above the limit',
+          4,
+          metaAt - 4,
+          hexOf(varint(64 * 1024 + 1)),
+        ],
+        [
+          'a key length above the limit',
+          pairs[0].start + 1,
+          pairs[0].keyAt - pairs[0].start - 1,
+          hexOf(varint(4 * 1024 + 1)),
+        ],
+        [
+          'a value length above the limit, no bytes',
+          pairs[0].valueLengthAt,
+          whole.length - pairs[0].valueLengthAt,
+          hexOf(varint(1024 * 1024 + 1)),
+        ],
+      ].map(([name, from, remove, insert]) => ({
+        name,
+        at: from,
+        remove,
+        insert,
+      }))
+      const edited = ({ at: from, remove, insert }) =>
+        Buffer.concat([
+          whole.subarray(0, from),
+          Buffer.from(insert, 'hex'),
+          whole.subarray(from + remove),
+        ])
+      return { full, empty, edits, edited }
+    }
+
+    // The pinned reader checks the metadata's space against the earlier
+    // spelling of a space reference only, so it refuses the new spelling before
+    // it reads a record. Its verdicts are therefore taken on a twin of each
+    // archive that differs in the spelling of the space and in the MAC headers
+    // that cover it, and nowhere else.
+    const family = await familyFor(ARCHIVE_SPACE)
+    const twin = await familyFor(LEGACY_SPACE)
+    const outcome = (verdict) =>
+      verdict.accepted ? 'accepted' : `refused: ${verdict.error}`
+    const readerOnNewSpelling = outcome(
+      await judge(family.full.bytes, family.full.commit, family.full.headers),
+    )
+    if (readerOnNewSpelling === 'accepted')
+      throw new Error(
+        'the oracle reader reads the new spelling; no twin needed',
+      )
+    const twinOutcome = async (bytes, commit, headers) => {
+      const verdict = await judge(bytes, commit, headers)
+      const message = verdict.message ?? ''
+      if (message.includes(ARCHIVE_SPACE) || message.includes(LEGACY_SPACE))
+        throw new Error('a verdict names the space, so the twin would show')
+      return outcome(verdict)
+    }
+    const outcomeOfFull = await twinOutcome(
+      twin.full.bytes,
+      twin.full.commit,
+      twin.full.headers,
+    )
+    const outcomeOfEmpty = await twinOutcome(
+      twin.empty.bytes,
+      twin.empty.commit,
+      twin.empty.headers,
+    )
+    if (outcomeOfFull !== 'accepted' || outcomeOfEmpty !== 'accepted')
+      throw new Error('the oracle refuses an archive it wrote')
+    const refused = []
+    for (const [index, edit] of family.edits.entries()) {
+      const twinEdit = twin.edits[index]
+      if (twinEdit.name !== edit.name || twinEdit.insert !== edit.insert)
+        throw new Error(`${edit.name}: the twin edit differs`)
+      const verdict = await twinOutcome(
+        twin.edited(twinEdit),
+        twin.full.commit,
+        twin.full.headers,
+      )
+      if (verdict === 'accepted')
+        throw new Error(`the oracle accepts ${edit.name}`)
+      refused.push({ ...edit, insert: inlineIfShort(edit.insert), verdict })
+    }
+
+    const base64Of = (bytes) => Buffer.from(bytes).toString('base64')
+    writeFixture(
+      'repo-archive.json',
+      {
+        classification: 'upstream-signed-target-uri',
+        oracle: recordOracle,
+        generator,
+        upstreamVerified: true,
+        reproducible: true,
+      },
+      {
+        note: 'Oracle archives over a new-form space, in base64. macHeaders answer the request of commit-mac.json (the response signature-input is that request). A verdict is `accepted` or `refused: <error name>` from verifyRepoStarFull, taken on a twin archive in the earlier space spelling, which the pinned reader insists on (readerOnNewSpelling). An edit replaces remove bytes at offset at by insert (hex).',
+        archive: {
+          bytes: base64Of(family.full.bytes),
+          macHeaders: {
+            'atproto-space-commit': family.full.headers['atproto-space-commit'],
+            signature: family.full.headers.signature,
+          },
+          verdict: outcomeOfFull,
+          readerOnNewSpelling,
+        },
+        empty: {
+          bytes: base64Of(family.empty.bytes),
+          verdict: outcomeOfEmpty,
+        },
+        refused,
       },
     )
   }

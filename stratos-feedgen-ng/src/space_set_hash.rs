@@ -2,8 +2,7 @@
 //! in one member's repo, following the pinned upstream `packages/space/src/lthash.ts`.
 //! Each element expands to 1024 little-endian 16-bit lanes (BLAKE3 extended
 //! output) that are added into, or subtracted from, a 2048-byte state; the
-//! commit carries the SHA-256 of that state. Nothing here is called by the
-//! synchronizer yet.
+//! commit carries the SHA-256 of that state.
 
 use std::fmt;
 

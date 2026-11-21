@@ -1,7 +1,7 @@
 //! Typed operations of one `listRepoOps` page, and their pure application to a
 //! set-hash state. The page body is unauthenticated until the digest of the
 //! state it produces equals the `data` of a MAC-verified commit; nothing here
-//! stores or projects anything. Nothing here is called by the synchronizer yet.
+//! stores or projects anything.
 
 use std::{collections::HashMap, fmt};
 
@@ -14,10 +14,11 @@ use crate::{
     space_record::{RecordRefusal, check_cid_text, encode_record, record_cid},
     space_set_hash::{RecordPath, RecordPathError, SetHashState, set_hash_element},
     space_sync::{
-        MAX_CID_BYTES, MAX_CURSOR_BYTES, MAX_SPACE_PAGE_OPS, POST_COLLECTION, is_admitted_record,
-        serialize_bounded,
+        MAX_CID_BYTES, MAX_CURSOR_BYTES, MAX_SPACE_PAGE_OPS, is_admitted_record,
+        is_projected_collection, serialize_bounded,
     },
-    store::{InteractionKind, SpaceStageMutation, is_utc_timestamp},
+    space_value_budget::{BodyCountRefusal, ValueBudget, count_body_values},
+    store::{SpaceStageMutation, is_utc_timestamp},
 };
 
 const DAG_CBOR_CODEC: u64 = 0x71;
@@ -59,6 +60,32 @@ impl RepoOp {
     }
 }
 
+impl RepoOp {
+    /// A record of a complete repo state as the operation that creates it, so a
+    /// whole-repo replacement goes through the code that holds a value to its
+    /// CID without writing the records out as a page and reading them back.
+    pub(crate) fn creating(
+        rev: &str,
+        path: RecordPath,
+        cid: Cid,
+        value: Option<Value>,
+    ) -> Result<Self, OpPageRefusal> {
+        if !is_tid(rev) {
+            return Err(OpPageRefusal::InvalidRev);
+        }
+        if value.as_ref().is_some_and(|record| !record.is_object()) {
+            return Err(OpPageRefusal::ValueNotAnObject);
+        }
+        Ok(Self {
+            rev: rev.to_owned(),
+            path,
+            cid: Some(cid),
+            prev: None,
+            value,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct OpPage {
     ops: Vec<RepoOp>,
@@ -72,6 +99,11 @@ impl OpPage {
 
     pub fn cursor(&self) -> Option<&str> {
         self.cursor.as_deref()
+    }
+
+    /// The ops, so a poll that holds the ops of many pages does not copy them.
+    pub fn into_ops(self) -> Vec<RepoOp> {
+        self.ops
     }
 }
 
@@ -88,6 +120,7 @@ pub enum OpPageRefusal {
     InvalidCid,
     NothingChanged,
     ValueNotAnObject,
+    OverBudget,
 }
 
 impl fmt::Display for OpPageRefusal {
@@ -108,6 +141,9 @@ impl fmt::Display for OpPageRefusal {
                 formatter.write_str("an operation has neither a cid nor a prev")
             }
             Self::ValueNotAnObject => formatter.write_str("an operation's record is not an object"),
+            Self::OverBudget => {
+                formatter.write_str("the page would take the cycle past its decoded values")
+            }
         }
     }
 }
@@ -116,8 +152,17 @@ impl std::error::Error for OpPageRefusal {}
 
 /// Reads the body of an authenticated page. The whole page is refused when any
 /// operation is malformed; the body's `commit` member is not read, the verified
-/// commit travels with the page.
-pub fn decode_op_page(body: &[u8]) -> Result<OpPage, OpPageRefusal> {
+/// commit travels with the page. Every value of the body is charged to the
+/// cycle's `budget` before the body is parsed into a tree: the ops of a poll
+/// are all held until they are applied together.
+pub fn decode_op_page(body: &[u8], budget: &ValueBudget) -> Result<OpPage, OpPageRefusal> {
+    let values = count_body_values(body, budget.remaining()).map_err(|refusal| match refusal {
+        BodyCountRefusal::NotJson => OpPageRefusal::NotJson,
+        BodyCountRefusal::OverBudget => OpPageRefusal::OverBudget,
+    })?;
+    budget
+        .charge(values)
+        .map_err(|_| OpPageRefusal::OverBudget)?;
     let page: Value = serde_json::from_slice(body).map_err(|_| OpPageRefusal::NotJson)?;
     let Value::Object(page) = page else {
         return Err(OpPageRefusal::NotAnObject);
@@ -267,15 +312,19 @@ impl PathChange {
         self.cid.as_ref()
     }
 
-    /// The record of the last operation when it carried one.
+    /// The record of the last operation when it carried one and the projection
+    /// reads its collection.
     pub fn value(&self) -> Option<&Value> {
         self.value.as_ref()
     }
 
-    /// A create or update that arrived without its record: the path changes,
-    /// nothing can be projected from it.
+    /// A create or update of a record the projection reads that arrived without
+    /// its record: the path changes, nothing can be projected from it. A record
+    /// of another collection never keeps its value, so it is never missing one.
     pub fn value_missing(&self) -> bool {
-        self.cid.is_some() && self.value.is_none()
+        self.cid.is_some()
+            && self.value.is_none()
+            && is_projected_collection(self.path.collection())
     }
 }
 
@@ -287,7 +336,9 @@ pub struct ChangeSet {
 
 impl ChangeSet {
     /// Applies `ops` in order to `base`. Ops of several pages are applied by
-    /// passing them together, so a poll's net change is one change set.
+    /// passing them together, so a poll's net change is one change set. Every
+    /// op's value is held to its CID; the change set keeps the values of the
+    /// collections the projection reads and no others.
     pub fn apply(base: SetHashState, ops: &[RepoOp]) -> Result<Self, ChangeSetRefusal> {
         let mut state = base;
         let mut changes: Vec<PathChange> = Vec::new();
@@ -320,7 +371,13 @@ impl ChangeSet {
                 state.add(&set_hash_element(&op.path, cid));
             }
             change.cid = op.cid;
-            change.value = op.value.clone();
+            // The value was held to its CID above; the digest covers the CID,
+            // so a value nothing will project is not worth holding on to.
+            change.value = op
+                .value
+                .as_ref()
+                .filter(|_| is_projected_collection(op.path.collection()))
+                .cloned();
         }
         Ok(Self { state, changes })
     }
@@ -396,7 +453,7 @@ pub fn projection_mutations(
     let mut mutations = Vec::new();
     for change in changes {
         let collection = change.path.collection();
-        if collection != POST_COLLECTION && InteractionKind::from_collection(collection).is_none() {
+        if !is_projected_collection(collection) {
             continue;
         }
         let uri = space.record_uri(author, collection, change.path.rkey());
@@ -487,7 +544,8 @@ mod tests {
     }
 
     fn decoded(page: &Value) -> OpPage {
-        decode_op_page(&body_of(page)).expect("a well-formed page")
+        decode_op_page(&body_of(page), &ValueBudget::unlimited_for_tests())
+            .expect("a well-formed page")
     }
 
     fn cid_of_value(value: &Value) -> Cid {
@@ -1046,7 +1104,7 @@ mod tests {
         let mut labelled = 0;
         for row in rows {
             let body = body_of(&row.body);
-            let outcome = decode_op_page(&body)
+            let outcome = decode_op_page(&body, &ValueBudget::unlimited_for_tests())
                 .map_err(Ok)
                 .and_then(|page| ChangeSet::apply(SetHashState::empty(), page.ops()).map_err(Err));
             let oracle_accepts = matches!(row.oracle, Oracle::Accepts(_));
@@ -1081,8 +1139,14 @@ mod tests {
 
     #[test]
     fn a_body_that_is_not_a_json_object_is_refused() {
-        assert_eq!(decode_op_page(b"{"), Err(OpPageRefusal::NotJson));
-        assert_eq!(decode_op_page(b"[]"), Err(OpPageRefusal::NotAnObject));
+        assert_eq!(
+            decode_op_page(b"{", &ValueBudget::unlimited_for_tests()),
+            Err(OpPageRefusal::NotJson)
+        );
+        assert_eq!(
+            decode_op_page(b"[]", &ValueBudget::unlimited_for_tests()),
+            Err(OpPageRefusal::NotAnObject)
+        );
     }
 
     #[test]
@@ -1092,15 +1156,17 @@ mod tests {
         assert_eq!(decoded(&at_limit).ops().len(), 1_000);
         let over_limit = page_with(vec![op.clone(); crate::space_sync::MAX_SPACE_PAGE_OPS + 1]);
         assert_eq!(
-            decode_op_page(&body_of(&over_limit)),
+            decode_op_page(&body_of(&over_limit), &ValueBudget::unlimited_for_tests()),
             Err(OpPageRefusal::TooManyOps)
         );
         let mut long_cursor = page_with(vec![op.clone()]);
         long_cursor["cursor"] = json!("c".repeat(crate::space_sync::MAX_CURSOR_BYTES));
-        assert!(decode_op_page(&body_of(&long_cursor)).is_ok());
+        assert!(
+            decode_op_page(&body_of(&long_cursor), &ValueBudget::unlimited_for_tests()).is_ok()
+        );
         long_cursor["cursor"] = json!("c".repeat(crate::space_sync::MAX_CURSOR_BYTES + 1));
         assert_eq!(
-            decode_op_page(&body_of(&long_cursor)),
+            decode_op_page(&body_of(&long_cursor), &ValueBudget::unlimited_for_tests()),
             Err(OpPageRefusal::InvalidCursor)
         );
     }
@@ -1112,7 +1178,7 @@ mod tests {
             base_op_with(&[("rkey", json!("a/b"))]),
         ]);
         assert!(matches!(
-            decode_op_page(&body_of(&page)),
+            decode_op_page(&body_of(&page), &ValueBudget::unlimited_for_tests()),
             Err(OpPageRefusal::InvalidPath(_))
         ));
     }
@@ -1522,6 +1588,111 @@ mod tests {
         );
     }
 
+    fn create_in(collection: &str, rkey: &str, value: &Value) -> Value {
+        let cid = cid_of_value(value).to_string();
+        let mut op = op_json("3jzfcijpj2z2a", collection, rkey, &json!(cid), &Value::Null);
+        op.insert("value".into(), value.clone());
+        Value::Object(op)
+    }
+
+    fn spike_follow() -> Value {
+        json!({ "$type": FOLLOW, "subject": "did:plc:spikespiegel" })
+    }
+
+    #[test]
+    fn a_page_is_charged_every_value_of_its_body_and_the_body_at_the_limit_is_accepted() {
+        let page = page_with(vec![create_post("swordfish", &post_value("Bang"))]);
+        let values = crate::space_value_budget::count_values(&page);
+
+        let exact = ValueBudget::with_limit(values);
+        assert!(decode_op_page(&body_of(&page), &exact).is_ok());
+        assert_eq!(exact.used(), values);
+
+        let short = ValueBudget::with_limit(values - 1);
+        assert_eq!(
+            decode_op_page(&body_of(&page), &short),
+            Err(OpPageRefusal::OverBudget)
+        );
+        assert_eq!(short.used(), 0);
+    }
+
+    #[test]
+    fn a_page_over_the_budget_is_refused_before_it_is_parsed() {
+        // Not JSON after the values that already pass the limit.
+        let budget = ValueBudget::with_limit(2);
+        assert_eq!(
+            decode_op_page(br#"{"ops":[1,2,3,}"#, &budget),
+            Err(OpPageRefusal::OverBudget)
+        );
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn pages_of_one_cycle_draw_on_the_same_budget() {
+        let page = page_with(vec![create_post("swordfish", &post_value("Bang"))]);
+        let values = crate::space_value_budget::count_values(&page);
+        let budget = ValueBudget::with_limit(values * 2);
+        assert!(decode_op_page(&body_of(&page), &budget).is_ok());
+        assert!(decode_op_page(&body_of(&page), &budget).is_ok());
+        assert_eq!(
+            decode_op_page(&body_of(&page), &budget),
+            Err(OpPageRefusal::OverBudget)
+        );
+        assert_eq!(budget.used(), values * 2);
+    }
+
+    #[test]
+    fn the_change_set_keeps_no_value_for_a_record_the_projection_does_not_read() {
+        let set = applied(vec![
+            create_in(FOLLOW, "spike", &spike_follow()),
+            create_post("swordfish", &post_value("Bang")),
+            create_in(
+                LIKE,
+                "ed",
+                &json!({ "$type": LIKE, "subject": { "uri": "at://did:plc:fayevalentine/zone.stratos.feed.post/swordfish" } }),
+            ),
+        ])
+        .expect("applies");
+        let kept: Vec<(&str, bool)> = set
+            .changes()
+            .iter()
+            .map(|change| (change.path().collection(), change.value().is_some()))
+            .collect();
+        assert_eq!(kept, vec![(FOLLOW, false), (POST, true), (LIKE, true)]);
+        // The path and its CID are what the digest covers, and they stay.
+        assert_eq!(
+            set.changes()[0].cid().copied(),
+            Some(cid_of_value(&spike_follow()))
+        );
+        assert!(set.changes().iter().all(|change| !change.value_missing()));
+    }
+
+    #[test]
+    fn a_value_of_a_record_the_projection_does_not_read_is_still_held_to_its_cid() {
+        let mut op = create_in(FOLLOW, "spike", &spike_follow());
+        op["value"] = json!({ "$type": FOLLOW, "subject": "did:plc:jetblack" });
+        assert_eq!(
+            applied(vec![op]).err(),
+            Some(ChangeSetRefusal::ValueDoesNotMatchCid)
+        );
+    }
+
+    #[test]
+    fn a_like_or_a_repost_without_its_value_is_a_missing_value_as_a_post_is() {
+        for collection in [POST, LIKE, REPOST] {
+            let value = json!({ "$type": collection });
+            let mut op = create_in(collection, "ein", &value);
+            op.as_object_mut().expect("object").remove("value");
+            let set = applied(vec![op]).expect("applies");
+            assert!(set.changes()[0].value_missing(), "{collection}");
+        }
+        let value = spike_follow();
+        let mut follow = create_in(FOLLOW, "spike", &value);
+        follow.as_object_mut().expect("object").remove("value");
+        let set = applied(vec![follow]).expect("applies");
+        assert!(!set.changes()[0].value_missing());
+    }
+
     // Cross-check: the state and digest Stratos reaches after a fixed run of
     // operations over the three fixed records; the upstream package applies the
     // same run in the fixture and must reach the same bytes.
@@ -1547,7 +1718,8 @@ mod tests {
                    "cid": null, "prev": FOLLOW_CID}),
         ];
         let body = serde_json::to_vec(&json!({ "ops": ops })).expect("serializable");
-        let page = decode_op_page(&body).expect("a well-formed page");
+        let page =
+            decode_op_page(&body, &ValueBudget::unlimited_for_tests()).expect("a well-formed page");
         let set = ChangeSet::apply(SetHashState::empty(), page.ops()).expect("applies");
         (
             STANDARD.encode(set.state().to_bytes()),

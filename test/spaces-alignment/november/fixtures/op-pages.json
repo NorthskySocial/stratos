@@ -15,7 +15,7 @@
     },
     "generator": {
       "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
-      "sha256": "8021522efa5c1c6845958047b54a9b192d161b8abc9c16fb6e1ead0e87b6f116"
+      "sha256": "69096a6a53caaffd5d97177be6f032d907a9d656cac513d7d764777dd6e6644f"
     },
     "upstreamVerified": true,
     "reproducible": true

@@ -331,6 +331,14 @@ async fn readmit_account(
     lifecycle
         .reconcile_actor_enrollment(did, observed_at, Some(enrollment))
         .map_err(|_| "enrollment")?;
+    // While the takedown stood the member may have been polled again, which
+    // rebuilt a verified base with every post withheld; a base that is current
+    // would never bring them back.
+    for boundary in lifecycle.pds_member_boundaries(did).map_err(|_| "store")? {
+        lifecycle
+            .reset_pds_member_space_state(&boundary, did)
+            .map_err(|_| "store")?;
+    }
     lifecycle.finish_reinstatement(did).map_err(|_| "store")?;
     accounts
         .actors
@@ -2840,5 +2848,132 @@ mod tests {
             ]
         );
         assert!(super::EnforcementFailures::default().lines().is_empty());
+    }
+    fn faye_posts() -> Vec<crate::store::VerifiedSpaceRecord> {
+        let post = |rkey: &str, text: &str| {
+            let value = json!({
+                "$type": POST_COLLECTION,
+                "text": text,
+                "createdAt": "1998-04-03T00:00:00.000Z",
+            });
+            let bytes = crate::space_record::encode_record(&value).unwrap();
+            crate::store::VerifiedSpaceRecord {
+                path: crate::space_set_hash::RecordPath::parse(POST_COLLECTION, rkey).unwrap(),
+                cid: crate::space_record::record_cid(&bytes),
+                value: Some(value),
+            }
+        };
+        vec![
+            post("redtail", "Cowboy Bebop"),
+            post("swordfish", "See you space cowboy"),
+        ]
+    }
+
+    // Replaces Faye's repo from `records` with the commit over exactly them.
+    fn replace_faye_repo(
+        scene: &RecordScene,
+        rev: &str,
+        records: &[crate::store::VerifiedSpaceRecord],
+    ) -> Result<(), crate::store::StoreError> {
+        let mut state = crate::space_set_hash::SetHashState::empty();
+        for record in records {
+            state.add(&crate::space_set_hash::set_hash_element(
+                &record.path,
+                &record.cid,
+            ));
+        }
+        let target = crate::store::VerifiedSpaceTarget {
+            boundary: SPACE_BOUNDARY.to_owned(),
+            space_uri: SPACE.to_owned(),
+            actor_did: FAYE_VALENTINE.to_owned(),
+            host: "https://pds.example.test".to_owned(),
+            generation: scene
+                .lifecycle
+                .pds_member_generation(SPACE_BOUNDARY, FAYE_VALENTINE)
+                .unwrap()
+                .expect("faye is a current member"),
+        };
+        scene.lifecycle.replace_verified_space_repo(
+            &target,
+            &crate::space_mac::MacVerifiedCommit::for_tests(
+                FAYE_VALENTINE,
+                SPACE,
+                rev,
+                state.digest(),
+            ),
+            records,
+            FAR_RETENTION,
+            "1998-04-03T12:00:00.000Z",
+        )
+    }
+
+    // `None` for a member who is not current as well as for one with no base.
+    fn faye_verified_rev(scene: &RecordScene) -> Option<String> {
+        let generation = scene
+            .lifecycle
+            .pds_member_generation(SPACE_BOUNDARY, FAYE_VALENTINE)
+            .unwrap()?;
+        scene
+            .lifecycle
+            .verified_space_base_at_generation(SPACE_BOUNDARY, SPACE, FAYE_VALENTINE, generation)
+            .unwrap()
+            .map(|base| base.rev)
+    }
+
+    async fn verified_faye_scene() -> RecordScene {
+        let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+        store
+            .replace_pds_space_members(
+                SPACE_BOUNDARY,
+                vec![faye_member()],
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap();
+        let scene = RecordScene::new(store, SPACE_BOUNDARY).await;
+        scene.catch_up_on_an_empty_log().await;
+        replace_faye_repo(&scene, "3jzfcijpj2z2a", &faye_posts()).unwrap();
+        assert!(scene.feed_lists(FAYE_SPACE_POST));
+        assert!(scene.feed_lists(FAYE_SECOND_SPACE_POST));
+        scene
+    }
+
+    // The member is polled again while the takedown stands (the authority
+    // still lists them), so a verified base is rebuilt with the posts withheld
+    // by the takedown filter. Lifting the takedown must bring them back.
+    #[tokio::test]
+    async fn a_lifted_account_takedown_resets_the_verified_state_of_a_pds_member() {
+        let scene = verified_faye_scene().await;
+        scene
+            .publish_and_cycle(&[(Sub::Account(FAYE_VALENTINE), false)])
+            .await;
+        assert!(!scene.feed_lists(FAYE_SPACE_POST));
+        assert_eq!(faye_verified_rev(&scene), None, "the takedown dropped it");
+        scene
+            .lifecycle
+            .replace_pds_space_members(
+                SPACE_BOUNDARY,
+                vec![faye_member()],
+                "1998-04-03T13:00:00.000Z",
+            )
+            .unwrap();
+        replace_faye_repo(&scene, "3jzfcijpj2z2b", &faye_posts()).unwrap();
+        assert_eq!(faye_verified_rev(&scene).as_deref(), Some("3jzfcijpj2z2b"));
+        assert!(
+            !scene.feed_lists(FAYE_SPACE_POST),
+            "withheld while taken down"
+        );
+
+        scene.responder.set_enrolled(FAYE_VALENTINE, true);
+        scene
+            .publish_and_cycle(&[(Sub::Account(FAYE_VALENTINE), true)])
+            .await;
+        assert_eq!(scene.cycle().await, LabelCycle::CaughtUp);
+
+        assert_eq!(
+            faye_verified_rev(&scene),
+            None,
+            "the next poll must start from nothing"
+        );
+        assert!(!scene.feed_lists(FAYE_SPACE_POST), "until a replacement");
     }
 }

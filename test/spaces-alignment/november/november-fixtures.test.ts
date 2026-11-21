@@ -1349,6 +1349,349 @@ describe('op page vectors', () => {
   })
 })
 
+describe('repo archive vectors', () => {
+  const FILE = 'repo-archive.json'
+  const SPACE = 'at:space/did:web:bebop.example/zone.stratos.space.feed/crew'
+  const REPO = 'did:plc:fayevalentine'
+  const COVERED = 'atproto-space-commit'
+  const MAGIC = '2a6c0100'
+  const MAX_FAMILY_BYTES = 6 * 1024
+  const RECORDS: Array<[name: string, path: string]> = [
+    ['a like with a strong reference', 'app.bsky.feed.like/ed'],
+    ['a repost', 'app.bsky.feed.repost/jet'],
+    ['a follow', 'app.bsky.graph.follow/faye'],
+    ['a post', 'zone.stratos.feed.post/swordfish'],
+  ]
+  const REQUIRED_REFUSALS = [
+    'cut before the end marker',
+    'cut inside a value',
+    'an unknown control byte',
+    'one byte after the end',
+    'two records swapped',
+    'a record repeated',
+    'a path that is not collection/rkey',
+    'one value byte changed',
+    'a non-canonical encoding of the record',
+    'metadata type changed',
+    'metadata revision changed',
+    'a metadata length above the limit',
+    'a key length above the limit',
+    'a value length above the limit, no bytes',
+  ]
+  const ACCEPTED = 'accepted'
+
+  interface Edit {
+    name: string
+    at: number
+    remove: number
+    insert: string
+    verdict: string
+  }
+  const fixture = loadFixture(FILE) as FixtureFile & {
+    archive: {
+      bytes: string
+      macHeaders: Record<string, string>
+      verdict: string
+      readerOnNewSpelling: string
+    }
+    empty: { bytes: string; verdict: string }
+    refused: Edit[]
+  }
+  const macFixture = loadFixture('commit-mac.json') as FixtureFile & {
+    acceptSignature: string
+    sharedSecret: ByteField
+  }
+  const recordFixture = loadFixture('record-cid.json') as FixtureFile & {
+    records: Array<{ name: string; oracle: string }>
+  }
+  const lthash = loadFixture('lthash.json') as FixtureFile & {
+    emptyDigest: ByteField
+  }
+  const archiveBytes = (): Buffer =>
+    Buffer.from(fixture.archive.bytes, 'base64')
+  const emptyBytes = (): Buffer => Buffer.from(fixture.empty.bytes, 'base64')
+  const commitHeader = (): Record<string, string> => {
+    const members: Record<string, string> = {}
+    for (const match of fixture.archive.macHeaders[COVERED]?.matchAll(
+      /(\w+)=(?:"([^"]*)"|:([^:]*):|(\d+))/g,
+    ) ?? [])
+      members[match[1] as string] = (match[2] ?? match[3] ?? match[4]) as string
+    return members
+  }
+  const applyEdit = (archive: Buffer, edit: Edit): Buffer =>
+    Buffer.concat([
+      archive.subarray(0, edit.at),
+      Buffer.from(edit.insert, 'hex'),
+      archive.subarray(edit.at + edit.remove),
+    ])
+
+  // An independent reading of the framing, so the fixture is checked without
+  // trusting the oracle that wrote it or the reader under test.
+  interface Pair {
+    start: number
+    key: Buffer
+    valueStart: number
+    value: Buffer
+  }
+  interface Framing {
+    metaStart: number
+    metaEnd: number
+    pairs: Pair[]
+    end: number
+  }
+  const frame = (bytes: Buffer, at: number): [length: number, next: number] => {
+    let length = 0
+    let width = 0
+    for (;;) {
+      const byte = bytes[at + width] as number
+      length += (byte & 0x7f) * 2 ** (7 * width)
+      width += 1
+      if (byte < 0x80) return [length, at + width]
+    }
+  }
+  const readFraming = (bytes: Buffer): Framing => {
+    expect(bytes.subarray(0, 4).toString('hex')).toBe(MAGIC)
+    const [metaLength, metaStart] = frame(bytes, 4)
+    const metaEnd = metaStart + metaLength
+    const pairs: Pair[] = []
+    let at = metaEnd
+    while (bytes[at] === 1) {
+      const start = at
+      const [keyLength, keyStart] = frame(bytes, at + 1)
+      const [valueLength, valueStart] = frame(bytes, keyStart + keyLength)
+      pairs.push({
+        start,
+        key: bytes.subarray(keyStart, keyStart + keyLength),
+        valueStart: keyStart + keyLength,
+        value: bytes.subarray(valueStart, valueStart + valueLength),
+      })
+      at = valueStart + valueLength
+    }
+    expect(bytes[at]).toBe(0)
+    expect(bytes.length).toBe(at + 1)
+    return { metaStart, metaEnd, pairs, end: at }
+  }
+  const editNamed = (name: string): Edit => {
+    const found = fixture.refused.find((edit) => edit.name === name)
+    if (!found) throw new Error(`no edit named ${name}`)
+    return found
+  }
+  const recordBytes = (name: string): string => {
+    const found = recordFixture.records.find((entry) => entry.name === name)
+    return /^accepted ([0-9a-f]+) /.exec(found?.oracle ?? '')?.[1] ?? ''
+  }
+  const keysOf = (framing: Framing): string[] =>
+    framing.pairs.map((pair) => pair.key.toString())
+
+  it('is made by the oracle over a new-form space uri and reproducible', () => {
+    expect(fixture.header.classification).toBe('upstream-signed-target-uri')
+    expect(fixture.header.upstreamVerified).toBe(true)
+    expect(fixture.header.reproducible).toBe(true)
+    expect(fixture.header.oracle['additionalPackages']).toEqual([
+      expect.objectContaining({ package: '@atproto/lex-json' }),
+    ])
+  })
+
+  it('stays within the family size limit', () => {
+    expect(readFileSync(resolve(FIXTURES_DIR, FILE)).length).toBeLessThan(
+      MAX_FAMILY_BYTES,
+    )
+  })
+
+  it('holds a commit header for the repo and space, and the mac the commit mac vectors would make', () => {
+    const header = commitHeader()
+    expect(header['ver']).toBe('1')
+    expect(header['repo']).toBe(REPO)
+    expect(header['space']).toBe(SPACE)
+    expect(header['rev']).toMatch(/^[234567a-j][2-7a-z]{12}$/)
+    expect(Buffer.from(header['data'] as string, 'base64')).toHaveLength(32)
+
+    const params = /^mac=(.*)$/.exec(macFixture.acceptSignature)?.[1]
+    const base = [
+      `"${COVERED}";sf: ${fixture.archive.macHeaders[COVERED]}`,
+      `"@signature-params": ${params}`,
+    ].join('\n')
+    const mac = createHmac(
+      'sha256',
+      Buffer.from(macFixture.sharedSecret.value, 'base64'),
+    )
+      .update(base)
+      .digest('base64')
+    expect(fixture.archive.macHeaders['signature']).toBe(`mac=:${mac}:`)
+    expect(Object.keys(fixture.archive.macHeaders).sort()).toEqual([
+      COVERED,
+      'signature',
+    ])
+  })
+
+  it('holds four records from the record vectors, in strict path order', () => {
+    const framing = readFraming(archiveBytes())
+    expect(keysOf(framing)).toEqual(RECORDS.map(([, path]) => path))
+    expect(framing.pairs.map((pair) => pair.value.toString('hex'))).toEqual(
+      RECORDS.map(([name]) => recordBytes(name)),
+    )
+    const paths = keysOf(framing)
+    expect(paths).toEqual([...paths].sort())
+    expect(new Set(paths.map((path) => path.split('/')[0])).size).toBe(4)
+  })
+
+  it('carries the header commit as the metadata, in front of the records', () => {
+    const bytes = archiveBytes()
+    const { metaStart, metaEnd } = readFraming(bytes)
+    const meta = bytes.subarray(metaStart, metaEnd)
+    const header = commitHeader()
+    expect(meta.includes(Buffer.from('atproto-space-repo'))).toBe(true)
+    for (const member of ['repo', 'space', 'rev'])
+      expect(meta.includes(Buffer.from(header[member] as string))).toBe(true)
+    expect(meta.includes(Buffer.from(header['data'] as string, 'base64'))).toBe(
+      true,
+    )
+  })
+
+  it('writes the empty repo as the metadata and the end marker alone', () => {
+    const bytes = emptyBytes()
+    const { metaStart, metaEnd, pairs, end } = readFraming(bytes)
+    expect(pairs).toEqual([])
+    expect(end).toBe(metaEnd)
+    const meta = bytes.subarray(metaStart, metaEnd)
+    expect(meta.includes(Buffer.from(lthash.emptyDigest.value, 'base64'))).toBe(
+      true,
+    )
+    expect(meta.includes(Buffer.from(SPACE))).toBe(true)
+    expect(meta.includes(Buffer.from(REPO))).toBe(true)
+  })
+
+  it('has the oracle accept both archives, and refuse the full one in the new spelling', () => {
+    expect(fixture.archive.verdict).toBe(ACCEPTED)
+    expect(fixture.empty.verdict).toBe(ACCEPTED)
+    expect(fixture.archive.readerOnNewSpelling).toBe(
+      'refused: SpaceRepoVerificationError',
+    )
+  })
+
+  it('holds each required refusal once, with an oracle refusal beside it', () => {
+    expect(fixture.refused.map((edit) => edit.name)).toEqual(REQUIRED_REFUSALS)
+    for (const edit of fixture.refused)
+      expect(edit.verdict, edit.name).toMatch(
+        /^refused: (StarParseError|SpaceRepoVerificationError|SpaceMacError)$/,
+      )
+  })
+
+  it('edits only bytes the archive has and changes the archive', () => {
+    const base = archiveBytes()
+    for (const edit of fixture.refused) {
+      expect(Number.isInteger(edit.at) && edit.at >= 0, edit.name).toBe(true)
+      expect(edit.remove >= 0, edit.name).toBe(true)
+      expect(edit.at + edit.remove, edit.name).toBeLessThanOrEqual(base.length)
+      expect(edit.insert, edit.name).toMatch(/^([0-9a-f]{2})*$/)
+      expect(applyEdit(base, edit).equals(base), edit.name).toBe(false)
+    }
+  })
+
+  it('makes each edit the way its name says', () => {
+    const base = archiveBytes()
+    const framing = readFraming(base)
+    const [first, second, third, fourth] = framing.pairs as [
+      Pair,
+      Pair,
+      Pair,
+      Pair,
+    ]
+    const read = (name: string): Buffer => applyEdit(base, editNamed(name))
+    const changedMeta = (name: string): boolean =>
+      !read(name)
+        .subarray(0, framing.metaEnd)
+        .equals(base.subarray(0, framing.metaEnd))
+
+    expect(read('cut before the end marker')).toEqual(
+      base.subarray(0, base.length - 1),
+    )
+    const cutInside = read('cut inside a value')
+    expect(cutInside.length).toBeLessThan(base.length)
+    expect(cutInside.length).toBeGreaterThan(fourth.valueStart)
+    expect(read('an unknown control byte')[first.start]).toBe(2)
+    expect(read('one byte after the end')).toEqual(
+      Buffer.concat([base, Buffer.from([0])]),
+    )
+
+    expect(keysOf(readFraming(read('two records swapped')))).toEqual([
+      first.key.toString(),
+      second.key.toString(),
+      fourth.key.toString(),
+      third.key.toString(),
+    ])
+    const repeated = keysOf(readFraming(read('a record repeated')))
+    expect(repeated).toHaveLength(5)
+    expect(new Set(repeated).size).toBe(4)
+
+    expect(
+      keysOf(readFraming(read('a path that is not collection/rkey'))),
+    ).toContain('app.bsky.feed.like.ed')
+    const changed = readFraming(read('one value byte changed'))
+    expect(changed.pairs.map((pair) => pair.value.length)).toEqual(
+      framing.pairs.map((pair) => pair.value.length),
+    )
+    expect(
+      changed.pairs.filter(
+        (pair, index) => !pair.value.equals(framing.pairs[index]!.value),
+      ),
+    ).toHaveLength(1)
+
+    const reencoded = readFraming(
+      read('a non-canonical encoding of the record'),
+    )
+    const post = reencoded.pairs[3]
+    expect(post?.value.length).toBe(fourth.value.length)
+    expect(post?.value.equals(fourth.value)).toBe(false)
+    expect([...(post?.value ?? [])].sort()).toEqual([...fourth.value].sort())
+
+    expect(read('metadata type changed').toString('latin1')).toContain(
+      'atproto-space-rexo',
+    )
+    expect(read('metadata revision changed')).toHaveLength(base.length)
+    expect(changedMeta('metadata revision changed')).toBe(true)
+
+    const [metaLimit] = frame(read('a metadata length above the limit'), 4)
+    expect(metaLimit).toBe(64 * 1024 + 1)
+    const [keyLimit] = frame(
+      read('a key length above the limit'),
+      first.start + 1,
+    )
+    expect(keyLimit).toBe(4 * 1024 + 1)
+    const valueLimited = read('a value length above the limit, no bytes')
+    const [valueLimit, valueBytesAt] = frame(valueLimited, first.valueStart)
+    expect(valueLimit).toBe(1024 * 1024 + 1)
+    expect(valueLimited).toHaveLength(valueBytesAt)
+  })
+
+  it('fails the message authentication only where the commit changed', () => {
+    const verdicts = new Map(
+      fixture.refused.map((edit) => [edit.name, edit.verdict]),
+    )
+    expect(verdicts.get('metadata revision changed')).toBe(
+      'refused: SpaceMacError',
+    )
+    expect(verdicts.get('cut before the end marker')).toBe(
+      'refused: StarParseError',
+    )
+    expect(verdicts.get('metadata type changed')).toBe(
+      'refused: SpaceRepoVerificationError',
+    )
+    expect(verdicts.get('two records swapped')).toBe(
+      'refused: SpaceRepoVerificationError',
+    )
+    expect(verdicts.get('a value length above the limit, no bytes')).toBe(
+      'refused: StarParseError',
+    )
+    const macFailures = fixture.refused.filter((edit) =>
+      edit.verdict.endsWith('SpaceMacError'),
+    )
+    expect(macFailures.map((edit) => edit.name)).toEqual([
+      'metadata revision changed',
+    ])
+  })
+})
+
 describe('november fixture byte fields', () => {
   const names = fixturePaths()
 

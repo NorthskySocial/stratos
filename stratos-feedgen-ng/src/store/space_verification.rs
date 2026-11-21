@@ -3,23 +3,25 @@
 //! projection rows in a single immediate transaction. The store never takes a
 //! hash or a previous value from its caller: it re-reads its own rows, applies
 //! the change set to them and compares the SHA-256 of the result with the
-//! `data` of the MAC-verified commit. Nothing here is called by the
-//! synchronizer yet.
+//! `data` of the MAC-verified commit.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use cid::Cid;
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use super::space::{apply_verified_space_stage_row, has_pds_member_generation};
+use super::space::{
+    apply_verified_space_stage_row, exceeds_projection_maximum, has_pds_member_generation,
+    stage_row_bytes,
+};
 use super::*;
 use crate::{
     config::{MAX_SPACE_REPO_RECORDS, MAX_SPACE_VERIFICATION_ROWS},
     identifier::{Did, FEED_SPACE_TYPE, RecordUri, SpaceUri},
     space_mac::MacVerifiedCommit,
-    space_ops::{ChangeSet, decode_op_page, projection_mutations},
+    space_ops::{ChangeSet, RepoOp, projection_mutations},
     space_set_hash::{RecordPath, SetHashState, set_hash_element},
-    space_sync::MAX_SPACE_PAGE_OPS,
+    space_sync::{MAX_SPACE_PAGE_OPS, is_projected_collection},
 };
 
 /// What a promotion is for: one member's repo in one space, read from `host`
@@ -48,7 +50,9 @@ pub struct VerifiedSpaceBase {
 pub struct VerifiedSpaceRecord {
     pub path: RecordPath,
     pub cid: Cid,
-    pub value: Value,
+    /// The record. Only a record in a collection the projection does not read
+    /// may arrive without it: its CID is what the commit's digest covers.
+    pub value: Option<Value>,
 }
 
 impl EncryptedStore {
@@ -88,6 +92,24 @@ impl EncryptedStore {
         transaction.commit().map_err(StoreError::Open)
     }
 
+    /// Forgets a member's verified state in a space: the checkpoint, the path
+    /// rows, and every post and interaction the member has in that space. It
+    /// takes no commit, so it is only for a host's own statement that the repo
+    /// does not exist. Another member, another space and custody rows are
+    /// untouched, and any refusal changes nothing.
+    pub fn clear_verified_space_repo(
+        &mut self,
+        target: &VerifiedSpaceTarget,
+        observed_at: &str,
+    ) -> Result<(), StoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        write_verified_clear(&transaction, target, observed_at)?;
+        transaction.commit().map_err(StoreError::Open)
+    }
+
     /// Replaces a member's whole repo state in a space from `records`, the
     /// complete set the host holds at `commit`, if and only if the hash of that
     /// set is the commit's `data`. It needs no earlier checkpoint and takes over
@@ -114,6 +136,76 @@ impl EncryptedStore {
             observed_at,
         )?;
         transaction.commit().map_err(StoreError::Open)
+    }
+}
+
+#[cfg(test)]
+impl EncryptedStore {
+    /// Every row of every table as text, for tests in other modules that
+    /// compare a store before and after a cycle that must change nothing.
+    pub(crate) fn table_snapshot(&self) -> Vec<(String, Vec<String>)> {
+        let tables: Vec<String> = self
+            .connection
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        tables
+            .into_iter()
+            .map(|table| {
+                let mut statement = self
+                    .connection
+                    .prepare(&format!("SELECT * FROM \"{table}\""))
+                    .unwrap();
+                let columns = statement.column_count();
+                let mut rows: Vec<String> = statement
+                    .query_map([], |row| {
+                        Ok((0..columns)
+                            .map(|column| format!("{:?}", row.get_ref(column).unwrap()))
+                            .collect::<Vec<_>>()
+                            .join("|"))
+                    })
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap();
+                rows.sort();
+                (table, rows)
+            })
+            .collect()
+    }
+
+    /// The posts served to `boundary`, as (uri, cid), sorted.
+    pub(crate) fn served_posts(&self, boundary: &str, as_of: &str) -> Vec<(String, String)> {
+        let mut posts: Vec<_> = self
+            .list_posts_by_boundary(boundary, None, 50, as_of)
+            .unwrap()
+            .posts
+            .into_iter()
+            .map(|post| (post.uri, post.cid))
+            .collect();
+        posts.sort();
+        posts
+    }
+
+    /// No store operation leaves a checkpoint under a generation other than
+    /// the member's current one, so a test that needs one writes it here.
+    pub(crate) fn rewrite_stored_space_generation(
+        &self,
+        space_uri: &str,
+        actor_did: &str,
+        generation: u64,
+    ) {
+        let generation = i64::try_from(generation).expect("a stored generation");
+        let rewritten = self
+            .connection
+            .execute(
+                "UPDATE space_repo_state SET generation = ?3 WHERE space_uri = ?1 AND did = ?2",
+                params![space_uri, actor_did, generation],
+            )
+            .unwrap();
+        assert_eq!(rewritten, 1, "one checkpoint to rewrite");
     }
 }
 
@@ -189,14 +281,23 @@ fn other_members_rows(
         .map_err(StoreError::Open)
 }
 
+fn check_timestamps(timestamps: &[&str]) -> Result<(), StoreError> {
+    if timestamps
+        .iter()
+        .all(|timestamp| is_utc_timestamp(timestamp))
+    {
+        Ok(())
+    } else {
+        Err(StoreError::SpaceRepoInvalid)
+    }
+}
+
 /// What a target must satisfy before anything else is read: well-formed
-/// identifiers and times, a boundary that names the target's space, and the
-/// membership generation the caller holds.
+/// identifiers, a boundary that names the target's space, and the membership
+/// generation the caller holds.
 fn check_target(
     transaction: &rusqlite::Transaction<'_>,
     target: &VerifiedSpaceTarget,
-    retained_at: &str,
-    observed_at: &str,
 ) -> Result<(SpaceUri, Did, i64), StoreError> {
     let space = SpaceUri::parse(&target.space_uri).map_err(|_| StoreError::SpaceRepoInvalid)?;
     let author = Did::parse(target.actor_did.clone()).map_err(|_| StoreError::SpaceRepoInvalid)?;
@@ -209,8 +310,6 @@ fn check_target(
     if space_of_boundary.as_ref() != Some(&space)
         || target.boundary.is_empty()
         || target.host.is_empty()
-        || !is_utc_timestamp(retained_at)
-        || !is_utc_timestamp(observed_at)
     {
         return Err(StoreError::SpaceRepoInvalid);
     }
@@ -260,21 +359,50 @@ fn write_checkpoint(
     Ok(())
 }
 
+fn stage_rows(
+    mutations: Vec<SpaceStageMutation>,
+    boundary: &str,
+    observed_at: &str,
+) -> Vec<SpaceStageRow> {
+    mutations
+        .into_iter()
+        .map(|mutation| stage_row_of(mutation, boundary, observed_at))
+        .collect()
+}
+
 fn apply_projection(
     transaction: &rusqlite::Transaction<'_>,
     target: &VerifiedSpaceTarget,
-    mutations: Vec<SpaceStageMutation>,
+    rows: Vec<SpaceStageRow>,
     retained_at: &str,
-    observed_at: &str,
 ) -> Result<(), StoreError> {
-    for mutation in mutations {
+    for row in rows {
         apply_verified_space_stage_row(
             transaction,
             &target.space_uri,
             &target.actor_did,
             retained_at,
-            stage_row_of(mutation, &target.boundary, observed_at),
+            row,
         )?;
+    }
+    Ok(())
+}
+
+/// A write adds the rows it upserts to the projection, counted as the old
+/// staging counted them; that and what is already published must not pass the
+/// configured maximum. Deletions add nothing.
+fn check_projection_maximum(
+    transaction: &rusqlite::Transaction<'_>,
+    target: &VerifiedSpaceTarget,
+    rows: &[SpaceStageRow],
+) -> Result<(), StoreError> {
+    let added_bytes: i64 = rows
+        .iter()
+        .filter(|row| !row.deleted)
+        .map(|row| stage_row_bytes(&target.space_uri, &target.actor_did, row))
+        .sum();
+    if exceeds_projection_maximum(transaction, added_bytes)? {
+        return Err(StoreError::SpaceRepoOverBudget);
     }
     Ok(())
 }
@@ -290,7 +418,8 @@ fn write_verified_promotion(
     retained_at: &str,
     observed_at: &str,
 ) -> Result<(), StoreError> {
-    let (space, author, generation) = check_target(transaction, target, retained_at, observed_at)?;
+    check_timestamps(&[retained_at, observed_at])?;
+    let (space, author, generation) = check_target(transaction, target)?;
     let checkpoint = read_checkpoint(transaction, &target.space_uri, &target.actor_did)?;
     if checkpoint
         .as_ref()
@@ -339,6 +468,10 @@ fn write_verified_promotion(
     if &state.digest() != commit.data() {
         return Err(StoreError::SpaceRepoDigestMismatch);
     }
+    let mutations = projection_mutations(&space, &author, changes, observed_at)
+        .map_err(|_| StoreError::SpaceRepoInvalid)?;
+    let rows = stage_rows(mutations, &target.boundary, observed_at);
+    check_projection_maximum(transaction, target, &rows)?;
 
     for change in changes {
         match change.cid() {
@@ -379,9 +512,7 @@ fn write_verified_promotion(
         observed_at,
     )?;
 
-    let mutations = projection_mutations(&space, &author, changes, observed_at)
-        .map_err(|_| StoreError::SpaceRepoInvalid)?;
-    apply_projection(transaction, target, mutations, retained_at, observed_at)
+    apply_projection(transaction, target, rows, retained_at)
 }
 
 /// Everything a replacement decides and writes; the caller owns the transaction.
@@ -393,7 +524,8 @@ fn write_verified_replacement(
     retained_at: &str,
     observed_at: &str,
 ) -> Result<(), StoreError> {
-    let (space, author, generation) = check_target(transaction, target, retained_at, observed_at)?;
+    check_timestamps(&[retained_at, observed_at])?;
+    let (space, author, generation) = check_target(transaction, target)?;
     if commit.repo() != target.actor_did || commit.space() != target.space_uri {
         return Err(StoreError::SpaceRepoInvalid);
     }
@@ -403,23 +535,34 @@ fn write_verified_replacement(
     {
         return Err(StoreError::SpaceRepoOverBudget);
     }
-    if !records.windows(2).all(|pair| {
-        (pair[0].path.collection(), pair[0].path.rkey())
-            < (pair[1].path.collection(), pair[1].path.rkey())
-    }) {
+    if !records
+        .windows(2)
+        .all(|pair| joined_path_bytes(&pair[0].path).lt(joined_path_bytes(&pair[1].path)))
+    {
         return Err(StoreError::SpaceRepoInvalid);
     }
-    let (state, mutations) = rebuild_state(&space, &author, commit.rev(), records, observed_at)?;
-    if &state.digest() != commit.data() {
+    // Only a collection the projection does not read may arrive without its
+    // record; for the others the projection would have nothing to serve.
+    if records
+        .iter()
+        .any(|record| record.value.is_none() && is_projected_collection(record.path.collection()))
+    {
+        return Err(StoreError::SpaceRepoInvalid);
+    }
+    let held = held_cids(transaction, target)?;
+    let rebuilt = rebuild_state(&space, &author, commit.rev(), records, observed_at, &held)?;
+    if &rebuilt.state.digest() != commit.data() {
         return Err(StoreError::SpaceRepoDigestMismatch);
     }
+    let rows = stage_rows(rebuilt.mutations, &target.boundary, observed_at);
+    check_projection_maximum(transaction, target, &rows)?;
 
     remove_projection_not_in(
         transaction,
         target,
         &space,
         &author,
-        &mutations,
+        &rebuilt.kept_uris,
         retained_at,
         observed_at,
     )?;
@@ -453,74 +596,161 @@ fn write_verified_replacement(
         target,
         generation,
         commit.rev(),
-        &state,
+        &rebuilt.state,
         records.len() as i64,
         observed_at,
     )?;
-    apply_projection(transaction, target, mutations, retained_at, observed_at)
+    apply_projection(transaction, target, rows, retained_at)
+}
+
+fn write_verified_clear(
+    transaction: &rusqlite::Transaction<'_>,
+    target: &VerifiedSpaceTarget,
+    observed_at: &str,
+) -> Result<(), StoreError> {
+    check_timestamps(&[observed_at])?;
+    let (space, author, _) = check_target(transaction, target)?;
+    // Only deletions are applied, which never read a retention time.
+    remove_projection_not_in(
+        transaction,
+        target,
+        &space,
+        &author,
+        &HashSet::new(),
+        observed_at,
+        observed_at,
+    )?;
+    for table in ["space_repo_record", "space_repo_state"] {
+        transaction
+            .execute(
+                &format!("DELETE FROM {table} WHERE space_uri = ?1 AND did = ?2"),
+                params![target.space_uri, target.actor_did],
+            )
+            .map_err(StoreError::Open)?;
+    }
+    Ok(())
+}
+
+/// The CID text stored for each path of the member's repo in the space, read
+/// before anything is rewritten.
+fn held_cids(
+    transaction: &rusqlite::Transaction<'_>,
+    target: &VerifiedSpaceTarget,
+) -> Result<HashMap<(String, String), String>, StoreError> {
+    transaction
+        .prepare(
+            "SELECT collection, rkey, cid FROM space_repo_record
+             WHERE space_uri = ?1 AND did = ?2",
+        )
+        .map_err(StoreError::Open)?
+        .query_map(params![target.space_uri, target.actor_did], |row| {
+            Ok(((row.get(0)?, row.get(1)?), row.get(2)?))
+        })
+        .map_err(StoreError::Open)?
+        .collect::<Result<_, _>>()
+        .map_err(StoreError::Open)
+}
+
+struct RebuiltRepo {
+    state: SetHashState,
+    mutations: Vec<SpaceStageMutation>,
+    // The projection rows of paths whose CID is the one already held: they are
+    // neither written again nor removed.
+    kept_uris: HashSet<String>,
+}
+
+/// The bytes an archive orders its records by. A collection that extends
+/// another by a dot sorts before it here, which (collection, rkey) order would
+/// reverse, so the check must use this and not the pair.
+fn joined_path_bytes(path: &RecordPath) -> impl Iterator<Item = u8> + '_ {
+    path.collection()
+        .bytes()
+        .chain(std::iter::once(b'/'))
+        .chain(path.rkey().bytes())
 }
 
 /// Hashes the set from scratch and derives its projection. The records go
-/// through the same decoder and change set as a page of operations, in chunks
-/// the size of a page, so a value is held to its CID by the one code that
-/// already does it; a value the encoder refuses refuses the whole set.
+/// through the same change set as a page of operations, in chunks the size of
+/// a page, so a value is held to its CID by the one code that already does it;
+/// a value the encoder refuses refuses the whole set. A record without a value
+/// contributes its path and CID to the hash and the path rows and nothing to
+/// the projection: the commit's digest is what authenticates that CID. A path
+/// whose CID is the one in `held` gives no mutation: its row is as the last
+/// write left it. A path with no path row is never trusted, whatever the
+/// projection holds for it.
 fn rebuild_state(
     space: &SpaceUri,
     author: &Did,
     rev: &str,
     records: &[VerifiedSpaceRecord],
     observed_at: &str,
-) -> Result<(SetHashState, Vec<SpaceStageMutation>), StoreError> {
+    held: &HashMap<(String, String), String>,
+) -> Result<RebuiltRepo, StoreError> {
     let mut state = SetHashState::empty();
     let mut mutations = Vec::new();
+    let mut kept_uris = HashSet::new();
     for chunk in records.chunks(MAX_SPACE_PAGE_OPS) {
-        let ops: Vec<Value> = chunk
+        let ops = chunk
             .iter()
             .map(|record| {
-                json!({
-                    "rev": rev,
-                    "collection": record.path.collection(),
-                    "rkey": record.path.rkey(),
-                    "cid": record.cid.to_string(),
-                    "prev": null,
-                    "value": record.value,
-                })
+                RepoOp::creating(rev, record.path.clone(), record.cid, record.value.clone())
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| StoreError::SpaceRepoInvalid)?;
+        let change_set = ChangeSet::apply(state, &ops).map_err(|_| StoreError::SpaceRepoInvalid)?;
+        let unchanged: HashSet<String> = change_set
+            .changes()
+            .iter()
+            .filter(|change| {
+                let held_cid = held.get(&(
+                    change.path().collection().to_owned(),
+                    change.path().rkey().to_owned(),
+                ));
+                held_cid.map(String::as_str) == change.cid().map(ToString::to_string).as_deref()
+            })
+            .map(|change| {
+                space.record_uri(author, change.path().collection(), change.path().rkey())
             })
             .collect();
-        let body =
-            serde_json::to_vec(&json!({ "ops": ops })).map_err(|_| StoreError::SpaceRepoInvalid)?;
-        let page = decode_op_page(&body).map_err(|_| StoreError::SpaceRepoInvalid)?;
-        let change_set =
-            ChangeSet::apply(state, page.ops()).map_err(|_| StoreError::SpaceRepoInvalid)?;
         mutations.extend(
             projection_mutations(space, author, change_set.changes(), observed_at)
-                .map_err(|_| StoreError::SpaceRepoInvalid)?,
+                .map_err(|_| StoreError::SpaceRepoInvalid)?
+                .into_iter()
+                .filter(|mutation| !unchanged.contains(mutation_uri(mutation))),
         );
+        kept_uris.extend(unchanged);
         state = change_set.state().clone();
     }
-    Ok((state, mutations))
+    kept_uris.extend(mutations.iter().filter_map(|mutation| match mutation {
+        SpaceStageMutation::Upsert { uri, .. } => Some(uri.clone()),
+        SpaceStageMutation::Delete { .. } => None,
+    }));
+    Ok(RebuiltRepo {
+        state,
+        mutations,
+        kept_uris,
+    })
 }
 
-/// Removes every post and interaction this member has in this space that the
-/// replacement does not write again. Rows are matched by parsing their URI, so
-/// custody rows and other spaces are never candidates; removal goes through the
-/// same row application as every other projection change.
+fn mutation_uri(mutation: &SpaceStageMutation) -> &str {
+    match mutation {
+        SpaceStageMutation::Upsert { uri, .. } | SpaceStageMutation::Delete { uri } => uri,
+    }
+}
+
+/// Removes every post and interaction this member has in this space that is
+/// not in `kept_uris`. Rows are matched by parsing their URI, so custody rows
+/// and other spaces are never candidates; removal goes through the same row
+/// application as every other projection change.
 fn remove_projection_not_in(
     transaction: &rusqlite::Transaction<'_>,
     target: &VerifiedSpaceTarget,
     space: &SpaceUri,
     author: &Did,
-    mutations: &[SpaceStageMutation],
+    kept_uris: &HashSet<String>,
     retained_at: &str,
     observed_at: &str,
 ) -> Result<(), StoreError> {
-    let rewritten: HashSet<&str> = mutations
-        .iter()
-        .filter_map(|mutation| match mutation {
-            SpaceStageMutation::Upsert { uri, .. } => Some(uri.as_str()),
-            SpaceStageMutation::Delete { .. } => None,
-        })
-        .collect();
     let mut statement = transaction
         .prepare(
             "SELECT uri FROM post WHERE author_did = ?1
@@ -535,10 +765,15 @@ fn remove_projection_not_in(
     drop(statement);
     let removals = uris
         .into_iter()
-        .filter(|uri| is_record_of(uri, space, author) && !rewritten.contains(uri.as_str()))
+        .filter(|uri| is_record_of(uri, space, author) && !kept_uris.contains(uri))
         .map(|uri| SpaceStageMutation::Delete { uri })
         .collect();
-    apply_projection(transaction, target, removals, retained_at, observed_at)
+    apply_projection(
+        transaction,
+        target,
+        stage_rows(removals, &target.boundary, observed_at),
+        retained_at,
+    )
 }
 
 fn is_record_of(uri: &str, space: &SpaceUri, author: &Did) -> bool {
@@ -610,6 +845,7 @@ mod tests {
         space_ops::decode_op_page,
         space_record::{encode_record, record_cid},
         space_set_hash::RecordPath,
+        space_value_budget::ValueBudget,
         store::{ActorEnrollment, PdsSpaceMember},
     };
 
@@ -697,7 +933,13 @@ mod tests {
         let base = store.verified_space_base(SPACE, did).unwrap();
         let state = base.map_or_else(SetHashState::empty, |base| base.state);
         let body = serde_json::to_vec(&json!({ "ops": ops })).unwrap();
-        ChangeSet::apply(state, decode_op_page(&body).unwrap().ops()).unwrap()
+        ChangeSet::apply(
+            state,
+            decode_op_page(&body, &ValueBudget::unlimited_for_tests())
+                .unwrap()
+                .ops(),
+        )
+        .unwrap()
     }
 
     fn promote_with(
@@ -973,8 +1215,13 @@ mod tests {
         // A caller that forgot the stored state builds a set that is consistent
         // with its own commit, but not with the rows the store holds.
         let body = serde_json::to_vec(&json!({ "ops": pages[1]["ops"] })).unwrap();
-        let from_nothing =
-            ChangeSet::apply(SetHashState::empty(), decode_op_page(&body).unwrap().ops()).unwrap();
+        let from_nothing = ChangeSet::apply(
+            SetHashState::empty(),
+            decode_op_page(&body, &ValueBudget::unlimited_for_tests())
+                .unwrap()
+                .ops(),
+        )
+        .unwrap();
         let self_consistent = MacVerifiedCommit::for_tests(
             FAYE,
             SPACE,
@@ -1644,15 +1891,20 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .split_at(crate::space_sync::MAX_SPACE_PAGE_OPS);
-            let mut decoded =
-                decode_op_page(&serde_json::to_vec(&json!({ "ops": first })).unwrap())
-                    .unwrap()
-                    .ops()
-                    .to_vec();
+            let mut decoded = decode_op_page(
+                &serde_json::to_vec(&json!({ "ops": first })).unwrap(),
+                &ValueBudget::unlimited_for_tests(),
+            )
+            .unwrap()
+            .ops()
+            .to_vec();
             decoded.extend_from_slice(
-                decode_op_page(&serde_json::to_vec(&json!({ "ops": second })).unwrap())
-                    .unwrap()
-                    .ops(),
+                decode_op_page(
+                    &serde_json::to_vec(&json!({ "ops": second })).unwrap(),
+                    &ValueBudget::unlimited_for_tests(),
+                )
+                .unwrap()
+                .ops(),
             );
             ChangeSet::apply(SetHashState::empty(), &decoded).unwrap()
         };
@@ -1825,8 +2077,13 @@ mod tests {
             MacVerifiedCommit::for_tests(FAYE, space_uri, "3jzfcijpj2z2a", hashed(&model).digest());
         let ops = json!([create_post("3jzfcijpj2z2a", rkey, &value)]);
         let body = serde_json::to_vec(&json!({ "ops": ops })).unwrap();
-        let change_set =
-            ChangeSet::apply(SetHashState::empty(), decode_op_page(&body).unwrap().ops()).unwrap();
+        let change_set = ChangeSet::apply(
+            SetHashState::empty(),
+            decode_op_page(&body, &ValueBudget::unlimited_for_tests())
+                .unwrap()
+                .ops(),
+        )
+        .unwrap();
         let target = VerifiedSpaceTarget {
             boundary: boundary.to_owned(),
             space_uri: space_uri.to_owned(),
@@ -1911,7 +2168,7 @@ mod tests {
         VerifiedSpaceRecord {
             path: RecordPath::parse(collection, rkey).unwrap(),
             cid: cid_of(value),
-            value: value.clone(),
+            value: Some(value.clone()),
         }
     }
 
@@ -2002,7 +2259,7 @@ mod tests {
                     record.path.rkey(),
                     Some(&record.cid),
                     None,
-                    Some(&record.value),
+                    record.value.as_ref(),
                 )
             })
             .collect();
@@ -2465,11 +2722,47 @@ mod tests {
         }
     }
 
+    // A collection that extends another by a dot sorts the other way round
+    // as joined `collection/rkey` text than as a (collection, rkey) pair: '.'
+    // is below '/'. An archive is ordered by the text.
+    #[test]
+    fn paths_are_ordered_by_their_joined_text_as_an_archive_orders_them() {
+        const CREW: &str = "moe.bebop.crew";
+        const CREW_MEMBER: &str = "moe.bebop.crew.member";
+        let crew = record_of(CREW, "spike", &json!({ "$type": CREW, "name": "Spike" }));
+        let member = record_of(
+            CREW_MEMBER,
+            "spike",
+            &json!({ "$type": CREW_MEMBER, "name": "Spike" }),
+        );
+        let archive_order = vec![member.clone(), crew.clone()];
+        let tuple_order = vec![crew.clone(), member.clone()];
+        let commit =
+            MacVerifiedCommit::for_tests(FAYE, SPACE, "3jzfcijpj2z2b", digest_of(&archive_order));
+        let (mut store, target) = store_with_faye_and_jet_promoted();
+
+        for refused in [
+            tuple_order.clone(),
+            vec![member.clone(), member.clone()],
+            vec![crew.clone(), crew.clone()],
+        ] {
+            let error = assert_refused_and_unchanged(&mut store, &target, &commit, &refused);
+            assert!(matches!(error, StoreError::SpaceRepoInvalid), "{error:?}");
+        }
+
+        replace(&mut store, &target, &commit, &archive_order).unwrap();
+
+        let base = store.verified_space_base(SPACE, FAYE).unwrap().unwrap();
+        assert_eq!(base.state.digest(), digest_of(&archive_order));
+        assert_eq!(base.record_count, 2);
+        assert_eq!(stored_paths(&store, FAYE).len(), 2);
+    }
+
     #[test]
     fn a_record_that_is_not_the_one_its_cid_names_refuses_the_whole_replacement() {
         let (mut store, target) = store_with_faye_and_jet_promoted();
         let mut forged = record_of(POST, "swordfish", &post_value("Bang"));
-        forged.value = post_value("Bang, edited");
+        forged.value = Some(post_value("Bang, edited"));
         let records = sorted(vec![record_of(POST, "ein", &post_value("Woof")), forged]);
 
         let error = assert_refused_and_unchanged(
@@ -2491,7 +2784,7 @@ mod tests {
             VerifiedSpaceRecord {
                 path: RecordPath::parse(POST, "ein").unwrap(),
                 cid: cid_of(&post_value("Woof")),
-                value: fractional,
+                value: Some(fractional),
             },
         ]);
 
@@ -2913,13 +3206,18 @@ mod tests {
                     record.path.rkey(),
                     Some(&record.cid),
                     None,
-                    Some(&record.value),
+                    record.value.as_ref(),
                 )
             })
             .collect();
         let body = serde_json::to_vec(&json!({ "ops": ops })).unwrap();
-        let change_set =
-            ChangeSet::apply(SetHashState::empty(), decode_op_page(&body).unwrap().ops()).unwrap();
+        let change_set = ChangeSet::apply(
+            SetHashState::empty(),
+            decode_op_page(&body, &ValueBudget::unlimited_for_tests())
+                .unwrap()
+                .ops(),
+        )
+        .unwrap();
         store.promote_verified_space_repo(
             target,
             None,
@@ -3021,5 +3319,693 @@ mod tests {
             matches!(replaced, Err(StoreError::SpaceRepoInvalid)),
             "{replaced:?}"
         );
+    }
+
+    // Clearing a member's verified state, and what a replacement leaves alone.
+
+    const OBSERVED_LATER: &str = "2026-09-25T00:00:00.000Z";
+    const RETAINED_LATER: &str = "2026-09-26T00:00:00.000Z";
+
+    fn faye_jet_hammerhead_and_custody() -> (EncryptedStore, VerifiedSpaceTarget) {
+        let mut store = memory_store();
+        members(&mut store, &[FAYE, JET]);
+        store
+            .replace_pds_space_members(
+                HAMMERHEAD,
+                vec![PdsSpaceMember {
+                    did: FAYE.to_owned(),
+                }],
+                OBSERVED,
+            )
+            .unwrap();
+        let target = target_of(&store, FAYE);
+        promote_records(
+            &mut store,
+            &target,
+            "3jzfcijpj2z2a",
+            &faye_before_replacement(),
+        );
+        promote_swordfish_in(&mut store, HAMMERHEAD, HAMMERHEAD_SPACE, "swordfish");
+        let jet_target = target_of(&store, JET);
+        promote_records(
+            &mut store,
+            &jet_target,
+            "3jzfcijpj2z2a",
+            &sorted(vec![
+                record_of(POST, "swordfish", &post_value("Bang")),
+                record_of(LIKE, "ed", &subject_like()),
+            ]),
+        );
+        custody_rows_of_faye(&mut store);
+        (store, target)
+    }
+
+    #[test]
+    fn clearing_removes_exactly_that_members_rows_in_that_space() {
+        let (mut store, target) = faye_jet_hammerhead_and_custody();
+        let jet_before = rows_of_member(&store, JET);
+        let other_space_before = rows_in_space(&store, HAMMERHEAD_SPACE);
+        let custody_before = custody_rows(&store);
+        assert_eq!(custody_before.len(), 2);
+        assert_eq!(served_posts(&store).len(), 4);
+
+        store.clear_verified_space_repo(&target, OBSERVED).unwrap();
+
+        assert_eq!(store.verified_space_base(SPACE, FAYE).unwrap(), None);
+        assert!(stored_paths(&store, FAYE).is_empty());
+        let served: Vec<String> = served_posts(&store)
+            .into_iter()
+            .map(|(uri, _)| uri)
+            .collect();
+        assert!(
+            !served
+                .iter()
+                .any(|uri| uri.starts_with(&format!("{SPACE}/{FAYE}/"))),
+            "{served:?}"
+        );
+        assert!(
+            store
+                .interaction_rows()
+                .iter()
+                .all(|row| !row.0.starts_with(&format!("{SPACE}/{FAYE}/"))),
+        );
+        assert_eq!(rows_of_member(&store, JET), jet_before);
+        assert_eq!(rows_in_space(&store, HAMMERHEAD_SPACE), other_space_before);
+        assert_eq!(custody_rows(&store), custody_before);
+        assert!(
+            store
+                .pds_member_generation(BOUNDARY, FAYE)
+                .unwrap()
+                .is_some(),
+            "membership is not what a clear is about"
+        );
+    }
+
+    #[test]
+    fn a_stale_generation_or_a_forged_boundary_clears_nothing() {
+        let (mut store, target) = faye_jet_hammerhead_and_custody();
+        let everything = |store: &EncryptedStore| {
+            (
+                rows_of_member(store, FAYE),
+                rows_of_member(store, JET),
+                rows_in_space(store, HAMMERHEAD_SPACE),
+                custody_rows(store),
+            )
+        };
+        let before = everything(&store);
+
+        let forged = VerifiedSpaceTarget {
+            boundary: HAMMERHEAD.to_owned(),
+            ..target.clone()
+        };
+        let outcome = store.clear_verified_space_repo(&forged, OBSERVED);
+        assert!(
+            matches!(outcome, Err(StoreError::SpaceRepoInvalid)),
+            "{outcome:?}"
+        );
+        assert_eq!(everything(&store), before);
+
+        let stale = VerifiedSpaceTarget {
+            generation: target.generation + 1,
+            ..target.clone()
+        };
+        let outcome = store.clear_verified_space_repo(&stale, OBSERVED);
+        assert!(
+            matches!(outcome, Err(StoreError::UnauthorizedSpaceMember)),
+            "{outcome:?}"
+        );
+        assert_eq!(everything(&store), before);
+
+        members(&mut store, &[JET]);
+        let jet_after_departure = rows_of_member(&store, JET);
+        let outcome = store.clear_verified_space_repo(&target, OBSERVED);
+        assert!(
+            matches!(outcome, Err(StoreError::UnauthorizedSpaceMember)),
+            "{outcome:?}"
+        );
+        assert_eq!(rows_of_member(&store, JET), jet_after_departure);
+    }
+
+    // uri, cid, sort_at, indexed_at, retained_at and row_version, as text.
+    fn post_rows_of(store: &EncryptedStore, did: &str) -> Vec<String> {
+        store
+            .connection
+            .prepare(
+                "SELECT uri || ' ' || cid || ' ' || sort_at || ' ' || indexed_at || ' ' ||
+                        retained_at || ' ' || row_version
+                 FROM post WHERE author_did = ?1 ORDER BY uri",
+            )
+            .unwrap()
+            .query_map([did], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn three_posts() -> Vec<VerifiedSpaceRecord> {
+        sorted(vec![
+            record_of(POST, "ein", &post_value("Woof")),
+            record_of(POST, "redtail", &post_value("Cowboy Bebop")),
+            record_of(POST, "swordfish", &post_value("See you space cowboy")),
+        ])
+    }
+
+    #[test]
+    fn a_replacement_leaves_unchanged_rows_as_they_were_and_rewrites_the_changed_one() {
+        let mut store = memory_store();
+        let target = target_of(&store, FAYE);
+        promote_records(&mut store, &target, "3jzfcijpj2z2a", &three_posts());
+        let before = post_rows_of(&store, FAYE);
+        assert_eq!(before.len(), 3);
+
+        let mut after_edit = three_posts();
+        let edited = record_of(POST, "redtail", &post_value("Cowboy Bebop, edited"));
+        after_edit.retain(|record| record.path.rkey() != "redtail");
+        after_edit.push(edited);
+        let after_edit = sorted(after_edit);
+        store
+            .replace_verified_space_repo(
+                &target,
+                &commit_for(FAYE, SPACE, "3jzfcijpj2z2b", &after_edit),
+                &after_edit,
+                RETAINED_LATER,
+                OBSERVED_LATER,
+            )
+            .unwrap();
+
+        let after = post_rows_of(&store, FAYE);
+        let by_row = |rows: &[String], rkey: &str| {
+            rows.iter()
+                .find(|row| {
+                    row.split(' ')
+                        .next()
+                        .is_some_and(|uri| uri.ends_with(&format!("/{rkey}")))
+                })
+                .cloned()
+                .unwrap_or_else(|| panic!("{rkey} in {rows:?}"))
+        };
+        for untouched in ["ein", "swordfish"] {
+            assert_eq!(
+                by_row(&after, untouched),
+                by_row(&before, untouched),
+                "{untouched}: indexed_at, retained_at, sort_at and row_version stay"
+            );
+        }
+        assert_ne!(by_row(&after, "redtail"), by_row(&before, "redtail"));
+        assert!(by_row(&after, "redtail").contains(RETAINED_LATER));
+        assert!(by_row(&after, "redtail").contains(OBSERVED_LATER));
+        assert_eq!(
+            store.verified_space_base(SPACE, FAYE).unwrap().unwrap().rev,
+            "3jzfcijpj2z2b"
+        );
+        assert_eq!(
+            store
+                .verified_space_base(SPACE, FAYE)
+                .unwrap()
+                .unwrap()
+                .state
+                .digest(),
+            digest_of(&after_edit)
+        );
+    }
+
+    #[test]
+    fn a_replacement_still_removes_the_rows_of_paths_the_set_no_longer_holds() {
+        let mut store = memory_store();
+        let target = target_of(&store, FAYE);
+        promote_records(
+            &mut store,
+            &target,
+            "3jzfcijpj2z2a",
+            &faye_before_replacement(),
+        );
+        let ein_before = post_rows_of(&store, FAYE)
+            .into_iter()
+            .find(|row| row.contains("/ein "))
+            .unwrap();
+        let kept = sorted(vec![record_of(POST, "ein", &post_value("Woof"))]);
+
+        replace(
+            &mut store,
+            &target,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2b", &kept),
+            &kept,
+        )
+        .unwrap();
+
+        assert_eq!(post_rows_of(&store, FAYE), vec![ein_before]);
+        assert!(store.interaction_rows().is_empty());
+        assert_eq!(stored_paths(&store, FAYE).len(), 1);
+    }
+
+    #[test]
+    fn a_replacement_that_changes_a_record_under_a_takedown_does_not_serve_it() {
+        let mut store = memory_store();
+        let target = target_of(&store, FAYE);
+        promote_records(&mut store, &target, "3jzfcijpj2z2a", &three_posts());
+        take_down(
+            &mut store,
+            LabelSubject::Record {
+                uri: record_uri(FAYE, POST, "redtail"),
+                author_did: FAYE.to_owned(),
+            },
+        );
+        let swordfish_before = post_rows_of(&store, FAYE)
+            .into_iter()
+            .find(|row| row.contains("/swordfish "))
+            .unwrap();
+        assert_eq!(post_rows_of(&store, FAYE).len(), 2);
+
+        let mut edited = three_posts();
+        edited.retain(|record| record.path.rkey() != "redtail");
+        edited.push(record_of(
+            POST,
+            "redtail",
+            &post_value("Cowboy Bebop, edited"),
+        ));
+        let edited = sorted(edited);
+        replace(
+            &mut store,
+            &target,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2b", &edited),
+            &edited,
+        )
+        .unwrap();
+
+        let rows = post_rows_of(&store, FAYE);
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert!(!rows.iter().any(|row| row.contains("/redtail ")));
+        assert!(rows.contains(&swordfish_before));
+        assert!(
+            stored_paths(&store, FAYE)
+                .get(&(POST.to_owned(), "redtail".to_owned()))
+                .is_some_and(|cid| *cid == cid_of(&post_value("Cowboy Bebop, edited")))
+        );
+    }
+
+    // What the old path left: projection rows with no path rows under them.
+    fn leave_rows_as_the_old_path_did(store: &mut EncryptedStore, target: &VerifiedSpaceTarget) {
+        let ops = json!([
+            create_post("3jzfcijpj2z2a", "ein", &post_value("Woof")),
+            create_post(
+                "3jzfcijpj2z2a",
+                "swordfish",
+                &post_value("See you space cowboy")
+            ),
+            op(
+                "3jzfcijpj2z2a",
+                LIKE,
+                "ed",
+                Some(&cid_of(&subject_like())),
+                None,
+                Some(&subject_like()),
+            ),
+        ]);
+        let change_set = change_set_over(store, FAYE, &ops);
+        let mutations = projection_mutations(
+            &SpaceUri::parse(SPACE).unwrap(),
+            &Did::parse(FAYE.to_owned()).unwrap(),
+            change_set.changes(),
+            OBSERVED,
+        )
+        .unwrap();
+        let transaction = store.connection.transaction().unwrap();
+        apply_projection(
+            &transaction,
+            target,
+            stage_rows(mutations, BOUNDARY, OBSERVED),
+            RETAINED,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+    }
+
+    #[test]
+    fn the_first_replacement_after_the_old_path_rewrites_or_removes_every_row_it_left() {
+        let mut store = memory_store();
+        let target = target_of(&store, FAYE);
+        leave_rows_as_the_old_path_did(&mut store, &target);
+        assert_eq!(post_rows_of(&store, FAYE).len(), 2);
+        assert_eq!(store.interaction_rows().len(), 1);
+        assert_eq!(count(&store, "space_repo_record"), 0, "no path rows");
+        let ein_left = post_rows_of(&store, FAYE)
+            .into_iter()
+            .find(|row| row.contains("/ein "))
+            .unwrap();
+
+        let set = sorted(vec![
+            record_of(POST, "ein", &post_value("Woof")),
+            record_of(POST, "redtail", &post_value("Cowboy Bebop")),
+        ]);
+        store
+            .replace_verified_space_repo(
+                &target,
+                &commit_for(FAYE, SPACE, "3jzfcijpj2z2b", &set),
+                &set,
+                RETAINED_LATER,
+                OBSERVED_LATER,
+            )
+            .unwrap();
+
+        let rows = post_rows_of(&store, FAYE);
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert!(!rows.iter().any(|row| row.contains("/swordfish ")));
+        let ein = rows.iter().find(|row| row.contains("/ein ")).unwrap();
+        assert_ne!(
+            *ein, ein_left,
+            "the left row is not trusted: it is written again"
+        );
+        assert!(ein.contains(RETAINED_LATER));
+        assert!(rows.iter().any(|row| row.contains("/redtail ")));
+        assert!(store.interaction_rows().is_empty());
+    }
+
+    fn set_projection_maximum(store: &EncryptedStore, bytes: i64) {
+        store
+            .connection
+            .execute(
+                "INSERT INTO retention_metadata (key, value) VALUES ('projection_max_bytes', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [bytes],
+            )
+            .unwrap();
+    }
+
+    fn published_bytes_of(store: &EncryptedStore) -> i64 {
+        store
+            .connection
+            .query_row(
+                "SELECT (SELECT COALESCE(SUM(projection_bytes), 0) FROM post)
+                      + (SELECT COALESCE(SUM(projection_bytes), 0) FROM interaction)",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    // What the write adds is counted on top of what is published, not instead
+    // of it: with the maximum one byte above what is published, even a row of
+    // a few hundred bytes passes a count of the new bytes alone and must not.
+    #[test]
+    fn a_promotion_and_a_replacement_over_the_projection_maximum_are_refused_and_change_nothing() {
+        let mut store = memory_store();
+        let target = target_of(&store, FAYE);
+        promote_records(&mut store, &target, "3jzfcijpj2z2a", &three_posts());
+        let published = published_bytes_of(&store);
+        assert!(published > 600, "{published}");
+        set_projection_maximum(&store, published + 1);
+        let before = rows_of_member(&store, FAYE);
+
+        let fresh = post_value("Ed was here");
+        let fresh_ops = json!([create_post("3jzfcijpj2z2b", "radical", &fresh)]);
+        let mut with_fresh = three_posts();
+        with_fresh.push(record_of(POST, "radical", &fresh));
+        let with_fresh = sorted(with_fresh);
+        let outcome = promote_with(
+            &mut store,
+            &target,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2b", &with_fresh),
+            &fresh_ops,
+        );
+        assert!(
+            matches!(outcome, Err(StoreError::SpaceRepoOverBudget)),
+            "{outcome:?}"
+        );
+        assert_eq!(rows_of_member(&store, FAYE), before);
+
+        let error = assert_refused_and_unchanged(
+            &mut store,
+            &target,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2b", &with_fresh),
+            &with_fresh,
+        );
+        assert!(
+            matches!(error, StoreError::SpaceRepoOverBudget),
+            "{error:?}"
+        );
+        assert_eq!(rows_of_member(&store, FAYE), before);
+
+        set_projection_maximum(&store, published + 100_000);
+        promote_with(
+            &mut store,
+            &target,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2b", &with_fresh),
+            &fresh_ops,
+        )
+        .unwrap();
+        replace(
+            &mut store,
+            &target,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2c", &three_posts()),
+            &three_posts(),
+        )
+        .unwrap();
+    }
+
+    // The same figure the old staging computed for the rows of a page, taken
+    // by staging them there and reading `stage_usage` before and after.
+    #[test]
+    fn the_bytes_a_write_adds_are_what_staging_the_same_rows_counted() {
+        let mut store = memory_store();
+        let generation = store
+            .pds_member_generation(BOUNDARY, FAYE)
+            .unwrap()
+            .unwrap();
+        let ops = json!([
+            create_post("3jzfcijpj2z2a", "ein", &post_value("Woof")),
+            create_post(
+                "3jzfcijpj2z2a",
+                "swordfish",
+                &post_value("See you space cowboy")
+            ),
+            op(
+                "3jzfcijpj2z2a",
+                LIKE,
+                "ed",
+                Some(&cid_of(&subject_like())),
+                None,
+                Some(&subject_like()),
+            ),
+            op(
+                "3jzfcijpj2z2a",
+                POST,
+                "gone",
+                None,
+                Some(&cid_of(&post_value("Bang"))),
+                None,
+            ),
+        ]);
+        let mutations_of = || {
+            let body = serde_json::to_vec(&json!({ "ops": ops })).unwrap();
+            let mut state = SetHashState::empty();
+            state.add(&set_hash_element(
+                &RecordPath::parse(POST, "gone").unwrap(),
+                &cid_of(&post_value("Bang")),
+            ));
+            let change_set = ChangeSet::apply(
+                state,
+                decode_op_page(&body, &ValueBudget::unlimited_for_tests())
+                    .unwrap()
+                    .ops(),
+            )
+            .unwrap();
+            projection_mutations(
+                &SpaceUri::parse(SPACE).unwrap(),
+                &Did::parse(FAYE.to_owned()).unwrap(),
+                change_set.changes(),
+                OBSERVED,
+            )
+            .unwrap()
+        };
+        let page = |cursor: &str| SpaceStagePage {
+            space_uri: SPACE.to_owned(),
+            actor_did: FAYE.to_owned(),
+            boundary: BOUNDARY.to_owned(),
+            next_cursor: Some(cursor.to_owned()),
+            updated_at: OBSERVED.to_owned(),
+        };
+        let usage = |store: &mut EncryptedStore| {
+            let transaction = store.connection.transaction().unwrap();
+            super::super::space::stage_usage(&transaction, Some(SPACE), Some(FAYE))
+                .unwrap()
+                .bytes
+        };
+        store
+            .stage_authorized_space_page_at_generation(page("c1"), Vec::new(), generation)
+            .unwrap();
+        let without_rows = usage(&mut store);
+
+        let mutations = mutations_of();
+        assert_eq!(mutations.len(), 4);
+        store
+            .stage_authorized_space_page_at_generation(page("c1"), mutations, generation)
+            .unwrap();
+        let staged = usage(&mut store) - without_rows;
+
+        let counted: i64 = stage_rows(mutations_of(), BOUNDARY, OBSERVED)
+            .iter()
+            .map(|row| stage_row_bytes(SPACE, FAYE, row))
+            .sum();
+        assert!(staged > 800, "{staged}");
+        assert_eq!(counted, staged);
+    }
+
+    fn follow_value(name: &str) -> Value {
+        json!({ "$type": FOLLOW, "subject": format!("did:plc:{name}") })
+    }
+
+    fn without_value(mut record: VerifiedSpaceRecord) -> VerifiedSpaceRecord {
+        record.value = None;
+        record
+    }
+
+    fn replaced_store(records: &[VerifiedSpaceRecord]) -> EncryptedStore {
+        let (mut store, target) = store_with_faye_and_jet_promoted();
+        let sorted_records = sorted(records.to_vec());
+        replace(
+            &mut store,
+            &target,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2b", &sorted_records),
+            &sorted_records,
+        )
+        .expect("the digest covers the CID, not the value");
+        store
+    }
+
+    #[test]
+    fn a_record_without_a_value_in_a_collection_the_projection_does_not_read_is_hashed_and_stored_as_with_it()
+     {
+        let crew = json!({ "$type": "moe.bebop.crew", "name": "Spike" });
+        let with_values = vec![
+            record_of(POST, "swordfish", &post_value("See you space cowboy")),
+            record_of(LIKE, "ed", &subject_like()),
+            record_of(REPOST, "jet", &subject_repost()),
+            record_of(FOLLOW, "spike", &follow_value("spikespiegel")),
+            record_of("moe.bebop.crew", "faye", &crew),
+        ];
+        let dropped: Vec<VerifiedSpaceRecord> = with_values
+            .iter()
+            .cloned()
+            .map(|record| {
+                if record.path.collection() == POST
+                    || record.path.collection() == LIKE
+                    || record.path.collection() == REPOST
+                {
+                    record
+                } else {
+                    without_value(record)
+                }
+            })
+            .collect();
+        assert_eq!(
+            dropped
+                .iter()
+                .filter(|record| record.value.is_none())
+                .count(),
+            2
+        );
+
+        let full = replaced_store(&with_values);
+        let lean = replaced_store(&dropped);
+
+        assert_eq!(rows_of_member(&lean, FAYE), rows_of_member(&full, FAYE));
+        assert_eq!(rows_in_space(&lean, SPACE), rows_in_space(&full, SPACE));
+        let stored = lean.verified_space_base(SPACE, FAYE).unwrap().unwrap();
+        assert_eq!(stored.record_count, 5);
+        assert_eq!(stored.state.digest(), digest_of(&sorted(with_values)));
+    }
+
+    #[test]
+    fn replacing_from_the_final_fixture_state_with_the_follows_value_dropped_stores_the_oracles_state_and_digest()
+     {
+        let mut store = memory_store();
+        let pages = fixture_pages();
+        let mut last: BTreeMap<(String, String), Value> = BTreeMap::new();
+        for op in pages
+            .iter()
+            .flat_map(|page| page["ops"].as_array().unwrap())
+        {
+            let path = (
+                op["collection"].as_str().unwrap().to_owned(),
+                op["rkey"].as_str().unwrap().to_owned(),
+            );
+            match op.get("value") {
+                Some(value) if op["cid"].is_string() => last.insert(path, value.clone()),
+                _ => last.remove(&path),
+            };
+        }
+        let records: Vec<VerifiedSpaceRecord> = last
+            .iter()
+            .map(|((collection, rkey), value)| {
+                let record = record_of(collection, rkey, value);
+                if collection == FOLLOW {
+                    without_value(record)
+                } else {
+                    record
+                }
+            })
+            .collect();
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record.value.is_none())
+                .count(),
+            1
+        );
+        let last_page = pages.last().unwrap();
+
+        replace_faye(&mut store, &commit_of_page(last_page), &records).unwrap();
+
+        let fixture: Value = serde_json::from_str(OP_PAGES).unwrap();
+        let final_state = STANDARD
+            .decode(fixture["stateAfterLastPage"]["value"].as_str().unwrap())
+            .unwrap();
+        let stored = store.verified_space_base(SPACE, FAYE).unwrap().unwrap();
+        assert_eq!(stored.state.to_bytes().as_slice(), final_state.as_slice());
+        assert_eq!(stored.state.digest(), *commit_of_page(last_page).data());
+        assert_eq!(stored.record_count, 4);
+    }
+
+    #[test]
+    fn a_missing_value_on_a_post_like_or_repost_path_refuses_the_replacement_and_changes_nothing() {
+        for collection in [POST, LIKE, REPOST] {
+            let (mut store, target) = store_with_faye_and_jet_promoted();
+            let mut records = faye_before_replacement();
+            let at = records
+                .iter()
+                .position(|record| record.path.collection() == collection)
+                .expect("faye holds one");
+            records[at].value = None;
+
+            let error = assert_refused_and_unchanged(
+                &mut store,
+                &target,
+                // The digest covers the CIDs, so only the missing value is wrong.
+                &commit_for(FAYE, SPACE, "3jzfcijpj2z2b", &records),
+                &records,
+            );
+
+            assert!(
+                matches!(error, StoreError::SpaceRepoInvalid),
+                "{collection}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_value_kept_for_a_collection_the_projection_does_not_read_is_still_held_to_its_cid() {
+        let (mut store, target) = store_with_faye_and_jet_promoted();
+        let mut forged = record_of(FOLLOW, "spike", &follow_value("spikespiegel"));
+        forged.value = Some(follow_value("jetblack"));
+        let records = sorted(vec![record_of(POST, "ein", &post_value("Woof")), forged]);
+
+        let error = assert_refused_and_unchanged(
+            &mut store,
+            &target,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2b", &records),
+            &records,
+        );
+
+        assert!(matches!(error, StoreError::SpaceRepoInvalid), "{error:?}");
     }
 }

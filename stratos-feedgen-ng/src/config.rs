@@ -307,6 +307,27 @@ pub(crate) const MAX_SPACE_PROMOTION_STAGE_BYTES: i64 = 8 * 1024 * 1024;
 /// One member's repo in one space is kept whole as path rows, so a host cannot
 /// grow the cache by publishing more records than a feed member plausibly holds.
 pub const MAX_SPACE_REPO_RECORDS: usize = 20_000;
+/// What one member's repo archive may hold, checked on a declared length before
+/// any byte of it is kept. Key and value limits are upstream's; the whole
+/// archive and the record count are local, so a repo above them is a failed
+/// target and never a truncated state.
+pub const MAX_SPACE_ARCHIVE_META_BYTES: usize = 64 * 1024;
+pub const MAX_SPACE_ARCHIVE_KEY_BYTES: usize = 4 * 1024;
+pub const MAX_SPACE_ARCHIVE_VALUE_BYTES: usize = 1024 * 1024;
+pub const MAX_SPACE_ARCHIVE_BYTES: usize = 16 * 1024 * 1024;
+/// The page bodies one poll of one member may read in all, so a host cannot
+/// make a poll read without end; a poll that would pass it recovers from the
+/// whole archive instead.
+pub const MAX_SPACE_POLL_BODY_BYTES: usize = 16 * 1024 * 1024;
+/// The decoded JSON values (every scalar, array and map counts one) one member's
+/// cycle may hold in all, pages and archive together. The wire limits do not
+/// bound memory: a one-byte CBOR integer decodes to a 32-byte value, so 16 MiB
+/// of integers is some 500 MB decoded, and the store rewrites what it is given.
+pub const MAX_SPACE_CYCLE_VALUES: usize = 2_000_000;
+/// One member's whole cycle, lookups and pages and any archive included.
+pub const SPACE_TARGET_DEADLINE: Duration = Duration::from_secs(60);
+/// After a replacement fails for a member, how long before another is tried.
+pub const SPACE_REPLACEMENT_COOLDOWN: Duration = Duration::from_secs(10 * 60);
 /// Path rows across every member and space. They are not feed rows: they do not
 /// count against the retention budget and retention never deletes them, so they
 /// need a bound of their own.
@@ -878,5 +899,13 @@ mod tests {
             Err(super::ConfigError::UnreadableSigningKeyFile)
         );
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_limits_of_the_verified_space_read_are_the_ones_the_operator_was_told() {
+        assert_eq!(super::MAX_SPACE_ARCHIVE_BYTES, 16 * 1024 * 1024);
+        assert_eq!(super::MAX_SPACE_POLL_BODY_BYTES, 16 * 1024 * 1024);
+        assert_eq!(super::SPACE_TARGET_DEADLINE.as_secs(), 60);
+        assert_eq!(super::SPACE_REPLACEMENT_COOLDOWN.as_secs(), 600);
     }
 }

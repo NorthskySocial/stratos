@@ -93,48 +93,53 @@
     },
     {
       "path": "commit-and-ops.json",
-      "sha256": "1806479007e57d8201d9ef126df2992c96cef1d4731cb63af907c1da4147eae3",
+      "sha256": "69ccd09399768af7f2154680ffe73f03c65b99def7b292c779e6106bdf7f95ce",
       "classification": "upstream-legacy-uri"
     },
     {
       "path": "commit-mac.json",
-      "sha256": "3a8833ba279ac49de359900cc7bbdf1473888e41befafef1a119539c5ef0c28b",
+      "sha256": "1cadf350ad7b481ac07d27894708efb0763270f26c0db15d313cc45672f42c8a",
       "classification": "upstream-signed-target-uri"
     },
     {
       "path": "credential-signature.json",
-      "sha256": "813a324314e713a11ec4610aae2c6fad63c9666472d1e8c97cb9ba27f3e59d91",
+      "sha256": "1c4ae9763a2957f6f055235ab2d7cc9432fafd3dee58afb9ca2f6c901f818014",
       "classification": "upstream-uri-free"
     },
     {
       "path": "hpke-export-oracle.json",
-      "sha256": "1f97fb9845cb47431c3f96b574d061be961bd348368960e0414fa7060c73ed89",
+      "sha256": "9e6be7635dbbc2b20a0ab31d1eb81f99d44d0db6235ce8618a129b83e2a341bc",
       "classification": "upstream-uri-free"
     },
     {
       "path": "hpke-export-rfc.json",
-      "sha256": "3b9030cc1b6cad9c2d1574a6a17461e98e348dab29c215a620dd5a2b39a242b6",
+      "sha256": "23b66a6e4a58b2120e3791c8b4ceb2d18f1088a8da890d8822a78a66b6e9c82d",
       "classification": "rfc"
     },
     {
       "path": "kem-keys.json",
-      "sha256": "fecb3f5225f4abee1a4d13237fd5b3602190bdd3be7b7afdc95169115b2572aa",
+      "sha256": "1625c6137750b451d30f34e5afe7715947c60433d01a616331376d5e365b4c3e",
       "classification": "upstream-uri-free"
     },
     {
       "path": "lthash.json",
-      "sha256": "ef0efc771fc8a91c7a41b24c4295e5f82803b6e4e43793777dd58a5046b4d42e",
+      "sha256": "2ce7f0e83d05d2aba64e517780894851c33fa745ba4dfe1712e4ff0d8f2a9e3a",
       "classification": "upstream-uri-free"
     },
     {
       "path": "op-pages.json",
-      "sha256": "b35eb9b2ecac4dc586d7522898308eb2dc0f7f52bc8413e519f024310435200b",
+      "sha256": "98db3fac666c216a2be9100190d27caa63d0e29db61e1792f68afb0c0866534a",
       "classification": "upstream-signed-target-uri"
     },
     {
       "path": "record-cid.json",
-      "sha256": "9f2c4558b444647a097ab33aaea8a68e4498d1d6801891e69d8bedc20db47082",
+      "sha256": "1eaf585b6d636858939b821414744e417dd0f532c1a1c3e98a33e82114bdd120",
       "classification": "upstream-uri-free"
+    },
+    {
+      "path": "repo-archive.json",
+      "sha256": "9abed4dffa29b4fa0e56de5064f2e9e7c2121ea981d3e6e7162676f61a905127",
+      "classification": "upstream-signed-target-uri"
     },
     {
       "path": "space-uri-conformance.json",
@@ -143,12 +148,12 @@
     },
     {
       "path": "star-framing.json",
-      "sha256": "daddf8377b753457326af18455f14bb595d422ee3a2d66596592b8109883d665",
+      "sha256": "557c3582b949950292e4512af9a22305bae19aac813b11ad25f7afd1ef7754aa",
       "classification": "upstream-legacy-uri"
     },
     {
       "path": "stratos-produced.json",
-      "sha256": "bdc24ac7c0b0ebbb4049ccd1749c8d89d579563c88b0b36400fdac1601342099",
+      "sha256": "8f042fe0ccf899a6df43b2210e473a94332d84e39a5e5a75fafdc3b2f93ae6b6",
       "classification": "upstream-signed-target-uri"
     },
     {
@@ -158,7 +163,7 @@
     },
     {
       "path": "token-audiences.json",
-      "sha256": "622267507be6f36852fdc1d27b88b8a2992b366192e7f65f6057bab3c81b1390",
+      "sha256": "de0f93778f417ceca78ecc7a884eb80df953930654b18ee7d123a46c2c6fdfd7",
       "classification": "upstream-signed-target-uri"
     }
   ]

@@ -283,6 +283,13 @@ fn has_record_type(value: &Value, collection: &str) -> bool {
         == Some(collection)
 }
 
+/// The collections the projection serves from: posts and the interactions it
+/// counts. A record of any other collection is hashed into the repo's state
+/// and never read again, so its value is not worth holding.
+pub(crate) fn is_projected_collection(collection: &str) -> bool {
+    collection == POST_COLLECTION || InteractionKind::from_collection(collection).is_some()
+}
+
 pub(crate) fn is_admitted_record(collection: &str, value: &Value) -> bool {
     if collection == POST_COLLECTION {
         return has_record_type(value, POST_COLLECTION);

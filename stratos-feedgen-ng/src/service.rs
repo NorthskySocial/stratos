@@ -257,6 +257,18 @@ impl ProjectionReader {
         self.admission.invalidate_boundary(&target.boundary);
         Ok(())
     }
+    pub fn clear_verified_space_repo(
+        &mut self,
+        target: &VerifiedSpaceTarget,
+        observed_at: &str,
+    ) -> Result<(), StoreError> {
+        self.store.clear_verified_space_repo(target, observed_at)?;
+        self.admission.invalidate_boundary(&target.boundary);
+        Ok(())
+    }
+    pub fn pds_member_boundaries(&self, did: &str) -> Result<Vec<String>, StoreError> {
+        self.store.pds_member_boundaries(did)
+    }
     pub fn discard_pds_space_stage(
         &mut self,
         boundary: &str,
@@ -454,6 +466,24 @@ impl ProjectionReader {
 impl ProjectionReader {
     pub(crate) fn interaction_rows(&self) -> Vec<(String, String, String, String)> {
         self.store.interaction_rows()
+    }
+
+    pub(crate) fn table_snapshot(&self) -> Vec<(String, Vec<String>)> {
+        self.store.table_snapshot()
+    }
+
+    pub(crate) fn served_posts(&self, boundary: &str, as_of: &str) -> Vec<(String, String)> {
+        self.store.served_posts(boundary, as_of)
+    }
+
+    pub(crate) fn rewrite_stored_space_generation(
+        &self,
+        space_uri: &str,
+        actor_did: &str,
+        generation: u64,
+    ) {
+        self.store
+            .rewrite_stored_space_generation(space_uri, actor_did, generation);
     }
 }
 

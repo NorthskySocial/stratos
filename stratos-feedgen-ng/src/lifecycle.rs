@@ -119,7 +119,7 @@ impl ControlLifecycle {
     }
 
     #[cfg(test)]
-    fn read<T>(&self, action: impl FnOnce(&ProjectionReader) -> T) -> T {
+    pub(crate) fn read<T>(&self, action: impl FnOnce(&ProjectionReader) -> T) -> T {
         let projection = self.projection.lock().expect("projection lock poisoned");
         action(&projection)
     }
@@ -748,6 +748,26 @@ impl ControlLifecycle {
             .lock()
             .expect("projection lock poisoned")
             .replace_verified_space_repo(target, commit, records, retained_at, observed_at)
+    }
+
+    pub fn clear_verified_space_repo(
+        &self,
+        target: &VerifiedSpaceTarget,
+        observed_at: &str,
+    ) -> Result<(), StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .clear_verified_space_repo(target, observed_at)
+    }
+
+    pub fn pds_member_boundaries(&self, did: &str) -> Result<Vec<String>, StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .pds_member_boundaries(did)
     }
 
     pub fn discard_pds_space_stage(

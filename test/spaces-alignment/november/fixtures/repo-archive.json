@@ -1,0 +1,137 @@
+{
+  "header": {
+    "classification": "upstream-signed-target-uri",
+    "oracle": {
+      "package": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-AasGxXJz1htNRNNR1JL/2v4EV45VvC4UrbY1x/w/cFH0avOHFxhDV0MQMMegVYhSi7DtnkJ1smwDxO6K/W402g==",
+      "additionalPackages": [
+        {
+          "package": "@atproto/lex-json",
+          "version": "0.0.0-spaces-alpha-20261117141222",
+          "integrity": "sha512-rF7Ogq8ZSLjmO82l9ZMjlO7zcKTm/079pQPTdMx92bIdRuWRk3TT3bF+iNkkwE1KNfKpKGACGxpvTXosb4ircg=="
+        }
+      ]
+    },
+    "generator": {
+      "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
+      "sha256": "69096a6a53caaffd5d97177be6f032d907a9d656cac513d7d764777dd6e6644f"
+    },
+    "upstreamVerified": true,
+    "reproducible": true
+  },
+  "note": "Oracle archives over a new-form space, in base64. macHeaders answer the request of commit-mac.json (the response signature-input is that request). A verdict is `accepted` or `refused: <error name>` from verifyRepoStarFull, taken on a twin archive in the earlier space spelling, which the pinned reader insists on (readerOnNewSpelling). An edit replaces remove bytes at offset at by insert (hex).",
+  "archive": {
+    "bytes": "KmwBALYBpmNyZXZtM2p6ZmNpanBqMnoyZGN2ZXIBZGRhdGFYII1zxUcQnU1QaFOrZNqiQiTZuPUEo+6z3NiCJc2ZFYYHZHJlcG91ZGlkOnBsYzpmYXlldmFsZW50aW5lZSR0eXBlcmF0cHJvdG8tc3BhY2UtcmVwb2VzcGFjZXg7YXQ6c3BhY2UvZGlkOndlYjpiZWJvcC5leGFtcGxlL3pvbmUuc3RyYXRvcy5zcGFjZS5mZWVkL2NyZXcBFWFwcC5ic2t5LmZlZWQubGlrZS9lZKUBomUkdHlwZXJhcHAuYnNreS5mZWVkLmxpa2Vnc3ViamVjdKJjY2lkeDtiYWZ5cmVpaHlwZzN1dngzc2M3NTRyMjJlbWt3NnVqcGlxam96aWU2cHV1bTRpZTRlZ3QyanF4ejZ3YWN1cml4O2F0Oi8vZGlkOnBsYzpmYXlldmFsZW50aW5lL3pvbmUuc3RyYXRvcy5mZWVkLnBvc3Qvc3dvcmRmaXNoARhhcHAuYnNreS5mZWVkLnJlcG9zdC9qZXSnAaJlJHR5cGV0YXBwLmJza3kuZmVlZC5yZXBvc3Rnc3ViamVjdKJjY2lkeDtiYWZ5cmVpaHlwZzN1dngzc2M3NTRyMjJlbWt3NnVqcGlxam96aWU2cHV1bTRpZTRlZ3QyanF4ejZ3YWN1cml4O2F0Oi8vZGlkOnBsYzpmYXlldmFsZW50aW5lL3pvbmUuc3RyYXRvcy5mZWVkLnBvc3Qvc3dvcmRmaXNoARphcHAuYnNreS5ncmFwaC5mb2xsb3cvZmF5ZTaiZSR0eXBldWFwcC5ic2t5LmdyYXBoLmZvbGxvd2dzdWJqZWN0cGRpZDpwbGM6amV0YmxhY2sBIHpvbmUuc3RyYXRvcy5mZWVkLnBvc3Qvc3dvcmRmaXNoOKJkdGV4dHRTZWUgeW91IHNwYWNlIGNvd2JveWUkdHlwZXZ6b25lLnN0cmF0b3MuZmVlZC5wb3N0AA==",
+    "macHeaders": {
+      "atproto-space-commit": "ver=1, repo=\"did:plc:fayevalentine\", space=\"at:space/did:web:bebop.example/zone.stratos.space.feed/crew\", rev=\"3jzfcijpj2z2d\", data=:jXPFRxCdTVBoU6tk2qJCJNm49QSj7rPc2IIlzZkVhgc=:",
+      "signature": "mac=:7+iXNJJWI3D/M4NkR1OV3JAI9sU7G6BUAHlywoQOwKc=:"
+    },
+    "verdict": "accepted",
+    "readerOnNewSpelling": "refused: SpaceRepoVerificationError"
+  },
+  "empty": {
+    "bytes": "KmwBALYBpmNyZXZtM2p6ZmNpanBqMnoyYWN2ZXIBZGRhdGFYIOWgCqmZGsil7jEJhE2EpVWDvSBXKtP/zUJ5Lzw2sYOtZHJlcG91ZGlkOnBsYzpmYXlldmFsZW50aW5lZSR0eXBlcmF0cHJvdG8tc3BhY2UtcmVwb2VzcGFjZXg7YXQ6c3BhY2UvZGlkOndlYjpiZWJvcC5leGFtcGxlL3pvbmUuc3RyYXRvcy5zcGFjZS5mZWVkL2NyZXcA",
+    "verdict": "accepted"
+  },
+  "refused": [
+    {
+      "name": "cut before the end marker",
+      "at": 747,
+      "remove": 1,
+      "insert": "",
+      "verdict": "refused: StarParseError"
+    },
+    {
+      "name": "cut inside a value",
+      "at": 743,
+      "remove": 5,
+      "insert": "",
+      "verdict": "refused: StarParseError"
+    },
+    {
+      "name": "an unknown control byte",
+      "at": 188,
+      "remove": 1,
+      "insert": "02",
+      "verdict": "refused: StarParseError"
+    },
+    {
+      "name": "one byte after the end",
+      "at": 748,
+      "remove": 0,
+      "insert": "00",
+      "verdict": "refused: StarParseError"
+    },
+    {
+      "name": "two records swapped",
+      "at": 573,
+      "remove": 174,
+      "insert": "01207a6f6e652e73747261746f732e666565642e706f73742f73776f72646669736838a264746578747453656520796f7520737061636520636f77626f79652474797065767a6f6e652e73747261746f732e666565642e706f7374011a6170702e62736b792e67726170682e666f6c6c6f772f6661796536a2652474797065756170702e62736b792e67726170682e666f6c6c6f77677375626a656374706469643a706c633a6a6574626c61636b",
+      "verdict": "refused: SpaceRepoVerificationError"
+    },
+    {
+      "name": "a record repeated",
+      "at": 656,
+      "remove": 0,
+      "insert": "011a6170702e62736b792e67726170682e666f6c6c6f772f6661796536a2652474797065756170702e62736b792e67726170682e666f6c6c6f77677375626a656374706469643a706c633a6a6574626c61636b",
+      "verdict": "refused: SpaceRepoVerificationError"
+    },
+    {
+      "name": "a path that is not collection/rkey",
+      "at": 208,
+      "remove": 1,
+      "insert": "2e",
+      "verdict": "refused: SpaceRepoVerificationError"
+    },
+    {
+      "name": "one value byte changed",
+      "at": 698,
+      "remove": 1,
+      "insert": "54",
+      "verdict": "refused: SpaceRepoVerificationError"
+    },
+    {
+      "name": "a non-canonical encoding of the record",
+      "at": 691,
+      "remove": 56,
+      "insert": "a2652474797065767a6f6e652e73747261746f732e666565642e706f737464746578747453656520796f7520737061636520636f77626f79",
+      "verdict": "refused: SpaceRepoVerificationError"
+    },
+    {
+      "name": "metadata type changed",
+      "at": 119,
+      "remove": 1,
+      "insert": "78",
+      "verdict": "refused: SpaceRepoVerificationError"
+    },
+    {
+      "name": "metadata revision changed",
+      "at": 24,
+      "remove": 1,
+      "insert": "65",
+      "verdict": "refused: SpaceMacError"
+    },
+    {
+      "name": "a metadata length above the limit",
+      "at": 4,
+      "remove": 2,
+      "insert": "818004",
+      "verdict": "refused: StarParseError"
+    },
+    {
+      "name": "a key length above the limit",
+      "at": 189,
+      "remove": 1,
+      "insert": "8120",
+      "verdict": "refused: StarParseError"
+    },
+    {
+      "name": "a value length above the limit, no bytes",
+      "at": 211,
+      "remove": 537,
+      "insert": "818040",
+      "verdict": "refused: StarParseError"
+    }
+  ]
+}
