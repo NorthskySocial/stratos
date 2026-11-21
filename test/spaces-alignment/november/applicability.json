@@ -38,12 +38,15 @@
       "id": "prompt-1c-error-renames",
       "promptSection": "1c",
       "surface": "Renamed upstream error names",
-      "ownership": "absent",
-      "paths": [],
-      "workstream": "none",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/pds_space_sync.rs",
+        "webapp/src/lib/inspector.ts"
+      ],
+      "workstream": "sync-recovery",
       "status": "done",
-      "decision": "No production or test code matches on an upstream Spaces error name, so the renames need no change here.",
-      "evidence": "rg -n 'NotSpaceOwner|UserNotAuthorized|BadSpaceMac|MalformedCursor' over production source and test finds only this ledger's own evidence text."
+      "decision": "The section renames four errors: NotSpaceOwner to NotAuthorized, UserNotAuthorized to AccountNotAuthorized, BadSpaceMac to InvalidSpaceMac and MalformedCursor to InvalidCursor. The Rust feed generator matches host answers by the new names only: InvalidSpaceMac and InvalidCursor are in its table of told-apart host errors, and an invalid cursor starts a whole-repo read. The webapp inspector names InvalidSpaceMac from the lexicon. Nothing in production or test code matches NotAuthorized, AccountNotAuthorized, NotSpaceOwner, UserNotAuthorized or BadSpaceMac. The deprecated TypeScript feed generator still matches the earlier name MalformedCursor; it is a rollback reference and is not changed (see deprecated-stratos-feedgen).",
+      "evidence": "stratos-feedgen-ng/src/pds_space_sync.rs:47 INVALID_CURSOR and :144-154 HOST_REFUSALS; webapp/src/lib/inspector.ts:195 SPACE_RECORD_ERROR_NAMES; stratos-feedgen/src/space-sync/errors.ts:44-48 MalformedCursorError; rg -n 'NotSpaceOwner|UserNotAuthorized|BadSpaceMac|AccountNotAuthorized' outside docs/history finds only this ledger."
     },
     {
       "id": "prompt-1d-star-content-type",
@@ -139,9 +142,9 @@
       ],
       "workstream": "interop-cutover",
       "status": "pending-upstream",
-      "condition": "the reference-host suites that call the upstream credential request run against a host that accepts the new spelling",
-      "decision": "Production mints credentials through the custom getSpaceCredential; only reference-authority test calls use the upstream request.",
-      "evidence": "rg -l 'getSpaceCredential' test/spaces-alignment test/scripts lists the reference-host drivers and the Deno scripts; production uses zone.stratos.space.getSpaceCredential (stratos-service/src/features/space-credential/handler.ts:29)."
+      "condition": "a driver calls the host authorizeSpaceSync for a space the host is the authority of (journey upstream-standard-mint-control), and the reference-host suites that exchange through the custom mint run against a host that accepts the new spelling",
+      "decision": "Production mints credentials through the custom getSpaceCredential, and so does every reference-host driver: no driver calls the upstream authorizeSpaceSync, so no suite runs the host's own exchange as a control. The journey upstream-standard-mint-control has no driver.",
+      "evidence": "rg -n 'authorizeSpaceSync' test/spaces-alignment/scenarios test/scripts finds no call; test/spaces-alignment/scenarios/standard-credential-transport.driver.mjs:25 and test/spaces-alignment/scenarios/credential-lifetime.driver.mjs:52 point their exchange at zone.stratos.space.getSpaceCredential; production uses zone.stratos.space.getSpaceCredential (stratos-service/src/features/space-credential/handler.ts:29)."
     },
     {
       "id": "prompt-4b-registration",
@@ -703,8 +706,8 @@
       ],
       "workstream": "canonical-uri",
       "status": "done",
-      "decision": "Accepts exactly one spelling by parse-and-reformat equality. parseCanonicalSpaceRecordUri parses with the core record parser and accepts only a string that formats back to itself; parseCanonicalRepoUri keeps accepting a custody at:// URI that the installed AtUri rebuilds byte for byte. A subject in the earlier at://authority/space/... spelling is neither, so it is unresolvable and a like or repost of it is refused with the one subject message under every validate value. post-rules.ts recordUriCollection reads the collection of a new-form space record URI through the core parser, or of a lowercase at:// URI with exactly three parts and a non-empty collection part through AtUri, and is undefined for any other string; a space URI is never given to AtUri. isStratosUri reads it alone; isBskyUri and the public-post embed check fall back to the upstream reader (see uri-reply-and-embed-strings).",
-      "evidence": "stratos-core/src/validation/subject.ts:70-90 parseCanonicalRepoUri and :97-102 parseCanonicalSpaceRecordUri; stratos-core/src/validation/post-rules.ts:25-41 recordUriCollection, :53-55 isStratosUri and :72-75 isBskyUri; stratos-service/tests/space-uri-record-path.integration.test.ts pins the refusals on sqlite and Postgres."
+      "decision": "Accepts exactly one spelling by parse-and-reformat equality. parseCanonicalSpaceRecordUri parses with the core record parser and accepts only a string that formats back to itself; parseCanonicalRepoUri keeps accepting a custody at:// URI that the installed AtUri rebuilds byte for byte. A subject in the earlier at://authority/space/... spelling is neither, so it is unresolvable and a like or repost of it is refused with the one subject message under every validate value. post-rules.ts recordUriCollection reads the collection of a new-form space record URI through the core parser, or of a lowercase at:// URI with exactly three parts and a non-empty collection part through AtUri, and is undefined for any other string; a space URI is never given to AtUri. isStratosUri reads it alone; isBskyUri and the public-post embed check fall back to the upstream reader (see uri-reply-and-embed-strings). A gap remains between the client and the service. parseCanonicalRepoUri reads a custody authority through the upstream AtUri reader, which refuses a DID holding an underscore, or a did:web whose host has a dot and an encoded port, and the service write paths build or read custody record URIs through the same reader. The client classifier parseRecordAddress accepts those DIDs as custody records. A parity test pins the difference; no test drives a write for such a member.",
+      "evidence": "stratos-core/src/validation/subject.ts:70-90 parseCanonicalRepoUri and :97-102 parseCanonicalSpaceRecordUri; stratos-core/src/validation/post-rules.ts:25-41 recordUriCollection, :53-55 isStratosUri and :72-75 isBskyUri; stratos-service/tests/space-uri-record-path.integration.test.ts pins the refusals on sqlite and Postgres. stratos-service/tests/client-record-address-parity.test.ts:159-166 pins the DIDs core refuses and the client accepts; stratos-service/src/api/records/create.ts:151, stratos-service/src/api/records/update.ts:207, stratos-service/src/api/records/delete.ts:66 and stratos-service/src/api/records/batch.ts:88 use AtUri."
     },
     {
       "id": "uri-subject-resolver",
@@ -1361,7 +1364,7 @@
       "status": "pending-upstream",
       "condition": "the sandbox pins a spaces PDS that accepts at:space/, after which test/spaces-alignment/november/INTEROP.md is walked in order",
       "decision": "The sandbox suites run against the digest-pinned pds-space1 and, for the two reference-host suites, a reference PDS built from the November manifest. The pinned spaces PDS refuses the new spelling, so the baseline cannot pass on this branch and every suite the runner runs after it is blocked; ordinary-custody runs alone. The reference PDS is built only from a ready manifest, and november-interop never runs without a named image digest. Nothing here has run against a host that accepts the new spelling.",
-      "evidence": "test/spaces-alignment/README.md (Suites); test/spaces-alignment/november/INTEROP.md is the checklist for the day a host accepts the spelling; test/spaces-alignment/sources.json pins the AiaB checkout and still records the October PDS, which the runner no longer reads."
+      "evidence": "test/spaces-alignment/README.md (Suites); test/spaces-alignment/november/INTEROP.md is the checklist for the day a host accepts the spelling; test/spaces-alignment/sources.json pins the AiaB checkout and still records the October PDS; the runner builds nothing from it and reads its revision only to refuse it as a reference host (test/spaces-alignment/november/reference-host.ts:65-81)."
     },
     {
       "id": "tests-spike-and-harness",

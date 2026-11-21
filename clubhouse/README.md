@@ -1,7 +1,7 @@
 # Clubhouse public-alpha shell
 
 Clubhouse is a separately deployable Svelte 5 + Tailwind 4 browser shell for
-the Plan 024 public-alpha rooms. It currently displays the public response from
+the public-alpha rooms. It currently displays the public response from
 `GET /oauth/boundaries`, renders room and enrollment placeholder states, and keeps
 the room URL durable as `/rooms/:id`.
 
@@ -56,11 +56,15 @@ default catalogue, room-status, and Stratos-custody post URLs are derived from
   room IDs to authority-space URIs). The PDS is still the authority for these
   writes. Stratos-custody posts go only to `POST /oauth/boundaries/post`, which
   resolves the canonical boundary and verifies membership server-side. Owned
-  posts are deleted through `com.atproto.space.deleteRecord` for PDS custody or
+  posts are deleted through `com.atproto.space.deleteRecord` for PDS custody,
+  only when the post is in the room's configured space, or
   `DELETE /oauth/boundaries/post` for Stratos custody. A map value that is not
   a space URI is never used: a signed-in PDS-custody member sees a
-  configuration error in that room and their posts there are refused.
-  Stratos-custody members do not use the map, see no error and can still post.
+  configuration error in that room, and their posts and deletes there are
+  refused before any request. A map that is not valid JSON, or not a JSON
+  object, configures no room, and a signed-in PDS-custody member sees a
+  configuration error in every room. Stratos-custody members do not use the
+  map, see no error and can still post.
 
 Clubhouse requests full `zone.stratos.feed.post` record access, including all
 space record actions. Existing browser sessions created with the earlier

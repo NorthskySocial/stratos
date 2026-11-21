@@ -259,8 +259,9 @@ credential. Decoded, it looks like this:
 Three details matter.
 
 **No `aud` claim.** The credential names its authority in `iss` and its space
-in `sub`, and nothing else. It works against any repo host that serves the
-space: Stratos itself, or a member's PDS.
+in `sub`, and nothing else. It is meant for any repo host that serves the
+space: Stratos itself, or a member's PDS. No member's PDS has accepted one in
+the `at:space/` spelling yet.
 
 **Signed by the authority's own key.** The Stratos DID document publishes the
 `#atproto` key, so a member's PDS verifies the credential without calling

@@ -385,21 +385,31 @@ Write one entry for each room. The key is the room ID. In the value, replace
 of that room's boundary. Vite embeds this value in the browser bundle, so a
 change needs an image rebuild. Mark: **READY**.
 
-What members see when a value is not a space URI:
+What members see when a value is not a space URI, or the setting cannot be
+read:
 
 - A signed-in member whose room status says `pds` custody sees the alert
   `Posting is not set up for the room "<room id>": the space it was given is not
 a valid space address. Ask whoever runs this Clubhouse to correct it.` Posting
-  there answers `Posting needs service configuration for this room.`
+  or deleting a post there answers `Posting needs service configuration for this
+room.` and sends nothing.
+- A setting that is not valid JSON, or JSON that is not an object, configures no
+  room. A signed-in member whose room status says `pds` custody sees the alert
+  `Posting is not set up because the room spaces setting could not be read; ask
+whoever runs this Clubhouse to correct it.` in every room. Posting or deleting
+  a post answers `Posting needs service configuration for this room.`
+- With no setting at all, nobody sees an alert, and a `pds`-custody member's post
+  or delete answers `Posting needs service configuration for this room.`
 - A member whose records are on Stratos, a signed-out visitor and a member whose
   custody is not known yet see no alert. Members on Stratos can still post.
-- A value that is not valid JSON, or JSON that is not an object, reads as no
-  spaces configured. No message is shown.
 
 A `?topic=` link that is not in the new spelling does not open. The room opens
 without a topic and shows `This topic link cannot be opened.` A member in a room
 whose records are on their own PDS deletes a post through
-`com.atproto.space.deleteRecord`.
+`com.atproto.space.deleteRecord`, and only a post in the room's configured
+space. For a post in any other space Clubhouse answers `This post cannot be
+deleted from here. Your posts are kept in a different place from this one.` and
+sends nothing.
 
 You know it worked when a Stratos-custody test member posts from the webapp and
 from Clubhouse, and both posts reach the feed. A member with `pds` custody who
@@ -566,8 +576,9 @@ instead of the copy, print `11`, and the feed generator's `/health` reaches
 A failed member logs `event=pds_space_target_failed kind=<reason>`, except a
 failure with the reason `member_generation`, which logs no line of its own. A
 pass with failed members logs one `event=pds_space_target_failures` line. It
-holds a `<reason>=<count>` pair for every reason, `member_generation` included.
-The 27 reason words are:
+holds a `<reason>=<count>` pair for each reason that occurred in that pass, in
+alphabetical order, `member_generation` included; a reason with no failure has
+no pair. The 27 reason words are:
 
 ```text
 invalid_space_mac  invalid_space_uri  invalid_credential  bad_space_audience

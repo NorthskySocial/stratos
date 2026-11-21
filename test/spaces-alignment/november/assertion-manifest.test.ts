@@ -218,14 +218,14 @@ const SURVIVING_SUITES: Record<string, ScenarioSuite> = Object.fromEntries(
 
 type Carrier =
   | { kind: 'suite-assertion'; suite: string; id: string }
-  | { kind: 'test'; file: string; title: string }
+  | { kind: 'test'; file: string; title: string; proves?: string }
   | { kind: 'journey'; name: string }
   | { kind: 'none' }
 
 interface Entry {
   suite: string
   id: string
-  disposition: 'retained' | 'renamed' | 'superseded'
+  disposition: 'retained' | 'renamed' | 'superseded' | 'uncovered'
   renamedTo?: string
   carriedBy: Carrier[]
   reason: string
@@ -256,14 +256,21 @@ function carrierProblems(entry: Entry, carrier: Carrier): string[] {
       return problems
     }
     case 'test': {
+      const problems: string[] = []
+      if (entry.disposition === 'uncovered')
+        problems.push(`${name} is uncovered but names a test`)
+      if (!carrier.proves?.trim())
+        problems.push(
+          `${name} names ${carrier.title} without saying what its body proves`,
+        )
       const path = resolve(REPOSITORY_ROOT, carrier.file)
       if (!existsSync(path))
-        return [`${name} names a missing file ${carrier.file}`]
-      return readFileSync(path, 'utf8').includes(carrier.title)
-        ? []
-        : [
-            `${name} names a test title not in ${carrier.file}: ${carrier.title}`,
-          ]
+        return [...problems, `${name} names a missing file ${carrier.file}`]
+      if (!readFileSync(path, 'utf8').includes(carrier.title))
+        problems.push(
+          `${name} names a test title not in ${carrier.file}: ${carrier.title}`,
+        )
+      return problems
     }
     case 'journey':
       return JOURNEYS.some((journey) => journey.id === carrier.name)
@@ -296,12 +303,22 @@ function problemsOf(entries: Entry[]): string[] {
       problems.push(`${name} is not an assertion of the start`)
     if (entry.reason.trim() === '') problems.push(`${name} has no reason`)
     if (entry.carriedBy.length === 0) problems.push(`${name} maps to nothing`)
+    if (
+      entry.disposition === 'uncovered' &&
+      !(
+        entry.carriedBy.every((carrier) => carrier.kind === 'journey') &&
+        entry.reason.startsWith('Not covered today.')
+      )
+    )
+      problems.push(
+        `${name} is uncovered but is not carried by journeys alone with a reason that says so`,
+      )
     if (entry.disposition === 'renamed' && !entry.renamedTo)
       problems.push(`${name} is renamed without a new name`)
     if (entry.disposition !== 'renamed' && entry.renamedTo)
       problems.push(`${name} names a new name but is not renamed`)
     if (
-      entry.disposition !== 'superseded' &&
+      (entry.disposition === 'retained' || entry.disposition === 'renamed') &&
       !(
         entry.carriedBy.length === 1 &&
         entry.carriedBy[0]!.kind === 'suite-assertion'
@@ -341,9 +358,12 @@ describe('assertion manifest', () => {
     const count = (disposition: string) =>
       manifest.entries.filter((entry) => entry.disposition === disposition)
         .length
-    expect([count('retained'), count('renamed'), count('superseded')]).toEqual([
-      102, 4, 43,
-    ])
+    expect([
+      count('retained'),
+      count('renamed'),
+      count('superseded'),
+      count('uncovered'),
+    ]).toEqual([102, 4, 42, 1])
   })
 
   it('keeps all ten mandatory baseline assertions retained under their names', () => {
@@ -423,6 +443,68 @@ describe('assertion manifest', () => {
     ;(entry.carriedBy[0] as { file: string }).file =
       'stratos-feedgen-ng/src/nowhere.rs'
     expect(problemsOf(entries).join('\n')).toContain('missing file')
+  })
+
+  it('fails when a named test does not say what its body proves', () => {
+    for (const proves of [undefined, '', '  ']) {
+      const entries = structuredClone(manifest.entries)
+      const carrier = entries.find(
+        (candidate) => candidate.id === 'restart-keeps-revocation',
+      )!.carriedBy[0] as { proves?: string; title: string }
+      carrier.proves = proves
+      expect(problemsOf(entries).join('\n')).toContain(
+        `names ${carrier.title} without saying what its body proves`,
+      )
+    }
+  })
+
+  it('names each assertion no current test covers, carried only by a journey', () => {
+    const uncovered = manifest.entries
+      .filter((entry) => entry.disposition === 'uncovered')
+      .map((entry) => [
+        entryName(entry.suite, entry.id),
+        entry.carriedBy.map((carrier) => carrier.kind),
+      ])
+    expect(uncovered).toEqual([
+      ['staging-limits:service-responsive', ['journey']],
+    ])
+  })
+
+  it('lists each uncovered assertion and its journey in the checklist', () => {
+    const checklist = readFileSync(resolve(HERE, 'INTEROP.md'), 'utf8')
+    const section = checklist.slice(
+      checklist.indexOf('## Not covered by any test today'),
+      checklist.indexOf('## 2. The day a host accepts the new spelling'),
+    )
+    for (const entry of manifest.entries.filter(
+      (candidate) => candidate.disposition === 'uncovered',
+    )) {
+      expect(section).toContain('`' + entry.suite + ':' + entry.id + '`')
+      for (const carrier of entry.carriedBy)
+        if (carrier.kind === 'journey')
+          expect(section).toContain('`' + carrier.name + '`')
+    }
+  })
+
+  it('fails when an uncovered entry names a test or does not say it is uncovered', () => {
+    const naming = structuredClone(manifest.entries)
+    naming
+      .find((candidate) => candidate.id === 'service-responsive')!
+      .carriedBy.push({
+        kind: 'test',
+        file: 'stratos-feedgen-ng/src/server/tests.rs',
+        title: 'health_starts_unavailable',
+        proves: 'The health route answers 503 before a session exists.',
+      })
+    expect(problemsOf(naming).join('\n')).toContain(
+      'is uncovered but names a test',
+    )
+    const silent = structuredClone(manifest.entries)
+    silent.find((candidate) => candidate.id === 'service-responsive')!.reason =
+      'A journey runs it.'
+    expect(problemsOf(silent).join('\n')).toContain(
+      'is uncovered but is not carried by journeys alone',
+    )
   })
 
   it('fails when a superseded entry maps to nothing without saying so', () => {

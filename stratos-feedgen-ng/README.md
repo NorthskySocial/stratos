@@ -12,12 +12,14 @@ authority public endpoint; space signatures do not bind a URL.
 
 ## Space credential transport
 
-The Rust client requires the standard HTTP-signature receiver from Plan 014
-(PR #218) and an October-compatible spaces PDS. It sends its existing
-service-signed delegation as `Authorization: Bearer`, signs that header with a
-fresh P-256 `did:key`, and sends only `space` in JSON. Authority service-member
-and app admission still apply. Ordinary service JWTs and caller authentication
-are unchanged; this is not the independent DPoP ADR in PR #217.
+The Rust client gets each space credential from the authority's
+`zone.stratos.space.getSpaceCredential`, which accepts the HTTP-signature
+exchange, and reads a member's repo from the member's PDS under the November
+space contract. It sends its service-signed delegation as
+`Authorization: Bearer`, signs that header with a fresh P-256 `did:key`, and
+sends only `space` in JSON. Authority service-member and app admission still
+apply. Ordinary service JWTs and caller authentication are unchanged; the
+exchange uses no DPoP proof.
 
 Read requests use `Authorization: Atproto-Space-Credential`,
 `Atproto-Space-Audience`, `Signature-Input`, and `Signature`. The signature
@@ -35,10 +37,11 @@ the authority, space, and generated key, with a positive lifetime of at most
 3,600 seconds and issuance no more than five seconds in the future.
 
 Restart the receiver and Rust client together to discard old cached grants.
-The receiver can coexist with legacy OAuth/DPoP clients; the Rust client has no
-legacy transport fallback. The AiaB primary PDS now uses the pinned October
-source. Deployed images must still be traced to that source revision and an
-immutable image digest; a source checkout alone does not prove what is running.
+The receiver also serves OAuth/DPoP clients; the Rust client has no other
+transport to fall back to. No pinned PDS accepts the new space URI spelling yet,
+so the client has not read from a real host. Trace a deployed image to its
+source revision and an immutable image digest; a source checkout alone does not
+prove what is running.
 
 ## Architecture
 

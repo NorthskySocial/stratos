@@ -180,9 +180,14 @@ naming the acceptance row it closes. It has no driver for some journeys yet. The
 workflow that runs on every pull request does not name it.
 
 `november/assertion-manifest.json` maps every assertion of every suite that
-existed when the series began to `retained`, `renamed` or `superseded`, and
-`november/assertion-manifest.test.ts` fails when one has no entry or names a
-test that does not exist.
+existed when the series began to `retained`, `renamed`, `superseded` or
+`uncovered`. `uncovered` means no current test proves it and only a journey of
+the prepared suite carries it; `november/INTEROP.md` lists those. Every named
+test carries a `proves` sentence that says what its body establishes.
+`november/assertion-manifest.test.ts` fails when an assertion has no entry, a
+named test does not exist or has no `proves` sentence, or an uncovered entry
+names a test. Whether a named test proves the same thing as the assertion it
+replaces is a reviewer's judgement; the test cannot check it.
 
 ## Running the other suites
 

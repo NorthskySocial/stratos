@@ -677,7 +677,10 @@ describe('Clubhouse integration', () => {
     mocks.auth.init.mockResolvedValue(session(fetchHandler))
     const integration = createClubhouseIntegration({
       serviceUrl: 'https://stratos.example',
-      pdsSpaceUriByRoom: {},
+      pdsSpaceUriByRoom: {
+        'nerv-hq':
+          'at:space/did:web:stratos.example/zone.stratos.space.feed/nerv-hq',
+      },
     })
     await integration.initialize?.()
 

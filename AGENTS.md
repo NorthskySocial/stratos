@@ -31,14 +31,20 @@ any write, sync, or boundary code.
 | non-spaces     | `stratos` | Stratos            | Stratos, per-actor P-256 key |
 | spaces-capable | `pds`     | the user's own PDS | the user                     |
 
-Three rules follow. They are load-bearing, and each was proven against the
-upstream alpha PDS rather than read from the spec.
+Three rules follow. They are load-bearing. The first two were observed against
+the earlier upstream alpha PDS, not read from the spec. The third is the URI
+grammar of the combined URI syntax proposal that Stratos targets. The upstream
+packages at the pinned release still use the earlier spelling, and no host has
+accepted the new one; Stratos's own parsers and a hand-written corpus check it.
 
 1. **Never trust a boundary on a `pds`-custody record.** A repo host does not
    authorize writes against the space authority. Any account can write records
    into a Stratos-owned space URI in its own repo. A boundary on such a record is
    a user-supplied claim. Always re-derive the boundary from Stratos enrollment
-   state. See `stratos-feedgen/src/subscription/indexer.ts` for the ingest path.
+   state. The Rust feed generator reads these records in
+   `stratos-feedgen-ng/src/pds_space_sync.rs`, and its store writes each post
+   under the member's boundary, never the record's
+   (`stratos-feedgen-ng/src/store/space_verification.rs`).
 2. **Membership decides whose repo the syncer reads.** It is the only write-side
    control that exists. Removing a member does not stop them writing; it stops us
    reading. The syncer iterates the member list. Do not add writer discovery.

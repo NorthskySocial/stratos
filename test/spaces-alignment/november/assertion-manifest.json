@@ -1037,12 +1037,14 @@
         {
           "kind": "test",
           "file": "stratos-service/tests/space-presentation-routes.integration.test.ts",
-          "title": "refuses the old scheme beside an otherwise valid tagged signature"
+          "title": "refuses the old scheme beside an otherwise valid tagged signature",
+          "proves": "A credential presented under the earlier Atproto-Space scheme with a valid tagged signature gets 401 on each space route."
         },
         {
           "kind": "test",
           "file": "stratos-service/tests/space-presentation-routes.integration.test.ts",
-          "title": "refuses the old scheme even when it is signed as the old profile did"
+          "title": "refuses the old scheme even when it is signed as the old profile did",
+          "proves": "A credential presented under the earlier scheme, signed with the earlier label and components, gets 401 on each space route."
         }
       ],
       "reason": "There is no dual acceptance now; the service route tests refuse the earlier scheme, and a run that expected both to be accepted cannot pass on any current build."
@@ -1238,12 +1240,14 @@
         {
           "kind": "test",
           "file": "stratos-service/tests/space-presentation-routes.integration.test.ts",
-          "title": "refuses the old scheme beside an otherwise valid tagged signature"
+          "title": "refuses the old scheme beside an otherwise valid tagged signature",
+          "proves": "A credential presented under the earlier Atproto-Space scheme with a valid tagged signature gets 401 on each space route."
         },
         {
           "kind": "test",
           "file": "stratos-service/tests/space-presentation-routes.integration.test.ts",
-          "title": "refuses the old scheme even when it is signed as the old profile did"
+          "title": "refuses the old scheme even when it is signed as the old profile did",
+          "proves": "A credential presented under the earlier scheme, signed with the earlier label and components, gets 401 on each space route."
         }
       ],
       "reason": "There is no dual acceptance now; the service route tests refuse the earlier scheme, so the October expectation cannot pass on any current build."
@@ -1547,10 +1551,11 @@
         {
           "kind": "test",
           "file": "stratos-service/tests/unsupported-upstream-routes.test.ts",
-          "title": "answers $nsid as an unknown method"
+          "title": "answers $nsid as an unknown method",
+          "proves": "Each upstream writer-set and revocation route, notifyCredentialsRevoked among them, gets 501 MethodNotImplemented from the in-process service."
         }
       ],
-      "reason": "The in-process service test answers each upstream revocation route as an unknown method; the October probe needed a receiver that no longer exists."
+      "reason": "The in-process service test answers each upstream revocation route as an unknown method, under its November name notifyCredentialsRevoked where the October probe sent notifyCredentialRevoked; the October probe needed a receiver that no longer exists."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1560,10 +1565,11 @@
         {
           "kind": "test",
           "file": "stratos-service/tests/unsupported-upstream-routes.test.ts",
-          "title": "offers no #atproto_pds service in the DID document"
+          "title": "offers no #atproto_pds service in the DID document",
+          "proves": "The service DID document lists at least one service and none whose id ends in #atproto_pds."
         }
       ],
-      "reason": "The in-process service test reads the DID document and finds no host service; the October probe needed a receiver that no longer exists."
+      "reason": "The in-process service test reads the DID document and finds no host service; the host role the October probe looked for as #atproto_space_host is #atproto_pds in the November contract, and the October probe needed a receiver that no longer exists."
     },
     {
       "suite": "writer-sync-contract",
@@ -1672,15 +1678,17 @@
         {
           "kind": "test",
           "file": "stratos-service/tests/unsupported-upstream-routes.test.ts",
-          "title": "answers them as unknown whoever asks"
+          "title": "answers them as unknown whoever asks",
+          "proves": "Each upstream writer-set and revocation route gets 501 when the request carries a bearer authorization header."
         },
         {
           "kind": "test",
           "file": "stratos-service/tests/unsupported-upstream-routes.test.ts",
-          "title": "notices a handler registered for one of the routes"
+          "title": "notices a handler registered for one of the routes",
+          "proves": "With a listWriters handler placed before the service router, the unknown-method check fails and names that route."
         }
       ],
-      "reason": "The in-process service test answers the upstream writer routes as unknown methods; the October probe needed a PDS that speaks them."
+      "reason": "The in-process service test answers the upstream writer routes, under their November names listWriters and notifyRepoUpdate where the October probe sent listRepos and notifyWrite, as unknown methods; the October probe needed a PDS that speaks them."
     },
     {
       "suite": "pds-revocation",
@@ -1690,10 +1698,11 @@
         {
           "kind": "test",
           "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
-          "title": "a_member_removed_during_the_poll_promotes_nothing"
+          "title": "a_member_removed_during_the_poll_promotes_nothing",
+          "proves": "A member removed while their poll waits on a page ends the cycle as Retry, and none of that member's posts is served."
         }
       ],
-      "reason": "Replaced by the named Rust tests (a member removed during a poll promotes nothing); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
+      "reason": "Replaced by the named Rust test (a member removed during a poll promotes nothing); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
     },
     {
       "suite": "pds-revocation",
@@ -1703,10 +1712,17 @@
         {
           "kind": "test",
           "file": "stratos-feedgen-ng/src/store/space_verification.rs",
-          "title": "a_generation_bumped_between_the_read_and_the_promotion_is_unauthorized"
+          "title": "a_generation_bumped_between_the_read_and_the_promotion_is_unauthorized",
+          "proves": "A promotion whose member generation was reset after the target was read is refused as unauthorized and writes no record or post."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_member_who_left_cannot_be_promoted",
+          "proves": "A promotion for a member removed after the target was read is refused as unauthorized."
         }
       ],
-      "reason": "Replaced by the named Rust tests (a promotion after the generation changed is unauthorized); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
+      "reason": "Replaced by the named Rust tests. A November poll verifies and promotes the commit of its last page, so a removal during that last read is a removal before the promotion write, and the store refuses that write after a generation reset and after a removal; the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
     },
     {
       "suite": "pds-revocation",
@@ -1716,14 +1732,21 @@
         {
           "kind": "test",
           "file": "stratos-feedgen-ng/src/store/space_verification.rs",
-          "title": "a_stale_generation_or_a_forged_boundary_clears_nothing"
+          "title": "a_departed_member_loses_the_verified_state_and_the_other_member_keeps_it",
+          "proves": "Removing one of two promoted members deletes that member's verified state and stored paths and leaves the other member's."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_member_who_left_cannot_be_replaced",
+          "proves": "After one member is removed, the other member's post, boundary, interaction and verified-state rows are unchanged, and a replacement for the removed member is refused."
         },
         {
           "kind": "journey",
           "name": "membership-revoked-mid-poll"
         }
       ],
-      "reason": "Replaced by the named Rust tests (a stale generation clears nothing and leaves another member rows alone); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
+      "reason": "Replaced by the named Rust tests (a departed member's rows go and another member's stay). The other member of the October driver held Stratos custody; the named tests keep another PDS-custody member, and the journey runs the mixed case against a host. The October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
     },
     {
       "suite": "pds-revocation",
@@ -1733,15 +1756,23 @@
         {
           "kind": "test",
           "file": "stratos-feedgen-ng/src/store/space_verification.rs",
-          "title": "a_stale_generation_changes_nothing"
+          "title": "a_stale_generation_changes_nothing",
+          "proves": "After a member is removed and added again, a replacement under the old generation is refused as unauthorized and changes no row."
         },
         {
           "kind": "test",
           "file": "stratos-feedgen-ng/src/lifecycle.rs",
-          "title": "reading_the_base_under_a_stale_generation_is_refused"
+          "title": "reading_the_base_under_a_stale_generation_is_refused",
+          "proves": "Reading a member's base with a generation other than the current one is refused as unauthorized."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
+          "title": "a_member_re_enrolled_with_a_new_generation_starts_with_a_replacement",
+          "proves": "A member removed and added again while a poll waits ends that poll as Retry, and a cycle holding the old generation is turned away at its first base read."
         }
       ],
-      "reason": "Replaced by the named Rust tests (the generation is checked at each store write and at each base read); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
+      "reason": "Replaced by the named Rust tests (the generation is checked at each store write and at each base read). The October run also waited for a logged target failure; a stale cycle now ends as Retry, which is not a failure. The October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
     },
     {
       "suite": "pds-revocation",
@@ -1751,7 +1782,8 @@
         {
           "kind": "test",
           "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
-          "title": "a_member_re_enrolled_with_a_new_generation_starts_with_a_replacement"
+          "title": "a_member_re_enrolled_with_a_new_generation_starts_with_a_replacement",
+          "proves": "After the stale cycle is refused, the next cycle replaces the member's state under a new generation and its digest equals the host's."
         },
         {
           "kind": "journey",
@@ -1768,14 +1800,15 @@
         {
           "kind": "test",
           "file": "stratos-feedgen-ng/src/store/space_verification.rs",
-          "title": "a_member_who_left_cannot_be_replaced"
+          "title": "a_member_who_left_stays_gone_and_cannot_be_replaced_after_the_store_reopens",
+          "proves": "A member removed from a file store has no generation, base or rows after the store is closed and reopened, the other member's rows are unchanged, and a replacement for the removed member is refused."
         },
         {
           "kind": "journey",
           "name": "membership-revoked-mid-poll"
         }
       ],
-      "reason": "Replaced by the named Rust tests (a member who left cannot be replaced); the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
+      "reason": "Replaced by the named Rust test, which closes and reopens a real encrypted file store after the removal, where the October driver restarted the feed generator; the October driver held pages and detected a terminal page by a body commit and waited for a log word that no longer exists, so it cannot pass on any current build."
     },
     {
       "suite": "staging-limits",
@@ -1785,10 +1818,11 @@
         {
           "kind": "test",
           "file": "stratos-feedgen-ng/src/space_ops.rs",
-          "title": "pages_of_one_cycle_draw_on_the_same_budget"
+          "title": "pages_of_one_cycle_draw_on_the_same_budget",
+          "proves": "One value budget charged by three equal pages refuses the third once two have used it, and its used count does not reset between pages."
         }
       ],
-      "reason": "Replaced by the named Rust test of the budget, deadline or interruption it exercised; staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
+      "reason": "Replaced by the named Rust test. The October budget accumulated over passes because staged pages carried from one pass to the next; a November cycle carries nothing into the next, so the budget a split read cannot evade is the one every page of a cycle draws on. Staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
     },
     {
       "suite": "staging-limits",
@@ -1809,7 +1843,14 @@
         {
           "kind": "test",
           "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
-          "title": "an_archive_over_a_limit_fails_as_over_budget_and_changes_nothing"
+          "title": "a_page_past_the_decoded_value_budget_fails_and_one_at_it_is_accepted",
+          "proves": "A poll whose page decodes one value past the budget fails as RepoOverBudget and changes no table, and one at the budget is promoted."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
+          "title": "an_archive_over_a_limit_fails_as_over_budget_and_changes_nothing",
+          "proves": "A whole-repo archive with more records or bytes than allowed fails the cycle as RepoOverBudget and leaves every table as it was."
         }
       ],
       "reason": "Replaced by the named Rust test of the budget, deadline or interruption it exercised; staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
@@ -1833,10 +1874,11 @@
         {
           "kind": "test",
           "file": "stratos-feedgen-ng/src/pds_space_scheduler.rs",
-          "title": "a_pass_over_every_kind_of_outcome_counts_each_and_logs_one_reason_line"
+          "title": "a_pass_over_every_kind_of_outcome_counts_each_and_logs_one_reason_line",
+          "proves": "In one pass where two targets fail and one is cleared, another target still promotes and the pass counts each outcome."
         }
       ],
-      "reason": "Replaced by the named Rust test of the budget, deadline or interruption it exercised; staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
+      "reason": "Replaced by the named Rust test: failing targets leave another target of the same pass to promote. Its failures are host refusals, not a budget overrun, which is what failed in the October run. Staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
     },
     {
       "suite": "staging-limits",
@@ -1885,15 +1927,14 @@
     {
       "suite": "staging-limits",
       "id": "service-responsive",
-      "disposition": "superseded",
+      "disposition": "uncovered",
       "carriedBy": [
         {
-          "kind": "test",
-          "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
-          "title": "a_cycle_whose_deadline_passes_while_it_waits_for_its_target_fails_sends_nothing_and_gets_no_cooldown"
+          "kind": "journey",
+          "name": "health-answers-while-a-sync-writes"
         }
       ],
-      "reason": "Replaced by the named Rust test of the budget, deadline or interruption it exercised; staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
+      "reason": "Not covered today. The October run required a health answer within two seconds while sync was over its budget, and no current test makes a health or feed request while a sync cycle runs. The health handler reads the readiness gate and the scheduler status, not the store; a test would hold a store write open, request /health, and require an answer within that bound. Until one exists only the named journey of the prepared suite carries it."
     },
     {
       "suite": "staging-limits",
@@ -1903,10 +1944,17 @@
         {
           "kind": "test",
           "file": "stratos-feedgen-ng/src/store/space_verification.rs",
-          "title": "a_promotion_that_never_commits_leaves_nothing_and_a_full_one_survives_reopening"
+          "title": "a_promotion_that_never_commits_leaves_nothing_and_a_full_one_survives_reopening",
+          "proves": "A promotion dropped before its commit leaves no base, record, post or interaction on a reopened file store, and a full promotion afterwards survives another reopen."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_replacement_that_never_commits_leaves_the_earlier_state_and_a_full_one_survives_reopening",
+          "proves": "A replacement dropped before its commit leaves the earlier verified rows on a reopened file store, and a full replacement afterwards survives another reopen."
         }
       ],
-      "reason": "Replaced by the named Rust test of the budget, deadline or interruption it exercised; staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
+      "reason": "The behaviour is inverted on purpose, and the named Rust tests pin the inverted behaviour, not the October one. The October feed generator kept the staged cursor of an interrupted pass to resume from; the November one stages nothing, so an interrupted cycle must leave nothing and the next cycle starts from the verified base. Staging no longer exists, so the October assertion cannot pass on any current build."
     },
     {
       "suite": "staging-limits",

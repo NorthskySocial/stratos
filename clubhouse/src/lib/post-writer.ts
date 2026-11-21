@@ -51,8 +51,9 @@ export interface RoomPostDeleteInput {
   uri: string
   cid: string
   /**
-   * The space configured for the room, when one is. A post in any other space
-   * is not the room's, so nothing is sent for it.
+   * The space configured for the room, when one is. Without one a PDS-custody
+   * delete is refused as create is, and a post in any other space is not the
+   * room's, so nothing is sent for either.
    */
   roomSpace?: string
   stratosWriter?: StratosPostWriter
@@ -163,9 +164,8 @@ export async function deleteRoomPost(
   }
 
   if (target.kind !== 'space') throw postKeptElsewhere()
-  if (input.roomSpace !== undefined && target.space !== input.roomSpace) {
-    throw postKeptElsewhere()
-  }
+  if (!input.roomSpace) throw new RoomPostConfigurationError()
+  if (target.space !== input.roomSpace) throw postKeptElsewhere()
   const response = await input.session.fetchHandler(
     '/xrpc/com.atproto.space.deleteRecord',
     {

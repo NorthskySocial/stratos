@@ -46,7 +46,7 @@ export const JOURNEYS: readonly Journey[] = [
     proves:
       'A Stratos-custody member on an ordinary PDS posts through the service, the post appears in the feed from the Rust feed generator, a member of another boundary is denied, and the delete removes it.',
     expected:
-      'Passes: the journey touches no space URI and no credential from the spaces PDS.',
+      'Should pass: the journey touches no space URI and no credential from the spaces PDS.',
     unknown:
       'The suite has never run; the first run may show a stack or driver fault.',
     carriedBy: ['ordinary-custody'],
@@ -55,9 +55,9 @@ export const JOURNEYS: readonly Journey[] = [
     id: 'two-authors-on-one-host',
     acceptanceRow: 'mixed-custody-privacy',
     proves:
-      'Two PDS-custody members who share one reference host each have their own record read through a credential for their own repo, and neither read returns the other member.',
+      "Two PDS-custody members who share one reference host each have their own seeded record read with one Stratos credential presented to their own repo, and a presentation addressed to one member is refused for the other member's repo.",
     expected:
-      'Each read is addressed to the author, never to the authority, and a credential for one member is refused for the other.',
+      'Each read is addressed to the author, never to the authority. The credential names the space, not a member; the presentation names the repo it is for, and the host refuses it for any other repo.',
     unknown:
       'How the host answers a credential presentation in the tagged signature form.',
     carriedBy: ['standard-credential-transport', 'rust-production-interop'],
@@ -77,11 +77,11 @@ export const JOURNEYS: readonly Journey[] = [
     id: 'schema-resolution-and-explicit-grants',
     acceptanceRow: 'mixed-custody-privacy',
     proves:
-      'The host resolves the space type declaration during OAuth and enforces the explicit space grant on a write.',
+      'The host resolves the space type declaration during OAuth, grants the space scope, and accepts a PDS-custody write made under that grant.',
     expected:
       'The sandbox declaration fixture carries name and title and the three collections of the repository declaration, which carries title only.',
     unknown:
-      'Whether the host in use still requires name, and how it answers the space scope string.',
+      'Whether the host in use still requires name, how it answers the space scope string, and whether it refuses a write without the grant: no driver writes without it.',
     carriedBy: ['baseline'],
   },
   {
@@ -90,7 +90,7 @@ export const JOURNEYS: readonly Journey[] = [
     proves:
       'The webapp inspector reads the signed-in member own PDS-custody record with that member OAuth grant.',
     expected:
-      'The inspector classifies the address, then sends three requests addressed to the author and nothing for an address it refuses.',
+      "The inspector classifies the address, then sends exactly one com.atproto.space.getRecord to the signed-in member's own PDS for their own repo, and no request for another author's space record or for an address it refuses.",
     unknown: 'The host response to the OAuth-bound read.',
     carriedBy: [],
   },
@@ -110,7 +110,7 @@ export const JOURNEYS: readonly Journey[] = [
     proves:
       "A credential minted by Stratos, as space authority, reads a member's record from the reference host.",
     expected:
-      'The credential carries the #atproto_pds audience and the service signature; the receiver verifies it against the authority DID document without contacting Stratos.',
+      'The credential names the authority as issuer and the space as subject, binds the presentation key in cnf.kid, carries no aud, and is signed with the authority key; the #atproto_pds audience is on the delegation it was exchanged for. The receiver checks the signature against the authority DID document and calls no Stratos method.',
     unknown:
       'Whether the host accepts a credential minted by a foreign authority. This is the question the earlier probe left open.',
     carriedBy: ['standard-credential-transport', 'rust-production-interop'],
@@ -120,15 +120,16 @@ export const JOURNEYS: readonly Journey[] = [
     acceptanceRow: 'mixed-custody-privacy',
     proves:
       "The host's own standard credential exchange works in the same stack, so a failure of the custom mint is not a stack fault.",
-    expected: 'The exchange succeeds with a delegation and a signed proof.',
+    expected:
+      'For a space whose authority is the host, its com.atproto.space.authorizeSpaceSync returns a credential for a delegation token and a P-256 credentialKey. No driver calls it: the reference-host drivers exchange through the Stratos method zone.stratos.space.getSpaceCredential.',
     unknown: 'The host exchange route at the pinned build.',
-    carriedBy: ['standard-credential-transport', 'rust-production-interop'],
+    carriedBy: [],
   },
   {
     id: 'wrong-key-and-wrong-owner-denied',
     acceptanceRow: 'mixed-custody-privacy',
     proves:
-      'A presentation signed with the wrong key, and a credential for another owner, are refused by the host and by Stratos.',
+      "A presentation signed with the wrong key, and a presentation addressed to one owner sent to another owner's repo, are refused by the reference host.",
     expected: 'Both are refused with an authentication error, never a record.',
     unknown: 'The host error words.',
     carriedBy: ['standard-credential-transport', 'rust-production-interop'],
@@ -140,14 +141,15 @@ export const JOURNEYS: readonly Journey[] = [
       'A delegation with the #atproto_pds audience is accepted by the custom mint, and an allow-listed client attestation is accepted.',
     expected:
       'The service verifier accepts the current audience and the allow-listed attestation.',
-    unknown: 'How the host issues the delegation for an OAuth session.',
-    carriedBy: ['delegation-transport', 'credential-lifetime'],
+    unknown:
+      'How the host issues the delegation for an OAuth session. No driver presents a client attestation, so no suite carries this journey; delegation-transport and credential-lifetime perform the delegation half only.',
+    carriedBy: [],
   },
   {
     id: 'invalid-jwt-signature-refused-by-receiver',
     acceptanceRow: 'mixed-custody-privacy',
     proves:
-      'A credential whose JWT signature is invalid is refused by the receiving verifier on the host and on Stratos.',
+      'A credential whose JWT signature is invalid is refused by the receiving verifier on the reference host.',
     expected: 'Refused before any record is read.',
     unknown: 'The host response.',
     carriedBy: ['standard-credential-transport'],
@@ -156,7 +158,7 @@ export const JOURNEYS: readonly Journey[] = [
     id: 'renewal-and-revoked-member-denied',
     acceptanceRow: 'mixed-custody-privacy',
     proves:
-      'A credential renews with a fresh key, and after the member is removed a renewal and a read are denied.',
+      'A credential renews with a fresh key, and after the member is removed a renewal is denied while a credential already issued still reads until it expires.',
     expected:
       'Renewal after removal is denied by Stratos; a credential already issued lapses at its expiry.',
     unknown:
@@ -194,7 +196,8 @@ export const JOURNEYS: readonly Journey[] = [
     acceptanceRow: 'mixed-custody-privacy',
     proves:
       'The exact new post URI and text appear in a real feed HTTP response, not only on a rendered page.',
-    expected: 'The feed response carries the post URI in the new spelling.',
+    expected:
+      'The feed response carries the URI the write returned: at:space/ for a PDS-custody post, at:// for a Stratos-custody post.',
     unknown: 'The URI the host returns for a created record.',
     carriedBy: ['baseline', 'ordinary-custody'],
   },
@@ -215,7 +218,7 @@ export const JOURNEYS: readonly Journey[] = [
     proves:
       'A terminal page whose set hash does not match the records applied promotes nothing.',
     expected:
-      'The set hash is recomputed over the whole repo state and compared before promotion.',
+      "The set hash of the whole repo, kept from the stored base and updated by each op, must equal the commit's data before anything is promoted.",
     unknown: 'As above.',
     carriedBy: [],
   },
@@ -233,8 +236,10 @@ export const JOURNEYS: readonly Journey[] = [
     acceptanceRow: 'verified-sync-recovery',
     proves:
       'A repo that exactly fills a page is followed by an empty terminal page and verifies.',
-    expected: 'An empty page ends the sync; only the terminal page promotes.',
-    unknown: 'Whether the host sends an empty terminal page or ends early.',
+    expected:
+      "A page without a cursor ends the poll, whatever its ops, and only that page's commit is proven and promoted; a page with a cursor is never the last.",
+    unknown:
+      'Whether the host sends a cursor after a full page and then an empty page, or ends on the full page.',
     carriedBy: [],
   },
   {
@@ -277,6 +282,17 @@ export const JOURNEYS: readonly Journey[] = [
     carriedBy: [],
   },
   {
+    id: 'health-answers-while-a-sync-writes',
+    acceptanceRow: 'verified-sync-recovery',
+    proves:
+      'While a poll or a whole-repo replacement of a large member repo writes to the store, the feed generator answers /health within two seconds.',
+    expected:
+      'No test covers this today. The health handler reads the readiness gate and the scheduler status, not the store.',
+    unknown:
+      'How long a store write takes on a large real repo, and whether /health waits for it.',
+    carriedBy: [],
+  },
+  {
     id: 'malformed-or-truncated-archive-refused',
     acceptanceRow: 'verified-sync-recovery',
     proves:
@@ -300,7 +316,7 @@ export const JOURNEYS: readonly Journey[] = [
     proves:
       'A cache that held both custodies before the upgrade keeps the Stratos-custody rows and rebuilds the PDS-custody projection by a verified sync.',
     expected:
-      'The migration purges every space row and keeps everything else byte for byte; its tests run on file stores.',
+      'The migration purges every space row and keeps everything else byte for byte; some of its tests run on encrypted file stores.',
     unknown:
       'A real kept database and the upstream migrations on a disposable database have not been rehearsed.',
     carriedBy: [],

@@ -306,6 +306,35 @@ describe('deleting a room post', () => {
     expect(document.body.textContent).not.toContain('Post deleted')
   })
 
+  it.each([
+    ['the room space is not a space URI', { spaces: { bebop: '' } }],
+    ['the room spaces setting cannot be read', { spaceSetting: { text: '[' } }],
+  ])(
+    'shows the configuration error and sends no delete when %s',
+    async (_label, setting) => {
+      const own = spacePost(SPIKE, '3kswordfish', 'Bang.')
+      const { getFeed } = await openRoom({
+        custody: 'pds',
+        posts: [own],
+        ...setting,
+      })
+      const loadsBefore = getFeed.mock.calls.length
+
+      button('Delete').click()
+      await tick()
+      button('Delete now').click()
+      await vi.waitFor(() =>
+        expect(document.querySelector('.delete-error')?.textContent).toBe(
+          'Posting needs service configuration for this room.',
+        ),
+      )
+
+      expect(requests).toEqual([{ url: STATUS_URL, method: 'GET' }])
+      expect(getFeed.mock.calls.length).toBe(loadsBefore)
+      expect(document.body.textContent).toContain('Bang.')
+    },
+  )
+
   it('keeps the Stratos-custody delete on the service endpoint', async () => {
     const own = custodyPost(SPIKE, '3kswordfish', 'Bang.')
     await openRoom({ custody: 'stratos', posts: [own] })

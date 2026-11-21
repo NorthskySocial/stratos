@@ -200,33 +200,39 @@ const SPACE_URI_MARKERS = [
 ]
 
 // Where the earlier spelling may appear only on a line that says legacy: the
-// roots above, the rest of the test tree, the deprecated feed generator, the
-// documentation site's own source, and the root pages a reader opens first.
+// roots above, the rest of the test tree, the deprecated packages, the
+// workflows and scripts, the documentation site's own source, and the root
+// files a reader or a build opens first.
 const LEGACY_LINE_ROOTS = [
   ...SWEEP_ROOTS,
   'test/spaces-alignment',
   'stratos-feedgen',
+  'stratos-indexer',
+  '.github',
+  'scripts',
   'docs/.vitepress',
   'AGENTS.md',
   'README.md',
   'test/README.md',
+  'Dockerfile',
+  'docker-compose.yml',
+  'docker-compose.feedgen.yml',
+  '.env.example',
+  'test/.env.example',
 ]
 const LEGACY_LINE_SKIPPED_DIRECTORY =
   /^(node_modules|target|dist|build|cache|\..*)$/
+// Only the example of an environment file is read: a real one holds secrets.
 const LEGACY_LINE_TEXT_FILE =
-  /\.(ts|tsx|js|mjs|mts|cjs|svelte|vue|rs|json|md|sql|toml|ya?ml)$/
+  /\.(ts|tsx|js|mjs|mts|cjs|svelte|vue|rs|json|md|sql|toml|ya?ml|sh|html)$|^Dockerfile|^\.env\.example$/
 
 // Paths that may spell a space URI in the earlier scheme-and-segment form on a
 // line that does not say legacy, each with its reason. Nothing else may.
 const EARLIER_SPELLING_EXEMPTIONS: Record<string, string> = {
-  'stratos-feedgen-ng/src/store/migrations.rs':
-    'migration test rows describe what an older build wrote, and migrations are not edited',
   'test/spaces-alignment/november/fixtures/commit-and-ops.json':
     'upstream output recorded in the earlier spelling, classified as such in the source manifest',
   'test/spaces-alignment/november/fixtures/star-framing.json':
     'upstream output recorded in the earlier spelling, classified as such in the source manifest',
-  'test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs':
-    'the generator lines that make the two fixtures above',
   'test/spaces-alignment/november/fixtures/space-uri-conformance.json':
     'the corpus: inputs every parser must refuse',
   'test/spaces-alignment/november/applicability.json':
@@ -235,6 +241,42 @@ const EARLIER_SPELLING_EXEMPTIONS: Record<string, string> = {
     'a probe whose record URI is in the earlier spelling, to be refused',
   'docs/history':
     'the pages that describe the October contract, which no current build implements',
+}
+
+// Built from its parts so that no line of this file spells it.
+function earlierSpaceUri(
+  authority: string,
+  spaceType: string,
+  skey: string,
+): string {
+  return ['at:/', authority, 'space', spaceType, skey].join('/')
+}
+
+// Lines of a file that may spell a space URI the earlier way, found by the
+// exact value they hold, each with its reason. Any other such line of the file
+// still has to say legacy.
+const EARLIER_SPELLING_LINE_EXEMPTIONS: Record<
+  string,
+  { legacyValue: string; reason: string }
+> = {
+  'stratos-feedgen-ng/src/store/migrations.rs': {
+    legacyValue: earlierSpaceUri(
+      'did:web:stratos.example',
+      'zone.stratos.space.feed',
+      'bebop',
+    ),
+    reason:
+      'migration test rows describe what an older build wrote, and migrations are not edited',
+  },
+  'test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs': {
+    legacyValue: earlierSpaceUri(
+      'did:web:bebop.example',
+      'zone.stratos.space.feed',
+      'crew',
+    ),
+    reason:
+      'the generator line that makes the two fixtures recorded in the earlier spelling',
+  },
 }
 
 // Files that read, compare or carry a record or space URI. Each must stay
@@ -323,8 +365,10 @@ function sweepFiles(
   skipped: RegExp = SWEEP_SKIPPED_DIRECTORY,
   textFile: RegExp = SWEEP_TEXT_FILE,
 ): string[] {
+  // Only directories are skipped by name, so a dot file such as .env.example
+  // is still read when its name is a text file's.
   return readdirSync(resolve(REPO_ROOT, directory), { withFileTypes: true })
-    .filter((entry) => !skipped.test(entry.name))
+    .filter((entry) => !(entry.isDirectory() && skipped.test(entry.name)))
     .flatMap((entry) => {
       const path = join(directory, entry.name)
       if (entry.isDirectory()) return sweepFiles(path, skipped, textFile)
@@ -348,10 +392,13 @@ function isExemptFromLegacyLines(file: string): boolean {
 }
 
 function earlierSpellingWithoutLegacy(file: string): string[] {
+  const exemptValue = EARLIER_SPELLING_LINE_EXEMPTIONS[file]?.legacyValue
   return readFileSync(resolve(REPO_ROOT, file), 'utf8')
     .split('\n')
     .flatMap((line, index) =>
-      EARLIER_SPACE_URI.test(line) && !/legacy/i.test(line)
+      EARLIER_SPACE_URI.test(line) &&
+      !/legacy/i.test(line) &&
+      !(exemptValue !== undefined && line.includes(exemptValue))
         ? [`${file}:${index + 1}`]
         : [],
     )
@@ -617,6 +664,15 @@ describe('november applicability ledger', () => {
       'AGENTS.md',
       'README.md',
       'test/README.md',
+      '.github/workflows/test.yml',
+      'stratos-indexer/src/indexer.ts',
+      'webapp/scripts/e2e-docker.sh',
+      'clubhouse/index.html',
+      'stratos-feedgen-ng/Dockerfile',
+      'Dockerfile',
+      '.env.example',
+      'webapp/.env.example',
+      'test/.env.example',
     ])
       expect(swept.has(file), file).toBe(true)
     expect([...swept].some((file) => file.includes('/dist/'))).toBe(false)
@@ -626,6 +682,18 @@ describe('november applicability ledger', () => {
   it('exempts only named paths that exist, each with a reason', () => {
     for (const [path, reason] of Object.entries(EARLIER_SPELLING_EXEMPTIONS)) {
       expect(existsSync(resolve(REPO_ROOT, path)), path).toBe(true)
+      expect(reason.trim().length, path).toBeGreaterThan(0)
+    }
+  })
+
+  it('exempts lines only by a value each file holds, each with a reason', () => {
+    for (const [path, { legacyValue, reason }] of Object.entries(
+      EARLIER_SPELLING_LINE_EXEMPTIONS,
+    )) {
+      expect(readFileSync(resolve(REPO_ROOT, path), 'utf8'), path).toContain(
+        legacyValue,
+      )
+      expect(EARLIER_SPACE_URI.test(legacyValue), path).toBe(true)
       expect(reason.trim().length, path).toBeGreaterThan(0)
     }
   })

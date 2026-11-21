@@ -35,7 +35,10 @@ export const GET_SPACE_CREDENTIAL_METHOD =
 interface GetSpaceCredentialInput {
   /** The space's `at:space/` URI to issue a credential for. */
   space?: string
-  /** Optional space-delegation JWT (spec-shaped identity path). */
+  /**
+   * Optional space-delegation JWT that names the caller in place of a DPoP
+   * session; refused beside an Authorization header.
+   */
   delegationToken?: string
   /**
    * Optional client-attestation JWT. Required only for spaces gated on client

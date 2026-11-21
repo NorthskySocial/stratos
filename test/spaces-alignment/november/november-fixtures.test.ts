@@ -566,7 +566,7 @@ describe('values Stratos produced, judged by the upstream package', () => {
       constantIn(source, 'FIXED_PRESENTATION_SIGNATURE_INPUT'),
     )
     expect(headers['signature']).toBe(
-      constantIn(source, 'FIXED_PRESENTATION_SIGNATURE'),
+      constantIn(source, 'UPSTREAM_PRESENTATION_SIGNATURE'),
     )
     expect(sourceText(source)).toContain(
       `SigningKey::from_slice(&[${signingKeyFill}; 32])`,

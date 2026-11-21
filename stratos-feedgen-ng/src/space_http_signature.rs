@@ -147,8 +147,8 @@ mod tests {
     const FIXED_PRESENTATION_AUTHORIZATION: &str = "Atproto-Space-Credential misato-credential";
     const FIXED_PRESENTATION_SIGNATURE_INPUT: &str =
         "sig=(\"authorization\" \"atproto-space-audience\");tag=\"atproto-space-credential\"";
-    const FIXED_PRESENTATION_SIGNATURE: &str = "sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP5X7CESqkIDp3uH7VNJUeHN4vFg/8BCnCxoe4mGCVkZNg==:";
-    const UPSTREAM_LOW_S_PRESENTATION_SIGNATURE: &str = "sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP5X7CESqkIDp3uH7VNJUeHN4vFg/8BCnCxoe4mGCVkZNg==:";
+    // The upstream TypeScript signer's output for this key and input; it signs low-S.
+    const UPSTREAM_PRESENTATION_SIGNATURE: &str = "sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP5X7CESqkIDp3uH7VNJUeHN4vFg/8BCnCxoe4mGCVkZNg==:";
     const FIXED_EXCHANGE_AUTHORIZATION: &str = "Bearer rei-delegation";
     const FIXED_EXCHANGE_SIGNATURE_INPUT: &str = "atproto-space=(\"authorization\");keyid=\"did:key:zDnaeXxvmFHMHjqgQTbadpWG7gPHwnga1i7SMwxrV2BSdUjAD\"";
     const FIXED_EXCHANGE_SIGNATURE: &str = "atproto-space=:eK8Y8zk7bC2CY6h+uaBC3knTw6bVJxqhoA/eZjfd5CRAnG28Jb9lwnxOuXlN7YjgiM07qAtzdw4lqW8X5h/HSQ==:";
@@ -289,15 +289,7 @@ mod tests {
             headers.signature_input(),
             FIXED_PRESENTATION_SIGNATURE_INPUT
         );
-        assert_eq!(headers.signature(), FIXED_PRESENTATION_SIGNATURE);
-        let generated =
-            Signature::from_slice(&signature_bytes(headers.signature(), "sig")).unwrap();
-        let upstream = Signature::from_slice(&signature_bytes(
-            UPSTREAM_LOW_S_PRESENTATION_SIGNATURE,
-            "sig",
-        ))
-        .unwrap();
-        assert_eq!(generated.normalize_s().unwrap_or(generated), upstream);
+        assert_eq!(headers.signature(), UPSTREAM_PRESENTATION_SIGNATURE);
     }
 
     #[test]

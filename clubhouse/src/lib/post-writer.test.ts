@@ -104,6 +104,8 @@ describe('custody-aware room posting', () => {
       custody: 'pds',
       uri: 'at:space/did:web:stratos.example/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/3k2',
       cid: 'bafy-asuka',
+      roomSpace:
+        'at:space/did:web:stratos.example/zone.stratos.space.feed/tokyo-3',
     })
 
     expect(fetchHandler).toHaveBeenCalledTimes(1)
@@ -132,6 +134,8 @@ describe('custody-aware room posting', () => {
       custody: 'pds',
       uri: 'at:space/did:web:stratos.example/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/3k2',
       cid: 'bafy-asuka',
+      roomSpace:
+        'at:space/did:web:stratos.example/zone.stratos.space.feed/tokyo-3',
     })
     expect(
       fetchHandler.mock.calls.map(([path]) => path as string),
@@ -148,6 +152,8 @@ describe('custody-aware room posting', () => {
         custody: 'pds',
         uri: 'at:space/did:web:stratos.example/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/3k2',
         cid: 'bafy-asuka',
+        roomSpace:
+          'at:space/did:web:stratos.example/zone.stratos.space.feed/tokyo-3',
       }),
     ).rejects.toThrow('PDS could not delete the post (HTTP 500).')
   })
@@ -276,6 +282,30 @@ describe('custody-aware room posting', () => {
     expect(fetchHandler).not.toHaveBeenCalled()
     expect(deletePost).not.toHaveBeenCalled()
   })
+
+  it.each([
+    ['no configured space', undefined],
+    ['an empty configured space', ''],
+  ])(
+    'refuses a PDS-custody delete from a room with %s as create does, and sends nothing',
+    async (_label, roomSpace) => {
+      const fetchHandler = vi.fn()
+
+      const refusal = deleteRoomPost({
+        session: { sub: 'did:plc:asuka', fetchHandler } as never,
+        custody: 'pds',
+        uri: 'at:space/did:web:stratos.example/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/3k2',
+        cid: 'bafy-asuka',
+        ...(roomSpace === undefined ? {} : { roomSpace }),
+      })
+
+      await expect(refusal).rejects.toBeInstanceOf(RoomPostConfigurationError)
+      await expect(refusal).rejects.toThrow(
+        'Posting needs service configuration for this room.',
+      )
+      expect(fetchHandler).not.toHaveBeenCalled()
+    },
+  )
 
   describe('deleting from a PDS-custody room with a configured space', () => {
     const ROOM_SPACE =

@@ -2734,6 +2734,64 @@ mod tests {
     }
 
     #[test]
+    fn a_member_who_left_stays_gone_and_cannot_be_replaced_after_the_store_reopens() {
+        let path = file_path("departed");
+        let (target, jet_before) = {
+            let mut store = EncryptedStore::open(&path, key()).unwrap();
+            members(&mut store, &[FAYE, JET]);
+            let target = target_of(&store, FAYE);
+            promote_records(
+                &mut store,
+                &target,
+                "3jzfcijpj2z2a",
+                &faye_before_replacement(),
+            );
+            let jet = target_of(&store, JET);
+            promote_records(
+                &mut store,
+                &jet,
+                "3jzfcijpj2z2a",
+                &[record_of(POST, "swordfish", &post_value("Bang"))],
+            );
+            assert!(
+                rows_of_member(&store, FAYE)
+                    .iter()
+                    .any(|rows| !rows.is_empty())
+            );
+            let jet_before = rows_of_member(&store, JET);
+            members(&mut store, &[JET]);
+            (target, jet_before)
+        };
+
+        let mut reopened = EncryptedStore::open(&path, key()).unwrap();
+        assert_eq!(
+            reopened.pds_member_generation(BOUNDARY, FAYE).unwrap(),
+            None
+        );
+        assert_eq!(reopened.verified_space_base(SPACE, FAYE).unwrap(), None);
+        assert!(
+            rows_of_member(&reopened, FAYE).iter().all(Vec::is_empty),
+            "the store still holds the departed member's rows after reopening"
+        );
+        assert_eq!(rows_of_member(&reopened, JET), jet_before);
+
+        let outcome = replace(
+            &mut reopened,
+            &target,
+            &commit_for(FAYE, SPACE, "3jzfcijpj2z2b", &[]),
+            &[],
+        );
+
+        assert!(
+            matches!(outcome, Err(StoreError::UnauthorizedSpaceMember)),
+            "{outcome:?}"
+        );
+        assert_eq!(reopened.verified_space_base(SPACE, FAYE).unwrap(), None);
+        drop(reopened);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn a_commit_for_another_repo_or_space_changes_nothing() {
         let (mut store, target) = store_with_faye_and_jet_promoted();
         let replacement = sorted(vec![record_of(POST, "ein", &post_value("Woof"))]);

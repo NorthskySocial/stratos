@@ -59,43 +59,135 @@ the step that proves it ends, and `failure.json` lists those names under
 - Not reached on a stop there: every assertion after the one reached.
 - Unknown: where exactly it stops. Read `assertionsReached` and record it.
 
+## Not covered by any test today
+
+These assertions of the earlier suites have no test in the repository now.
+`assertion-manifest.json` marks each one `uncovered`, and only a journey of the
+prepared suite carries it. Treat each as unprotected until a test or a driver
+exists.
+
+- `staging-limits:service-responsive`: the feed generator answers `/health`
+  within two seconds while a sync writes to the store. Journey
+  `health-answers-while-a-sync-writes`. A test would hold a store write open,
+  request `/health`, and require the answer within that bound.
+
 ## 2. The day a host accepts the new spelling
 
 Do these in order. Stop at the first step that fails and keep its output.
 
 1. **Pin the artifact.** Choose one upstream commit and one set of npm package
-   versions whose syntax package, validators and PDS accept `at:space/`, and the
-   image digest of the PDS built from that commit. Neither revision the manifest
-   names today does: both serialize the earlier spelling. Write the revision,
-   the package versions and the image digest down before anything else.
+   versions whose syntax package, validators and PDS accept `at:space/`. Neither
+   revision the manifest names today does: both serialize the earlier spelling.
+   Build the PDS image of that commit the way the runner does
+   (`test/spaces-alignment/build-alpha-pds.ts`), with the same label, so a later
+   rebuild on the same machine can reuse the layer cache:
+
+   ```sh
+   git clone https://github.com/bluesky-social/atproto.git <upstream checkout>
+   git -C <upstream checkout> checkout --detach <revision>
+   docker build --file <upstream checkout>/Dockerfile \
+     --label org.opencontainers.image.revision=<revision> \
+     --iidfile pds-image.id --tag stratos-reference-pds:probe <upstream checkout>
+   cat pds-image.id
+   ```
+
+   The last line prints `sha256:` and 64 hex digits. That is the local image ID
+   that `docker build --iidfile` writes, not a registry digest. It is the value
+   for `uriProbe.imageDigest` and for `--pds-image-digest`. Write the revision,
+   the package versions and the image ID down before anything else.
+
 2. **Fill the manifest** `test/spaces-alignment/november/sources.json`:
    `reference.revision` and `reference.releaseAnchor` (neither may be a revision
    on `legacyUriOnly`), each package's `version`, `integrity` and
    `tarballSha256`, and `referenceHost.sha256` with the SHA-256 of `Dockerfile`
    and `pnpm-lock.yaml` at that revision. The runner refuses to build the
    reference host while those two hashes are empty or the revision is on the
-   legacy-only list or is the revision the October file pins.
-3. **Probe.** Create a record on the pinned host, read back the URI it returns,
-   read the record at that URI and mint a credential for the space. Save the
-   receipt. Fill `cutoverEvidence.uriProbe` (`artifactRevision`, `imageDigest`,
-   `packageVersions`, `recordUri`, `credentialSubject`, `receiptSha256`), then
-   set `referenceSupportsTargetUri` to `true` and `cutoverEvidence.status` to
+   legacy-only list or is the revision the October file pins. The values come
+   from these commands, one package at a time:
+
+   ```sh
+   git -C <upstream checkout> show <revision>:Dockerfile | sha256sum
+   git -C <upstream checkout> show <revision>:pnpm-lock.yaml | sha256sum
+   npm view <package>@<version> dist.integrity
+   npm pack <package>@<version> --pack-destination <scratch directory>
+   sha256sum <scratch directory>/*.tgz
+   ```
+
+3. **Probe.** Start the image alone, then ask it to parse a space URI in the new
+   spelling. The host validates query parameters before it checks
+   authentication, so the request needs no account:
+
+   ```sh
+   docker run --rm --detach --name stratos-reference-pds-probe \
+     --publish 127.0.0.1:2583:3000 \
+     --env PDS_HOSTNAME=localhost --env PDS_DEV_MODE=true \
+     --env PDS_JWT_SECRET=<random hex> --env PDS_ADMIN_PASSWORD=<random text> \
+     --env PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX=<64 hex> \
+     --env PDS_DID_PLC_URL=<local PLC directory URL> \
+     --env PDS_DATA_DIRECTORY=/app/data \
+     --env PDS_BLOBSTORE_DISK_LOCATION=/app/data/blocks \
+     --env PDS_INVITE_REQUIRED=false --env PDS_CRAWLERS= \
+     "$(cat pds-image.id)"
+   curl --silent --write-out '\n%{http_code}\n' \
+     'http://127.0.0.1:2583/xrpc/com.atproto.space.getRecord?space=at:space/did:web:stratos.example/zone.stratos.space.feed/general&repo=did:plc:spikespiegelbebopcrewabc&collection=zone.stratos.feed.post&rkey=bebop'
+   ```
+
+   A 401 answer means the host parsed the space URI and asked for
+   authentication. A 400 `InvalidRequest` answer about `space` means it refuses
+   the spelling: stop here. Then, on the same host, create an account and a
+   session, call `com.atproto.space.createSpace` (space type
+   `zone.stratos.space.feed`, a personal-space policy),
+   `com.atproto.space.createRecord` in the space it returns,
+   `com.atproto.space.getRecord` at the URI it returns, and
+   `com.atproto.space.getDelegationToken` then
+   `com.atproto.space.authorizeSpaceSync` for that space. Save the four answers in
+   one receipt file. The probe holds when the space, the record URI and the
+   credential `sub` all start with `at:space/`, and the record read back has the
+   same URI. Fill `cutoverEvidence.uriProbe`: `artifactRevision`, `imageDigest`
+   (the image ID from step 1), `packageVersions`, `recordUri` (from
+   `createRecord`), `credentialSubject` (the credential `sub`) and
+   `receiptSha256` (`sha256sum` of the receipt file). Then set
+   `referenceSupportsTargetUri` to `true` and `cutoverEvidence.status` to
    `fulfilled`. `test/spaces-alignment/november/november-sources.test.ts` rejects a ready manifest
-   whose probe is partial or names a legacy-only artifact.
+   whose probe is partial or names a legacy-only artifact. Not verified: none of
+   these commands has been run, and the PDS settings follow
+   `templates/reference-pds.yaml`. Use a local PLC directory, never the public
+   one.
+
 4. **Build the reference host.** The runner builds it from the upstream
    repository root `Dockerfile` at `reference.revision` whenever a suite that
-   needs it is selected, and refuses to if step 2 or 3 is incomplete. The
-   service definition is `test/spaces-alignment/templates/reference-pds.yaml`. Check its container
+   needs it is selected, and refuses to if step 2 or 3 is incomplete.
+   `uriProbe.imageDigest` is optional to that check, so
+   `standard-credential-transport` and `rust-production-interop` build and run a
+   reference host with no digest named. `november-interop` needs
+   `--pds-image-digest`, equal to `uriProbe.imageDigest`. Whenever
+   `--pds-image-digest` is given, the runner also requires its own build's image
+   ID to equal it. A rebuild from source need not reproduce the ID of step 1: a
+   changed base image or a build without the layer cache gives a new one. If the
+   IDs differ, the run stops with `The built reference PDS image differs from
+--pds-image-digest`, removes the image it built, and does not report that
+   image's ID. Build and probe as in steps 1 and 3 on the machine that runs the
+   suite, straight before the run, so the runner's build can reuse the layer
+   cache. If the IDs still differ, this artifact cannot be run as
+   `november-interop`; record that and keep the reports. The service definition is
+   `test/spaces-alignment/templates/reference-pds.yaml`. Check its container
    command and data paths against the `pds` stage of the `Dockerfile` at the
    pinned revision; they follow the layout of the earlier image and have not
    been compared with the new one.
 5. **Run the upstream migrations on a disposable database.** Start the built
    image once against an empty data directory and once against a copy of a kept
-   database, and read the migration list at the pinned revision: the account
-   manager's `011` and `012` and the actor store's `007` to `009` were the ones
-   the earlier step needed, and a newer revision may add more. Not verified:
-   the command that applies them; the PDS applies its own migrations when it
-   starts.
+   database, with the settings of step 3 and a mounted data directory:
+
+   ```sh
+   docker run --rm --volume <empty directory>:/app/data <step 3 settings> "$(cat pds-image.id)"
+   docker run --rm --volume <copy of a kept data directory>:/app/data <step 3 settings> "$(cat pds-image.id)"
+   ```
+
+   The PDS applies its own migrations when it starts. Read the migration list at
+   the pinned revision: the account manager's `011` and `012` and the actor
+   store's `007` to `009` were the ones the earlier step needed, and a newer
+   revision may add more. Not verified: these commands have not been run.
+
 6. **Run the baseline.** All ten assertions must pass; the receipt is
    acceptance only for the baseline.
 
@@ -245,7 +337,7 @@ save. Walk them in this order.
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: A Stratos-custody member on an ordinary PDS posts through the service, the post appears in the feed from the Rust feed generator, a member of another boundary is denied, and the delete removes it.
-- Expected: Passes: the journey touches no space URI and no credential from the spaces PDS.
+- Expected: Should pass: the journey touches no space URI and no credential from the spaces PDS.
 - Unknown: The suite has never run; the first run may show a stack or driver fault.
 - Command: Run `ordinary-custody` (command below); it carries this journey in a ported form.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
@@ -253,8 +345,8 @@ save. Walk them in this order.
 ### 3. `two-authors-on-one-host`
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
-- Proves: Two PDS-custody members who share one reference host each have their own record read through a credential for their own repo, and neither read returns the other member.
-- Expected: Each read is addressed to the author, never to the authority, and a credential for one member is refused for the other.
+- Proves: Two PDS-custody members who share one reference host each have their own seeded record read with one Stratos credential presented to their own repo, and a presentation addressed to one member is refused for the other member's repo.
+- Expected: Each read is addressed to the author, never to the authority. The credential names the space, not a member; the presentation names the repo it is for, and the host refuses it for any other repo.
 - Unknown: How the host answers a credential presentation in the tagged signature form.
 - Command: Run `standard-credential-transport` (command below); it carries this journey in a ported form, as do `rust-production-interop`.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
@@ -271,9 +363,9 @@ save. Walk them in this order.
 ### 5. `schema-resolution-and-explicit-grants`
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
-- Proves: The host resolves the space type declaration during OAuth and enforces the explicit space grant on a write.
+- Proves: The host resolves the space type declaration during OAuth, grants the space scope, and accepts a PDS-custody write made under that grant.
 - Expected: The sandbox declaration fixture carries name and title and the three collections of the repository declaration, which carries title only.
-- Unknown: Whether the host in use still requires name, and how it answers the space scope string.
+- Unknown: Whether the host in use still requires name, how it answers the space scope string, and whether it refuses a write without the grant: no driver writes without it.
 - Command: Run `baseline` (command below); it carries this journey in a ported form.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
@@ -281,7 +373,7 @@ save. Walk them in this order.
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: The webapp inspector reads the signed-in member own PDS-custody record with that member OAuth grant.
-- Expected: The inspector classifies the address, then sends three requests addressed to the author and nothing for an address it refuses.
+- Expected: The inspector classifies the address, then sends exactly one com.atproto.space.getRecord to the signed-in member's own PDS for their own repo, and no request for another author's space record or for an address it refuses.
 - Unknown: The host response to the OAuth-bound read.
 - Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
@@ -299,7 +391,7 @@ save. Walk them in this order.
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: A credential minted by Stratos, as space authority, reads a member's record from the reference host.
-- Expected: The credential carries the #atproto_pds audience and the service signature; the receiver verifies it against the authority DID document without contacting Stratos.
+- Expected: The credential names the authority as issuer and the space as subject, binds the presentation key in cnf.kid, carries no aud, and is signed with the authority key; the #atproto_pds audience is on the delegation it was exchanged for. The receiver checks the signature against the authority DID document and calls no Stratos method.
 - Unknown: Whether the host accepts a credential minted by a foreign authority. This is the question the earlier probe left open.
 - Command: Run `standard-credential-transport` (command below); it carries this journey in a ported form, as do `rust-production-interop`.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
@@ -308,15 +400,15 @@ save. Walk them in this order.
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: The host's own standard credential exchange works in the same stack, so a failure of the custom mint is not a stack fault.
-- Expected: The exchange succeeds with a delegation and a signed proof.
+- Expected: For a space whose authority is the host, its com.atproto.space.authorizeSpaceSync returns a credential for a delegation token and a P-256 credentialKey. No driver calls it: the reference-host drivers exchange through the Stratos method zone.stratos.space.getSpaceCredential.
 - Unknown: The host exchange route at the pinned build.
-- Command: Run `standard-credential-transport` (command below); it carries this journey in a ported form, as do `rust-production-interop`.
+- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 10. `wrong-key-and-wrong-owner-denied`
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
-- Proves: A presentation signed with the wrong key, and a credential for another owner, are refused by the host and by Stratos.
+- Proves: A presentation signed with the wrong key, and a presentation addressed to one owner sent to another owner's repo, are refused by the reference host.
 - Expected: Both are refused with an authentication error, never a record.
 - Unknown: The host error words.
 - Command: Run `standard-credential-transport` (command below); it carries this journey in a ported form, as do `rust-production-interop`.
@@ -327,14 +419,14 @@ save. Walk them in this order.
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: A delegation with the #atproto_pds audience is accepted by the custom mint, and an allow-listed client attestation is accepted.
 - Expected: The service verifier accepts the current audience and the allow-listed attestation.
-- Unknown: How the host issues the delegation for an OAuth session.
-- Command: Run `delegation-transport` (command below); it carries this journey in a ported form, as do `credential-lifetime`.
+- Unknown: How the host issues the delegation for an OAuth session. No driver presents a client attestation, so no suite carries this journey; delegation-transport and credential-lifetime perform the delegation half only.
+- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 12. `invalid-jwt-signature-refused-by-receiver`
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
-- Proves: A credential whose JWT signature is invalid is refused by the receiving verifier on the host and on Stratos.
+- Proves: A credential whose JWT signature is invalid is refused by the receiving verifier on the reference host.
 - Expected: Refused before any record is read.
 - Unknown: The host response.
 - Command: Run `standard-credential-transport` (command below); it carries this journey in a ported form.
@@ -343,7 +435,7 @@ save. Walk them in this order.
 ### 13. `renewal-and-revoked-member-denied`
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
-- Proves: A credential renews with a fresh key, and after the member is removed a renewal and a read are denied.
+- Proves: A credential renews with a fresh key, and after the member is removed a renewal is denied while a credential already issued still reads until it expires.
 - Expected: Renewal after removal is denied by Stratos; a credential already issued lapses at its expiry.
 - Unknown: Whether the host honours removal sooner than expiry. No host route announces removal.
 - Command: Run `standard-credential-transport` (command below); it carries this journey in a ported form, as do `rust-production-interop` and `credential-lifetime`.
@@ -371,7 +463,7 @@ save. Walk them in this order.
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: The exact new post URI and text appear in a real feed HTTP response, not only on a rendered page.
-- Expected: The feed response carries the post URI in the new spelling.
+- Expected: The feed response carries the URI the write returned: at:space/ for a PDS-custody post, at:// for a Stratos-custody post.
 - Unknown: The URI the host returns for a created record.
 - Command: Run `baseline` (command below); it carries this journey in a ported form, as do `ordinary-custody`.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
@@ -389,7 +481,7 @@ save. Walk them in this order.
 
 - Closes: The feed generator promotes only fully verified repo state from a real host, and recovers from gaps, key rotation and restarts without serving unverified records.
 - Proves: A terminal page whose set hash does not match the records applied promotes nothing.
-- Expected: The set hash is recomputed over the whole repo state and compared before promotion.
+- Expected: The set hash of the whole repo, kept from the stored base and updated by each op, must equal the commit's data before anything is promoted.
 - Unknown: As above.
 - Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
@@ -407,8 +499,8 @@ save. Walk them in this order.
 
 - Closes: The feed generator promotes only fully verified repo state from a real host, and recovers from gaps, key rotation and restarts without serving unverified records.
 - Proves: A repo that exactly fills a page is followed by an empty terminal page and verifies.
-- Expected: An empty page ends the sync; only the terminal page promotes.
-- Unknown: Whether the host sends an empty terminal page or ends early.
+- Expected: A page without a cursor ends the poll, whatever its ops, and only that page's commit is proven and promoted; a page with a cursor is never the last.
+- Unknown: Whether the host sends a cursor after a full page and then an empty page, or ends on the full page.
 - Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
@@ -448,7 +540,16 @@ save. Walk them in this order.
 - Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
-### 25. `malformed-or-truncated-archive-refused`
+### 25. `health-answers-while-a-sync-writes`
+
+- Closes: The feed generator promotes only fully verified repo state from a real host, and recovers from gaps, key rotation and restarts without serving unverified records.
+- Proves: While a poll or a whole-repo replacement of a large member repo writes to the store, the feed generator answers /health within two seconds.
+- Expected: No test covers this today. The health handler reads the readiness gate and the scheduler status, not the store.
+- Unknown: How long a store write takes on a large real repo, and whether /health waits for it.
+- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
+
+### 26. `malformed-or-truncated-archive-refused`
 
 - Closes: The feed generator promotes only fully verified repo state from a real host, and recovers from gaps, key rotation and restarts without serving unverified records.
 - Proves: A malformed or truncated whole-repo archive is refused and changes nothing.
@@ -457,7 +558,7 @@ save. Walk them in this order.
 - Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
-### 26. `suspension-and-offline-are-not-deletion`
+### 27. `suspension-and-offline-are-not-deletion`
 
 - Closes: The feed generator promotes only fully verified repo state from a real host, and recovers from gaps, key rotation and restarts without serving unverified records.
 - Proves: A suspended or unreachable host leaves the member projection in place and does not delete it.
@@ -466,11 +567,11 @@ save. Walk them in this order.
 - Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
-### 27. `mixed-cache-migration-preserves-custody`
+### 28. `mixed-cache-migration-preserves-custody`
 
 - Closes: The cache migration keeps custody data, the PDS projection is rebuilt from a verified sync, and a rollback pairs matching versions.
 - Proves: A cache that held both custodies before the upgrade keeps the Stratos-custody rows and rebuilds the PDS-custody projection by a verified sync.
-- Expected: The migration purges every space row and keeps everything else byte for byte; its tests run on file stores.
+- Expected: The migration purges every space row and keeps everything else byte for byte; some of its tests run on encrypted file stores.
 - Unknown: A real kept database and the upstream migrations on a disposable database have not been rehearsed.
 - Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
