@@ -216,7 +216,8 @@ Content-Type: application/json
   has no `value`. Each result has the type `#createResult`, `#updateResult` or
   `#deleteResult`.
 
-The errors are listed under [Writes](#writes). The client library wraps all
+The errors are listed under
+[Writing into a boundary](/reference/errors#writing-into-a-boundary). The client library wraps all
 four procedures in `createBoundaryRecord`, `putBoundaryRecord`,
 `deleteBoundaryRecord` and `applyBoundaryWrites`. These helpers also route
 `pds` custody to the PDS. Their target resolver, `resolveRepositoryTarget`,
