@@ -541,6 +541,20 @@ Each helper returns `{ ok: true, value }` or `{ ok: false, reason }`.
   `/{authorDid}/{collection}/{rkey}`. The record parser returns `spaceDid` (the space authority)
   and `authorDid` (the member who wrote the record) as separate fields. Any other string,
   including an `at://` URI, is refused. Never give a space URI to a parser for `at://` URIs.
+- `parseRecordAddress(uri)` tells a record's address apart without a guess, and never throws. For
+  a space record URI it returns
+  `{ ok: true, value: { kind: 'space', authority, spaceType, skey, author, collection, rkey } }`,
+  where `authority` is the space DID and `author` the member who wrote the record. For
+  `at://{did}/{collection}/{rkey}`, with a valid DID, an NSID collection, a valid record key and
+  exactly three parts, it returns `{ ok: true, value: { kind: 'custody', author, collection, rkey } }`.
+  Every other string, including a handle authority, a query or fragment, a space URI, or a string
+  with surrounding spaces, is `{ ok: false, reason: 'not a record address' }`, the same reason
+  every time. Nothing is decoded, trimmed or case-folded: decode a link yourself first, and note
+  that `decodeURIComponent` throws on a bad escape while `URLSearchParams` keeps it and turns a `+`
+  into a space. A DID can itself hold a percent escape, such as the port in
+  `did:web:localhost%3A3100`, so percent-encode the whole address again when you put it in a link:
+  decoding the link once turns `%3A` into `:`, which is a different DID that still classifies as
+  valid. Use it instead of testing a URI prefix or splitting it in an app.
 
 ### The four procedures
 

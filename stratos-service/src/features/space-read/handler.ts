@@ -20,23 +20,22 @@ import {
 import { createRepoHostResolverDeps } from './host-resolution.js'
 
 /**
- * XRPC method NSID for the space-scoped record read. Spec-shaped mirror of
- * `com.atproto.space.getRecord` (atproto#5187), quarantined under the
- * `zone.stratos.*` namespace until the spec is finalized.
+ * XRPC method NSID for the boundary-scoped record read. A Stratos method; it
+ * is not the upstream `com.atproto.space.getRecord` of a similar name.
  */
 export const GET_SPACE_RECORD_METHOD = 'zone.stratos.space.getRecord'
 
 /**
- * XRPC method NSID for the space-scoped blob enumeration. Spec-shaped mirror
- * of `com.atproto.space.listBlobs` (atproto#5187), quarantined under the
- * `zone.stratos.*` namespace until the spec is finalized.
+ * XRPC method NSID for the boundary-scoped blob enumeration. A Stratos method;
+ * it is not the upstream `com.atproto.space.listBlobs` of a similar name.
  */
 export const LIST_SPACE_BLOBS_METHOD = 'zone.stratos.space.listBlobs'
 
 /**
- * XRPC method NSID for the space membership oracle. Spec-shaped mirror of
- * `com.atproto.space.listRepos` (atproto#5187), extended with `host` /
- * `hostSource` per Stratos's own repo-host-discovery convention.
+ * XRPC method NSID for the membership oracle: which repos hold data in a
+ * space, with `host` / `hostSource` per Stratos's repo-host-discovery
+ * convention. It is not the upstream `com.atproto.space.listRepos` of a
+ * similar name.
  */
 export const LIST_SPACE_REPOS_METHOD = 'zone.stratos.space.listRepos'
 
@@ -291,8 +290,9 @@ function parseLimit(raw: unknown, defaultLimit: number): number {
  *   1. Require `space`; resolve its boundary → else `UnknownSpace`.
  *   2. The caller's effective boundary set must include it → else `AuthRequired`.
  *   3. Page active enrollments carrying that boundary.
- *   4. Per member, resolve a repo host (never throws; absent fields on a
- *      resolution miss) and a Stratos-known `rev` (stratos-custody only).
+ *   4. Per member, resolve a repo host (pds-custody only; never throws;
+ *      absent fields on a resolution miss) and a Stratos-known `rev`
+ *      (stratos-custody only).
  */
 async function handleListSpaceRepos(
   ctx: AppContext,

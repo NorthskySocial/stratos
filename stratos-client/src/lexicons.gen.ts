@@ -2876,7 +2876,7 @@ export const stratosLexicons: LexiconDoc[] = [
       "type": "space",
       "description": "A members-only Stratos post feed",
       "key": "any",
-      "name": "Stratos Feed",
+      "title": "Stratos Feed",
       "collections": [
         "zone.stratos.feed.post",
         "app.bsky.feed.like",
@@ -2891,7 +2891,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "Get a single record from a permissioned space. Spec-shaped mirror of com.atproto.space.getRecord (atproto#5187): callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). The record must belong to the requested space; records outside it - including records with no space at all - resolve to RecordNotFound (no existence leak).",
+      "description": "Get a single record from a permissioned space. This is a boundary-scoped read of a record this service holds. It is a Stratos method, not the upstream com.atproto.space.getRecord of a similar name, and a member's own PDS is never asked. It is callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). The record must belong to the requested space; records outside it - including records with no space at all - resolve to RecordNotFound (no existence leak).",
       "parameters": {
         "type": "params",
         "required": ["space", "repo", "collection", "rkey"],
@@ -3035,7 +3035,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "List the CIDs of blobs referenced by an account's records within a permissioned space, optionally since some revision of that repo. Spec-shaped mirror of com.atproto.space.listBlobs (atproto#5187): callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). Blobs behind permissioned records are never enumerated by an unauthenticated endpoint.",
+      "description": "List the CIDs of blobs referenced by an account's records within a permissioned space, optionally since some revision of that repo. This is a boundary-scoped read of blobs this service holds. It is a Stratos method, not the upstream com.atproto.space.listBlobs of a similar name. It is callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). Blobs behind permissioned records are never enumerated by an unauthenticated endpoint.",
       "parameters": {
         "type": "params",
         "required": ["space", "repo"],
@@ -3107,7 +3107,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "List the known repos that hold data in a space (the writer set), with each repo's current rev and resolved repo host. Spec-shaped mirror of com.atproto.space.listRepos (atproto#5187), extended with the `host` and `hostSource` fields upstream has no answer for: an authority-recorded override, or else the member's DID-document #atproto_pds endpoint. This is a membership oracle, not a member-facing read: callable with inter-service auth (a syncing service, admitted by its own enrolled boundaries) or with a space credential for that space, never with a plain user session.",
+      "description": "List the known repos that hold data in a space (the writer set), each with its DID and custody. A stratos-custody repo also carries its current rev, which this service stores. A pds-custody repo also carries a `host` and `hostSource` when its host can be resolved: an authority-recorded override, or else the member's DID-document #atproto_pds endpoint; both are omitted when neither is found. This is the membership oracle for a space, answered from this service's active enrollments in the space's boundary. It is a Stratos method, not the upstream com.atproto.space.listRepos of a similar name, and does not take or return what that method does. It is not a member-facing read: callable with inter-service auth (a syncing service, admitted by its own enrolled boundaries) or with a space credential for that space, never with a plain user session.",
       "parameters": {
         "type": "params",
         "required": ["space"],
@@ -3183,7 +3183,7 @@ export const stratosLexicons: LexiconDoc[] = [
         },
         "host": {
           "type": "string",
-          "description": "The Stratos convention's resolved repo host for this member, if resolvable. Absent when neither an override nor a DID-document PDS endpoint could be found."
+          "description": "The Stratos convention's resolved repo host for a pds-custody member, if resolvable. Absent for a stratos-custody member, and when neither an override nor a DID-document PDS endpoint could be found."
         },
         "hostSource": {
           "type": "string",
@@ -3319,7 +3319,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "Full-state recovery: enumerate a repo's record paths and their current CIDs, mirroring listRecords semantics. Record values are inlined by default; excludeValues returns metadata only. Boundary-gated: the caller only observes records within its enrolled boundaries. Intended as the fallback when the oplog (listRepoOps) returns OplogTruncated: the caller enumerates paths, diffs locally, and fetches misses. Callers must authenticate with a signed service JWT via the Authorization: Bearer header.",
+      "description": "Full-state recovery: enumerate the record paths and current CIDs of a repo this service holds, paged by collection and record key. Record values are inlined by default; excludeValues returns metadata only. Boundary-gated: the caller only observes records within its enrolled boundaries. Intended as the fallback when the oplog (listRepoOps) returns OplogTruncated: the caller enumerates paths, diffs locally, and fetches misses. Callers must authenticate with a signed service JWT via the Authorization: Bearer header.",
       "parameters": {
         "type": "params",
         "required": ["did"],
@@ -3415,7 +3415,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "Incremental pull sync of a repo's operation log (oplog), mirroring com.atproto.space.listRepoOps semantics. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: the caller only observes operations for records within its enrolled boundaries. The response reaches the head of the oplog when `cursor` is absent; the repo's current signed commit is then included (unless the repo has no commits yet), consistent with the operations returned. When a concurrent write is detected, a cursor is returned instead of the commit; that response can carry no operations and repeat the cursor you sent, so poll again while a cursor is present and do not read an unchanged cursor as a stall. A write that commits after the head probe is not detected; it falls outside this snapshot and arrives on a later poll. Callers must authenticate with a signed service JWT via the Authorization: Bearer header. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned (stricter than upstream, which silently restarts) so the caller falls back to full-state recovery (listRecordPaths).",
+      "description": "Incremental pull sync of the operation log (oplog) of a repo this service holds, for a syncing service such as a feed generator. It is a Stratos method, not the upstream com.atproto.space.listRepoOps of a similar name, and does not take or return what that method does. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: a service caller only observes operations for records within its enrolled boundaries, and a space credential only those within its space's boundary. The response reaches the head of the oplog when `cursor` is absent; the repo's current signed commit is then included (unless the repo has no commits yet), consistent with the operations returned. When a concurrent write is detected, a cursor is returned instead of the commit; that response can carry no operations and repeat the cursor you sent, so poll again while a cursor is present and do not read an unchanged cursor as a stall. A write that commits after the head probe is not detected; it falls outside this snapshot and arrives on a later poll. Callers authenticate with a signed service JWT via the Authorization: Bearer header, or with a space credential; a plain user session is not admitted. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned rather than a silent restart, so the caller falls back to full-state recovery (listRecordPaths).",
       "parameters": {
         "type": "params",
         "required": ["did"],

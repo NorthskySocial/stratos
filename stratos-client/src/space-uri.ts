@@ -13,6 +13,9 @@
  */
 
 const SPACE_URI_PREFIX = 'at:space/'
+const CUSTODY_URI_PREFIX = 'at://'
+const CUSTODY_PART_COUNT = 3
+const NOT_A_RECORD_ADDRESS = 'not a record address'
 const SPACE_PART_COUNT = 3
 const RECORD_PART_COUNT = 6
 
@@ -36,6 +39,25 @@ export interface SpaceRecordUriParts extends SpaceUriParts {
   collection: string
   rkey: string
 }
+
+export interface SpaceRecordAddress {
+  kind: 'space'
+  authority: string
+  spaceType: string
+  skey: string
+  author: string
+  collection: string
+  rkey: string
+}
+
+export interface CustodyRecordAddress {
+  kind: 'custody'
+  author: string
+  collection: string
+  rkey: string
+}
+
+export type RecordAddress = SpaceRecordAddress | CustodyRecordAddress
 
 export type SpaceUriParseResult<T> =
   | { ok: true; value: T }
@@ -130,6 +152,42 @@ export const parseSpaceRecordUri = (
     ok: true,
     value: { spaceDid, spaceType, skey, authorDid, collection, rkey },
   }
+}
+
+const parseCustodyRecordUri = (
+  uri: string,
+): SpaceUriParseResult<CustodyRecordAddress> => {
+  const parts = uri.slice(CUSTODY_URI_PREFIX.length).split('/')
+  if (parts.length !== CUSTODY_PART_COUNT) return refuse(NOT_A_RECORD_ADDRESS)
+  const [author, collection, rkey] = parts
+  if (!isUriDid(author) || !isNsid(collection) || !isRecordKey(rkey)) {
+    return refuse(NOT_A_RECORD_ADDRESS)
+  }
+  return { ok: true, value: { kind: 'custody', author, collection, rkey } }
+}
+
+/**
+ * Classifies a record address: a space record URI, or the three-part
+ * `at://{did}/{collection}/{rkey}` URI of a record in a Stratos-custody repo.
+ * Anything else, including a handle authority, a query, a fragment or a
+ * space URI, is refused with one plain reason. Nothing is decoded, trimmed or
+ * case-folded. Never throws.
+ */
+export const parseRecordAddress = (
+  uri: string,
+): SpaceUriParseResult<RecordAddress> => {
+  if (typeof uri !== 'string') return refuse(NOT_A_RECORD_ADDRESS)
+  if (uri.startsWith(SPACE_URI_PREFIX)) {
+    const record = parseSpaceRecordUri(uri)
+    if (!record.ok) return refuse(NOT_A_RECORD_ADDRESS)
+    const { spaceDid, authorDid, ...rest } = record.value
+    return {
+      ok: true,
+      value: { kind: 'space', authority: spaceDid, author: authorDid, ...rest },
+    }
+  }
+  if (uri.startsWith(CUSTODY_URI_PREFIX)) return parseCustodyRecordUri(uri)
+  return refuse(NOT_A_RECORD_ADDRESS)
 }
 
 /**

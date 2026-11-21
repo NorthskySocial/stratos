@@ -53,9 +53,13 @@ export {
 } from './attestation.js'
 export {
   boundaryToSpaceUri,
+  parseRecordAddress,
   parseSpaceRecordUri,
   parseSpaceUri,
   type BoundarySpaceUriResult,
+  type CustodyRecordAddress,
+  type RecordAddress,
+  type SpaceRecordAddress,
   type SpaceRecordUriParts,
   type SpaceUriParseResult,
   type SpaceUriParts,

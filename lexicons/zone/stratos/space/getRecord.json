@@ -4,7 +4,7 @@
   "defs": {
     "main": {
       "type": "query",
-      "description": "Get a single record from a permissioned space. Spec-shaped mirror of com.atproto.space.getRecord (atproto#5187): callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). The record must belong to the requested space; records outside it - including records with no space at all - resolve to RecordNotFound (no existence leak).",
+      "description": "Get a single record from a permissioned space. This is a boundary-scoped read of a record this service holds. It is a Stratos method, not the upstream com.atproto.space.getRecord of a similar name, and a member's own PDS is never asked. It is callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). The record must belong to the requested space; records outside it - including records with no space at all - resolve to RecordNotFound (no existence leak).",
       "parameters": {
         "type": "params",
         "required": ["space", "repo", "collection", "rkey"],

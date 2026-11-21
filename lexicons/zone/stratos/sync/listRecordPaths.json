@@ -4,7 +4,7 @@
   "defs": {
     "main": {
       "type": "query",
-      "description": "Full-state recovery: enumerate a repo's record paths and their current CIDs, mirroring listRecords semantics. Record values are inlined by default; excludeValues returns metadata only. Boundary-gated: the caller only observes records within its enrolled boundaries. Intended as the fallback when the oplog (listRepoOps) returns OplogTruncated: the caller enumerates paths, diffs locally, and fetches misses. Callers must authenticate with a signed service JWT via the Authorization: Bearer header.",
+      "description": "Full-state recovery: enumerate the record paths and current CIDs of a repo this service holds, paged by collection and record key. Record values are inlined by default; excludeValues returns metadata only. Boundary-gated: the caller only observes records within its enrolled boundaries. Intended as the fallback when the oplog (listRepoOps) returns OplogTruncated: the caller enumerates paths, diffs locally, and fetches misses. Callers must authenticate with a signed service JWT via the Authorization: Bearer header.",
       "parameters": {
         "type": "params",
         "required": ["did"],

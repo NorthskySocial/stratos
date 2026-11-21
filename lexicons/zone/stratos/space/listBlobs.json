@@ -4,7 +4,7 @@
   "defs": {
     "main": {
       "type": "query",
-      "description": "List the CIDs of blobs referenced by an account's records within a permissioned space, optionally since some revision of that repo. Spec-shaped mirror of com.atproto.space.listBlobs (atproto#5187): callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). Blobs behind permissioned records are never enumerated by an unauthenticated endpoint.",
+      "description": "List the CIDs of blobs referenced by an account's records within a permissioned space, optionally since some revision of that repo. This is a boundary-scoped read of blobs this service holds. It is a Stratos method, not the upstream com.atproto.space.listBlobs of a similar name. It is callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). Blobs behind permissioned records are never enumerated by an unauthenticated endpoint.",
       "parameters": {
         "type": "params",
         "required": ["space", "repo"],
