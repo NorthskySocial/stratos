@@ -9,12 +9,19 @@ impl EncryptedStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StoreError::Open)?;
-        let deleted = transaction.execute("DELETE FROM post WHERE uri IN (SELECT uri FROM post WHERE retained_at <= ?1 ORDER BY retained_at ASC, uri ASC LIMIT ?2)", params![as_of, i64::from(limit.clamp(1, MAX_PURGE_BATCH))]).map_err(StoreError::Open)?;
+        let limit = i64::from(limit.clamp(1, MAX_PURGE_BATCH));
+        let deleted_posts = transaction.execute("DELETE FROM post WHERE uri IN (SELECT uri FROM post WHERE retained_at <= ?1 ORDER BY retained_at ASC, uri ASC LIMIT ?2)", params![as_of, limit]).map_err(StoreError::Open)?;
+        let deleted_interactions = interactions::delete_expired_interactions(
+            &transaction,
+            as_of,
+            limit.saturating_sub(deleted_posts as i64),
+        )?;
         transaction.commit().map_err(StoreError::Open)?;
-        Ok(deleted as u64)
+        Ok((deleted_posts + deleted_interactions) as u64)
     }
 
-    /// Deletes expired or oldest posts in short transactions until the configured cap is met.
+    /// Deletes expired posts and interactions, then orphan interactions, then the
+    /// oldest posts, in short transactions until the configured cap is met.
     pub fn compact_projection(
         &mut self,
         as_of: &str,
@@ -140,47 +147,44 @@ impl EncryptedStore {
                     .map_err(StoreError::Open)?;
             }
         }
-        let expired = transaction
+        let expired_posts = transaction
             .execute(
                 "DELETE FROM post WHERE uri IN (SELECT uri FROM post WHERE retained_at <= ?1 OR retained_at > ?2 ORDER BY retained_at ASC, uri ASC LIMIT ?3)",
                 params![as_of, maximum_retained_at, limit],
             )
             .map_err(StoreError::Open)?;
+        let expired_interactions = interactions::delete_interactions_outside_retention(
+            &transaction,
+            as_of,
+            maximum_retained_at,
+            limit.saturating_sub(expired_posts as i64),
+        )?;
+        let expired = expired_posts + expired_interactions;
         let deleted = if expired != 0 {
             expired
+        } else if interactions::published_bytes(&transaction)? <= published_capacity {
+            0
         } else {
-            let published_bytes: i64 = transaction
-                .query_row(
-                    "SELECT COALESCE(SUM(projection_bytes), 0) FROM post",
-                    [],
-                    |row| row.get(0),
-                )
-                .map_err(StoreError::Open)?;
-            if published_bytes <= published_capacity {
-                0
-            } else {
-                transaction
+            // Orphans can never be counted, so they go before any readable post.
+            match interactions::evict_orphan_interactions(&transaction, limit)? {
+                0 => transaction
                     .execute(
                         "DELETE FROM post WHERE uri IN (SELECT uri FROM post ORDER BY sort_at ASC, uri ASC LIMIT ?1)",
                         [limit],
                     )
-                    .map_err(StoreError::Open)?
+                    .map_err(StoreError::Open)?,
+                evicted => evicted,
             }
         };
         let expired_remaining: bool = transaction
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM post WHERE retained_at <= ?1 OR retained_at > ?2)",
+                "SELECT EXISTS(SELECT 1 FROM post WHERE retained_at <= ?1 OR retained_at > ?2)
+                     OR EXISTS(SELECT 1 FROM interaction WHERE retained_at <= ?1 OR retained_at > ?2)",
                 params![as_of, maximum_retained_at],
                 |row| row.get(0),
             )
             .map_err(StoreError::Open)?;
-        let published_bytes: i64 = transaction
-            .query_row(
-                "SELECT COALESCE(SUM(projection_bytes), 0) FROM post",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(StoreError::Open)?;
+        let published_bytes = interactions::published_bytes(&transaction)?;
         transaction.commit().map_err(StoreError::Open)?;
         if !expired_targets.is_empty() {
             eprintln!(
@@ -240,6 +244,7 @@ impl EncryptedStore {
         let deleted = transaction
             .execute("DELETE FROM post WHERE NOT EXISTS (SELECT 1 FROM post_boundary WHERE post_boundary.uri = post.uri)", [])
             .map_err(StoreError::Open)?;
+        interactions::delete_boundary_interactions(&transaction, boundary)?;
         transaction.commit().map_err(StoreError::Open)?;
         Ok(deleted as u64)
     }

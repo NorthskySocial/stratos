@@ -1,0 +1,268 @@
+{
+  "referenceCommit": "98ef3a6b9",
+  "referenceNamespace": "com.atproto.space",
+  "writesLengthLimit": {
+    "declaredInReferenceLexicon": false,
+    "referenceImplementation": {
+      "limit": 200,
+      "file": "packages/pds/src/api/com/atproto/space/applyWrites.ts",
+      "constantLine": 19,
+      "checkLines": "69-70"
+    }
+  },
+  "procedures": {
+    "createRecord": {
+      "input": {
+        "required": ["space", "repo", "collection", "record"],
+        "properties": {
+          "space": {
+            "type": "string",
+            "format": "space-ref"
+          },
+          "repo": {
+            "type": "string",
+            "format": "did"
+          },
+          "collection": {
+            "type": "string",
+            "format": "nsid"
+          },
+          "rkey": {
+            "type": "string",
+            "format": "record-key",
+            "maxLength": 512
+          },
+          "validate": {
+            "type": "boolean"
+          },
+          "record": {
+            "type": "unknown"
+          }
+        }
+      },
+      "output": {
+        "required": ["uri", "cid"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "format": "at-uri"
+          },
+          "cid": {
+            "type": "string",
+            "format": "cid"
+          },
+          "validationStatus": {
+            "type": "string",
+            "knownValues": ["valid", "unknown"]
+          }
+        }
+      },
+      "errors": ["SpaceNotFound", "RecordAlreadyExists"],
+      "defs": {}
+    },
+    "putRecord": {
+      "input": {
+        "required": ["space", "repo", "collection", "rkey", "record"],
+        "properties": {
+          "space": {
+            "type": "string",
+            "format": "space-ref"
+          },
+          "repo": {
+            "type": "string",
+            "format": "did"
+          },
+          "collection": {
+            "type": "string",
+            "format": "nsid"
+          },
+          "rkey": {
+            "type": "string",
+            "format": "record-key",
+            "maxLength": 512
+          },
+          "validate": {
+            "type": "boolean"
+          },
+          "record": {
+            "type": "unknown"
+          }
+        }
+      },
+      "output": {
+        "required": ["uri", "cid"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "format": "at-uri"
+          },
+          "cid": {
+            "type": "string",
+            "format": "cid"
+          },
+          "validationStatus": {
+            "type": "string",
+            "knownValues": ["valid", "unknown"]
+          }
+        }
+      },
+      "errors": ["SpaceNotFound"],
+      "defs": {}
+    },
+    "deleteRecord": {
+      "input": {
+        "required": ["space", "repo", "collection", "rkey"],
+        "properties": {
+          "space": {
+            "type": "string",
+            "format": "space-ref"
+          },
+          "repo": {
+            "type": "string",
+            "format": "did"
+          },
+          "collection": {
+            "type": "string",
+            "format": "nsid"
+          },
+          "rkey": {
+            "type": "string",
+            "format": "record-key"
+          }
+        }
+      },
+      "output": {
+        "required": [],
+        "properties": {}
+      },
+      "errors": ["SpaceNotFound"],
+      "defs": {}
+    },
+    "applyWrites": {
+      "input": {
+        "required": ["space", "repo", "writes"],
+        "properties": {
+          "space": {
+            "type": "string",
+            "format": "space-ref"
+          },
+          "repo": {
+            "type": "string",
+            "format": "did"
+          },
+          "validate": {
+            "type": "boolean"
+          },
+          "writes": {
+            "type": "array",
+            "items": {
+              "type": "union",
+              "refs": ["#create", "#update", "#delete"],
+              "closed": true
+            }
+          }
+        }
+      },
+      "output": {
+        "required": [],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "union",
+              "refs": ["#createResult", "#updateResult", "#deleteResult"],
+              "closed": true
+            }
+          }
+        }
+      },
+      "errors": ["SpaceNotFound", "RecordNotFound", "RecordAlreadyExists"],
+      "defs": {
+        "create": {
+          "required": ["collection", "value"],
+          "properties": {
+            "collection": {
+              "type": "string",
+              "format": "nsid"
+            },
+            "rkey": {
+              "type": "string",
+              "format": "record-key",
+              "maxLength": 512
+            },
+            "value": {
+              "type": "unknown"
+            }
+          }
+        },
+        "update": {
+          "required": ["collection", "rkey", "value"],
+          "properties": {
+            "collection": {
+              "type": "string",
+              "format": "nsid"
+            },
+            "rkey": {
+              "type": "string",
+              "format": "record-key"
+            },
+            "value": {
+              "type": "unknown"
+            }
+          }
+        },
+        "delete": {
+          "required": ["collection", "rkey"],
+          "properties": {
+            "collection": {
+              "type": "string",
+              "format": "nsid"
+            },
+            "rkey": {
+              "type": "string",
+              "format": "record-key"
+            }
+          }
+        },
+        "createResult": {
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri"
+            },
+            "cid": {
+              "type": "string",
+              "format": "cid"
+            },
+            "validationStatus": {
+              "type": "string",
+              "knownValues": ["valid", "unknown"]
+            }
+          }
+        },
+        "updateResult": {
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri"
+            },
+            "cid": {
+              "type": "string",
+              "format": "cid"
+            },
+            "validationStatus": {
+              "type": "string",
+              "knownValues": ["valid", "unknown"]
+            }
+          }
+        },
+        "deleteResult": {
+          "required": [],
+          "properties": {}
+        }
+      }
+    }
+  }
+}

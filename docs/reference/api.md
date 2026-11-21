@@ -48,6 +48,10 @@ These serve `stratos` custody. Stratos hosts the repo.
 | `com.atproto.repo.createRecord`    | procedure | DPoP                               |
 | `com.atproto.repo.deleteRecord`    | procedure | DPoP                               |
 | `com.atproto.repo.applyWrites`     | procedure | DPoP                               |
+| `zone.stratos.repo.createRecord`   | procedure | DPoP                               |
+| `zone.stratos.repo.putRecord`      | procedure | DPoP                               |
+| `zone.stratos.repo.deleteRecord`   | procedure | DPoP                               |
+| `zone.stratos.repo.applyWrites`    | procedure | DPoP                               |
 | `com.atproto.repo.uploadBlob`      | procedure | DPoP                               |
 | `zone.stratos.repo.uploadBlob`     | procedure | DPoP                               |
 | `com.atproto.repo.getRecord`       | query     | Optional DPoP                      |
@@ -95,7 +99,7 @@ These serve `stratos` custody. Stratos hosts the repo.
 
 | Method                         | Note                                                                                 |
 | ------------------------------ | ------------------------------------------------------------------------------------ |
-| `com.atproto.repo.putRecord`   | Use an `update` action in `applyWrites`.                                             |
+| `com.atproto.repo.putRecord`   | Use `zone.stratos.repo.putRecord`, or an `update` action in `applyWrites`.           |
 | `com.atproto.sync.getRecord`   | Removed. Stratos serves no single-record proof.                                      |
 | `zone.stratos.repo.importRepo` | A lexicon exists. No handler is registered.                                          |
 | `zone.stratos.feedgen.*`       | Served by the feed generator. See [Private Feed Attachments](/client/feedgen-blobs). |
@@ -170,6 +174,131 @@ Content-Type: application/json
 
 Each write is `{ action, collection, rkey, record }`. This is not the
 upstream `$type` and `value` shape.
+
+### Boundary Records
+
+The `zone.stratos.repo` procedures write into one boundary. The boundary is a
+parameter, in the form `{serviceDid}/{domainName}`, and the record body does not
+need to carry it. They serve `stratos` custody. They allow three collections:
+`zone.stratos.feed.post`, `app.bsky.feed.like` and `app.bsky.feed.repost`.
+`repo` must be the caller's DID. A `pds`-custody user gets
+`PdsCustodyWriteForbidden`.
+
+```http
+POST /xrpc/zone.stratos.repo.createRecord
+Authorization: DPoP <access_token>
+DPoP: <proof>
+Content-Type: application/json
+
+{
+  "boundary": "did:web:stratos.example.com/general",
+  "repo": "<user-did>",
+  "collection": "zone.stratos.feed.post",
+  "record": { "$type": "zone.stratos.feed.post", ... }
+}
+```
+
+| Procedure                        | Input                                                                   | Output                             |
+| -------------------------------- | ----------------------------------------------------------------------- | ---------------------------------- |
+| `zone.stratos.repo.createRecord` | `boundary`, `repo`, `collection`, `record`; optional `rkey`, `validate` | `uri`, `cid`, `validationStatus`   |
+| `zone.stratos.repo.putRecord`    | `boundary`, `repo`, `collection`, `rkey`, `record`; optional `validate` | `uri`, `cid`, `validationStatus`   |
+| `zone.stratos.repo.deleteRecord` | `boundary`, `repo`, `collection`, `rkey`                                | `{}`                               |
+| `zone.stratos.repo.applyWrites`  | `boundary`, `repo`, `writes` (1 to 200); optional `validate`            | `results`, one per write, in order |
+
+- `createRecord` fails with `RecordAlreadyExists` when the key is taken.
+- `putRecord` creates the record or replaces it. It never overwrites a record
+  in another boundary or a record that was taken down.
+- `deleteRecord` succeeds when the record is missing or is in another
+  boundary.
+- `applyWrites` is one commit. Each write has a `$type` of
+  `zone.stratos.repo.applyWrites#create`, `#update` or `#delete`, and
+  `collection`, `rkey` and `value`. A `create` may leave out `rkey`. A `delete`
+  has no `value`. Each result has the type `#createResult`, `#updateResult` or
+  `#deleteResult`.
+
+The errors are listed under
+[Writing into a boundary](/reference/errors#writing-into-a-boundary). The client library wraps all
+four procedures in `createBoundaryRecord`, `putBoundaryRecord`,
+`deleteBoundaryRecord` and `applyBoundaryWrites`. These helpers also route
+`pds` custody to the PDS. Their target resolver, `resolveRepositoryTarget`,
+accepts only https origins. A service on a local `http` address needs a
+`resolveTarget` of your own.
+
+#### When `ScopeUpgradeRequired` is returned
+
+Stratos returns `ScopeUpgradeRequired` for a like or repost, when the member's
+stored OAuth grant has a space grant for this service that does not allow
+creating that collection. The client starts OAuth authorization for the member
+again, then repeats the write. Stratos does not return it when the member has
+no stored session, when the stored scope has no space grant for this service,
+or when the scope cannot be read. Posts are not checked.
+
+#### Likes and reposts
+
+[Creating Records](/client/creating-records#likes-and-reposts) has the rules.
+The `subject` must be a post in the same boundary. A member has one like or
+repost per post. Any wrong subject, including one that is not a `{ uri, cid }`
+reference, returns `InvalidRecord` with the message
+`The subject must be a post in this boundary`, whatever the `validate` value.
+For a post by a member who hosts their own repo, Stratos does not hold the
+record. It checks neither that the record exists nor its CID. `subject.cid`
+must still be a valid CID. Stratos checks that the author is an
+active member of the boundary who hosts their own repo, and that the URI is
+well formed for that boundary.
+
+#### Differences from the upstream procedures
+
+The procedures follow `com.atproto.space.createRecord`, `putRecord`,
+`deleteRecord` and `applyWrites`, with `boundary` in place of `space`. These
+differences are on purpose.
+
+- `$type` is required, and must equal the collection. Upstream fills in a
+  missing `$type`.
+- Stratos does not require `tid` keys and has no slur check. It checks the
+  record-key syntax only.
+- A record that breaks a rule is `InvalidRecord`. Upstream answers
+  `InvalidRequest`. The message text is not the same.
+- The body limit is 1,000,000 bytes per request. There is no cap per record.
+  Upstream has a size cap for a space.
+- `applyWrites` takes 1 to 200 writes. The upstream lexicon declares no limit.
+  The reference PDS enforces 200. A batch that names the same record twice is
+  refused. When several writes fail validation, the error returned is that of
+  the first failing write, in order. The collection, duplicate-key and grant checks run for the whole batch first, then the checks on each record's `boundary` claim and `$type`, and only then the lexicon and subject checks.
+- `deleteRecord` of a record that is missing, or that is in another boundary,
+  succeeds with `{}`. It writes no commit and sends no event.
+- A boundary the caller does not hold returns `ForbiddenBoundary`, whether or
+  not it exists. `BoundaryNotFound` is returned only for a boundary the caller
+  holds that is absent or inactive in the catalog. `putRecord`
+  returns `RecordAlreadyExists` when the key holds a record in another boundary
+  or a record that was taken down.
+- A subject may be a space URI where the lexicon says `at-uri`. Stratos parses
+  it itself.
+- A subject URI must be canonical. A repo URI has a DID authority and equals
+  its re-parsed form. A space URI equals the URI rebuilt from its parts. Any
+  other spelling is refused.
+- A member has one like or repost per post. A like that was taken down
+  still blocks a second one. Upstream does not limit this.
+- `ScopeUpgradeRequired` exists only on Stratos.
+- `via` on a repost is not resolved and not indexed. When `validate` is not
+  `false`, its shape is checked.
+- A `boundary` claim in the record body must be `{ values: [{ value }] }` with
+  one entry, whose `value` is the request's boundary. It may carry a `$type` of
+  `zone.stratos.boundary.defs#Domains`. An entry with its own `$type` is a
+  `BoundaryMismatch`.
+
+#### Feed view fields
+
+`zone.stratos.feedgen.getFeed` returns `likeCount` and `repostCount` on each
+post, the number of members who like or repost it in the feed's boundary. It
+returns `viewer` with `like` and `repost`, the URIs of the viewer's own
+records. A key is absent when the viewer has no such record.
+
+#### Deploy order
+
+Deploy the Rust feed generator before any client calls these procedures. It
+reads the boundary of each write from the sync stream and serves the fields
+above. After clients use the procedures, do not roll back to the TypeScript
+feed generator.
 
 ### Get Record
 

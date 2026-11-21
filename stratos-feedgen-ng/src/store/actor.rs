@@ -83,6 +83,7 @@ pub(super) fn unenroll_actor(
     let removed_posts = transaction
         .execute("DELETE FROM post WHERE author_did = ?1", [did])
         .map_err(StoreError::Open)? as u64;
+    super::interactions::delete_actor_interactions(transaction, did)?;
     transaction
         .execute("DELETE FROM actor_cursor WHERE did = ?1", [did])
         .map_err(StoreError::Open)?;
@@ -184,6 +185,12 @@ impl EncryptedStore {
             transaction
                 .execute("DELETE FROM post WHERE uri = ?1", [uri])
                 .map_err(StoreError::Open)?;
+        }
+        for interaction in &page.interactions.upserts {
+            super::interactions::upsert_interaction(&transaction, interaction)?;
+        }
+        for uri in &page.interactions.deletes {
+            super::interactions::delete_interaction(&transaction, uri)?;
         }
         transaction
             .execute(
@@ -366,6 +373,11 @@ impl EncryptedStore {
                             params![boundary, did],
                         )
                         .map_err(StoreError::Open)?;
+                    super::interactions::delete_actor_boundary_interactions(
+                        &transaction,
+                        did,
+                        boundary,
+                    )?;
                     transaction
                         .execute(
                             "DELETE FROM source_coverage WHERE source_id = ?1 AND boundary = ?2",

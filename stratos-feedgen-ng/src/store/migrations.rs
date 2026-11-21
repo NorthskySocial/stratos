@@ -259,6 +259,32 @@ const MIGRATIONS: &[Migration] = &[
         CREATE INDEX label_subject_author_idx ON label_subject(authority_did, author_did, state);
     "#,
     },
+    Migration {
+        version: 9,
+        sql: r#"
+        CREATE TABLE interaction (
+          uri TEXT PRIMARY KEY,
+          actor_did TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('like', 'repost')),
+          subject_uri TEXT NOT NULL,
+          boundary TEXT NOT NULL,
+          indexed_at TEXT NOT NULL,
+          retained_at TEXT NOT NULL,
+          projection_bytes INTEGER NOT NULL CHECK (projection_bytes >= 0)
+        ) WITHOUT ROWID;
+        CREATE INDEX interaction_count_idx
+          ON interaction(boundary, subject_uri, kind, actor_did);
+        CREATE INDEX interaction_actor_idx ON interaction(actor_did, boundary);
+        CREATE INDEX interaction_subject_idx ON interaction(subject_uri);
+        CREATE INDEX interaction_retained_idx ON interaction(retained_at);
+        -- Every removal of a post, whichever path takes it, removes its
+        -- interactions in the same transaction; no deletion site can forget.
+        CREATE TRIGGER interaction_after_post_delete AFTER DELETE ON post
+        BEGIN
+          DELETE FROM interaction WHERE subject_uri = OLD.uri;
+        END;
+    "#,
+    },
 ];
 
 pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
@@ -298,13 +324,13 @@ mod tests {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
         let migration_count: u32 = connection
             .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(migration_count, 8);
+        assert_eq!(migration_count, 9);
         let post_boundary_sql: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_boundary'",
@@ -484,7 +510,7 @@ mod tests {
     #[test]
     fn rejects_a_database_from_a_newer_store_format() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection.pragma_update(None, "user_version", 9).unwrap();
+        connection.pragma_update(None, "user_version", 10).unwrap();
 
         assert!(apply(&mut connection).is_err());
     }

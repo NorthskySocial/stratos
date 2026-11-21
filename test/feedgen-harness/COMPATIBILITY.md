@@ -78,6 +78,24 @@ not provide SQLCipher at-rest encryption. A Rust projection must use independent
 encrypted state and must never share a writer or database with the TypeScript
 projection.
 
+The Rust Feedgen takes a Stratos-custody post's boundary from the operation
+`boundary` the authority sets, and uses the record body only for operations
+recorded before the authority set it. When an operation carries a boundary the
+body boundary is not read. The result is still limited to the boundaries the
+actor currently holds.
+
+The Rust Feedgen counts likes and reposts of the posts it serves. Every post
+in a feed response carries `likeCount`, `repostCount` and `viewer`. The counts
+are 0 when nothing counts, and `viewer` is `{}` when the viewer has neither
+liked nor reposted the post. `viewer.like` and `viewer.repost` hold the URIs of
+the viewer's own records and nothing else. A like or repost counts only when
+its boundary is the feed's boundary and its subject is exactly the post's URI.
+One actor counts once per post, however many likes it made. An expired like or
+repost does not count. A like or repost can arrive before its post and counts
+once the post arrives. A like or repost never makes a post visible to a viewer
+who cannot already read it, and the response never names another actor or
+another actor's record URI.
+
 ## Moderation labels
 
 The Rust Feedgen applies Stratos moderation labels. It polls the authority's
@@ -117,3 +135,12 @@ durable path.
 
 The deprecated TypeScript Feedgen does not apply labels. It never reads the
 label log, so a takedown has no effect on what it serves.
+
+The deprecated TypeScript Feedgen reads only the record body's boundary for a
+Stratos-custody post and ignores the operation `boundary`. A post written
+without a body boundary does not appear after a rollback to it.
+
+The deprecated TypeScript Feedgen has no likes or reposts. It emits none of
+`likeCount`, `repostCount` and `viewer`. Its copy of the `getFeed` lexicon
+lists these three fields as optional so that it stays identical to the
+lexicon, but it never emits them.

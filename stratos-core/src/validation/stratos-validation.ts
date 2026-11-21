@@ -1,12 +1,16 @@
-import { AtUri } from '@atproto/syntax'
 import { Lexicons } from '@atproto/lexicon'
 import { parseCid } from '../atproto'
 import { stratosLexicons } from '../lexicons'
-import { parseRecordUri } from '../spaces/domain.js'
 import { StratosConfig, StratosValidationError } from '../types.js'
-import { PostValidator } from './post-validator.js'
-import { EnrollmentRecordValidator } from './enrollment-record-validator.js'
-import type { RecordValidator, RepoRecord } from './base.js'
+import {
+  POST_COLLECTION,
+  assertNoCrossNamespaceEmbed,
+  isBskyUri,
+  isStratosUri,
+} from './post-rules.js'
+import { buildRecordRules, findRecordRule } from './registry.js'
+import type { RecordRule, RecordRuleInput } from './registry.js'
+import type { RepoRecord } from './base.js'
 
 export type StratosValidationErrorCode =
   | 'ForbiddenDomain'
@@ -14,21 +18,17 @@ export type StratosValidationErrorCode =
   | 'CrossNamespaceReply'
   | 'ReplyBoundaryEscalation'
   | 'CrossNamespaceEmbed'
+  | 'InvalidSubject'
 
 /**
  * Validates stratos records for domain boundaries and cross-namespace isolation.
  */
 export class StratosValidator {
   private static lexicons = new Lexicons(stratosLexicons)
-  private validators: Map<string, RecordValidator>
+  private rules: ReadonlyMap<string, RecordRule>
 
   constructor(private config: StratosConfig) {
-    this.validators = new Map()
-    const postValidator = new PostValidator(config)
-    this.validators.set(postValidator.collection, postValidator)
-
-    const enrollmentValidator = new EnrollmentRecordValidator(config)
-    this.validators.set(enrollmentValidator.collection, enrollmentValidator)
+    this.rules = buildRecordRules(config)
   }
 
   /**
@@ -49,12 +49,7 @@ export class StratosValidator {
 
     // Check embeds in posts
     if (collection === 'app.bsky.feed.post') {
-      const validator = new StratosValidator({
-        serviceDid: '',
-        allowedDomains: [],
-        retentionDays: 0,
-      })
-      validator.assertNoCrossNamespaceEmbed(record.embed, 'bsky')
+      assertNoCrossNamespaceEmbed(record.embed, 'bsky')
     }
   }
 
@@ -65,16 +60,7 @@ export class StratosValidator {
    * @returns true if the URI references a stratos collection, false otherwise
    */
   static isStratosUri(uri: string): boolean {
-    const spaceRecord = parseRecordUri(uri)
-    if (spaceRecord.ok) {
-      return spaceRecord.value.collection.startsWith('zone.stratos.')
-    }
-    try {
-      const parsed = new AtUri(uri)
-      return parsed.collection.startsWith('zone.stratos.')
-    } catch {
-      return false
-    }
+    return isStratosUri(uri)
   }
 
   /**
@@ -84,12 +70,7 @@ export class StratosValidator {
    * @returns true if the URI references a bsky collection, false otherwise
    */
   static isBskyUri(uri: string): boolean {
-    try {
-      const parsed = new AtUri(uri)
-      return parsed.collection.startsWith('app.bsky.')
-    } catch {
-      return false
-    }
+    return isBskyUri(uri)
   }
 
   /**
@@ -197,7 +178,7 @@ export class StratosValidator {
   }
 
   /**
-   * Validates a record against service configuration and optional parent boundaries.
+   * Validates a record whose boundary claim is the one in its own body.
    *
    * @param record - The record to validate
    * @param collection - The collection the record belongs to
@@ -209,6 +190,27 @@ export class StratosValidator {
     record: RepoRecord,
     collection: string,
     parentBoundaries?: string[],
+  ): void {
+    this.assertValidWithInput(record, collection, {
+      boundaryClaim: record.boundary,
+      parentBoundaries,
+    })
+  }
+
+  /**
+   * Validates a record against service configuration, judging its boundary by
+   * the claim in `input` instead of the claim in its body.
+   *
+   * @param record - The record to validate
+   * @param collection - The collection the record belongs to
+   * @param input - The boundary claim and the parent's boundaries
+   *
+   * @throws StratosValidationError if validation fails
+   */
+  assertValidWithInput(
+    record: RepoRecord,
+    collection: string,
+    input: RecordRuleInput,
   ): void {
     // 1. Lexicon validation
     if (StratosValidator.isStratosCollection(collection)) {
@@ -240,11 +242,11 @@ export class StratosValidator {
     }
 
     // 2. Business logic validation
-    const validator = this.validators.get(collection)
-    if (validator && collection !== 'zone.stratos.feed.post') {
-      validator.validate(record, parentBoundaries)
+    const rule = findRecordRule(this.rules, collection)
+    if (rule && collection !== POST_COLLECTION) {
+      rule.check(record, input)
     } else {
-      this.assertStratosValidation(record, collection, parentBoundaries)
+      this.assertStratosValidation(record, collection, input)
     }
   }
 
@@ -253,12 +255,12 @@ export class StratosValidator {
    *
    * @param record - The record to validate
    * @param collection - The collection the record belongs to
-   * @param parentBoundaries - The boundaries of the parent record, if this is a reply
+   * @param input - The boundary claim and the parent's boundaries
    */
   private assertStratosValidation(
     record: RepoRecord,
     collection: string,
-    parentBoundaries?: string[],
+    input: RecordRuleInput,
   ): void {
     // Only validate zone.stratos.* collections
     if (!StratosValidator.isStratosCollection(collection)) {
@@ -274,202 +276,8 @@ export class StratosValidator {
     }
 
     // Validate boundary for stratos posts
-    if (collection === 'zone.stratos.feed.post') {
-      this.assertStratosPostValidation(record, parentBoundaries)
-    }
-  }
-
-  /**
-   * Validates a stratos post record for domain boundaries and cross-namespace isolation.
-   *
-   * @param record - The stratos post record to validate
-   * @param parentBoundaries - The parent boundaries for the post
-   * @throws StratosValidationError if the post violates domain boundaries or cross-namespace isolation
-   */
-  private assertStratosPostValidation(
-    record: RepoRecord,
-    parentBoundaries?: string[],
-  ): void {
-    const rawBoundary = record.boundary as
-      | { $type?: string; values?: Array<{ value: string }> }
-      | undefined
-    const boundary = rawBoundary
-      ? {
-          $type: 'zone.stratos.boundary.defs#Domains',
-          ...rawBoundary,
-        }
-      : undefined
-
-    // 1. Check boundary property exists
-    this.assertBoundaryPresence(boundary)
-
-    // 2. Validate each domain in the boundary
-    this.validateBoundaryDomains(
-      boundary as { values: Array<{ value: string }> },
-    )
-
-    // 3. Validate cross-namespace isolation for replies
-    const reply = record.reply as
-      | {
-          parent?: { uri?: string }
-          root?: { uri?: string }
-        }
-      | undefined
-
-    if (reply) {
-      this.assertReplyIsolation(reply)
-
-      // 4. Reply boundaries must be a subset of the parent's boundaries
-      if (parentBoundaries) {
-        this.assertReplyBoundaryConsistency(
-          boundary as { values: Array<{ value: string }> },
-          parentBoundaries,
-        )
-      }
-    }
-
-    // 5. Validate cross-namespace isolation for embeds
-    this.assertNoCrossNamespaceEmbed(record.embed, 'stratos')
-  }
-
-  /**
-   * Ensures a boundary exists with at least one domain.
-   *
-   * @param boundary - The boundary to validate
-   * @throws StratosValidationError if the boundary is missing or empty
-   */
-  private assertBoundaryPresence(
-    boundary: { $type?: string; values?: Array<{ value: string }> } | undefined,
-  ): void {
-    if (!boundary?.values || boundary.values.length === 0) {
-      throw new StratosValidationError(
-        'must have a boundary',
-        'MissingBoundary',
-      )
-    }
-  }
-
-  /**
-   * Validates each domain in the boundary against service configuration.
-   *
-   * @param boundary - The boundary to validate
-   * @throws StratosValidationError if a domain is not allowed or does not belong to the service
-   */
-  private validateBoundaryDomains(boundary: {
-    values: Array<{ value: string }>
-  }): void {
-    for (const d of boundary.values) {
-      const domain = d.value
-      let bareDomain = domain
-      if (domain.startsWith('did:')) {
-        const prefix = `${this.config.serviceDid}/`
-        if (!domain.startsWith(prefix)) {
-          throw new StratosValidationError(
-            `Boundary '${domain}' does not belong to this service`,
-            'ForbiddenDomain',
-          )
-        }
-        bareDomain = domain.slice(prefix.length)
-      }
-
-      const isAllowed =
-        this.config.allowedDomains.includes(domain) ||
-        this.config.allowedDomains.includes(bareDomain)
-
-      if (!isAllowed) {
-        throw new StratosValidationError(
-          `Domain '${bareDomain}' is not allowed`,
-          'ForbiddenDomain',
-        )
-      }
-    }
-  }
-
-  /**
-   * Ensures that a reply only references other Stratos records.
-   *
-   * @param reply - The reply to validate
-   * @throws StratosValidationError if the reply references a non-stratos record
-   */
-  private assertReplyIsolation(reply: {
-    parent?: { uri?: string }
-    root?: { uri?: string }
-  }): void {
-    if (reply.parent?.uri && !StratosValidator.isStratosUri(reply.parent.uri)) {
-      throw new StratosValidationError(
-        'cannot reply to a non-stratos record',
-        'CrossNamespaceReply',
-      )
-    }
-    if (reply.root?.uri && !StratosValidator.isStratosUri(reply.root.uri)) {
-      throw new StratosValidationError(
-        'cannot have a non-stratos root',
-        'CrossNamespaceReply',
-      )
-    }
-  }
-
-  /**
-   * Ensures that reply boundaries are a subset of parent boundaries.
-   *
-   * @param boundary - The boundary to validate
-   * @param parentBoundaries - The parent boundaries
-   * @throws StratosValidationError if the reply boundaries are not a subset of the parent boundaries
-   */
-  private assertReplyBoundaryConsistency(
-    boundary: { values: Array<{ value: string }> },
-    parentBoundaries: string[],
-  ): void {
-    const replyDomains = boundary.values.map((d) => d.value)
-    const escalatedDomains = replyDomains.filter(
-      (domain) => !parentBoundaries.includes(domain),
-    )
-
-    if (escalatedDomains.length > 0) {
-      throw new StratosValidationError(
-        `Reply boundaries must be a subset of the parent's boundaries. Domains not in parent: ${escalatedDomains.join(', ')}`,
-        'ReplyBoundaryEscalation',
-      )
-    }
-  }
-
-  /**
-   * Validates that an embed doesn't cross namespace boundaries.
-   *
-   * @param embed - The embed to validate
-   * @param namespace - The namespace of the embed (stratos or bsky)
-   * @throws StratosValidationError if the embed references a record from a different namespace
-   */
-  private assertNoCrossNamespaceEmbed(
-    embed: unknown,
-    namespace: 'stratos' | 'bsky',
-  ): void {
-    if (!embed || typeof embed !== 'object') {
-      return
-    }
-
-    const isInvalidUri =
-      namespace === 'stratos'
-        ? StratosValidator.isBskyUri
-        : StratosValidator.isStratosUri
-    const errorMessage =
-      namespace === 'stratos'
-        ? 'cannot embed bsky content'
-        : 'cannot embed stratos content'
-
-    // Check direct record embeds
-    const recordEmbed = embed as {
-      record?: { uri?: string }
-      media?: unknown
-    }
-
-    if (recordEmbed.record?.uri && isInvalidUri(recordEmbed.record.uri)) {
-      throw new StratosValidationError(errorMessage, 'CrossNamespaceEmbed')
-    }
-
-    // Check record-with-media embeds
-    if (recordEmbed.media && typeof recordEmbed.media === 'object') {
-      this.assertNoCrossNamespaceEmbed(recordEmbed.media, namespace)
+    if (collection === POST_COLLECTION) {
+      findRecordRule(this.rules, collection)?.check(record, input)
     }
   }
 }

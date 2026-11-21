@@ -429,7 +429,7 @@
 
             <Feed posts={filteredPosts} {stratosAgent} {publicAgent} {serviceUrl} loading={loading}
                   failure={feedgenFailure} onretry={refreshFeed}
-                  currentDid={did} onreply={handleReply} ondelete={handleDelete}/>
+                  currentDid={did} {session} {enrollment} {attestationVerified} onreply={handleReply} ondelete={handleDelete}/>
         </main>
     </div>
 {/if}

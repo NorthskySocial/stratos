@@ -1,8 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, rm } from 'node:fs/promises'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { randomBytes } from 'crypto'
 import { CID } from '@atproto/lex-data'
+import { StratosActorStore } from '../src/context.js'
 import { BlobAuthServiceImpl } from '../src/features'
 import type { ActorStore } from '../src/actor-store-types.js'
 import type { BoundaryResolver } from '@northskysocial/stratos-core'
+import { createCid } from './helpers/test-env.js'
+import { createMockBlobStore } from './utils/index.js'
 
 describe('BlobAuthServiceImpl', () => {
   let mockActorStore: any
@@ -11,6 +18,50 @@ describe('BlobAuthServiceImpl', () => {
   const blobCid = CID.parse(
     'bafybeigdyrzt5scf7nqmbtcc3dbzbi7bc6mc4y7uxmrsgrmbglppvdb4ia',
   )
+
+  const sqliteCleanups: Array<() => Promise<void>> = []
+
+  async function openSqliteActorStore(): Promise<ActorStore> {
+    const dataDir = join(
+      tmpdir(),
+      `stratos-test-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(dataDir, { recursive: true })
+    sqliteCleanups.push(() => rm(dataDir, { recursive: true, force: true }))
+    const actorStore = new StratosActorStore({
+      dataDir,
+      blobstore: () => createMockBlobStore(),
+      cborToRecord: (content) => JSON.parse(new TextDecoder().decode(content)),
+    }) as unknown as ActorStore
+    await actorStore.create('did:plc:shinji')
+    return actorStore
+  }
+
+  async function seedRecordWithBlob(
+    actorStore: ActorStore,
+    uri: string,
+    boundary: string,
+    blob: CID,
+  ) {
+    const value = {
+      text: 'Unit-01 ready.',
+      boundary: {
+        $type: 'zone.stratos.boundary.defs#Domains',
+        values: [{ value: boundary }],
+      },
+    }
+    const content = new TextEncoder().encode(JSON.stringify(value))
+    const cid = await createCid(content)
+    await actorStore.transact('did:plc:shinji', async (store) => {
+      await store.record.putRecord({ uri, cid, value, content })
+      await store.blob.trackBlob({ cid: blob, mimeType: 'image/png', size: 1 })
+      await store.blob.associateBlobWithRecord(blob, uri)
+    })
+  }
+
+  afterEach(async () => {
+    for (const cleanup of sqliteCleanups.splice(0)) await cleanup()
+  })
 
   beforeEach(() => {
     mockActorStore = {
@@ -55,36 +106,19 @@ describe('BlobAuthServiceImpl', () => {
   })
 
   it('grants access if viewer shares a boundary with a record referencing the blob', async () => {
-    mockActorStore.exists.mockResolvedValue(true)
     mockBoundaryResolver.getBoundaries.mockResolvedValue([
       'did:web:nerv.tokyo.jp/pilots',
     ])
-
-    const recordUri = 'at://did:plc:shinji/zone.stratos.feed.post/123'
-    const mockRecord = {
-      uri: recordUri,
-      cid: 'cid-record',
-      value: {
-        text: 'Unit-01 ready.',
-        boundary: {
-          $type: 'zone.stratos.boundary.defs#Domains',
-          values: [{ value: 'did:web:nerv.tokyo.jp/pilots' }],
-        },
-      },
-    }
-
-    mockActorStore.read.mockImplementation(
-      async (did: string, fn: (store: any) => Promise<any>) => {
-        const mockStore = {
-          blob: {
-            getRecordsForBlob: vi.fn().mockResolvedValue([recordUri]),
-          },
-          record: {
-            getRecord: vi.fn().mockResolvedValue(mockRecord),
-          },
-        }
-        return fn(mockStore)
-      },
+    const actorStore = await openSqliteActorStore()
+    service = new BlobAuthServiceImpl(
+      actorStore,
+      mockBoundaryResolver as unknown as BoundaryResolver,
+    )
+    await seedRecordWithBlob(
+      actorStore,
+      'at://did:plc:shinji/zone.stratos.feed.post/123',
+      'did:web:nerv.tokyo.jp/pilots',
+      blobCid,
     )
 
     const result = await service.canAccessBlob(
@@ -96,36 +130,19 @@ describe('BlobAuthServiceImpl', () => {
   })
 
   it('denies access if viewer does not share any boundary with referencing records', async () => {
-    mockActorStore.exists.mockResolvedValue(true)
     mockBoundaryResolver.getBoundaries.mockResolvedValue([
       'did:web:nerv.tokyo.jp/others',
     ])
-
-    const recordUri = 'at://did:plc:shinji/zone.stratos.feed.post/123'
-    const mockRecord = {
-      uri: recordUri,
-      cid: 'cid-record',
-      value: {
-        text: 'Unit-01 ready.',
-        boundary: {
-          $type: 'zone.stratos.boundary.defs#Domains',
-          values: [{ value: 'did:web:nerv.tokyo.jp/pilots' }],
-        },
-      },
-    }
-
-    mockActorStore.read.mockImplementation(
-      async (did: string, fn: (store: any) => Promise<any>) => {
-        const mockStore = {
-          blob: {
-            getRecordsForBlob: vi.fn().mockResolvedValue([recordUri]),
-          },
-          record: {
-            getRecord: vi.fn().mockResolvedValue(mockRecord),
-          },
-        }
-        return fn(mockStore)
-      },
+    const actorStore = await openSqliteActorStore()
+    service = new BlobAuthServiceImpl(
+      actorStore,
+      mockBoundaryResolver as unknown as BoundaryResolver,
+    )
+    await seedRecordWithBlob(
+      actorStore,
+      'at://did:plc:shinji/zone.stratos.feed.post/123',
+      'did:web:nerv.tokyo.jp/pilots',
+      blobCid,
     )
 
     const result = await service.canAccessBlob(
@@ -190,43 +207,29 @@ describe('BlobAuthServiceImpl', () => {
   })
 
   it('skips null records when checking access', async () => {
-    mockActorStore.exists.mockResolvedValue(true)
     mockBoundaryResolver.getBoundaries.mockResolvedValue([
       'did:web:nerv.tokyo.jp/pilots',
     ])
-
+    const actorStore = await openSqliteActorStore()
+    service = new BlobAuthServiceImpl(
+      actorStore,
+      mockBoundaryResolver as unknown as BoundaryResolver,
+    )
     const missingUri = 'at://did:plc:shinji/zone.stratos.feed.post/missing'
     const presentUri = 'at://did:plc:shinji/zone.stratos.feed.post/present'
-    const presentRecord = {
-      uri: presentUri,
-      cid: 'cid-record',
-      value: {
-        text: 'Unit-01 ready.',
-        boundary: {
-          $type: 'zone.stratos.boundary.defs#Domains',
-          values: [{ value: 'did:web:nerv.tokyo.jp/pilots' }],
-        },
-      },
-    }
-
-    mockActorStore.read.mockImplementation(
-      async (did: string, fn: (store: any) => Promise<any>) => {
-        const mockStore = {
-          blob: {
-            getRecordsForBlob: vi
-              .fn()
-              .mockResolvedValue([missingUri, presentUri]),
-          },
-          record: {
-            getRecord: vi
-              .fn()
-              .mockImplementation(async (uri: string) =>
-                uri === presentUri ? presentRecord : null,
-              ),
-          },
-        }
-        return fn(mockStore)
-      },
+    await actorStore.transact('did:plc:shinji', async (store) => {
+      await store.blob.trackBlob({
+        cid: blobCid,
+        mimeType: 'image/png',
+        size: 1,
+      })
+      await store.blob.associateBlobWithRecord(blobCid, missingUri)
+    })
+    await seedRecordWithBlob(
+      actorStore,
+      presentUri,
+      'did:web:nerv.tokyo.jp/pilots',
+      blobCid,
     )
 
     const result = await service.canAccessBlob(
@@ -294,58 +297,25 @@ describe('BlobAuthServiceImpl', () => {
     })
 
     it('returns mixed results per blob based on access', async () => {
-      mockActorStore.exists.mockResolvedValue(true)
       mockBoundaryResolver.getBoundaries.mockResolvedValue([
         'did:web:nerv.tokyo.jp/pilots',
       ])
-
-      const uriAccessible = 'at://did:plc:shinji/zone.stratos.feed.post/ok'
-      const uriBlocked = 'at://did:plc:shinji/zone.stratos.feed.post/blocked'
-      const accessibleRecord = {
-        uri: uriAccessible,
-        cid: 'cid-ok',
-        value: {
-          text: 'ok',
-          boundary: {
-            $type: 'zone.stratos.boundary.defs#Domains',
-            values: [{ value: 'did:web:nerv.tokyo.jp/pilots' }],
-          },
-        },
-      }
-      const blockedRecord = {
-        uri: uriBlocked,
-        cid: 'cid-blocked',
-        value: {
-          text: 'blocked',
-          boundary: {
-            $type: 'zone.stratos.boundary.defs#Domains',
-            values: [{ value: 'did:web:nerv.tokyo.jp/others' }],
-          },
-        },
-      }
-
-      mockActorStore.read.mockImplementation(
-        async (did: string, fn: (store: any) => Promise<any>) => {
-          const mockStore = {
-            blob: {
-              getRecordsForBlob: vi
-                .fn()
-                .mockImplementation(async (cid: any) =>
-                  cid.toString() === cidA.toString()
-                    ? [uriAccessible]
-                    : [uriBlocked],
-                ),
-            },
-            record: {
-              getRecord: vi
-                .fn()
-                .mockImplementation(async (uri: string) =>
-                  uri === uriAccessible ? accessibleRecord : blockedRecord,
-                ),
-            },
-          }
-          return fn(mockStore)
-        },
+      const actorStore = await openSqliteActorStore()
+      service = new BlobAuthServiceImpl(
+        actorStore,
+        mockBoundaryResolver as unknown as BoundaryResolver,
+      )
+      await seedRecordWithBlob(
+        actorStore,
+        'at://did:plc:shinji/zone.stratos.feed.post/ok',
+        'did:web:nerv.tokyo.jp/pilots',
+        cidA,
+      )
+      await seedRecordWithBlob(
+        actorStore,
+        'at://did:plc:shinji/zone.stratos.feed.post/blocked',
+        'did:web:nerv.tokyo.jp/others',
+        cidB,
       )
 
       const result = await service.canAccessBlobs(

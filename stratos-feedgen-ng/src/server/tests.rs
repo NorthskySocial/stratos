@@ -232,6 +232,7 @@ fn authenticated_router_with_request_limit(
                 upserts: posts,
                 deletes: Vec::new(),
                 updated_at: "1998-04-03T00:00:02.000Z".to_owned(),
+                interactions: crate::store::InteractionChanges::default(),
             })
             .unwrap();
     }

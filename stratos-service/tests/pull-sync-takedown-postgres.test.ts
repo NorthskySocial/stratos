@@ -67,7 +67,7 @@ describe('listRepoOps takedown filter (Postgres)', () => {
   afterAll(async () => {
     await closeServicePgDb(serviceDb)
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     repoDid = `did:plc:pgtakedown${didCounter++}`

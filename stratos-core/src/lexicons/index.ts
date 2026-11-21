@@ -12,6 +12,18 @@ import zoneStratosAdminListBoundaries from '../../../lexicons/zone/stratos/admin
 import zoneStratosServerListRooms from '../../../lexicons/zone/stratos/server/listRooms.json' with { type: 'json' }
 import type { LexiconDoc } from '@atproto/lexicon'
 import { atprotoLexicons } from './atproto.js'
+import appBskyRichtextFacet from './vendored/app/bsky/richtext/facet.json' with { type: 'json' }
+import appBskyEmbedImages from './vendored/app/bsky/embed/images.json' with { type: 'json' }
+import appBskyEmbedVideo from './vendored/app/bsky/embed/video.json' with { type: 'json' }
+import appBskyEmbedExternal from './vendored/app/bsky/embed/external.json' with { type: 'json' }
+import appBskyEmbedRecord from './vendored/app/bsky/embed/record.json' with { type: 'json' }
+import appBskyEmbedRecordWithMedia from './vendored/app/bsky/embed/recordWithMedia.json' with { type: 'json' }
+import appBskyEmbedGallery from './vendored/app/bsky/embed/gallery.json' with { type: 'json' }
+import appBskyEmbedDefs from './vendored/app/bsky/embed/defs.json' with { type: 'json' }
+import appBskyFeedLike from './vendored/app/bsky/feed/like.json' with { type: 'json' }
+import appBskyFeedRepost from './vendored/app/bsky/feed/repost.json' with { type: 'json' }
+import comAtprotoRepoStrongRef from './vendored/com/atproto/repo/strongRef.json' with { type: 'json' }
+import comAtprotoLabelDefs from './vendored/com/atproto/label/defs.json' with { type: 'json' }
 import zoneStratosActorEnrollment from '../../../lexicons/zone/stratos/actor/enrollment.json' with { type: 'json' }
 import zoneStratosAdminListEnrollments from '../../../lexicons/zone/stratos/admin/listEnrollments.json' with { type: 'json' }
 import zoneStratosAdminGetRepoHost from '../../../lexicons/zone/stratos/admin/getRepoHost.json' with { type: 'json' }
@@ -36,6 +48,10 @@ import zoneStratosIdentityResolveEnrollments from '../../../lexicons/zone/strato
 import zoneStratosRepoHydrateRecord from '../../../lexicons/zone/stratos/repo/hydrateRecord.json' with { type: 'json' }
 import zoneStratosRepoHydrateRecords from '../../../lexicons/zone/stratos/repo/hydrateRecords.json' with { type: 'json' }
 import zoneStratosRepoImportRepo from '../../../lexicons/zone/stratos/repo/importRepo.json' with { type: 'json' }
+import zoneStratosRepoCreateRecord from '../../../lexicons/zone/stratos/repo/createRecord.json' with { type: 'json' }
+import zoneStratosRepoPutRecord from '../../../lexicons/zone/stratos/repo/putRecord.json' with { type: 'json' }
+import zoneStratosRepoDeleteRecord from '../../../lexicons/zone/stratos/repo/deleteRecord.json' with { type: 'json' }
+import zoneStratosRepoApplyWrites from '../../../lexicons/zone/stratos/repo/applyWrites.json' with { type: 'json' }
 import zoneStratosRepoUploadBlob from '../../../lexicons/zone/stratos/sync/uploadBlob.json' with { type: 'json' }
 import zoneStratosModerationCreateLabel from '../../../lexicons/zone/stratos/moderation/createLabel.json' with { type: 'json' }
 import zoneStratosModerationDefs from '../../../lexicons/zone/stratos/moderation/defs.json' with { type: 'json' }
@@ -53,6 +69,18 @@ import zoneStratosSyncSubscribeRecords from '../../../lexicons/zone/stratos/sync
 
 export const stratosLexicons: LexiconDoc[] = [
   ...atprotoLexicons,
+  appBskyRichtextFacet as LexiconDoc,
+  appBskyEmbedImages as LexiconDoc,
+  appBskyEmbedVideo as LexiconDoc,
+  appBskyEmbedExternal as LexiconDoc,
+  appBskyEmbedRecord as LexiconDoc,
+  appBskyEmbedRecordWithMedia as LexiconDoc,
+  appBskyEmbedGallery as LexiconDoc,
+  appBskyEmbedDefs as LexiconDoc,
+  appBskyFeedLike as LexiconDoc,
+  appBskyFeedRepost as LexiconDoc,
+  comAtprotoRepoStrongRef as LexiconDoc,
+  comAtprotoLabelDefs as LexiconDoc,
   zoneStratosBoundaryCheckpoint as LexiconDoc,
   zoneStratosBoundaryOperation as LexiconDoc,
   zoneStratosAdminGetBoundaryAuditState as LexiconDoc,
@@ -90,6 +118,10 @@ export const stratosLexicons: LexiconDoc[] = [
   zoneStratosRepoHydrateRecord as LexiconDoc,
   zoneStratosRepoHydrateRecords as LexiconDoc,
   zoneStratosRepoImportRepo as LexiconDoc,
+  zoneStratosRepoCreateRecord as LexiconDoc,
+  zoneStratosRepoPutRecord as LexiconDoc,
+  zoneStratosRepoDeleteRecord as LexiconDoc,
+  zoneStratosRepoApplyWrites as LexiconDoc,
   zoneStratosRepoUploadBlob as LexiconDoc,
   zoneStratosModerationCreateLabel as LexiconDoc,
   zoneStratosModerationDefs as LexiconDoc,

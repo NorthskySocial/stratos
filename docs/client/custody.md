@@ -158,6 +158,9 @@ the access token and the DPoP proof. Call this only when
 
 Stratos refuses repo writes from a `pds`-custody user. `createRecord`,
 `deleteRecord`, and `applyWrites` all answer `400 PdsCustodyWriteForbidden`.
+This holds for the `com.atproto.repo` methods and for the `zone.stratos.repo`
+procedures. The write helpers in `stratos-client` route by custody, so you do
+not choose between them. See [Creating Records](/client/creating-records).
 
 ### PDS custody
 
@@ -232,6 +235,11 @@ space:zone.stratos.space.feed?authority={serviceDid}&collection=zone.stratos.fee
 Add `action=delete` to let users delete their posts. Build the string with
 `buildSpaceWriteScope` instead of typing it. The authority DID must be
 percent-encoded, and the helper does that.
+
+To like or repost, the scope also needs `collection=app.bsky.feed.like` and
+`collection=app.bsky.feed.repost`. A member who hosts their own repo cannot
+like or repost until the `zone.stratos.space.feed` declaration is published
+with those collections and the client's scope lists them.
 
 A PDS without spaces support ignores the scope. Check the granted scope before
 you offer a PDS-custody write.

@@ -128,7 +128,11 @@ lexicon declares what the space contains. Stratos ships one, in
       "description": "A members-only Stratos post feed",
       "key": "any",
       "name": "Stratos Feed",
-      "collections": ["zone.stratos.feed.post"]
+      "collections": [
+        "zone.stratos.feed.post",
+        "app.bsky.feed.like",
+        "app.bsky.feed.repost"
+      ]
     }
   }
 }
@@ -136,6 +140,14 @@ lexicon declares what the space contains. Stratos ships one, in
 
 `"key": "any"` means any valid skey names an instance of this space type.
 That is what lets every boundary name become a space without registration.
+
+The declaration lists three collections. A member who hosts their own repo
+can write a like or repost only when the published record lists them and
+their OAuth grant covers them. The Stratos enrollment client already requests
+all three collections. The file in the repository lists them. The record that
+a PDS resolves does not, until the owner publishes the new version. Until then
+a PDS may return a partial grant, and the member must authorize again after the
+update.
 
 ::: warning Keep the space type published
 A spaces-capable PDS resolves `zone.stratos.space.feed` as a

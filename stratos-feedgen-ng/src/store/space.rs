@@ -262,13 +262,7 @@ fn enforce_stage_budget(
     let budget = stage_budget(transaction, maximum)?;
     let target = stage_usage(transaction, Some(space_uri), Some(actor_did))?;
     let global = stage_usage(transaction, None, None)?;
-    let published_bytes: i64 = transaction
-        .query_row(
-            "SELECT COALESCE(SUM(projection_bytes), 0) FROM post",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(StoreError::Open)?;
+    let published_bytes = super::interactions::published_bytes(transaction)?;
     let reason = if target.rows > budget.target_rows {
         Some("target_rows")
     } else if target.bytes > budget.target_bytes {
@@ -557,24 +551,23 @@ fn apply_verified_space_stage_row(
         {
             return Err(StoreError::InvalidProjectionMutation);
         }
-        transaction
-            .execute("DELETE FROM post WHERE uri = ?1", [&stage.uri])
-            .map_err(StoreError::Open)?;
+        delete_post_and_interaction(transaction, &stage.uri)?;
         return Ok(());
     }
     // A pds-custody member can still hold a verified page staged before the takedown.
     if super::labels::account_taken_down(transaction, actor_did)? {
-        transaction
-            .execute("DELETE FROM post WHERE uri = ?1", [&stage.uri])
-            .map_err(StoreError::Open)?;
+        delete_post_and_interaction(transaction, &stage.uri)?;
         return Ok(());
     }
-    // A replay or a later sync must not re-admit a taken-down post.
+    // A replay or a later sync must not re-admit a taken-down record.
     if super::labels::record_taken_down(transaction, &stage.uri)? {
-        transaction
-            .execute("DELETE FROM post WHERE uri = ?1", [&stage.uri])
-            .map_err(StoreError::Open)?;
+        delete_post_and_interaction(transaction, &stage.uri)?;
         return Ok(());
+    }
+    let record_uri = crate::identifier::RecordUri::parse(&stage.uri)
+        .map_err(|_| StoreError::InvalidProjectionMutation)?;
+    if let Some(kind) = staged_interaction_kind(&record_uri) {
+        return upsert_staged_interaction(transaction, kind, actor_did, retained_at, stage);
     }
     let Some(cid) = stage.cid else {
         return Err(StoreError::InvalidProjectionMutation);
@@ -636,6 +629,61 @@ fn apply_verified_space_stage_row(
     Ok(())
 }
 
+fn delete_post_and_interaction(
+    transaction: &rusqlite::Transaction<'_>,
+    uri: &str,
+) -> Result<(), StoreError> {
+    transaction
+        .execute("DELETE FROM post WHERE uri = ?1", [uri])
+        .map_err(StoreError::Open)?;
+    super::interactions::delete_interaction(transaction, uri)?;
+    Ok(())
+}
+
+fn staged_interaction_kind(uri: &crate::identifier::RecordUri) -> Option<InteractionKind> {
+    let crate::identifier::RecordUri::Space { collection, .. } = uri else {
+        return None;
+    };
+    InteractionKind::from_collection(collection)
+}
+
+fn upsert_staged_interaction(
+    transaction: &rusqlite::Transaction<'_>,
+    kind: InteractionKind,
+    actor_did: &str,
+    retained_at: &str,
+    stage: SpaceStageRow,
+) -> Result<(), StoreError> {
+    let (Some(cid), Some(indexed_at), Some(record_json)) =
+        (stage.cid, stage.indexed_at, stage.record_json)
+    else {
+        return Err(StoreError::InvalidProjectionMutation);
+    };
+    if cid.is_empty() {
+        return Err(StoreError::InvalidProjectionMutation);
+    }
+    let record: serde_json::Value =
+        serde_json::from_slice(&record_json).map_err(|_| StoreError::InvalidProjectionMutation)?;
+    let subject_uri = record
+        .get("subject")
+        .and_then(|subject| subject.get("uri"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or(StoreError::InvalidProjectionMutation)?;
+    super::interactions::upsert_interaction(
+        transaction,
+        &ProjectionInteraction {
+            uri: stage.uri,
+            actor_did: actor_did.to_owned(),
+            kind,
+            subject_uri: subject_uri.to_owned(),
+            boundary: stage.boundary,
+            indexed_at,
+            retained_at: retained_at.to_owned(),
+        },
+    )?;
+    Ok(())
+}
+
 fn purge_departed_pds_member(
     transaction: &rusqlite::Transaction<'_>,
     boundary: &str,
@@ -659,6 +707,7 @@ fn purge_departed_pds_member(
             [],
         )
         .map_err(StoreError::Open)?;
+    super::interactions::delete_actor_boundary_interactions(transaction, did, boundary)?;
     transaction
         .execute(
             "DELETE FROM space_cursor WHERE did = ?1 AND boundary = ?2",
@@ -1536,6 +1585,30 @@ mod stage_limit_tests {
             store.space_sync_cursor(BOUNDARY, SPACE, DID).unwrap(),
             Some(format!("cursor-{}", accepted - 1))
         );
+    }
+
+    fn like_upsert(index: usize, payload_bytes: usize) -> SpaceStageMutation {
+        SpaceStageMutation::Upsert {
+            uri: format!("{SPACE}/{DID}/app.bsky.feed.like/{index}"),
+            cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+            sort_at: NOW.to_owned(),
+            indexed_at: NOW.to_owned(),
+            record_json: vec![b'x'; payload_bytes],
+            blob_refs_json: b"[]".to_vec(),
+        }
+    }
+
+    #[test]
+    fn a_staged_like_counts_its_record_against_the_stage_budget() {
+        let mut store = store(8_000);
+        store
+            .stage_space_page(page("small"), vec![like_upsert(0, 100)])
+            .unwrap();
+
+        assert!(matches!(
+            store.stage_space_page(page("large"), vec![like_upsert(1, 6_000)]),
+            Err(StoreError::SpaceStageLimit)
+        ));
     }
 
     #[test]

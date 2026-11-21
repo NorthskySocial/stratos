@@ -146,6 +146,8 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
   private readonly bloom: BloomFilter
   private readonly enrolledCache: LruCache<boolean>
   private readonly boundariesCache: LruCache<string[]>
+  // A boundaries read that started before an invalidation must not be cached.
+  private invalidationCount = 0
 
   constructor(
     inner: EnrollmentStoreWriter,
@@ -213,8 +215,11 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
     const cached = this.boundariesCache.get(did)
     if (cached !== undefined) return cached
 
+    const invalidationsAtStart = this.invalidationCount
     const result = await this.inner.getBoundaries(did)
-    this.boundariesCache.set(did, result)
+    if (this.invalidationCount === invalidationsAtStart) {
+      this.boundariesCache.set(did, result)
+    }
     return result
   }
 
@@ -269,6 +274,20 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
     return this.inner.listEnrollmentsByBoundary(boundary, options)
   }
 
+  /**
+   * Drop a DID's cached entries. For callers whose store writes bypass this
+   * wrapper and so cannot clear the cache themselves.
+   */
+  invalidate(did: string): void {
+    this.dropEntries(did)
+  }
+
+  private dropEntries(did: string): void {
+    this.invalidationCount++
+    this.enrolledCache.delete(did)
+    this.boundariesCache.delete(did)
+  }
+
   // ─── Write Operations (invalidate cache) ───────────────────────────────
 
   /**
@@ -280,8 +299,7 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
     if (enrollment.active) {
       this.bloom.add(enrollment.did)
     }
-    this.enrolledCache.delete(enrollment.did)
-    this.boundariesCache.delete(enrollment.did)
+    this.dropEntries(enrollment.did)
   }
 
   /**
@@ -291,8 +309,7 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
   async unenroll(did: string): Promise<void> {
     await this.inner.unenroll(did)
     // Can't remove from bloom filter, but cache invalidation handles correctness
-    this.enrolledCache.delete(did)
-    this.boundariesCache.delete(did)
+    this.dropEntries(did)
   }
 
   /**
@@ -305,6 +322,7 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
     updates: Partial<Omit<StoredEnrollment, 'did'>>,
   ): Promise<void> {
     await this.inner.updateEnrollment(did, updates)
+    this.invalidationCount++
     this.enrolledCache.delete(did)
   }
 
@@ -315,6 +333,7 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
    */
   async setBoundaries(did: string, boundaries: string[]): Promise<void> {
     await this.inner.setBoundaries(did, boundaries)
+    this.invalidationCount++
     this.boundariesCache.delete(did)
   }
 
@@ -325,6 +344,7 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
    */
   async addBoundary(did: string, boundary: string): Promise<void> {
     await this.inner.addBoundary(did, boundary)
+    this.invalidationCount++
     this.boundariesCache.delete(did)
   }
 
@@ -335,6 +355,7 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
    */
   async removeBoundary(did: string, boundary: string): Promise<void> {
     await this.inner.removeBoundary(did, boundary)
+    this.invalidationCount++
     this.boundariesCache.delete(did)
   }
 }

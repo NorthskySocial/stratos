@@ -68,6 +68,25 @@ impl ProjectionReader {
                 .iter()
                 .flat_map(|post| post.boundaries.iter().cloned()),
         );
+        // A replaced or deleted interaction changes the counts of the boundary
+        // it was stored under, which may differ from the one it moves to.
+        let changed_interaction_uris = page
+            .interactions
+            .upserts
+            .iter()
+            .map(|interaction| interaction.uri.clone())
+            .chain(page.interactions.deletes.iter().cloned())
+            .collect::<Vec<_>>();
+        boundaries.extend(
+            self.store
+                .list_interaction_boundaries_for_uris(&changed_interaction_uris)?,
+        );
+        boundaries.extend(
+            page.interactions
+                .upserts
+                .iter()
+                .map(|interaction| interaction.boundary.clone()),
+        );
         self.store.apply_actor_page(page)?;
         for boundary in boundaries {
             self.admission.invalidate_boundary(&boundary);
@@ -333,15 +352,24 @@ impl ProjectionReader {
         ) else {
             return Ok(None);
         };
-        Ok(Some((
-            token,
-            self.store.list_posts_by_boundary(
-                request.boundary,
-                request.cursor,
-                request.limit,
-                request.as_of,
-            )?,
-        )))
+        let mut page = self.store.list_posts_by_boundary(
+            request.boundary,
+            request.cursor,
+            request.limit,
+            request.as_of,
+        )?;
+        let uris = page
+            .posts
+            .iter()
+            .map(|post| post.uri.clone())
+            .collect::<Vec<_>>();
+        page.summaries = self.store.interaction_summaries(
+            request.boundary,
+            request.viewer,
+            &uris,
+            request.as_of,
+        )?;
+        Ok(Some((token, page)))
     }
     pub fn prepare_blob(
         &self,
@@ -376,11 +404,21 @@ impl ProjectionReader {
 }
 
 #[cfg(test)]
+impl ProjectionReader {
+    pub(crate) fn interaction_rows(&self) -> Vec<(String, String, String, String)> {
+        self.store.interaction_rows()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use crate::{
         moderation_label::{LabelPage, LabelSubject, ModerationLabel},
         service::{ProjectionReader, ReadRequest},
-        store::{ActorEnrollment, ActorPage, EncryptedStore, ProjectionPost, StorageKey},
+        store::{
+            ActorEnrollment, ActorPage, EncryptedStore, InteractionChanges, InteractionKind,
+            ProjectionInteraction, ProjectionPost, StorageKey,
+        },
     };
 
     fn actor_page(sequence: u64, boundaries: Vec<&str>) -> ActorPage {
@@ -401,6 +439,7 @@ mod tests {
             }],
             deletes: Vec::new(),
             updated_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            interactions: crate::store::InteractionChanges::default(),
         }
     }
     #[test]
@@ -462,6 +501,46 @@ mod tests {
         let (token, page) = reader.prepare(request).unwrap().unwrap();
         assert_eq!(reader.revoke_boundary("bebop").unwrap(), 0);
         assert!(reader.release(token, page, 2).is_none());
+    }
+
+    #[test]
+    fn a_purge_between_prepare_and_release_refuses_a_page_that_carries_counts() {
+        let mut reader = ProjectionReader::new(
+            EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+        );
+        let mut page = actor_page(1, vec!["bebop"]);
+        page.interactions.upserts = vec![ProjectionInteraction {
+            uri: "at://did:plc:spike/app.bsky.feed.like/swordfish".to_owned(),
+            actor_did: "did:plc:spike".to_owned(),
+            kind: InteractionKind::Like,
+            subject_uri: "at://did:plc:spike/zone.stratos.feed.post/see-you".to_owned(),
+            boundary: "bebop".to_owned(),
+            indexed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            retained_at: "1998-04-04T00:00:00.000Z".to_owned(),
+        }];
+        reader.apply_actor_page(page).unwrap();
+        reader.establish_session();
+        let request = ReadRequest {
+            viewer: "did:plc:faye",
+            boundary: "bebop",
+            authority_expires_at: 100,
+            now: 1,
+            cursor: None,
+            limit: 50,
+            as_of: "1998-04-02T00:00:00.000Z",
+        };
+        let (token, feed_page) = reader.prepare(request).unwrap().unwrap();
+        assert_eq!(
+            feed_page
+                .summaries
+                .get("at://did:plc:spike/zone.stratos.feed.post/see-you")
+                .map(|summary| summary.like_count),
+            Some(1)
+        );
+
+        reader.revoke_boundary("bebop").unwrap();
+
+        assert!(reader.release(token, feed_page, 2).is_none());
     }
 
     #[test]
@@ -588,5 +667,104 @@ mod tests {
         );
 
         assert!(reader.release(token, page, 2).is_some());
+    }
+
+    fn like_page(
+        sequence: u64,
+        upserts: Vec<ProjectionInteraction>,
+        deletes: Vec<String>,
+    ) -> ActorPage {
+        ActorPage {
+            authority_did: "did:web:stratos.example.test".to_owned(),
+            actor_did: "did:plc:spike".to_owned(),
+            sequence,
+            upserts: Vec::new(),
+            deletes: Vec::new(),
+            interactions: InteractionChanges { upserts, deletes },
+            updated_at: "1998-04-03T00:00:00.000Z".to_owned(),
+        }
+    }
+
+    fn spike_like(boundary: &str) -> ProjectionInteraction {
+        ProjectionInteraction {
+            uri: "at://did:plc:spike/app.bsky.feed.like/swordfish".to_owned(),
+            actor_did: "did:plc:spike".to_owned(),
+            kind: InteractionKind::Like,
+            subject_uri: "at://did:plc:faye/zone.stratos.feed.post/see-you".to_owned(),
+            boundary: boundary.to_owned(),
+            indexed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            retained_at: "1998-04-04T00:00:00.000Z".to_owned(),
+        }
+    }
+
+    fn read_request(boundary: &str) -> ReadRequest<'_> {
+        ReadRequest {
+            viewer: "did:plc:faye",
+            boundary,
+            authority_expires_at: 100,
+            now: 1,
+            cursor: None,
+            limit: 50,
+            as_of: "1998-04-02T00:00:00.000Z",
+        }
+    }
+
+    #[test]
+    fn a_like_upsert_invalidates_only_the_reads_of_its_boundary() {
+        let mut reader = ProjectionReader::new(
+            EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+        );
+        reader.establish_session();
+        let (token, page) = reader.prepare(read_request("bebop")).unwrap().unwrap();
+        let (other_token, other_page) = reader.prepare(read_request("other")).unwrap().unwrap();
+
+        reader
+            .apply_actor_page(like_page(1, vec![spike_like("bebop")], Vec::new()))
+            .unwrap();
+
+        assert!(reader.release(token, page, 2).is_none());
+        assert!(reader.release(other_token, other_page, 2).is_some());
+    }
+
+    #[test]
+    fn deleting_a_stored_like_invalidates_the_reads_of_the_boundary_it_was_in() {
+        let mut reader = ProjectionReader::new(
+            EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+        );
+        let like = spike_like("bebop");
+        reader
+            .apply_actor_page(like_page(1, vec![like.clone()], Vec::new()))
+            .unwrap();
+        reader.establish_session();
+        let (token, page) = reader.prepare(read_request("bebop")).unwrap().unwrap();
+        let (other_token, other_page) = reader.prepare(read_request("other")).unwrap().unwrap();
+
+        reader
+            .apply_actor_page(like_page(2, Vec::new(), vec![like.uri]))
+            .unwrap();
+
+        assert!(reader.interaction_rows().is_empty());
+        assert!(reader.release(token, page, 2).is_none());
+        assert!(reader.release(other_token, other_page, 2).is_some());
+    }
+
+    #[test]
+    fn moving_a_like_between_boundaries_invalidates_both() {
+        let mut reader = ProjectionReader::new(
+            EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+        );
+        reader
+            .apply_actor_page(like_page(1, vec![spike_like("bebop")], Vec::new()))
+            .unwrap();
+        reader.establish_session();
+        let (old_token, old_page) = reader.prepare(read_request("bebop")).unwrap().unwrap();
+        let (new_token, new_page) = reader.prepare(read_request("red-tail")).unwrap().unwrap();
+
+        reader
+            .apply_actor_page(like_page(2, vec![spike_like("red-tail")], Vec::new()))
+            .unwrap();
+
+        assert!(reader.release(old_token, old_page, 2).is_none());
+        assert!(reader.release(new_token, new_page, 2).is_none());
     }
 }

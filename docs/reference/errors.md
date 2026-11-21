@@ -47,7 +47,7 @@ the proof. OAuth client libraries do this for you.
 | `ServiceMismatch`          | 400    | The boundary belongs to a different Stratos service                  |
 | `ForbiddenBoundary`        | 400    | The caller does not hold the boundary                                |
 | `InvalidRecord`            | 400    | The record does not match its lexicon                                |
-| `InvalidCollection`        | 400    | The collection is not a `zone.stratos.*` collection                  |
+| `InvalidCollection`        | 400    | The collection is not allowed on this procedure                      |
 | `PdsCustodyWriteForbidden` | 400    | The user's records are kept on their own PDS. Write there instead.   |
 | `ServiceWriteForbidden`    | 400    | The caller is a service identity. Services can read but never write. |
 | `InvalidSwap`              | 400    | A `swapCommit` or `swapRecord` condition did not match               |
@@ -57,6 +57,43 @@ the proof. OAuth client libraries do this for you.
 sent the write to the wrong place. Resolve the repository target from the
 enrollment's custody first. See
 [Your First Post](/guide/first-post#_3-choose-the-repository-host).
+
+## Writing into a boundary
+
+The `zone.stratos.repo.createRecord`, `putRecord`, `deleteRecord` and
+`applyWrites` procedures take the boundary as a parameter. They return `NotEnrolled`,
+`ServiceWriteForbidden`, `PdsCustodyWriteForbidden`, `ForbiddenBoundary`,
+`InvalidDomain`, `ServiceMismatch`, `InvalidCollection` and `RateLimitExceeded`
+as in the tables above. They do not return `InvalidDomainCount` or the swap
+errors. They allow posts, likes and reposts. `com.atproto.repo.*` allows only `zone.stratos.*`
+collections and answers `InvalidCollection` for a like or repost.
+
+| Error                  | Status | Meaning                                                               | What the client does                                                  |
+| ---------------------- | ------ | --------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `BoundaryMismatch`     | 400    | The record body claims a boundary other than the one in the request   | Leave the `boundary` field out of the record, or make it match        |
+| `BoundaryNotFound`     | 400    | The caller holds the boundary, but it is absent or inactive           | Choose a boundary from the user's enrollment                          |
+| `RecordAlreadyExists`  | 400    | The key is taken, or the member already likes or reposts that post    | Use another `rkey`, call `putRecord`, or delete the existing record   |
+| `RecordNotFound`       | 400    | An update or delete in `applyWrites` named a record that is not there | Refresh the record list, then send the batch again                    |
+| `ScopeUpgradeRequired` | 400    | The member's grant predates the collection of a like or repost        | Send the member through OAuth authorization again. Do not retry first |
+| `InvalidRecord`        | 400    | For a like or repost: `The subject must be a post in this boundary`   | Use the `uri` and `cid` of a post in the same boundary, as served     |
+
+The subject message is the same for every wrong subject, whatever the
+`validate` value. A subject that is not a `{ uri, cid }` reference, a post that
+Stratos holds but cannot find, a post in another boundary, a URI that is not
+canonical and a wrong CID all return it. The error does not tell them apart.
+
+For a post by a member who hosts their own repo, Stratos does not hold the
+record. It checks neither that the record exists nor its CID. `subject.cid`
+must still be a valid CID. Stratos checks that the author is an
+active member of the boundary who hosts their own repo, and that the URI is
+well formed for that boundary.
+
+`ScopeUpgradeRequired` is returned only when the member's stored grant has a
+space grant for this service that lacks the collection. See
+[Differences from the upstream procedures](/reference/api#differences-from-the-upstream-procedures).
+
+`RecordNotFound` also appears when reading. There it also covers a record that
+the caller may not read.
 
 ## Reading records
 

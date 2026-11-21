@@ -1,8 +1,37 @@
-import { describe, expect, it, vi } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import type { StratosEnrollment } from '../src/lib/stratos'
 import { SPACE_WRITE_SCOPE } from '../src/lib/auth'
+import { Agent } from '@atproto/api'
 import Composer from '../src/lib/Composer.svelte'
+import { fetchStratosPosts, filterByDomain } from '../src/lib/feed'
+import {
+  startStratosResponder,
+  type StratosResponder,
+} from './helpers/stratos-responder'
+
+let responder: StratosResponder
+
+beforeAll(async () => {
+  responder = await startStratosResponder()
+})
+
+afterAll(async () => {
+  await responder.stop()
+})
+
+afterEach(() => {
+  responder.requests.length = 0
+  responder.respondWith(200, {})
+})
 
 const stratosCreateRecord = vi.fn().mockResolvedValue({})
 
@@ -77,37 +106,42 @@ describe('Composer.svelte', () => {
   })
 
   it('writes a private Stratos post with its boundary', async () => {
-    const createRecord = vi.fn().mockResolvedValue({})
-    const onpost = vi.fn()
-    render(Composer, {
-      props: props({
-        stratosAgent: {
-          com: { atproto: { repo: { uploadBlob: vi.fn(), createRecord } } },
-        },
-        onpost,
-      }),
+    const stratosSession = responder.session(
+      'did:plc:faye',
+      'https://stratos.example',
+    )
+    responder.respondWith(200, {
+      uri: 'at://did:plc:faye/zone.stratos.feed.post/3kmotoko',
+      cid: 'bafyreimotoko',
     })
+    const onpost = vi.fn()
+    render(Composer, { props: props({ session: stratosSession, onpost }) })
 
     await fireEvent.input(screen.getByRole('textbox'), {
       target: { value: 'Motoko checks the perimeter.' },
     })
     await fireEvent.click(screen.getByRole('button', { name: /Post$/ }))
 
-    await waitFor(() => expect(createRecord).toHaveBeenCalledTimes(1))
-    expect(createRecord).toHaveBeenCalledWith(
-      expect.objectContaining({
+    await waitFor(() => expect(responder.requests).toHaveLength(1))
+    expect(responder.requests[0]).toEqual({
+      method: 'POST',
+      path: '/xrpc/zone.stratos.repo.createRecord',
+      body: {
+        boundary: 'did:web:stratos.example/nerve',
         repo: 'did:plc:faye',
         collection: 'zone.stratos.feed.post',
-        record: expect.objectContaining({
+        record: {
+          $type: 'zone.stratos.feed.post',
           text: 'Motoko checks the perimeter.',
           boundary: {
             $type: 'zone.stratos.boundary.defs#Domains',
             values: [{ value: 'did:web:stratos.example/nerve' }],
           },
-        }),
-      }),
-    )
-    expect(onpost).toHaveBeenCalledTimes(1)
+          createdAt: expect.any(String),
+        },
+      },
+    })
+    await waitFor(() => expect(onpost).toHaveBeenCalledTimes(1))
   })
 
   it('writes PDS-custody posts through the space endpoint without a boundary or embed', async () => {
@@ -233,14 +267,13 @@ describe('Composer.svelte', () => {
   })
 
   it('clears the posting status after a post fails', async () => {
-    const createRecord = vi
-      .fn()
-      .mockRejectedValue(new Error('Rin lost the uplink'))
+    responder.respondWith(500, {
+      error: 'InternalServerError',
+      message: 'Rin lost the uplink',
+    })
     render(Composer, {
       props: props({
-        stratosAgent: {
-          com: { atproto: { repo: { uploadBlob: vi.fn(), createRecord } } },
-        },
+        session: responder.session('did:plc:faye', 'https://stratos.example'),
       }),
     })
 
@@ -339,5 +372,143 @@ describe('Composer.svelte', () => {
       ).toBeInTheDocument(),
     )
     expect(screen.getByLabelText(/🖼️/i)).toBeDisabled()
+  })
+
+  it('keeps the reply reference and the image embed in the Stratos record', async () => {
+    const uploadBlob = vi.fn().mockResolvedValue({
+      data: { blob: { ref: { $link: 'bafkreinerv' } } },
+    })
+    const stratosSession = responder.session(
+      'did:plc:faye',
+      'https://stratos.example',
+    )
+    const parent = {
+      uri: 'at://did:plc:rei/zone.stratos.feed.post/3kparent',
+      cid: 'bafyreiparent',
+    }
+    render(Composer, {
+      props: props({
+        session: stratosSession,
+        stratosAgent: {
+          com: { atproto: { repo: { uploadBlob, createRecord: vi.fn() } } },
+        },
+        replyingTo: {
+          ...parent,
+          text: 'Third Impact',
+          createdAt: '1996-03-27T00:00:00Z',
+          isPrivate: true,
+          reply: null,
+          author: 'did:plc:rei',
+          authorHandle: 'rei.example',
+          boundaries: ['did:web:stratos.example/nerve'],
+        },
+      }),
+    })
+
+    await fireEvent.change(screen.getByLabelText(/🖼️/i), {
+      target: {
+        files: [new File(['eva'], 'eva01.png', { type: 'image/png' })],
+      },
+    })
+    await fireEvent.input(screen.getByRole('textbox'), {
+      target: { value: 'Unit 01 is berserk.' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: /Post$/ }))
+
+    await waitFor(() => expect(responder.requests).toHaveLength(1))
+    const { record } = responder.requests[0].body as {
+      record: Record<string, unknown>
+    }
+    expect(record.reply).toEqual({ root: parent, parent })
+    expect(record.embed).toMatchObject({ $type: 'zone.stratos.embed.images' })
+    expect(record.boundary).toEqual({
+      $type: 'zone.stratos.boundary.defs#Domains',
+      values: [{ value: 'did:web:stratos.example/nerve' }],
+    })
+  })
+
+  it('writes a post the listRecords feed path reads back with its boundary', async () => {
+    const agent = new Agent({ service: responder.origin })
+    render(Composer, {
+      props: props({
+        session: responder.session('did:plc:faye', 'https://stratos.example'),
+      }),
+    })
+
+    await fireEvent.input(screen.getByRole('textbox'), {
+      target: { value: 'Faye counts the cards.' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: /Post$/ }))
+    await waitFor(() => expect(responder.requests).toHaveLength(1))
+    const { record } = responder.requests[0].body as { record: unknown }
+
+    responder.respondWith(200, {
+      records: [
+        {
+          uri: 'at://did:plc:faye/zone.stratos.feed.post/3kfaye',
+          cid: 'bafyreigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+          value: record,
+        },
+      ],
+    })
+    const posts = await fetchStratosPosts(agent, 'did:plc:faye')
+
+    expect(posts).toHaveLength(1)
+    expect(posts[0].boundaries).toEqual(['did:web:stratos.example/nerve'])
+    expect(filterByDomain(posts, 'did:web:stratos.example/nerve')).toHaveLength(
+      1,
+    )
+  })
+
+  it('writes to a Stratos service on a loopback http origin', async () => {
+    responder.respondWith(200, {
+      uri: 'at://did:plc:faye/zone.stratos.feed.post/3klocal',
+      cid: 'bafyreilocal',
+    })
+    render(Composer, {
+      props: props({
+        session: responder.session('did:plc:faye', responder.origin),
+        enrollment: { ...enrollment('stratos'), service: responder.origin },
+      }),
+    })
+
+    await fireEvent.input(screen.getByRole('textbox'), {
+      target: { value: 'Ed hacks the local stack.' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: /Post$/ }))
+
+    await waitFor(() => expect(responder.requests).toHaveLength(1))
+    expect(responder.requests[0].path).toBe(
+      '/xrpc/zone.stratos.repo.createRecord',
+    )
+  })
+
+  it('sends nothing when the Stratos address is http on a host that is not loopback', async () => {
+    const insecureSession = responder.session(
+      'did:plc:faye',
+      'http://stratos.example',
+    )
+    render(Composer, {
+      props: props({
+        session: insecureSession,
+        enrollment: {
+          ...enrollment('stratos'),
+          service: 'http://stratos.example',
+        },
+      }),
+    })
+
+    await fireEvent.input(screen.getByRole('textbox'), {
+      target: { value: 'Ritsuko checks the origin.' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: /Post$/ }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Could not create the post/i),
+      ).toBeInTheDocument(),
+    )
+    expect(responder.requests).toEqual([])
+    expect(insecureSession.fetchHandler).not.toHaveBeenCalled()
   })
 })

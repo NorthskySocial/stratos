@@ -46,6 +46,15 @@ describe('Record Update Handler', () => {
     await migrateServiceDb(db)
 
     enrollmentStore = new SqliteEnrollmentStore(db)
+    await enrollmentStore.enroll({
+      did: testDid,
+      enrolledAt: '2026-01-01T00:00:00.000Z',
+      boundaries: [],
+      signingKeyDid: 'did:key:zDnaeTestKey',
+      active: true,
+      isService: false,
+      custody: 'stratos',
+    })
     actorStore = new StratosActorStore({
       dataDir,
       blobstore: () => createMockBlobStore() as any,

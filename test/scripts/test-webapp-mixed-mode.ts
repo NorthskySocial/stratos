@@ -42,6 +42,7 @@ const FEEDGEN_DID = 'did:web:localhost%3A3302'
 const PDS_PROXY_PATH_PREFIX = '/pds'
 const SPACE_CREATE_PATH = '/xrpc/com.atproto.space.createRecord'
 const REPO_CREATE_PATH = '/xrpc/com.atproto.repo.createRecord'
+const BOUNDARY_CREATE_PATH = '/xrpc/zone.stratos.repo.createRecord'
 const PUBLIC_COLLECTION = 'app.bsky.feed.post'
 
 interface RecordResponse {
@@ -72,7 +73,12 @@ function captureWrites(page: Page): CapturedWrite[] {
   page.on('request', (request) => {
     if (request.method() !== 'POST') return
     const path = xrpcPath(request.url())
-    if (path !== SPACE_CREATE_PATH && path !== REPO_CREATE_PATH) {
+    // The public-write count needs the com.atproto.repo path too, to catch a private post that falls through.
+    if (
+      path !== SPACE_CREATE_PATH &&
+      path !== REPO_CREATE_PATH &&
+      path !== BOUNDARY_CREATE_PATH
+    ) {
       return
     }
     const rawBody = request.postData()
@@ -265,6 +271,7 @@ function assertStratosWrite(
     | undefined
   assert(
     write?.url.startsWith(stratosUrl) === true &&
+      write.body['boundary'] === DOMAINS.swordsmith &&
       write.body['repo'] === user.did &&
       write.body['collection'] === SPACE_POST_COLLECTION &&
       record?.['$type'] === SPACE_POST_COLLECTION &&
@@ -624,11 +631,11 @@ async function run(): Promise<void> {
     const stratosText = `Rei browser Stratos custody ${runId}`
     const stratosRef = await createPrivatePost(
       stratosPage,
-      REPO_CREATE_PATH,
+      BOUNDARY_CREATE_PATH,
       stratosText,
     )
     assertStratosWrite(
-      findWrite(stratosWrites, REPO_CREATE_PATH, stratosText),
+      findWrite(stratosWrites, BOUNDARY_CREATE_PATH, stratosText),
       stratosUser,
       stratosUrl,
     )
@@ -647,12 +654,12 @@ async function run(): Promise<void> {
     const stratosReply = await createPrivateReply(
       stratosPage,
       pdsText,
-      REPO_CREATE_PATH,
+      BOUNDARY_CREATE_PATH,
       stratosReplyText,
     )
     const stratosReplyWrite = findWrite(
       stratosWrites,
-      REPO_CREATE_PATH,
+      BOUNDARY_CREATE_PATH,
       stratosReplyText,
     )
     assertStratosWrite(stratosReplyWrite, stratosUser, stratosUrl)

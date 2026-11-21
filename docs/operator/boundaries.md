@@ -265,6 +265,10 @@ and checks on every grant path. Boundary administration does not implement that
 feature. Keep a boundary's lifecycle separate from member suspension and from
 service-wide enrollment activation.
 
+Record write checks read a member's boundaries from a 60-second cache. A removal
+made on another instance can lag by up to 60 seconds. A change made on the same
+instance applies at once.
+
 ## See also
 
 - [Signed boundary history](./boundary-history)

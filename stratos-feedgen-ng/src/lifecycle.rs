@@ -961,6 +961,7 @@ mod tests {
                 }],
                 deletes: Vec::new(),
                 updated_at: "1998-04-03T00:00:02.000Z".to_owned(),
+                interactions: crate::store::InteractionChanges::default(),
             })
             .unwrap();
         let lifecycle = ControlLifecycle::new(ProjectionReader::new(store), readiness);
@@ -1335,6 +1336,131 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn serves_a_post_whose_boundary_is_only_on_the_operation_to_viewers_in_that_boundary() {
+        let authority = "did:web:stratos.example.test";
+        let bebop = "did:web:stratos.example.test/bebop";
+        let swordfish = "did:web:stratos.example.test/swordfish";
+        let lifecycle = ControlLifecycle::for_authority(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            authority,
+        )
+        .unwrap();
+        lifecycle
+            .reconcile_actor_enrollment(
+                "did:plc:faye",
+                "1998-04-03T00:00:00.000Z",
+                Some(crate::store::ActorEnrollment {
+                    did: "did:plc:faye".to_owned(),
+                    boundaries: vec![bebop.to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        for (viewer, boundary) in [
+            ("did:plc:spikespiegel", bebop),
+            ("did:plc:jetblack", swordfish),
+        ] {
+            lifecycle
+                .apply_viewer_authorization(
+                    ViewerAuthorization {
+                        did: viewer.to_owned(),
+                        boundaries: vec![boundary.to_owned()],
+                        expires_at: 100,
+                    },
+                    1,
+                )
+                .unwrap();
+        }
+        lifecycle.session_established();
+        lifecycle.mark_labels_current();
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+
+        let header = serde_cbor::to_vec(&serde_json::json!({"t":"#commit"})).unwrap();
+        let body = serde_cbor::to_vec(&serde_json::json!({
+            "seq":7,
+            "did":"did:plc:faye",
+            "time":"1998-04-03T00:00:00.000Z",
+            "rev":"3jzfcijpj2z2a",
+            "ops":[{
+                "action":"create",
+                "path":"zone.stratos.feed.post/see-you",
+                "cid":"bafyreia",
+                "record":{"$type":"zone.stratos.feed.post","createdAt":"1998-04-03T00:00:00.000Z","text":"see you space cowboy"},
+                "boundary":{"values":[{"value":"bebop"}]}
+            }]
+        }))
+        .unwrap();
+        let mut frame = header;
+        frame.extend(body);
+        assert!(matches!(
+            lifecycle.apply_actor_frame(
+                &frame,
+                authority,
+                "did:plc:faye",
+                "1998-05-03T00:00:00.000Z",
+            ),
+            Ok(ActorFrameResult::Applied)
+        ));
+
+        let feeds = FeedRegistry::new([
+            FeedDescription {
+                id: "bebop".to_owned(),
+                boundary: bebop.to_owned(),
+                display_name: None,
+                description: None,
+            },
+            FeedDescription {
+                id: "swordfish".to_owned(),
+                boundary: swordfish.to_owned(),
+                display_name: None,
+                description: None,
+            },
+        ])
+        .unwrap();
+        let query = |feed_id| crate::feed_service::FeedQuery {
+            feed_id,
+            cursor: None,
+            limit: 50,
+            now: 2,
+            as_of: "1998-04-03T00:00:00.000Z",
+            blob_base_url: "https://feedgen.example.test",
+        };
+
+        let (served, served_count) = lifecycle
+            .serve_viewer_feed("did:plc:spikespiegel", &feeds, query("bebop"))
+            .unwrap();
+        assert_eq!(served_count, 1);
+        let served: serde_json::Value = serde_json::from_slice(&served).unwrap();
+        assert_eq!(
+            served["feed"][0]["post"]["uri"],
+            "at://did:plc:faye/zone.stratos.feed.post/see-you"
+        );
+        assert_eq!(
+            served["feed"][0]["post"]["boundaries"],
+            serde_json::json!([bebop])
+        );
+
+        assert!(matches!(
+            lifecycle.serve_viewer_feed("did:plc:jetblack", &feeds, query("bebop")),
+            Err(crate::feed_service::FeedServiceError::BoundaryMismatch)
+        ));
+        let (_, other_boundary_count) = lifecycle
+            .serve_viewer_feed("did:plc:jetblack", &feeds, query("swordfish"))
+            .unwrap();
+        assert_eq!(other_boundary_count, 0);
+    }
+
     fn lifecycle_with_telemetry() -> (
         ControlLifecycle,
         Arc<Mutex<FeedReadinessGate>>,
@@ -1531,6 +1657,7 @@ mod tests {
                 }],
                 deletes: Vec::new(),
                 updated_at: "1998-04-03T00:00:02.000Z".to_owned(),
+                interactions: crate::store::InteractionChanges::default(),
             })
             .unwrap();
         lifecycle
@@ -1602,5 +1729,238 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    const ACTOR_AUTHORITY: &str = "did:web:stratos.example.test";
+    const ACTOR_BEBOP: &str = "did:web:stratos.example.test/bebop";
+    const FAYE: &str = "did:plc:faye";
+    const RETAINED_AT: &str = "1998-05-03T00:00:00.000Z";
+    const LIKE: &str = "app.bsky.feed.like";
+    const REPOST: &str = "app.bsky.feed.repost";
+    const FAYE_LIKE_SUBJECT: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+
+    fn faye_uri(collection: &str, rkey: &str) -> String {
+        format!("at://{FAYE}/{collection}/{rkey}")
+    }
+
+    fn enrolled_lifecycle() -> ControlLifecycle {
+        let lifecycle = ControlLifecycle::for_authority(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            ACTOR_AUTHORITY,
+        )
+        .unwrap();
+        lifecycle
+            .reconcile_actor_enrollment(
+                FAYE,
+                "1998-04-03T00:00:00.000Z",
+                Some(ActorEnrollment {
+                    did: FAYE.to_owned(),
+                    boundaries: vec![ACTOR_BEBOP.to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        lifecycle
+    }
+
+    fn commit_frame(sequence: u64, ops: serde_json::Value) -> Vec<u8> {
+        let mut bytes = serde_cbor::to_vec(&serde_json::json!({"t": "#commit"})).unwrap();
+        bytes.extend(
+            serde_cbor::to_vec(&serde_json::json!({
+                "seq": sequence,
+                "did": FAYE,
+                "time": "1998-04-03T00:00:00.000Z",
+                "rev": "3jzfcijpj2z2a",
+                "ops": ops,
+            }))
+            .unwrap(),
+        );
+        bytes
+    }
+
+    fn like_create_ops(rkey: &str) -> serde_json::Value {
+        serde_json::json!([{
+            "action": "create",
+            "path": format!("app.bsky.feed.like/{rkey}"),
+            "cid": "bafyreia",
+            "record": {
+                "$type": LIKE,
+                "subject": {"uri": FAYE_LIKE_SUBJECT, "cid": "bafyreib"},
+                "boundary": {"values": [{"value": "bebop"}]},
+            },
+        }])
+    }
+
+    fn apply(lifecycle: &ControlLifecycle, frame: &[u8]) -> ActorFrameResult {
+        lifecycle
+            .apply_actor_frame(frame, ACTOR_AUTHORITY, FAYE, RETAINED_AT)
+            .unwrap()
+    }
+
+    fn faye_cursor(lifecycle: &ControlLifecycle) -> Option<u64> {
+        lifecycle
+            .actor_sync_state(ACTOR_AUTHORITY, FAYE)
+            .unwrap()
+            .unwrap()
+            .cursor
+    }
+
+    #[test]
+    fn a_like_frame_is_stored_and_a_later_delete_frame_removes_it() {
+        let lifecycle = enrolled_lifecycle();
+
+        assert!(matches!(
+            apply(&lifecycle, &commit_frame(7, like_create_ops("one"))),
+            ActorFrameResult::Applied
+        ));
+        assert_eq!(
+            lifecycle.read(|projection| projection.interaction_rows()),
+            [(
+                faye_uri(LIKE, "one"),
+                "like".to_owned(),
+                FAYE_LIKE_SUBJECT.to_owned(),
+                ACTOR_BEBOP.to_owned()
+            )]
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+
+        let delete = commit_frame(
+            8,
+            serde_json::json!([{"action": "delete", "path": "app.bsky.feed.like/one"}]),
+        );
+        assert!(matches!(
+            apply(&lifecycle, &delete),
+            ActorFrameResult::Applied
+        ));
+        assert!(
+            lifecycle
+                .read(|projection| projection.interaction_rows())
+                .is_empty()
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(8));
+    }
+
+    #[test]
+    fn a_malformed_like_frame_still_advances_the_cursor() {
+        let lifecycle = enrolled_lifecycle();
+        let malformed = commit_frame(
+            7,
+            serde_json::json!([{
+                "action": "create",
+                "path": "app.bsky.feed.like/one",
+                "cid": "bafyreia",
+                "record": {"$type": REPOST},
+            }]),
+        );
+
+        assert!(matches!(
+            apply(&lifecycle, &malformed),
+            ActorFrameResult::Applied
+        ));
+        assert!(
+            lifecycle
+                .read(|projection| projection.interaction_rows())
+                .is_empty()
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+    }
+
+    #[test]
+    fn a_like_with_an_unreadable_action_beside_a_post_keeps_the_post_and_advances_the_cursor() {
+        let lifecycle = enrolled_lifecycle();
+        let post_uri = format!("at://{FAYE}/zone.stratos.feed.post/see-you");
+        let frame = commit_frame(
+            7,
+            serde_json::json!([
+                {
+                    "action": "create",
+                    "path": "zone.stratos.feed.post/see-you",
+                    "cid": "bafyreia",
+                    "record": {
+                        "$type": "zone.stratos.feed.post",
+                        "createdAt": "1998-04-03T00:00:00.000Z",
+                        "boundary": {"values": [{"value": "bebop"}]},
+                    },
+                },
+                {
+                    "action": 7,
+                    "path": "app.bsky.feed.like/one",
+                    "cid": "bafyreib",
+                    "record": {
+                        "$type": LIKE,
+                        "subject": {"uri": FAYE_LIKE_SUBJECT, "cid": "bafyreib"},
+                        "boundary": {"values": [{"value": "bebop"}]},
+                    },
+                },
+                {
+                    "path": "app.bsky.feed.repost/two",
+                    "cid": "bafyreic",
+                    "record": {
+                        "$type": REPOST,
+                        "subject": {"uri": FAYE_LIKE_SUBJECT, "cid": "bafyreib"},
+                        "boundary": {"values": [{"value": "bebop"}]},
+                    },
+                },
+            ]),
+        );
+
+        assert!(matches!(
+            apply(&lifecycle, &frame),
+            ActorFrameResult::Applied
+        ));
+
+        let stored_post = lifecycle
+            .read(|projection| projection.blob_post(&post_uri, "1998-04-03T00:00:00.000Z"))
+            .unwrap()
+            .expect("the post is stored");
+        assert_eq!(stored_post.boundaries, [ACTOR_BEBOP]);
+        assert!(
+            lifecycle
+                .read(|projection| projection.interaction_rows())
+                .is_empty()
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+    }
+
+    #[test]
+    fn a_replayed_frame_does_not_readmit_a_taken_down_like() {
+        let lifecycle = enrolled_lifecycle();
+        lifecycle
+            .apply_label_page(
+                &crate::moderation_label::LabelPage {
+                    cursor: 1,
+                    labels: vec![crate::moderation_label::ModerationLabel {
+                        seq: 1,
+                        subject: crate::moderation_label::LabelSubject::Record {
+                            uri: faye_uri(LIKE, "one"),
+                            author_did: FAYE.to_owned(),
+                        },
+                        neg: false,
+                    }],
+                },
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap();
+
+        for _ in 0..2 {
+            assert!(matches!(
+                apply(&lifecycle, &commit_frame(7, like_create_ops("one"))),
+                ActorFrameResult::Applied
+            ));
+        }
+        assert!(matches!(
+            apply(&lifecycle, &commit_frame(8, like_create_ops("two"))),
+            ActorFrameResult::Applied
+        ));
+
+        let stored = lifecycle.read(|projection| projection.interaction_rows());
+        assert_eq!(
+            stored.iter().map(|row| row.0.clone()).collect::<Vec<_>>(),
+            [faye_uri(LIKE, "two")]
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(8));
     }
 }

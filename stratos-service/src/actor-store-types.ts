@@ -12,6 +12,7 @@ import type {
   StratosDbOrTx,
   StratosPgDbOrTx,
   StratosRecordDescript,
+  VisibleRecordWithBoundaries,
 } from '@northskysocial/stratos-core'
 import { Cid } from '@atproto/lex-data'
 
@@ -73,6 +74,20 @@ export interface ActorRecordReader {
   getCurrentRecordCid(uri: string | AtUri): Promise<Cid | null>
   /** Includes taken-down records; never reads the record body. */
   getRecordBoundaries(uri: string | AtUri): Promise<string[]>
+  /**
+   * One statement. `null` when the record is missing or taken down; the
+   * boundaries are the stored rows only, never the record body.
+   */
+  getVisibleRecordWithBoundaries(
+    uri: string | AtUri,
+  ): Promise<VisibleRecordWithBoundaries | null>
+  /**
+   * One statement for at most 100 URIs; more throws. Keyed by the normalized
+   * URI, omitting missing and taken-down records.
+   */
+  getVisibleRecordsWithBoundaries(
+    uris: readonly (string | AtUri)[],
+  ): Promise<Map<string, VisibleRecordWithBoundaries>>
   getRecordBacklinks(opts: GetBacklinksOpts): Promise<
     Array<{
       uri: string
@@ -104,6 +119,15 @@ export interface ActorRecordTransactor extends ActorRecordReader {
     record: Record<string, unknown> | null,
     action?: 'create' | 'update',
     repoRev?: string,
+    timestamp?: string,
+  ): Promise<void>
+  indexRecordInBoundary(
+    uri: string | AtUri,
+    cid: Cid,
+    record: Record<string, unknown>,
+    boundary: string,
+    action: 'create' | 'update',
+    repoRev: string,
     timestamp?: string,
   ): Promise<void>
   deleteRecord(uri: string | AtUri): Promise<void>

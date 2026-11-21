@@ -1695,6 +1695,33 @@ export const stratosLexicons: LexiconDoc[] = [
             "ref": "#blobView"
           },
           "description": "Authenticated feedgen blob URLs. Record blob refs remain unchanged. Absent for custody whose blobs must be read from the host."
+        },
+        "likeCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of distinct actors who like this post in the feed's boundary."
+        },
+        "repostCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of distinct actors who repost this post in the feed's boundary."
+        },
+        "viewer": {
+          "type": "ref",
+          "ref": "#viewerState"
+        }
+      }
+    },
+    "viewerState": {
+      "type": "object",
+      "properties": {
+        "like": {
+          "type": "string",
+          "description": "URI of the viewer's like record."
+        },
+        "repost": {
+          "type": "string",
+          "description": "URI of the viewer's repost record."
         }
       }
     },
@@ -2033,6 +2060,425 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.repo.applyWrites",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Apply a batch of creates, updates, and deletes in one boundary as a single commit. Mirrors com.atproto.space.applyWrites at atproto commit 98ef3a6b9, addressing the boundary by its service-qualified name. Requires auth.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "repo", "writes"],
+          "properties": {
+            "boundary": {
+              "type": "string",
+              "maxLength": 253,
+              "description": "Service-qualified boundary identifier `{serviceDid}/{domainName}`"
+            },
+            "repo": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID of the repo to write to (the authenticated member)."
+            },
+            "validate": {
+              "type": "boolean",
+              "description": "Can be set to 'false' to skip Lexicon schema validation of record data across all operations, 'true' to require it, or leave unset to validate only for known Lexicons."
+            },
+            "writes": {
+              "type": "array",
+              "description": "The writes to apply. One batch is one commit, so the length is bounded to the limit the reference implementation enforces; the server rejects larger batches before charging the rate limit.",
+              "minLength": 1,
+              "maxLength": 200,
+              "items": {
+                "type": "union",
+                "refs": ["#create", "#update", "#delete"],
+                "closed": true
+              }
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "union",
+                "refs": ["#createResult", "#updateResult", "#deleteResult"],
+                "closed": true
+              }
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound",
+          "description": "The boundary does not exist."
+        },
+        {
+          "name": "RecordNotFound",
+          "description": "An update or delete targeted a record that does not exist."
+        },
+        {
+          "name": "RecordAlreadyExists",
+          "description": "A create targeted a collection and rkey that already holds a record."
+        },
+        {
+          "name": "BoundaryMismatch",
+          "description": "The record carries a boundary that differs from the boundary parameter."
+        },
+        {
+          "name": "InvalidRecord",
+          "description": "The record is not an object, its $type is missing or differs from the collection, or it breaks a content rule of the collection."
+        },
+        {
+          "name": "InvalidCollection",
+          "description": "The collection is not allowed in this boundary."
+        },
+        {
+          "name": "NotEnrolled",
+          "description": "The caller is not enrolled, or the enrollment is inactive."
+        },
+        {
+          "name": "ServiceWriteForbidden",
+          "description": "Service identities cannot write records."
+        },
+        {
+          "name": "PdsCustodyWriteForbidden",
+          "description": "The caller keeps their records on their own PDS and cannot write here."
+        },
+        {
+          "name": "ForbiddenBoundary",
+          "description": "The caller does not hold this boundary."
+        },
+        {
+          "name": "InvalidDomain",
+          "description": "The boundary name is malformed."
+        },
+        {
+          "name": "ServiceMismatch",
+          "description": "The boundary belongs to another service."
+        },
+        {
+          "name": "RateLimitExceeded",
+          "description": "The caller has exceeded the write rate limit."
+        },
+        {
+          "name": "ScopeUpgradeRequired",
+          "description": "The member's grant predates this collection. Authorize again."
+        }
+      ]
+    },
+    "create": {
+      "type": "object",
+      "description": "Operation which creates a new record.",
+      "required": ["collection", "value"],
+      "properties": {
+        "collection": {
+          "type": "string",
+          "format": "nsid"
+        },
+        "rkey": {
+          "type": "string",
+          "format": "record-key",
+          "maxLength": 512
+        },
+        "value": {
+          "type": "unknown"
+        }
+      }
+    },
+    "update": {
+      "type": "object",
+      "description": "Operation which updates an existing record.",
+      "required": ["collection", "rkey", "value"],
+      "properties": {
+        "collection": {
+          "type": "string",
+          "format": "nsid"
+        },
+        "rkey": {
+          "type": "string",
+          "format": "record-key"
+        },
+        "value": {
+          "type": "unknown"
+        }
+      }
+    },
+    "delete": {
+      "type": "object",
+      "description": "Operation which deletes an existing record.",
+      "required": ["collection", "rkey"],
+      "properties": {
+        "collection": {
+          "type": "string",
+          "format": "nsid"
+        },
+        "rkey": {
+          "type": "string",
+          "format": "record-key"
+        }
+      }
+    },
+    "createResult": {
+      "type": "object",
+      "required": ["uri", "cid"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri"
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid"
+        },
+        "validationStatus": {
+          "type": "string",
+          "knownValues": ["valid", "unknown"]
+        }
+      }
+    },
+    "updateResult": {
+      "type": "object",
+      "required": ["uri", "cid"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri"
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid"
+        },
+        "validationStatus": {
+          "type": "string",
+          "knownValues": ["valid", "unknown"]
+        }
+      }
+    },
+    "deleteResult": {
+      "type": "object",
+      "required": [],
+      "properties": {}
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.repo.createRecord",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Create a single new record in a boundary. Mirrors com.atproto.space.createRecord at atproto commit 98ef3a6b9, addressing the boundary by its service-qualified name. Requires auth.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "repo", "collection", "record"],
+          "properties": {
+            "boundary": {
+              "type": "string",
+              "maxLength": 253,
+              "description": "Service-qualified boundary identifier `{serviceDid}/{domainName}`"
+            },
+            "repo": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID of the repo to write to (the authenticated member)."
+            },
+            "collection": {
+              "type": "string",
+              "format": "nsid",
+              "description": "The NSID of the record collection."
+            },
+            "rkey": {
+              "type": "string",
+              "format": "record-key",
+              "description": "The Record Key.",
+              "maxLength": 512
+            },
+            "validate": {
+              "type": "boolean",
+              "description": "Can be set to 'false' to skip Lexicon schema validation of record data, 'true' to require it, or leave unset to validate only for known Lexicons."
+            },
+            "record": {
+              "type": "unknown",
+              "description": "The record itself. Must contain a $type field."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "URI of the created record."
+            },
+            "cid": {
+              "type": "string",
+              "format": "cid"
+            },
+            "validationStatus": {
+              "type": "string",
+              "knownValues": ["valid", "unknown"]
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound",
+          "description": "The boundary does not exist."
+        },
+        {
+          "name": "RecordAlreadyExists",
+          "description": "A record already exists at this collection and rkey. Retry with a different rkey, or use putRecord."
+        },
+        {
+          "name": "BoundaryMismatch",
+          "description": "The record carries a boundary that differs from the boundary parameter."
+        },
+        {
+          "name": "InvalidRecord",
+          "description": "The record is not an object, its $type is missing or differs from the collection, or it breaks a content rule of the collection."
+        },
+        {
+          "name": "InvalidCollection",
+          "description": "The collection is not allowed in this boundary."
+        },
+        {
+          "name": "NotEnrolled",
+          "description": "The caller is not enrolled, or the enrollment is inactive."
+        },
+        {
+          "name": "ServiceWriteForbidden",
+          "description": "Service identities cannot write records."
+        },
+        {
+          "name": "PdsCustodyWriteForbidden",
+          "description": "The caller keeps their records on their own PDS and cannot write here."
+        },
+        {
+          "name": "ForbiddenBoundary",
+          "description": "The caller does not hold this boundary."
+        },
+        {
+          "name": "InvalidDomain",
+          "description": "The boundary name is malformed."
+        },
+        {
+          "name": "ServiceMismatch",
+          "description": "The boundary belongs to another service."
+        },
+        {
+          "name": "RateLimitExceeded",
+          "description": "The caller has exceeded the write rate limit."
+        },
+        {
+          "name": "ScopeUpgradeRequired",
+          "description": "The member's grant predates this collection. Authorize again."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.repo.deleteRecord",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Delete a record from a boundary, or ensure it is not there. Mirrors com.atproto.space.deleteRecord at atproto commit 98ef3a6b9, addressing the boundary by its service-qualified name. Succeeds whether or not the record was present in the boundary. Requires auth.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "repo", "collection", "rkey"],
+          "properties": {
+            "boundary": {
+              "type": "string",
+              "maxLength": 253,
+              "description": "Service-qualified boundary identifier `{serviceDid}/{domainName}`"
+            },
+            "repo": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID of the repo to delete from (the authenticated member)."
+            },
+            "collection": {
+              "type": "string",
+              "format": "nsid",
+              "description": "The NSID of the record collection."
+            },
+            "rkey": {
+              "type": "string",
+              "format": "record-key",
+              "description": "The Record Key."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound",
+          "description": "The boundary does not exist."
+        },
+        {
+          "name": "InvalidCollection",
+          "description": "The collection is not allowed in this boundary."
+        },
+        {
+          "name": "NotEnrolled",
+          "description": "The caller is not enrolled, or the enrollment is inactive."
+        },
+        {
+          "name": "ServiceWriteForbidden",
+          "description": "Service identities cannot write records."
+        },
+        {
+          "name": "PdsCustodyWriteForbidden",
+          "description": "The caller keeps their records on their own PDS and cannot write here."
+        },
+        {
+          "name": "ForbiddenBoundary",
+          "description": "The caller does not hold this boundary."
+        },
+        {
+          "name": "InvalidDomain",
+          "description": "The boundary name is malformed."
+        },
+        {
+          "name": "ServiceMismatch",
+          "description": "The boundary belongs to another service."
+        },
+        {
+          "name": "RateLimitExceeded",
+          "description": "The caller has exceeded the write rate limit."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.repo.hydrateRecord",
   "defs": {
     "main": {
@@ -2203,6 +2649,130 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.repo.putRecord",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Write a record in a boundary, creating it or updating it in place. Mirrors com.atproto.space.putRecord at atproto commit 98ef3a6b9, addressing the boundary by its service-qualified name. A record held in another boundary, or taken down, is never overwritten. Requires auth.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "repo", "collection", "rkey", "record"],
+          "properties": {
+            "boundary": {
+              "type": "string",
+              "maxLength": 253,
+              "description": "Service-qualified boundary identifier `{serviceDid}/{domainName}`"
+            },
+            "repo": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID of the repo to write to (the authenticated member)."
+            },
+            "collection": {
+              "type": "string",
+              "format": "nsid",
+              "description": "The NSID of the record collection."
+            },
+            "rkey": {
+              "type": "string",
+              "format": "record-key",
+              "description": "The Record Key.",
+              "maxLength": 512
+            },
+            "validate": {
+              "type": "boolean",
+              "description": "Can be set to 'false' to skip Lexicon schema validation of record data, 'true' to require it, or leave unset to validate only for known Lexicons."
+            },
+            "record": {
+              "type": "unknown",
+              "description": "The record to write."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "URI of the written record."
+            },
+            "cid": {
+              "type": "string",
+              "format": "cid"
+            },
+            "validationStatus": {
+              "type": "string",
+              "knownValues": ["valid", "unknown"]
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound",
+          "description": "The boundary does not exist."
+        },
+        {
+          "name": "RecordAlreadyExists",
+          "description": "A record already exists at this collection and rkey in another boundary, or has been taken down."
+        },
+        {
+          "name": "BoundaryMismatch",
+          "description": "The record carries a boundary that differs from the boundary parameter."
+        },
+        {
+          "name": "InvalidRecord",
+          "description": "The record is not an object, its $type is missing or differs from the collection, or it breaks a content rule of the collection."
+        },
+        {
+          "name": "InvalidCollection",
+          "description": "The collection is not allowed in this boundary."
+        },
+        {
+          "name": "NotEnrolled",
+          "description": "The caller is not enrolled, or the enrollment is inactive."
+        },
+        {
+          "name": "ServiceWriteForbidden",
+          "description": "Service identities cannot write records."
+        },
+        {
+          "name": "PdsCustodyWriteForbidden",
+          "description": "The caller keeps their records on their own PDS and cannot write here."
+        },
+        {
+          "name": "ForbiddenBoundary",
+          "description": "The caller does not hold this boundary."
+        },
+        {
+          "name": "InvalidDomain",
+          "description": "The boundary name is malformed."
+        },
+        {
+          "name": "ServiceMismatch",
+          "description": "The boundary belongs to another service."
+        },
+        {
+          "name": "RateLimitExceeded",
+          "description": "The caller has exceeded the write rate limit."
+        },
+        {
+          "name": "ScopeUpgradeRequired",
+          "description": "The member's grant predates this collection. Authorize again."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.repo.uploadBlob",
   "defs": {
     "main": {
@@ -2306,7 +2876,11 @@ export const stratosLexicons: LexiconDoc[] = [
       "description": "A members-only Stratos post feed",
       "key": "any",
       "name": "Stratos Feed",
-      "collections": ["zone.stratos.feed.post"]
+      "collections": [
+        "zone.stratos.feed.post",
+        "app.bsky.feed.like",
+        "app.bsky.feed.repost"
+      ]
     }
   }
 },
@@ -3076,6 +3650,27 @@ export const stratosLexicons: LexiconDoc[] = [
         "record": {
           "type": "unknown",
           "description": "The record content. Present for create and update operations."
+        },
+        "boundary": {
+          "type": "ref",
+          "ref": "#opBoundary",
+          "description": "The boundary the op belongs to; present on create, update and scoped removal ops written by current servers; absent on ops written before it existed, where consumers fall back to the record body."
+        },
+        "excludeBoundary": {
+          "type": "ref",
+          "ref": "#opBoundary",
+          "description": "Present on a scoped removal that is half of a move: the boundary the record moved into. A subscriber that holds one of these boundaries still sees the record and does not receive the removal."
+        }
+      }
+    },
+    "opBoundary": {
+      "type": "object",
+      "description": "The boundaries of a sync op. Unlike a record's boundary, it can list several values, because the removal op for a record written before the one-boundary rule names every boundary the record had.",
+      "required": ["values"],
+      "properties": {
+        "values": {
+          "type": "array",
+          "items": { "type": "ref", "ref": "zone.stratos.boundary.defs#Domain" }
         }
       }
     },

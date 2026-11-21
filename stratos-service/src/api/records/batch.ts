@@ -9,19 +9,29 @@ import {
   encodeRecord,
   MstWriteOp,
   parseCid,
-  StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context.js'
 import { signAndPersistCommit, StratosBlockStoreReader } from '../../features'
-import { validateWritableRecord, withConcurrencyRetry } from './validation.js'
+import {
+  assertCollectionInHostedSpaceType,
+  authorizeRecordBoundary,
+  validateLegacyRecordContent,
+  withConcurrencyRetry,
+} from './validation.js'
 import {
   type BatchWriteResult,
   type CommitResult,
+  opBoundary,
+  type RecordWriteInput,
   sequenceChange,
   type SequenceTrace,
 } from './types.js'
 import { ensureActorStoreExists } from './util.js'
-import { assertStratosCustody } from './custody.js'
+import {
+  assertStratosCustody,
+  assertWritableEnrollment,
+  assertWriterStillAuthorized,
+} from './custody.js'
 
 export type BatchAction = 'create' | 'update' | 'delete'
 
@@ -32,21 +42,33 @@ export interface BatchWriteOp {
   record?: unknown
 }
 
-export interface PrecomputedBatchOp {
+interface PrecomputedBatchOpBase {
   op: BatchWriteOp
   rkey: string
   uriStr: string
   uri: string
-  action: BatchAction
-  recordBytes?: Uint8Array
-  cid?: CID
-  tempRev?: string
   /**
    * Domains the record held BEFORE this op, captured inside the transaction for
-   * update ops so a domain change (move) can emit a boundary-carrying removal.
+   * update ops so a domain change (move) can emit a boundary-carrying removal,
+   * and for delete ops so a scoped removal can be sequenced.
    */
   previousDomains?: string[]
 }
+
+export interface PrecomputedDeleteOp extends PrecomputedBatchOpBase {
+  action: 'delete'
+}
+
+/** A create or update; every op that is not a delete is treated as one. */
+export interface PrecomputedWriteOp extends PrecomputedBatchOpBase {
+  action: 'create' | 'update'
+  writeInput: RecordWriteInput
+  recordBytes: Uint8Array
+  cid: CID
+  tempRev: string
+}
+
+export type PrecomputedBatchOp = PrecomputedDeleteOp | PrecomputedWriteOp
 
 /**
  * Pre-compute CPU-bound work outside the transaction
@@ -75,7 +97,13 @@ async function calculatePrecomputed(
         }
       }
 
-      await validateWritableRecord(ctx, callerDid, op.collection, op.record)
+      await validateLegacyRecordContent(ctx, op.collection, op.record)
+      const boundary = await authorizeRecordBoundary(
+        ctx,
+        callerDid,
+        op.collection,
+        op.record,
+      )
       const recordBytes = encodeRecord(op.record)
       const cid = await computeCid(op.record)
       const tempRev = TID.nextStr()
@@ -85,6 +113,13 @@ async function calculatePrecomputed(
         uriStr,
         uri: uri.toString(),
         action: op.action,
+        writeInput: {
+          callerDid,
+          boundary,
+          collection: op.collection,
+          rkey,
+          record: op.record as Record<string, unknown>,
+        },
         recordBytes,
         cid,
         tempRev,
@@ -104,7 +139,7 @@ function buildMstOps(precomputed: PrecomputedBatchOp[]): MstWriteOp[] {
     action: pre.action,
     collection: pre.op.collection,
     rkey: pre.rkey,
-    cid: pre.action === 'delete' ? null : parseCid(pre.cid!).toString(),
+    cid: pre.action === 'delete' ? null : parseCid(pre.cid).toString(),
   }))
 }
 
@@ -120,10 +155,11 @@ async function prepareWriteResults(
   store: {
     record: {
       deleteRecord(uri: AtUriSyntax): Promise<void>
-      indexRecord(
+      indexRecordInBoundary(
         uri: AtUriSyntax,
         cid: CID,
         record: Record<string, unknown>,
+        boundary: string,
         action: 'create' | 'update',
         rev: string,
       ): Promise<void>
@@ -138,17 +174,28 @@ async function prepareWriteResults(
       await store.record.deleteRecord(new AtUriSyntax(pre.uriStr))
       results.push({})
     } else {
-      await store.record.indexRecord(
+      const { record, boundary } = pre.writeInput
+      await store.record.indexRecordInBoundary(
         new AtUriSyntax(pre.uriStr),
-        pre.cid!,
-        pre.op.record as Record<string, unknown>,
+        pre.cid,
+        record,
+        boundary,
         pre.action,
         rev,
       )
-      results.push({ uri: pre.uriStr, cid: parseCid(pre.cid!).toString() })
+      results.push({ uri: pre.uriStr, cid: parseCid(pre.cid).toString() })
     }
   }
   return results
+}
+
+/** The distinct boundaries the batch writes into; deletes name none. */
+function writeBoundaries(precomputed: PrecomputedBatchOp[]): Set<string> {
+  return new Set(
+    precomputed.flatMap((pre) =>
+      pre.action === 'delete' ? [] : [pre.writeInput.boundary],
+    ),
+  )
 }
 
 /**
@@ -172,6 +219,9 @@ async function buildCommitWithRetry(
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
   let result: CommitResult
   try {
+    for (const boundary of writeBoundaries(precomputed)) {
+      await assertWriterStillAuthorized(ctx, callerDid, boundary)
+    }
     // Ensure actor store exists (inside mutex to prevent creation race)
     await ensureActorStoreExists(ctx.actorStore, callerDid)
 
@@ -252,22 +302,19 @@ async function persistBatchBlocks(
       }
       // Capture the deleted record's domains so a boundary-carrying removal can
       // be sequenced (a plain delete op carries no boundary and is otherwise
-      // invisible to every subscriber).
-      pre.previousDomains = StratosValidator.extractBoundaryDomains(
-        existing.value,
+      // invisible to every subscriber). The stored rows are the boundary; the
+      // body only claims one.
+      pre.previousDomains = await store.record.getRecordBoundaries(
+        new AtUriSyntax(pre.uri),
       )
     } else {
       if (pre.action === 'update') {
         // Capture pre-update domains so a move can emit a scoped removal.
-        const existing = await store.record.getRecord(
+        pre.previousDomains = await store.record.getRecordBoundaries(
           new AtUriSyntax(pre.uri),
-          null,
         )
-        pre.previousDomains = existing
-          ? StratosValidator.extractBoundaryDomains(existing.value)
-          : []
       }
-      await store.repo.putBlock(pre.cid!, pre.recordBytes!, pre.tempRev!)
+      await store.repo.putBlock(pre.cid, pre.recordBytes, pre.tempRev)
     }
   }
 }
@@ -289,17 +336,14 @@ async function sequenceBatchChanges(
 ): Promise<void> {
   // Sequence all changes inline (same connection)
   for (const pre of precomputed) {
-    await sequenceChange(store, {
-      action: pre.action,
-      uri: pre.uri,
-      cid: pre.action !== 'delete' ? pre.cid!.toString() : undefined,
-      record: pre.action !== 'delete' ? pre.op.record : undefined,
-      commitCid,
-      rev,
-      trace: sequenceTrace,
-    })
-
     if (pre.action === 'delete') {
+      await sequenceChange(store, {
+        action: 'delete',
+        uri: pre.uri,
+        commitCid,
+        rev,
+        trace: sequenceTrace,
+      })
       // A plain delete op carries no boundary, so the event above is dropped by
       // the fail-closed scope gate for every subscriber. Emit a boundary-carrying
       // removal scoped to the record's domains so members that could see the
@@ -318,21 +362,29 @@ async function sequenceBatchChanges(
       continue
     }
 
+    await sequenceChange(store, {
+      action: pre.action,
+      uri: pre.uri,
+      cid: pre.cid.toString(),
+      record: pre.op.record,
+      boundary: opBoundary(pre.writeInput.boundary),
+      commitCid,
+      rev,
+      trace: sequenceTrace,
+    })
+
     // A move (update that changes domains) emits a boundary-carrying removal
     // scoped to each domain the record left, sharing this op's rev. See
     // update.ts:sequenceMoveRemovals for the full rationale.
     const removedDomains = computeRemovedDomains(pre)
     if (removedDomains.length > 0) {
-      const newDomains = StratosValidator.extractBoundaryDomains(
-        pre.op.record as Record<string, unknown>,
-      )
       await sequenceChange(store, {
         action: 'delete',
         uri: pre.uri,
         boundary: { values: removedDomains.map((value) => ({ value })) },
         // Suppress the removal for subscribers who still see the record via its
         // new domain(s) — they must observe the update, not a deletion.
-        excludeBoundary: { values: newDomains.map((value) => ({ value })) },
+        excludeBoundary: opBoundary(pre.writeInput.boundary),
         commitCid,
         rev,
         trace: sequenceTrace,
@@ -351,12 +403,17 @@ async function sequenceBatchChanges(
  */
 function computeRemovedDomains(pre: PrecomputedBatchOp): string[] {
   if (pre.action !== 'update' || !pre.previousDomains?.length) return []
-  const newDomains = new Set(
-    StratosValidator.extractBoundaryDomains(
-      pre.op.record as Record<string, unknown>,
-    ),
-  )
-  return pre.previousDomains.filter((d) => !newDomains.has(d))
+  const newBoundary = pre.writeInput.boundary
+  return pre.previousDomains.filter((domain) => domain !== newBoundary)
+}
+
+function assertStratosNamespaceCollection(collection: string): void {
+  if (!collection.startsWith('zone.stratos.')) {
+    throw new InvalidRequestError(
+      'Only zone.stratos.* collections are supported',
+      'InvalidCollection',
+    )
+  }
 }
 
 /**
@@ -378,8 +435,18 @@ export async function applyWritesBatch(
     queuedAtMs: Date.now(),
   }
   ctx.writeRateLimiter.assertWriteAllowed(callerDid, ops.length)
+  for (const op of ops) {
+    assertCollectionInHostedSpaceType(op.collection)
+  }
+  // After the type check, so a collection the type does not list keeps the
+  // message it always had; only a listed collection outside zone.stratos.*
+  // (the interactions of the boundary procedures) reaches this gate.
+  for (const op of ops) {
+    assertStratosNamespaceCollection(op.collection)
+  }
 
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
+  assertWritableEnrollment(enrollment)
   assertStratosCustody(enrollment)
 
   const precomputed: PrecomputedBatchOp[] = await calculatePrecomputed(

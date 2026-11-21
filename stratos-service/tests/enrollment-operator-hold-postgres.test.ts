@@ -52,7 +52,7 @@ describe('enrollment operatorHold on Postgres', () => {
     await closeServicePgDb(db)
     await rawClient.end()
     await stopPostgresContainer()
-  })
+  }, 60_000)
 
   beforeEach(async () => {
     await migrateServicePgDb(db)

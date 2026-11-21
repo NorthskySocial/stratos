@@ -13,6 +13,10 @@ import { eq } from 'drizzle-orm'
 import { oauthSession, oauthState, type ServiceDb } from '../db'
 import { pgOauthSession, pgOauthState } from '../db/pg-schema.js'
 import type { ServicePgDb } from '../db/pg.js'
+import {
+  HOSTED_SPACE_COLLECTIONS,
+  HOSTED_SPACE_TYPE,
+} from '../shared/space-type-registry.js'
 
 /**
  * Granular OAuth scopes for PDS access.
@@ -25,9 +29,7 @@ export const OAUTH_SCOPE = [
 ].join(' ')
 
 /** Space type NSID this service hosts. */
-export const SPACE_TYPE = 'zone.stratos.space.feed'
-
-export const SPACE_COLLECTION = 'zone.stratos.feed.post'
+export const SPACE_TYPE = HOSTED_SPACE_TYPE
 
 /**
  * Builds the space-scope grant requested at enrolment. Omits `skey`: a user
@@ -44,7 +46,10 @@ export function buildSpaceScope(serviceDid: string): string {
   // is a different DID: the grant never matches and a capable PDS is recorded
   // as Stratos custody. It also sends the wrong authority to the PDS.
   const authority = encodeURIComponent(serviceDid)
-  return `space:${SPACE_TYPE}?authority=${authority}&collection=${SPACE_COLLECTION}&action=create&action=read`
+  const collections = HOSTED_SPACE_COLLECTIONS.map(
+    (collection) => `collection=${collection}`,
+  ).join('&')
+  return `space:${SPACE_TYPE}?authority=${authority}&${collections}&action=create&action=read`
 }
 
 /**

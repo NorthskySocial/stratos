@@ -329,9 +329,9 @@ export const applyWritesHandler = (ctx: AppContext) =>
     },
   })
 
-async function observeRecordOperation<T>(
+export async function observeRecordOperation<T>(
   ctx: AppContext,
-  operation: 'create' | 'delete' | 'batch',
+  operation: 'create' | 'update' | 'delete' | 'batch',
   work: () => Promise<T>,
 ): Promise<T> {
   const startedAt = performance.now()

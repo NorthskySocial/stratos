@@ -15,7 +15,8 @@ function buildInput() {
       text: 'hello shinji',
       createdAt: new Date().toISOString(),
     },
-    // Skips validateWritableRecord so the test isolates the custody gate.
+    // validate: false cannot skip record validation, so the body above is valid
+    // and the test isolates the custody gate.
     validate: false,
   }
 }
@@ -94,14 +95,11 @@ describe('updateRecord pds-custody rejection', () => {
     expect(ctx.actorStore.exists).toHaveBeenCalledWith(CALLER_DID)
   })
 
-  it('allows a missing enrollment to reach the existing write path', async () => {
+  it('rejects a missing enrollment', async () => {
     const ctx = buildContext(undefined)
 
     await expect(
       updateRecord(ctx, buildInput(), CALLER_DID),
-    ).rejects.not.toMatchObject({
-      code: 'PdsCustodyWriteForbidden',
-    })
-    expect(ctx.actorStore.exists).toHaveBeenCalledWith(CALLER_DID)
+    ).rejects.toMatchObject({ error: 'NotEnrolled' })
   })
 })

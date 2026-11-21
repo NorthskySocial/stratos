@@ -204,6 +204,7 @@ mod tests {
                 }],
                 deletes: Vec::new(),
                 updated_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                interactions: crate::store::InteractionChanges::default(),
             })
             .unwrap();
         ControlLifecycle::new(

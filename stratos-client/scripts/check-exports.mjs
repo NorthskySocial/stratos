@@ -60,6 +60,15 @@ const EXPECTED_EXPORTS = [
   'findHistoricalSigningKey',
   'keyHistoryTimestamp',
   'MAX_KEY_HISTORY_ENTRIES',
+  // writes
+  'applyBoundaryWrites',
+  'boundaryToSpaceUri',
+  'BoundaryWriteError',
+  'createBoundaryRecord',
+  'deleteBoundaryRecord',
+  'putBoundaryRecord',
+  'ScopeUpgradeRequiredError',
+  'BoundaryWriteClient',
   // scopes
   'STRATOS_SCOPES',
   'buildCollectionScope',
@@ -77,6 +86,7 @@ const EXPECTED_MODULES = [
   'scopes.js',
   'types.js',
   'verification.js',
+  'writes.js',
 ]
 
 if (!existsSync(entryPath)) {

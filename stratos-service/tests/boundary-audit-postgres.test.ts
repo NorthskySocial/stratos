@@ -66,7 +66,7 @@ describe('Postgres boundary audit transactions', () => {
     if (db) await closeServicePgDb(db)
     if (secondDb) await closeServicePgDb(secondDb)
     await container?.stop()
-  })
+  }, 60_000)
 
   it('serializes writers using independent connections and suppresses duplicate membership', async () => {
     const did = 'did:plc:rei'

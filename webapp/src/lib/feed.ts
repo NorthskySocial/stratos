@@ -17,6 +17,8 @@ interface FeedViewPost {
     author?: { did: string; handle: string }
     boundaries?: unknown
     blobs?: { cid: string; url: string; mimeType?: string }[]
+    likeCount?: unknown
+    viewer?: unknown
   }
   reason?: unknown
 }
@@ -90,6 +92,9 @@ export interface FeedPost {
   isPrivate: boolean
   feedgenBlobs?: { cid: string; url: string; mimeType?: string }[]
   loadFeedgenBlob?: (cid: string) => Promise<Blob | undefined>
+  likeCount?: number
+  /** URIs of the viewer's own like and repost of this post. */
+  viewer?: { like?: string; repost?: string }
   reply: ReplyRef | null
   embed?: {
     $type: string
@@ -279,6 +284,17 @@ function boundariesFromRecord(record: Record<string, unknown>): string[] {
     .filter((v): v is string => typeof v === 'string')
 }
 
+/** The viewer's like and repost URIs, or undefined when the post carries neither. */
+function viewerState(viewer: unknown): FeedPost['viewer'] | undefined {
+  if (!viewer || typeof viewer !== 'object') return undefined
+  const { like, repost } = viewer as Record<string, unknown>
+  const state = {
+    ...(typeof like === 'string' ? { like } : {}),
+    ...(typeof repost === 'string' ? { repost } : {}),
+  }
+  return Object.keys(state).length > 0 ? state : undefined
+}
+
 /**
  * Maps a FeedViewPost to a FeedPost.
  * @param feed - The FeedViewPost to map.
@@ -312,6 +328,12 @@ function mapFeedViewPosts(
         reply: parseReplyRef(val),
         embed: val.embed as FeedPost['embed'],
         ...(item.post.blobs ? { feedgenBlobs: item.post.blobs } : {}),
+        ...(typeof item.post.likeCount === 'number'
+          ? { likeCount: item.post.likeCount }
+          : {}),
+        ...(viewerState(item.post.viewer)
+          ? { viewer: viewerState(item.post.viewer) }
+          : {}),
         author: did,
         authorHandle: handle !== did ? handle : '',
         boundaries,

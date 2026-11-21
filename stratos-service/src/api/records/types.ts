@@ -1,6 +1,42 @@
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { ActorTransactor } from '../../actor-store-types.js'
 import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
+import type { Cid } from '@atproto/lex-data'
+
+export interface RecordWriteInput {
+  callerDid: string
+  boundary: string
+  collection: string
+  rkey: string
+  record: Record<string, unknown>
+}
+
+/** A create or update the service sequences; it always carries its boundary. */
+export interface BoundaryRecordWrite {
+  action: 'create' | 'update'
+  collection: string
+  rkey: string
+  record: unknown
+  cid: Cid
+  boundary: string
+}
+
+/** A delete the service sequences; it carries no boundary. */
+export interface RecordDeleteWrite {
+  action: 'delete'
+  collection: string
+  rkey: string
+}
+
+/** The writes the record handlers hand to the repo manager. */
+export type RecordHandlerWrite = BoundaryRecordWrite | RecordDeleteWrite
+
+/** The op-level boundary set sequenced for a single boundary. */
+export function opBoundary(boundary: string): {
+  values: Array<{ value: string }>
+} {
+  return { values: [{ value: boundary }] }
+}
 
 export interface WritePhases {
   enrollment?: number
@@ -28,6 +64,7 @@ export interface SequenceTrace {
 export interface BatchWriteResult {
   uri?: string
   cid?: string
+  validationStatus?: 'valid' | 'unknown'
 }
 
 export interface CommitResult {

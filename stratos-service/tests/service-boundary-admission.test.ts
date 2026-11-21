@@ -221,7 +221,7 @@ describe('PostgreSQL reserved boundary admission', () => {
   afterAll(async () => {
     await db?.$client.end()
     if (pgUrl) await stopPostgresContainer()
-  })
+  }, 60_000)
 
   it('checks the enrollment before decorated PostgreSQL boundaries', async () => {
     const store = new ReservedDomainEnrollmentStore(

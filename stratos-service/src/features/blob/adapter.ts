@@ -4,7 +4,6 @@ import {
   type BoundaryResolver,
   canAccessRecord,
   type Logger,
-  StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from '../../actor-store-types.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
@@ -77,11 +76,9 @@ export class BlobAuthServiceImpl implements BlobAuthService {
 
       // 5. Check if viewer has access to ANY of the records
       for (const uri of recordUris) {
-        const record = await store.record.getRecord(uri, null)
-        if (record) {
-          const recordBoundaries = StratosValidator.extractBoundaryDomains(
-            record.value,
-          )
+        const found = await store.record.getVisibleRecordWithBoundaries(uri)
+        if (found) {
+          const recordBoundaries = found.boundaries
           logDomainlessInvariant(this.logger, recordBoundaries, {
             uri: uri.toString(),
             ownerDid: actorDid,
@@ -175,11 +172,9 @@ export class BlobAuthServiceImpl implements BlobAuthService {
       if (!recordUris || recordUris.length === 0) return false
 
       for (const uri of recordUris) {
-        const record = await store.record.getRecord(uri, null)
-        if (record) {
-          const recordBoundaries = StratosValidator.extractBoundaryDomains(
-            record.value,
-          )
+        const found = await store.record.getVisibleRecordWithBoundaries(uri)
+        if (found) {
+          const recordBoundaries = found.boundaries
           logDomainlessInvariant(this.logger, recordBoundaries, {
             uri: uri.toString(),
             ownerDid: actorDid,
