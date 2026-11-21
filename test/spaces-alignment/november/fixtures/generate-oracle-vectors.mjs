@@ -1074,7 +1074,7 @@ if (writeStratosProduced) {
       'signature-input':
         'sig=("authorization" "atproto-space-audience");tag="atproto-space-credential"',
       signature:
-        'sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP6oE97sVb38WYR4Eqy2rh4x2fWZrebVAliLPkE88woMGw==:',
+        'sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP5X7CESqkIDp3uH7VNJUeHN4vFg/8BCnCxoe4mGCVkZNg==:',
     },
   }
   // Copied from the Rust test `a_delegation_for_fixed_inputs_is_byte_for_byte_stable`

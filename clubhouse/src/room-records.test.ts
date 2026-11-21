@@ -110,14 +110,24 @@ interface RoomOptions {
   custody: RoomCustody
   posts: ClubhouseFeedPost[]
   spaces?: Record<string, unknown>
+  /** The setting as written, for text that is not a JSON object; `undefined` leaves it absent. */
+  spaceSetting?: { text: string | undefined }
   path?: string
 }
 
-async function openRoom({ custody, posts, spaces, path }: RoomOptions) {
+async function openRoom({
+  custody,
+  posts,
+  spaces,
+  spaceSetting,
+  path,
+}: RoomOptions) {
   vi.stubEnv('VITE_STRATOS_URL', 'https://stratos.example')
   vi.stubEnv(
     'VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON',
-    JSON.stringify(spaces ?? { bebop: SPACE }),
+    spaceSetting
+      ? spaceSetting.text
+      : JSON.stringify(spaces ?? { bebop: SPACE }),
   )
   respondTo = stratosAnswers(custody)
   mocks.session = {
@@ -861,6 +871,98 @@ describe('deleting a post kept somewhere else than the member posts', () => {
       expect(document.body.textContent).toContain('Bang.')
     },
   )
+})
+
+describe('deleting a post in a space that is not the room configured one', () => {
+  const KEPT_ELSEWHERE =
+    'This post cannot be deleted from here. Your posts are kept in a different place from this one.'
+
+  it.each([
+    ['another authority', SPACE.replace('stratos.example', 'other.example')],
+    ['another space type', SPACE.replace('space.feed', 'space.other')],
+    ['another space name', SPACE.replace('bebop', 'cowboys')],
+  ])(
+    'says so for a PDS-custody member and %s, and sends no delete',
+    async (_label, space) => {
+      const own = pictured({
+        ...spacePost(SPIKE, '3kswordfish', 'Bang.'),
+        uri: `${space}/${SPIKE}/zone.stratos.feed.post/3kswordfish`,
+      })
+      await openRoom({ custody: 'pds', posts: [own] })
+
+      button('Delete').click()
+      await tick()
+      button('Delete now').click()
+      await vi.waitFor(() =>
+        expect(regionsWithRole('alert', KEPT_ELSEWHERE)).toHaveLength(1),
+      )
+      expect(requests).toEqual([{ url: STATUS_URL, method: 'GET' }])
+      expect(publicRequests).toEqual([])
+      expect(document.body.textContent).toContain('Bang.')
+    },
+  )
+})
+
+describe('an unreadable room spaces setting', () => {
+  const UNREADABLE =
+    'Posting is not set up because the room spaces setting could not be read; ask whoever runs this Clubhouse to correct it.'
+
+  it.each([
+    ['text that is not JSON', '{bebop: '],
+    ['a JSON array', '[]'],
+  ])(
+    'shows the error to a PDS-custody member when it is %s, and posting answers the configuration error',
+    async (_label, text) => {
+      await openRoom({
+        custody: 'pds',
+        posts: [],
+        spaceSetting: { text },
+      })
+      const alerts = regionsWithRole('alert', '')
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].textContent?.trim()).toBe(UNREADABLE)
+
+      const field = await type('#room-post', 'Bang.')
+      submit(field)
+      await vi.waitFor(() =>
+        expect(document.querySelector('#room-post-message')?.textContent).toBe(
+          'Posting needs service configuration for this room.',
+        ),
+      )
+      expect(requests).toEqual([{ url: STATUS_URL, method: 'GET' }])
+      expect(publicRequests).toEqual([])
+    },
+  )
+
+  it.each([
+    ['text that is not JSON', '{bebop: '],
+    ['a JSON array', '[]'],
+  ])(
+    'shows nothing to a Stratos-custody member when it is %s',
+    async (_label, text) => {
+      await openRoom({
+        custody: 'stratos',
+        posts: [],
+        spaceSetting: { text },
+      })
+      expect(regionsWithRole('alert', '')).toEqual([])
+      expect(document.body.textContent).not.toContain('room spaces setting')
+      expect(requests).toEqual([])
+      expect(publicRequests).toEqual([])
+    },
+  )
+
+  it('shows nothing to a PDS-custody member when the setting is absent', async () => {
+    await openRoom({
+      custody: 'pds',
+      posts: [],
+      spaceSetting: { text: undefined },
+    })
+    expect(regionsWithRole('alert', '')).toEqual([])
+    expect(document.body.textContent).not.toContain('room spaces setting')
+    expect(requests).toEqual([])
+    expect(publicRequests).toEqual([])
+  })
 })
 
 describe('a record address ending in a line terminator', () => {

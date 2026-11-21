@@ -183,6 +183,65 @@ describe('deletePost', () => {
     },
   )
 
+  it.each([
+    [
+      'a space record of another collection',
+      `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/app.bsky.feed.like/three`,
+      true,
+    ],
+    [
+      'a space record of the public post collection',
+      `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/app.bsky.feed.post/three`,
+      true,
+    ],
+    [
+      'a private custody record of another collection',
+      `at://${DID}/app.bsky.feed.like/two`,
+      true,
+    ],
+    [
+      'a private custody record of the public post collection',
+      `at://${DID}/app.bsky.feed.post/two`,
+      true,
+    ],
+    [
+      'a public record of another collection',
+      `at://${DID}/app.bsky.feed.like/one`,
+      false,
+    ],
+    [
+      'a public record of the private post collection',
+      `at://${DID}/zone.stratos.feed.post/one`,
+      false,
+    ],
+  ])(
+    'rejects %s as an invalid post URI before any request',
+    async (_label, uri, isPrivate) => {
+      const fetchHandler = vi.fn()
+      const publicDelete = vi.fn()
+      const stratosDelete = vi.fn()
+      const globalFetch = vi.fn()
+      vi.stubGlobal('fetch', globalFetch)
+
+      try {
+        await expect(
+          deletePost({
+            post: post({ uri, isPrivate }),
+            session: session(fetchHandler),
+            publicAgent: agent(publicDelete),
+            stratosAgent: agent(stratosDelete),
+          }),
+        ).rejects.toThrow('The post URI is invalid.')
+      } finally {
+        vi.unstubAllGlobals()
+      }
+      expect(fetchHandler).not.toHaveBeenCalled()
+      expect(globalFetch).not.toHaveBeenCalled()
+      expect(publicDelete).not.toHaveBeenCalled()
+      expect(stratosDelete).not.toHaveBeenCalled()
+    },
+  )
+
   it('reports a failed PDS space deletion', async () => {
     await expect(
       deletePost({

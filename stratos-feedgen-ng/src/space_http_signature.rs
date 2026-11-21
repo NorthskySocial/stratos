@@ -90,7 +90,8 @@ impl SpaceHttpSignatureKey {
         parameters: String,
     ) -> SpaceHttpSignatureHeaders {
         let base = signature_base(&authorization, audience.as_ref(), &parameters);
-        let signature: Signature = self.signing_key.sign(base.as_bytes());
+        let signed: Signature = self.signing_key.sign(base.as_bytes());
+        let signature = signed.normalize_s().unwrap_or(signed);
         SpaceHttpSignatureHeaders {
             authorization,
             audience,
@@ -146,11 +147,11 @@ mod tests {
     const FIXED_PRESENTATION_AUTHORIZATION: &str = "Atproto-Space-Credential misato-credential";
     const FIXED_PRESENTATION_SIGNATURE_INPUT: &str =
         "sig=(\"authorization\" \"atproto-space-audience\");tag=\"atproto-space-credential\"";
-    const FIXED_PRESENTATION_SIGNATURE: &str = "sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP6oE97sVb38WYR4Eqy2rh4x2fWZrebVAliLPkE88woMGw==:";
+    const FIXED_PRESENTATION_SIGNATURE: &str = "sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP5X7CESqkIDp3uH7VNJUeHN4vFg/8BCnCxoe4mGCVkZNg==:";
     const UPSTREAM_LOW_S_PRESENTATION_SIGNATURE: &str = "sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP5X7CESqkIDp3uH7VNJUeHN4vFg/8BCnCxoe4mGCVkZNg==:";
     const FIXED_EXCHANGE_AUTHORIZATION: &str = "Bearer rei-delegation";
     const FIXED_EXCHANGE_SIGNATURE_INPUT: &str = "atproto-space=(\"authorization\");keyid=\"did:key:zDnaeXxvmFHMHjqgQTbadpWG7gPHwnga1i7SMwxrV2BSdUjAD\"";
-    const FIXED_EXCHANGE_SIGNATURE: &str = "atproto-space=:eK8Y8zk7bC2CY6h+uaBC3knTw6bVJxqhoA/eZjfd5CS/Y5JC2kCaPoOxRoayEncfNBm/BZukJ3bOEFurFkNeCA==:";
+    const FIXED_EXCHANGE_SIGNATURE: &str = "atproto-space=:eK8Y8zk7bC2CY6h+uaBC3knTw6bVJxqhoA/eZjfd5CRAnG28Jb9lwnxOuXlN7YjgiM07qAtzdw4lqW8X5h/HSQ==:";
 
     fn fixtures() -> Value {
         serde_json::from_str(include_str!(
@@ -343,6 +344,54 @@ mod tests {
         assert_eq!(headers.signature_input(), FIXED_EXCHANGE_SIGNATURE_INPUT);
         assert_eq!(headers.signature(), FIXED_EXCHANGE_SIGNATURE);
         assert!(!headers.signature_input().contains("tag="));
+    }
+
+    const SEEDED_KEYS: u8 = 96;
+
+    fn is_low_s(signature: &Signature) -> bool {
+        signature.normalize_s().is_none()
+    }
+
+    #[test]
+    fn the_low_s_check_recognises_a_high_s_signature() {
+        let key = fixed_key();
+        let headers = key.exchange_headers("rei-delegation").unwrap();
+        let signed =
+            Signature::from_slice(&signature_bytes(headers.signature(), "atproto-space")).unwrap();
+        let low = signed.normalize_s().unwrap_or(signed);
+        let high = Signature::from_scalars(low.r().to_bytes(), (-low.s()).to_bytes()).unwrap();
+        assert!(is_low_s(&low));
+        assert!(!is_low_s(&high));
+    }
+
+    #[test]
+    fn every_presentation_and_exchange_signature_is_low_s_and_verifies() {
+        let audience = Did::parse(FIXED_AUDIENCE).unwrap();
+        for seed in 1..=SEEDED_KEYS {
+            let key = SpaceHttpSignatureKey::from_signing_key(
+                SigningKey::from_slice(&[seed; 32]).unwrap(),
+            );
+            let token = format!("faye-valentine-{seed}");
+            let presentation = key.presentation_headers(&token, &audience).unwrap();
+            let exchange = key.exchange_headers(&token).unwrap();
+            for (headers, label, audience) in [
+                (&presentation, "sig", Some(&audience)),
+                (&exchange, "atproto-space", None),
+            ] {
+                let signature =
+                    Signature::from_slice(&signature_bytes(headers.signature(), label)).unwrap();
+                assert!(is_low_s(&signature), "seed {seed} {label} is high-S");
+                let parameters = headers
+                    .signature_input()
+                    .strip_prefix(&format!("{label}="))
+                    .unwrap();
+                let base = signature_base(headers.authorization(), audience, parameters);
+                key.signing_key
+                    .verifying_key()
+                    .verify(base.as_bytes(), &signature)
+                    .unwrap();
+            }
+        }
     }
 
     #[test]

@@ -277,6 +277,68 @@ describe('custody-aware room posting', () => {
     expect(deletePost).not.toHaveBeenCalled()
   })
 
+  describe('deleting from a PDS-custody room with a configured space', () => {
+    const ROOM_SPACE =
+      'at:space/did:web:stratos.example/zone.stratos.space.feed/tokyo-3'
+    const KEPT_ELSEWHERE =
+      'This post cannot be deleted from here. Your posts are kept in a different place from this one.'
+    const postIn = (space: string) =>
+      `${space}/did:plc:asuka/zone.stratos.feed.post/3k2`
+
+    it('sends the delete for a post in that space', async () => {
+      const fetchHandler = vi
+        .fn()
+        .mockResolvedValue(new Response('{}', { status: 200 }))
+
+      await deleteRoomPost({
+        session: { sub: 'did:plc:asuka', fetchHandler } as never,
+        custody: 'pds',
+        uri: postIn(ROOM_SPACE),
+        cid: 'bafy-asuka',
+        roomSpace: ROOM_SPACE,
+      })
+
+      expect(fetchHandler).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(fetchHandler.mock.calls[0][1].body)).toEqual({
+        space: ROOM_SPACE,
+        repo: 'did:plc:asuka',
+        collection: 'zone.stratos.feed.post',
+        rkey: '3k2',
+      })
+    })
+
+    it.each([
+      [
+        'another authority',
+        'at:space/did:web:other.example/zone.stratos.space.feed/tokyo-3',
+      ],
+      [
+        'another space type',
+        'at:space/did:web:stratos.example/zone.stratos.space.other/tokyo-3',
+      ],
+      [
+        'another space name',
+        'at:space/did:web:stratos.example/zone.stratos.space.feed/bebop',
+      ],
+    ])(
+      'refuses a post in a space with %s and sends nothing',
+      async (_label, space) => {
+        const fetchHandler = vi.fn()
+
+        await expect(
+          deleteRoomPost({
+            session: { sub: 'did:plc:asuka', fetchHandler } as never,
+            custody: 'pds',
+            uri: postIn(space),
+            cid: 'bafy-asuka',
+            roomSpace: ROOM_SPACE,
+          }),
+        ).rejects.toThrow(KEPT_ELSEWHERE)
+        expect(fetchHandler).not.toHaveBeenCalled()
+      },
+    )
+  })
+
   it('sends root and parent as served when replying in a PDS-custody room', async () => {
     const fetchHandler = vi.fn().mockResolvedValue(
       new Response(

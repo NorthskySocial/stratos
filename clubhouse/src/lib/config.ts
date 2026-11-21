@@ -14,6 +14,8 @@ export interface ClubhouseConfig {
   pdsSpaceUriByRoom: Readonly<Record<string, string>>
   /** Why a room's configured space was refused, keyed by public room ID. */
   pdsSpaceProblemByRoom?: Readonly<Record<string, string>>
+  /** Why the whole room spaces setting could not be read; absent when it can be, or is not set. */
+  pdsSpaceSettingProblem?: string
 }
 
 /** Return the public app origin used in OAuth metadata and service redirects. */
@@ -60,18 +62,28 @@ function spaceProblem(roomId: string): string {
   return `Posting is not set up for the room "${roomId}": the space it was given is not a valid space address. Ask whoever runs this Clubhouse to correct it.`
 }
 
+const UNREADABLE_SPACE_SETTING =
+  'Posting is not set up because the room spaces setting could not be read; ask whoever runs this Clubhouse to correct it.'
+
 function parseSpaceUris(
   value: string | undefined,
-): Pick<ClubhouseConfig, 'pdsSpaceUriByRoom' | 'pdsSpaceProblemByRoom'> {
+): Pick<
+  ClubhouseConfig,
+  'pdsSpaceUriByRoom' | 'pdsSpaceProblemByRoom' | 'pdsSpaceSettingProblem'
+> {
   const none = {
     pdsSpaceUriByRoom: emptyDictionary<string>(),
     pdsSpaceProblemByRoom: emptyDictionary<string>(),
   }
   if (!value) return none
+  const unreadable = {
+    ...none,
+    pdsSpaceSettingProblem: UNREADABLE_SPACE_SETTING,
+  }
   try {
     const parsed: unknown = JSON.parse(value)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
-      return none
+      return unreadable
     const spaces = emptyDictionary<string>()
     const problems = emptyDictionary<string>()
     // `JSON.parse` gives a `__proto__` key as an own property, so it is read
@@ -82,7 +94,7 @@ function parseSpaceUris(
     }
     return { pdsSpaceUriByRoom: spaces, pdsSpaceProblemByRoom: problems }
   } catch {
-    return none
+    return unreadable
   }
 }
 

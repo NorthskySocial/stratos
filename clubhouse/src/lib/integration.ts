@@ -344,6 +344,7 @@ export function createClubhouseIntegration(
         custody,
         uri: post.uri,
         cid: post.cid,
+        roomSpace: ownValue(config.pdsSpaceUriByRoom, roomId),
         stratosWriter:
           dependencies.stratosWriter ??
           createServiceRoomPostWriter(session, config),

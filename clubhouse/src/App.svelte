@@ -100,7 +100,9 @@
   // nobody else is told it is broken.
   const configurationProblem = $derived(
     currentRoom && viewerCustody === 'pds'
-      ? (deploymentConfig.pdsSpaceProblemByRoom?.[currentRoom.id] ?? null)
+      ? (deploymentConfig.pdsSpaceProblemByRoom?.[currentRoom.id] ??
+        deploymentConfig.pdsSpaceSettingProblem ??
+        null)
       : null,
   )
   const currentRoomVisual = $derived(

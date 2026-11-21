@@ -15,7 +15,7 @@
     },
     "generator": {
       "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
-      "sha256": "69096a6a53caaffd5d97177be6f032d907a9d656cac513d7d764777dd6e6644f"
+      "sha256": "a42fa7432ecb9f61a0fddc1abd16f2cb47de69b10f302d8f39c2c84c6465dec5"
     },
     "upstreamVerified": true,
     "reproducible": true
@@ -29,7 +29,7 @@
       "authorization": "Atproto-Space-Credential misato-credential",
       "atproto-space-audience": "did:plc:tokyo3",
       "signature-input": "sig=(\"authorization\" \"atproto-space-audience\");tag=\"atproto-space-credential\"",
-      "signature": "sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP6oE97sVb38WYR4Eqy2rh4x2fWZrebVAliLPkE88woMGw==:"
+      "signature": "sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP5X7CESqkIDp3uH7VNJUeHN4vFg/8BCnCxoe4mGCVkZNg==:"
     },
     "verdict": "accepted"
   },

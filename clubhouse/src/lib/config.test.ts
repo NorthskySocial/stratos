@@ -198,3 +198,45 @@ describe('room names that every object inherits', () => {
     },
   )
 })
+
+describe('an unreadable room spaces setting', () => {
+  const UNREADABLE =
+    'Posting is not set up because the room spaces setting could not be read; ask whoever runs this Clubhouse to correct it.'
+
+  it.each([
+    ['text that is not JSON', '{bebop: '],
+    [
+      'a JSON array',
+      '["at:space/did:web:nerv.example/zone.stratos.space.feed/bebop"]',
+    ],
+    ['a JSON string', '"bebop"'],
+    ['a JSON number', '7'],
+    ['JSON null', 'null'],
+    ['blank text', '  '],
+  ])('is a configuration problem for %s and keeps no space', (_label, json) => {
+    const config = loadClubhouseConfig({
+      VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON: json,
+    })
+    expect(config.pdsSpaceSettingProblem).toBe(UNREADABLE)
+    expect(config.pdsSpaceUriByRoom).toEqual({})
+    expect(config.pdsSpaceProblemByRoom ?? {}).toEqual({})
+  })
+
+  it.each([
+    ['absent', {}],
+    ['empty', { VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON: '' }],
+    ['an empty object', { VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON: '{}' }],
+    [
+      'a valid object',
+      {
+        VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON: JSON.stringify({
+          bebop: 'at:space/did:web:nerv.example/zone.stratos.space.feed/bebop',
+        }),
+      },
+    ],
+  ])('is not a problem when the setting is %s', (_label, environment) => {
+    expect(
+      loadClubhouseConfig(environment).pdsSpaceSettingProblem,
+    ).toBeUndefined()
+  })
+})
