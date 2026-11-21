@@ -202,7 +202,8 @@ const SPACE_URI_MARKERS = [
 // Where the earlier spelling may appear only on a line that says legacy: the
 // roots above, the rest of the test tree, the deprecated packages, the
 // workflows and scripts, the documentation site's own source, and the root
-// files a reader or a build opens first.
+// files a reader or a build opens first. Lockfiles are generated and are not
+// read.
 const LEGACY_LINE_ROOTS = [
   ...SWEEP_ROOTS,
   'test/spaces-alignment',
@@ -219,12 +220,25 @@ const LEGACY_LINE_ROOTS = [
   'docker-compose.feedgen.yml',
   '.env.example',
   'test/.env.example',
+  'package.json',
+  'pnpm-workspace.yaml',
+  'Cargo.toml',
+  'deno.json',
+  'deno.indexer.json',
+  'project.json',
+  'tsconfig.json',
+  'vitest.config.ts',
+  'eslint.config.js',
+  'feeds.local.yaml',
+  'rust-toolchain.toml',
+  'stratos.code-workspace',
+  'wishlist.md',
 ]
 const LEGACY_LINE_SKIPPED_DIRECTORY =
   /^(node_modules|target|dist|build|cache|\..*)$/
 // Only the example of an environment file is read: a real one holds secrets.
 const LEGACY_LINE_TEXT_FILE =
-  /\.(ts|tsx|js|mjs|mts|cjs|svelte|vue|rs|json|md|sql|toml|ya?ml|sh|html)$|^Dockerfile|^\.env\.example$/
+  /\.(ts|tsx|js|mjs|mts|cjs|svelte|vue|rs|json|md|sql|toml|ya?ml|sh|html)$|^Dockerfile|\.Dockerfile$|^\.env\.example$/
 
 // Paths that may spell a space URI in the earlier scheme-and-segment form on a
 // line that does not say legacy, each with its reason. Nothing else may.
@@ -670,6 +684,10 @@ describe('november applicability ledger', () => {
       'clubhouse/index.html',
       'stratos-feedgen-ng/Dockerfile',
       'Dockerfile',
+      'test/spaces-alignment/atmosphere/stacks/feedgen-ng-e2e-browser.Dockerfile',
+      'test/spaces-alignment/atmosphere/stacks/feedgen-ng-local/identity.Dockerfile',
+      'package.json',
+      'pnpm-workspace.yaml',
       '.env.example',
       'webapp/.env.example',
       'test/.env.example',

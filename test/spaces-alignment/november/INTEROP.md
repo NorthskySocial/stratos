@@ -5,9 +5,10 @@ what to do, in order, the day an upstream PDS accepts the `at:space/` record
 and space spelling. No part of the November contract has been run against a
 host: the PDS images the sandbox pins refuse the new spelling.
 
-Every command below runs from the repository root, needs rootless Docker, a
-clean checkout at a committed SHA, a report directory that does not exist, and
-either the two-review receipt (`test/spaces-alignment/README.md`) or GitHub Actions with
+Every runner command below (`pnpm exec tsx test/spaces-alignment/run-sandbox.ts`)
+runs from the repository root, needs rootless Docker, a clean checkout at a
+committed SHA, a report directory that does not exist, and either the
+two-review receipt (`test/spaces-alignment/README.md`) or GitHub Actions with
 `--ci-evidence`. Replace `<sandbox checkout>`, `<receipt file>` and
 `<new directory>` with real paths.
 
@@ -73,23 +74,47 @@ exists.
 
 ## 2. The day a host accepts the new spelling
 
-Do these in order. Stop at the first step that fails and keep its output.
+Do these in order. Stop at the first step that fails and keep its output. No
+command in this section has been run: each is marked not verified. Where a
+command calls an upstream method, it names the lexicon its parameters come
+from, at the November reference revision
+`b5fd12fa57b10cf068efa879812f558780f37109`. Check the same path at the revision
+you pin before you rely on it.
 
 1. **Pin the artifact.** Choose one upstream commit and one set of npm package
    versions whose syntax package, validators and PDS accept `at:space/`. Neither
    revision the manifest names today does: both serialize the earlier spelling.
-   Build the PDS image of that commit the way the runner does
-   (`test/spaces-alignment/build-alpha-pds.ts`), with the same label, so a later
-   rebuild on the same machine can reuse the layer cache:
+   Build the PDS image of that commit as the runner does
+   (`buildAlphaPds` in `test/spaces-alignment/build-alpha-pds.ts`), on the
+   machine that will run the suites, so the runner's rebuild there can reuse
+   the layer cache. `<the daemon's socket URL>` is what
+   `docker context inspect rootless --format '{{.Endpoints.docker.Host}}'`
+   prints. Not verified: these commands have not been run.
 
    ```sh
    git clone https://github.com/bluesky-social/atproto.git <upstream checkout>
    git -C <upstream checkout> checkout --detach <revision>
-   docker build --file <upstream checkout>/Dockerfile \
+   grep -E '^FROM ' <upstream checkout>/Dockerfile
+   docker pull <each image a FROM line names that is not a stage name>
+   export DOCKER_HOST=<the daemon's socket URL>
+   DOCKER_CONFIG="$(mktemp -d)" docker build --progress=plain \
+     --file <upstream checkout>/Dockerfile \
      --label org.opencontainers.image.revision=<revision> \
      --iidfile pds-image.id --tag stratos-reference-pds:probe <upstream checkout>
    cat pds-image.id
    ```
+
+   The runner differs from a plain `docker build` in two ways, and either can
+   change the image ID. It pulls every base image a `FROM` line names before it
+   builds, so a newer image under the same tag replaces a cached one. It builds
+   with `DOCKER_CONFIG` set to a new empty directory, so none of your own
+   builder, proxy or credential settings apply. The commands above do both.
+   With an empty `DOCKER_CONFIG` the CLI cannot read your Docker contexts, so
+   name the rootless daemon with `DOCKER_HOST`. The upstream `Dockerfile` needs
+   BuildKit, so the `buildx` plugin must be installed where the CLI finds it
+   without your config. At the reference revision the only base image is
+   `node:24.22.2-alpine3.24`, and the last stage, which `docker build` builds by
+   default, is `pds`.
 
    The last line prints `sha256:` and 64 hex digits. That is the local image ID
    that `docker build --iidfile` writes, not a registry digest. It is the value
@@ -103,7 +128,8 @@ Do these in order. Stop at the first step that fails and keep its output.
    and `pnpm-lock.yaml` at that revision. The runner refuses to build the
    reference host while those two hashes are empty or the revision is on the
    legacy-only list or is the revision the October file pins. The values come
-   from these commands, one package at a time:
+   from these commands, one package at a time. Not verified: these commands
+   have not been run.
 
    ```sh
    git -C <upstream checkout> show <revision>:Dockerfile | sha256sum
@@ -113,83 +139,230 @@ Do these in order. Stop at the first step that fails and keep its output.
    sha256sum <scratch directory>/*.tgz
    ```
 
-3. **Probe.** Start the image alone, then ask it to parse a space URI in the new
-   spelling. The host validates query parameters before it checks
-   authentication, so the request needs no account:
+3. **Probe.** Start the image on its own network with a PLC directory, ask it to
+   parse a space URI in the new spelling, then make one record and one
+   credential in that spelling. Use a local PLC directory, never the public one.
+   Not verified: none of these commands has been run, and the PDS settings
+   follow `templates/reference-pds.yaml`.
+
+   Start the PLC directory. The upstream repository starts one in its
+   development environment: `TestPlc` in `packages/dev-env/src/plc.ts`, with an
+   in-memory database, on port 2582 in `packages/dev-env/src/bin.ts`. Build the
+   workspace first, in the same base image, as the `Dockerfile` build stages
+   do. This writes `node_modules` and build output into `<upstream checkout>`,
+   so do it after the image build of step 1.
+
+   ```sh
+   docker network create stratos-reference-probe
+   docker run --rm --volume <upstream checkout>:/src --workdir /src \
+     node:24.22.2-alpine3.24 \
+     sh -ec 'corepack enable && pnpm install --frozen-lockfile && pnpm run prebuild && pnpm run build'
+   docker run --rm --detach --name stratos-reference-plc \
+     --network stratos-reference-probe \
+     --volume <upstream checkout>:/src:ro --workdir /src/packages/dev-env \
+     node:24.22.2-alpine3.24 \
+     node --input-type=module -e "import { TestPlc } from './dist/plc.js'; await TestPlc.create({ port: 2582 })"
+   ```
+
+   Start the PDS on the same network. `<random hex>` is the output of
+   `openssl rand -hex 16`, `<64 hex>` the output of `openssl rand -hex 32`, and
+   `<random text>` any password you choose for the admin account.
 
    ```sh
    docker run --rm --detach --name stratos-reference-pds-probe \
-     --publish 127.0.0.1:2583:3000 \
+     --network stratos-reference-probe --publish 127.0.0.1:2583:3000 \
      --env PDS_HOSTNAME=localhost --env PDS_DEV_MODE=true \
      --env PDS_JWT_SECRET=<random hex> --env PDS_ADMIN_PASSWORD=<random text> \
      --env PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX=<64 hex> \
-     --env PDS_DID_PLC_URL=<local PLC directory URL> \
+     --env PDS_DID_PLC_URL=http://stratos-reference-plc:2582 \
      --env PDS_DATA_DIRECTORY=/app/data \
      --env PDS_BLOBSTORE_DISK_LOCATION=/app/data/blocks \
      --env PDS_INVITE_REQUIRED=false --env PDS_CRAWLERS= \
      "$(cat pds-image.id)"
+   ```
+
+   Ask it to parse a space URI. At the reference revision the host validates
+   query parameters before it checks authentication
+   (`packages/xrpc-server/src/server.ts`), so the request needs no account.
+   Parameters from `lexicons/com/atproto/space/getRecord.json`.
+
+   ```sh
    curl --silent --write-out '\n%{http_code}\n' \
      'http://127.0.0.1:2583/xrpc/com.atproto.space.getRecord?space=at:space/did:web:stratos.example/zone.stratos.space.feed/general&repo=did:plc:spikespiegelbebopcrewabc&collection=zone.stratos.feed.post&rkey=bebop'
    ```
 
    A 401 answer means the host parsed the space URI and asked for
    authentication. A 400 `InvalidRequest` answer about `space` means it refuses
-   the spelling: stop here. Then, on the same host, create an account and a
-   session, call `com.atproto.space.createSpace` (space type
-   `zone.stratos.space.feed`, a personal-space policy),
-   `com.atproto.space.createRecord` in the space it returns,
-   `com.atproto.space.getRecord` at the URI it returns, and
-   `com.atproto.space.getDelegationToken` then
-   `com.atproto.space.authorizeSpaceSync` for that space. Save the four answers in
-   one receipt file. The probe holds when the space, the record URI and the
-   credential `sub` all start with `at:space/`, and the record read back has the
-   same URI. Fill `cutoverEvidence.uriProbe`: `artifactRevision`, `imageDigest`
-   (the image ID from step 1), `packageVersions`, `recordUri` (from
-   `createRecord`), `credentialSubject` (the credential `sub`) and
-   `receiptSha256` (`sha256sum` of the receipt file). Then set
-   `referenceSupportsTargetUri` to `true` and `cutoverEvidence.status` to
-   `fulfilled`. `test/spaces-alignment/november/november-sources.test.ts` rejects a ready manifest
-   whose probe is partial or names a legacy-only artifact. Not verified: none of
-   these commands has been run, and the PDS settings follow
-   `templates/reference-pds.yaml`. Use a local PLC directory, never the public
-   one.
+   the spelling: stop here.
 
-4. **Build the reference host.** The runner builds it from the upstream
-   repository root `Dockerfile` at `reference.revision` whenever a suite that
-   needs it is selected, and refuses to if step 2 or 3 is incomplete.
+   Make an account and a session. `<password>` is one you choose. With
+   `PDS_HOSTNAME=localhost` the host's handle domain is `.test`
+   (`packages/pds/src/config/config.ts`). Parameters from
+   `lexicons/com/atproto/server/createAccount.json` and
+   `lexicons/com/atproto/server/createSession.json`. The lexicon requires only
+   `handle`; whether this host also requires `email` and `password` is not
+   established from it, so both are sent.
+
+   ```sh
+   curl --silent --request POST http://127.0.0.1:2583/xrpc/com.atproto.server.createAccount \
+     --header 'content-type: application/json' \
+     --data '{"handle":"spike.test","email":"spike@bebop.test","password":"<password>"}'
+   curl --silent --request POST http://127.0.0.1:2583/xrpc/com.atproto.server.createSession \
+     --header 'content-type: application/json' \
+     --data '{"identifier":"spike.test","password":"<password>"}'
+   ```
+
+   From the session answer, `<access token>` is `accessJwt` and `<did>` is
+   `did`. Create a personal space with the account as its authority, then a
+   record in it, with `validate` false so the host does not try to validate a
+   Stratos record type. `<space>` is the `space` that `createSpace` returns.
+   Parameters from `lexicons/com/atproto/space/createSpace.json`,
+   `lexicons/com/atproto/personalspace/policy.json` and
+   `lexicons/com/atproto/space/createRecord.json`.
+
+   ```sh
+   curl --silent --request POST http://127.0.0.1:2583/xrpc/com.atproto.space.createSpace \
+     --header 'content-type: application/json' \
+     --header 'authorization: Bearer <access token>' \
+     --data '{"spaceType":"zone.stratos.space.feed","skey":"bebop","policy":{"$type":"com.atproto.personalspace.policy"}}'
+   curl --silent --request POST http://127.0.0.1:2583/xrpc/com.atproto.space.createRecord \
+     --header 'content-type: application/json' \
+     --header 'authorization: Bearer <access token>' \
+     --data '{"space":"<space>","repo":"<did>","collection":"zone.stratos.feed.post","validate":false,"record":{"$type":"zone.stratos.feed.post","text":"See you space cowboy","createdAt":"2026-11-21T00:00:00.000Z"}}'
+   ```
+
+   Read the record back at the URI `createRecord` returns. `<rkey>` is the last
+   part of that URI. Parameters from
+   `lexicons/com/atproto/space/getRecord.json`.
+
+   ```sh
+   curl --silent --get http://127.0.0.1:2583/xrpc/com.atproto.space.getRecord \
+     --header 'authorization: Bearer <access token>' \
+     --data-urlencode 'space=<space>' --data-urlencode 'repo=<did>' \
+     --data-urlencode 'collection=zone.stratos.feed.post' \
+     --data-urlencode 'rkey=<rkey>'
+   ```
+
+   Get a delegation token, make a P-256 key for the credential, and exchange
+   both for a credential. `<token>` is the `token` that `getDelegationToken`
+   returns and `<credential key>` the `did:key` the second command prints.
+   `authorizeSpaceSync` takes no authentication header: its handler declares
+   none (`packages/pds/src/api/com/atproto/space/authorizeSpaceSync.ts`), and
+   for a personal space it accepts the authority's own delegation token.
+   Parameters from `lexicons/com/atproto/space/getDelegationToken.json` and
+   `lexicons/com/atproto/space/authorizeSpaceSync.json`; the key comes from
+   `P256Keypair` in `packages/crypto`.
+
+   ```sh
+   curl --silent --get http://127.0.0.1:2583/xrpc/com.atproto.space.getDelegationToken \
+     --header 'authorization: Bearer <access token>' \
+     --data-urlencode 'space=<space>'
+   docker run --rm --volume <upstream checkout>:/src:ro --workdir /src/packages/crypto \
+     node:24.22.2-alpine3.24 \
+     node --input-type=module -e "import { P256Keypair } from './dist/index.js'; console.log((await P256Keypair.create()).did())"
+   curl --silent --request POST http://127.0.0.1:2583/xrpc/com.atproto.space.authorizeSpaceSync \
+     --header 'content-type: application/json' \
+     --data '{"space":"<space>","credentialKey":"<credential key>","delegationToken":"<token>"}'
+   node -e "console.log(JSON.parse(Buffer.from(process.argv[1].split('.')[1], 'base64url')).sub)" '<credential>'
+   ```
+
+   `<credential>` is the `credential` that `authorizeSpaceSync` returns; the
+   last command prints its `sub`. Save the four answers of `createRecord`,
+   `getRecord`, `getDelegationToken` and `authorizeSpaceSync` in one receipt
+   file. The probe holds when the space, the record URI and the credential
+   `sub` all start with `at:space/`, and the record read back has the same URI.
+   Fill `cutoverEvidence.uriProbe`: `artifactRevision`, `imageDigest` (the image
+   ID from step 1), `packageVersions`, `recordUri` (from `createRecord`),
+   `credentialSubject` (the credential `sub`) and `receiptSha256` (`sha256sum`
+   of the receipt file). Then set `referenceSupportsTargetUri` to `true` and
+   `cutoverEvidence.status` to `fulfilled`.
+   `test/spaces-alignment/november/november-sources.test.ts` rejects a ready
+   manifest whose probe is partial or names a legacy-only artifact.
+
+4. **Run the upstream migrations on a disposable database.** The PDS applies
+   its own migrations when it starts. Start the image of step 1 once against an
+   empty data directory and once against a copy of a data directory an earlier
+   PDS build wrote, with the settings of step 3, on the same network, and with
+   another host port. Not verified: these commands have not been run.
+
+   ```sh
+   docker run --rm --detach --name stratos-reference-pds-migrate \
+     --network stratos-reference-probe --publish 127.0.0.1:2584:3000 \
+     --volume <empty directory>:/app/data \
+     <the --env settings of step 3> "$(cat pds-image.id)"
+   curl --silent --write-out '\n%{http_code}\n' http://127.0.0.1:2584/xrpc/_health
+   docker logs stratos-reference-pds-migrate
+   docker stop stratos-reference-pds-migrate
+   ```
+
+   Then run the same four commands with `<copy of a kept data directory>` in
+   place of `<empty directory>`. A 200 answer from `_health` means the PDS
+   started on that database; keep the logs either way. Under rootless Docker
+   the image's `node` user may not be able to write a directory you created; if
+   the PDS cannot write `/app/data`, add `--user 0:0`. At the November
+   reference revision the account manager's migrations end at `009-spaces` and
+   the actor store's at `002-spaces`
+   (`packages/pds/src/account-manager/db/migrations/` and
+   `packages/pds/src/actor-store/db/migrations/`). Read both lists at the
+   revision you pinned. Whether that revision migrates a database an earlier
+   build wrote is not known. When this step ends, stop the PLC and the probe
+   PDS and remove the network:
+
+   ```sh
+   docker stop stratos-reference-pds-probe stratos-reference-plc
+   docker network rm stratos-reference-probe
+   ```
+
+5. **Repin the sandbox's spaces PDS and settle the declaration fixture.** The
+   baseline and every suite after it run against the sandbox's `pds-space1`,
+   so this comes before them.
+   - The sandbox pins AiaB at the revision in
+     `test/spaces-alignment/sources.json`, and that AiaB pins a `pds-space1`
+     image that refuses the new spelling. Move the AiaB pin, with the SHA-256
+     of its `deno.json` and `deno.lock`, to a release whose `pds-space1`
+     accepts it. Not verified: whether such an AiaB release exists, and
+     whether AiaB exposes the PDS image as a setting at the pinned version.
+   - The Deno suite's `pds-spaces` service in `test/docker-compose.test.yml`
+     pins the same kind of image. Point it at the same digest and drop the
+     comment there that says it refuses the spelling.
+   - The sandbox declaration fixture
+     `test/spaces-alignment/atmosphere/examples/lexicon-fixtures/zone.stratos.space.feed.json`
+     carries `name` and `title` because the hosts pinned today refuse a
+     declaration without `name`. Read `lexSpace` in
+     `packages/lexicon/src/types.ts` at the revision you pinned; at the
+     November reference revision it has `title` and no `name`. If the new host
+     accepts `title` alone, remove `name` from the fixture and change the two
+     tests in `stratos-core/tests/space-type-declaration.test.ts` that hold the
+     fixture's `name`. Otherwise keep it.
+
+6. **Commit, and get the review receipt for that commit.** Steps 2, 3 and 5
+   edit the checkout, and the runner needs a clean checkout at a committed SHA and a
+   receipt (or `--ci-evidence`) for that same SHA
+   (`test/spaces-alignment/README.md`).
+
+7. **Know how the runner builds the reference host.** The runner builds it from
+   the upstream repository root `Dockerfile` at `reference.revision` whenever a
+   suite that needs it is selected, and refuses to if step 2 or 3 is incomplete.
    `uriProbe.imageDigest` is optional to that check, so
    `standard-credential-transport` and `rust-production-interop` build and run a
    reference host with no digest named. `november-interop` needs
    `--pds-image-digest`, equal to `uriProbe.imageDigest`. Whenever
    `--pds-image-digest` is given, the runner also requires its own build's image
    ID to equal it. A rebuild from source need not reproduce the ID of step 1: a
-   changed base image or a build without the layer cache gives a new one. If the
-   IDs differ, the run stops with `The built reference PDS image differs from
---pds-image-digest`, removes the image it built, and does not report that
-   image's ID. Build and probe as in steps 1 and 3 on the machine that runs the
-   suite, straight before the run, so the runner's build can reuse the layer
-   cache. If the IDs still differ, this artifact cannot be run as
-   `november-interop`; record that and keep the reports. The service definition is
-   `test/spaces-alignment/templates/reference-pds.yaml`. Check its container
-   command and data paths against the `pds` stage of the `Dockerfile` at the
-   pinned revision; they follow the layout of the earlier image and have not
-   been compared with the new one.
-5. **Run the upstream migrations on a disposable database.** Start the built
-   image once against an empty data directory and once against a copy of a kept
-   database, with the settings of step 3 and a mounted data directory:
+   changed base image or a build without the layer cache gives a new one. If
+   the IDs differ, the run stops with the error
+   `The built reference PDS image differs from --pds-image-digest`, removes the
+   image it built, and does not report that image's ID. That is why step 1 runs
+   on the machine that runs the suites: the runner's build can then reuse the
+   layer cache. If the IDs still differ, this artifact cannot be run as
+   `november-interop`; record that and keep the reports. The service definition
+   is `test/spaces-alignment/templates/reference-pds.yaml`. At the November
+   reference revision its command and data paths match the `pds` stage of the
+   `Dockerfile` (`index.ts` in the stage's working directory, data under
+   `/app/data`). Compare them again at the revision you pin.
 
-   ```sh
-   docker run --rm --volume <empty directory>:/app/data <step 3 settings> "$(cat pds-image.id)"
-   docker run --rm --volume <copy of a kept data directory>:/app/data <step 3 settings> "$(cat pds-image.id)"
-   ```
-
-   The PDS applies its own migrations when it starts. Read the migration list at
-   the pinned revision: the account manager's `011` and `012` and the actor
-   store's `007` to `009` were the ones the earlier step needed, and a newer
-   revision may add more. Not verified: these commands have not been run.
-
-6. **Run the baseline.** All ten assertions must pass; the receipt is
-   acceptance only for the baseline.
+8. **Run the baseline.** All ten assertions must pass; the receipt is
+   acceptance only for the baseline. Not verified: no run is recorded.
 
 ```sh
 pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
@@ -200,8 +373,9 @@ pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
   --report-dir <new directory>
 ```
 
-7. **Run each other suite**, one run each, each with a new report directory and
-   fresh accounts. Save every `receipt.json` and `failure.json`.
+9. **Run each other suite**, one run each, each with a new report directory and
+   fresh accounts. Save every `receipt.json` and `failure.json`. Not verified:
+   no run of any of them is recorded.
 
 **`ordinary-custody`**
 
@@ -302,10 +476,11 @@ pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
   --report-dir <new directory>
 ```
 
-8. **Run `november-interop`.** It starts only with `--pds-image-digest` naming
-   the image from step 1, and only when the manifest is ready and its probe
-   records the same digest. It has no driver for some journeys yet (see the
-   journey list); until each has one the run stops with the names it lacks.
+10. **Run `november-interop`.** It starts only with `--pds-image-digest` naming
+    the image from step 1, and only when the manifest is ready and its probe
+    records the same digest. It has no driver for some journeys yet (see the
+    journey list); until each has one the run stops with the names it lacks.
+    Not verified: it has never run.
 
 ```sh
 pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
@@ -392,7 +567,7 @@ save. Walk them in this order.
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: A credential minted by Stratos, as space authority, reads a member's record from the reference host.
 - Expected: The credential names the authority as issuer and the space as subject, binds the presentation key in cnf.kid, carries no aud, and is signed with the authority key; the #atproto_pds audience is on the delegation it was exchanged for. The receiver checks the signature against the authority DID document and calls no Stratos method.
-- Unknown: Whether the host accepts a credential minted by a foreign authority. This is the question the earlier probe left open.
+- Unknown: Whether a November host accepts a credential minted by a foreign authority. An August probe of an earlier alpha build reported that it did; the repository keeps its commit message, not its output.
 - Command: Run `standard-credential-transport` (command below); it carries this journey in a ported form, as do `rust-production-interop`.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
@@ -437,7 +612,7 @@ save. Walk them in this order.
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: A credential renews with a fresh key, and after the member is removed a renewal is denied while a credential already issued still reads until it expires.
 - Expected: Renewal after removal is denied by Stratos; a credential already issued lapses at its expiry.
-- Unknown: Whether the host honours removal sooner than expiry. No host route announces removal.
+- Unknown: Whether the host honours removal sooner than expiry. The host takes com.atproto.space.notifyCredentialsRevoked from the space authority, by credential id, but Stratos never sends it.
 - Command: Run `standard-credential-transport` (command below); it carries this journey in a ported form, as do `rust-production-interop` and `credential-lifetime`.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
@@ -454,8 +629,8 @@ save. Walk them in this order.
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: Whether the host checks the space authority or membership on a write: a second account writes into a space whose authority cannot be resolved.
-- Expected: Stratos treats any record in a member repo as an unverified claim until its own membership and boundary state agree.
-- Unknown: The open question of the earlier write probe: if the write succeeds, the host authorizes from the caller session scope alone.
+- Expected: The write should succeed: at the November reference revision, com.atproto.space.createRecord checks only the caller's own repo, its OAuth grant and that the collection is not a policy record before it commits (packages/pds/src/api/com/atproto/space/createRecord.ts). Stratos treats any record in a member repo as an unverified claim until its own membership and boundary state agree.
+- Unknown: What a pinned November host does. An August probe of an earlier alpha build reported that such a write succeeded; the repository keeps its commit message, not its output or the build it ran against, and its first version did not ensure the writer was a second, unrelated account.
 - Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
@@ -576,19 +751,28 @@ save. Walk them in this order.
 - Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
-## Open questions the earlier probes left
+## Open questions for a November host
 
 A host answers each of these once; nobody has the answer for the new build.
+August probes of an earlier upstream alpha build reported answers to the first
+two. The repository keeps their commit messages, not their output or the build
+they ran against.
 
 - Does a host check the space authority or membership on a write? A second
-  account writes into a space whose authority cannot be resolved. If the write
-  succeeds, Stratos must treat any record in a member repo as an unverified
-  claim until its own membership and boundary state agree (journeys
+  account writes into a space whose authority cannot be resolved. The August
+  probe reported that the write succeeded; its first version did not ensure
+  the writer was a second, unrelated account, and no run after the fix is
+  recorded. At the November reference revision,
+  `com.atproto.space.createRecord` checks only the caller's own repo, its OAuth
+  grant and that the collection is not a policy record before it commits.
+  Stratos treats any record in a member repo as an unverified claim until its
+  own membership and boundary state agree (journeys
   `host-does-not-authorize-write-against-authority` and
   `non-member-forged-boundary-write-never-indexed`).
 - Does a host accept a credential that a foreign authority minted, verified
   against the authority DID document with no call back to Stratos (journey
-  `custom-mint-reads-from-reference-pds`)?
+  `custom-mint-reads-from-reference-pds`)? The August probe reported that the
+  alpha build did.
 - Can the syncer read a member's records from a host it does not control with
   only that credential (journeys `two-authors-on-one-host` and
   `authors-on-separate-hosts`)?
@@ -600,19 +784,3 @@ A host answers each of these once; nobody has the answer for the new build.
   `authors-on-separate-hosts`)?
 - What record URI does a host return for a created record (journeys
   `canonical-uri-at-each-boundary` and `post-uri-and-text-in-real-feed-response`)?
-
-## 3. What to change in the sandbox then
-
-- **The pinned spaces PDS.** The sandbox's `pds-space1` and the Deno suite's
-  `pds-spaces` service both pin an image that refuses the new spelling. Move the
-  sandbox pin in `test/spaces-alignment/sources.json` to a release whose
-  `pds-space1` accepts it, and point the `pds-spaces` image in
-  `test/docker-compose.test.yml` at the same digest, then drop the comment there
-  saying it refuses the spelling. Not verified: whether the sandbox exposes the
-  PDS image as a setting at the pinned version.
-- **Whether the fixture still needs `name`.** The sandbox declaration fixture
-  `test/spaces-alignment/atmosphere/examples/lexicon-fixtures/zone.stratos.space.feed.json` carries
-  `name` and `title` because the pinned hosts refuse a declaration without
-  `name`. If the new pinned host accepts `title` alone, remove `name` from the
-  fixture and update the test that holds the fixture equal to the repository
-  declaration apart from `name`.

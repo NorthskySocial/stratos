@@ -1428,10 +1428,11 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "journey",
+          "name": "custom-mint-reads-from-reference-pds"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+      "reason": "It checked that two credentials Stratos minted for one space had different ids and each read the member's record from the October PDS through com.atproto.space.listRecords. Stratos depends on a host accepting a Stratos credential: the named journey carries that half, and two of the surviving suites carry the journey in a ported form. The different ids existed only so that the probe could revoke one; at the November reference the revocation method is renamed com.atproto.space.notifyCredentialsRevoked, and Stratos never sends it, so that half has nothing to port to."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1442,7 +1443,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+      "reason": "It checked that a revocation notice with an issuer other than the space authority was refused with 403 and left the credential readable. The October probe signed com.atproto.space.notifyCredentialRevoked with the Stratos service key, sent it to the October PDS, and read back with com.atproto.space.listRecords. At the November reference the method is renamed com.atproto.space.notifyCredentialsRevoked; the PDS serves it and takes it only from the space authority. Stratos answers it as an unknown method and never sends it: a credential Stratos mints lapses at its expiry, and Stratos depends on no host revocation. The probe tested how a host handles a notice Stratos never sends, so it is superseded, nothing to port to."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1453,7 +1454,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+      "reason": "It checked that a revocation notice addressed to the authority DID was refused with 403 and left the credential readable. The October probe signed com.atproto.space.notifyCredentialRevoked with the Stratos service key, sent it to the October PDS, and read back with com.atproto.space.listRecords. At the November reference the method is renamed com.atproto.space.notifyCredentialsRevoked; the PDS serves it and takes it only from the space authority. Stratos answers it as an unknown method and never sends it: a credential Stratos mints lapses at its expiry, and Stratos depends on no host revocation. The probe tested how a host handles a notice Stratos never sends, so it is superseded, nothing to port to."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1464,7 +1465,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+      "reason": "It checked that a revocation notice addressed to the PDS's own DID was refused with 403 and left the credential readable. The October probe signed com.atproto.space.notifyCredentialRevoked with the Stratos service key, sent it to the October PDS, and read back with com.atproto.space.listRecords. At the November reference the method is renamed com.atproto.space.notifyCredentialsRevoked; the PDS serves it and takes it only from the space authority. Stratos answers it as an unknown method and never sends it: a credential Stratos mints lapses at its expiry, and Stratos depends on no host revocation. The probe tested how a host handles a notice Stratos never sends, so it is superseded, nothing to port to."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1475,7 +1476,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+      "reason": "It checked that a revocation notice bound to another method was refused with 401 BadJwtLexiconMethod and left the credential readable. The October probe signed com.atproto.space.notifyCredentialRevoked with the Stratos service key, sent it to the October PDS, and read back with com.atproto.space.listRecords. At the November reference the method is renamed com.atproto.space.notifyCredentialsRevoked; the PDS serves it and takes it only from the space authority. Stratos answers it as an unknown method and never sends it: a credential Stratos mints lapses at its expiry, and Stratos depends on no host revocation. The probe tested how a host handles a notice Stratos never sends, so it is superseded, nothing to port to."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1486,7 +1487,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+      "reason": "It checked that a revocation notice bound to no method was refused with 401 BadJwtLexiconMethod and left the credential readable. The October probe signed com.atproto.space.notifyCredentialRevoked with the Stratos service key, sent it to the October PDS, and read back with com.atproto.space.listRecords. At the November reference the method is renamed com.atproto.space.notifyCredentialsRevoked; the PDS serves it and takes it only from the space authority. Stratos answers it as an unknown method and never sends it: a credential Stratos mints lapses at its expiry, and Stratos depends on no host revocation. The probe tested how a host handles a notice Stratos never sends, so it is superseded, nothing to port to."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1497,7 +1498,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+      "reason": "It checked that an empty list, an empty id and 101 ids were each refused with 400 InvalidRequest. The October probe signed com.atproto.space.notifyCredentialRevoked with the Stratos service key, sent it to the October PDS, and read back with com.atproto.space.listRecords. At the November reference the method is renamed com.atproto.space.notifyCredentialsRevoked; the PDS serves it and takes it only from the space authority. Stratos answers it as an unknown method and never sends it: a credential Stratos mints lapses at its expiry, and Stratos depends on no host revocation. The probe tested how a host handles a notice Stratos never sends, so it is superseded, nothing to port to."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1508,7 +1509,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+      "reason": "It checked that a notice for another space left the credential readable. The October probe signed com.atproto.space.notifyCredentialRevoked with the Stratos service key, sent it to the October PDS, and read back with com.atproto.space.listRecords. At the November reference the method is renamed com.atproto.space.notifyCredentialsRevoked; the PDS serves it and takes it only from the space authority. Stratos answers it as an unknown method and never sends it: a credential Stratos mints lapses at its expiry, and Stratos depends on no host revocation. The probe tested how a host handles a notice Stratos never sends, so it is superseded, nothing to port to."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1519,7 +1520,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+      "reason": "It checked that revoking one credential refused it with 401 CredentialRevoked and left a second credential readable. The October probe signed com.atproto.space.notifyCredentialRevoked with the Stratos service key, sent it to the October PDS, and read back with com.atproto.space.listRecords. At the November reference the method is renamed com.atproto.space.notifyCredentialsRevoked; the PDS serves it and takes it only from the space authority. Stratos answers it as an unknown method and never sends it: a credential Stratos mints lapses at its expiry, and Stratos depends on no host revocation. The probe tested how a host handles a notice Stratos never sends, so it is superseded, nothing to port to."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1530,7 +1531,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+      "reason": "It checked that a notice naming the same credential twice was accepted and kept it revoked. The October probe signed com.atproto.space.notifyCredentialRevoked with the Stratos service key, sent it to the October PDS, and read back with com.atproto.space.listRecords. At the November reference the method is renamed com.atproto.space.notifyCredentialsRevoked; the PDS serves it and takes it only from the space authority. Stratos answers it as an unknown method and never sends it: a credential Stratos mints lapses at its expiry, and Stratos depends on no host revocation. The probe tested how a host handles a notice Stratos never sends, so it is superseded, nothing to port to."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1541,7 +1542,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed the October credential-revocation receiver, a method the November reference host does not have, so it cannot pass on any current build."
+      "reason": "It checked that a revoked credential stayed refused after the host restarted. The October probe signed com.atproto.space.notifyCredentialRevoked with the Stratos service key, sent it to the October PDS, and read back with com.atproto.space.listRecords. At the November reference the method is renamed com.atproto.space.notifyCredentialsRevoked; the PDS serves it and takes it only from the space authority. Stratos answers it as an unknown method and never sends it: a credential Stratos mints lapses at its expiry, and Stratos depends on no host revocation. The probe tested how a host handles a notice Stratos never sends, so it is superseded, nothing to port to."
     },
     {
       "suite": "credential-revocation-contract",
@@ -1580,7 +1581,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+      "reason": "It checked the shape of a write's latest commit read back with getLatestCommit. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1591,7 +1592,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+      "reason": "It checked that a short page of the writer list ended with a cursor equal to its last space revision. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1602,7 +1603,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+      "reason": "It checked that a writer list read from the last cursor was empty and kept that cursor. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1613,7 +1614,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+      "reason": "It checked that a second write by the same writer moved that writer to a new state in the list. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1624,7 +1625,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+      "reason": "It checked that an equal or older write notice left the writer list unchanged. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1635,7 +1636,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+      "reason": "It checked that a write notice signed by another account was refused with 403. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1646,7 +1647,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+      "reason": "It checked that a write notice addressed to the writer was refused with 403. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1657,7 +1658,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+      "reason": "It checked that a write notice with a revision too far ahead was refused with 400 FutureRev. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1668,7 +1669,7 @@
           "kind": "none"
         }
       ],
-      "reason": "Superseded, nothing to port to: it probed October writer notification on a PDS (a space-listing route, write notices, member puts), none of which exists on the November reference host, so it cannot pass on any current build."
+      "reason": "It checked that a write notice from a writer removed from the member list was refused with 403. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1830,10 +1831,25 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
+          "title": "creates_updates_and_deletes_over_one_two_and_three_pages_promote",
+          "proves": "A poll that updates one post, deletes another and creates three, over one, two or three pages, serves exactly one URI for each remaining path and none for the deleted one, and its digest equals the host state."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_replacement_leaves_unchanged_rows_as_they_were_and_rewrites_the_changed_one",
+          "proves": "A whole-repo replacement that edits one of three posts rewrites that post row with the new timestamps and leaves the other two rows as they were."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_delete_removes_the_post_and_the_interactions_that_pointed_at_it",
+          "proves": "A promoted delete removes the served post and the like that pointed at it, and only the like keeps a path row."
         }
       ],
-      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+      "reason": "Partly carried by the named Rust tests. The October run required a same-path replacement and a delete each to leave one published row or none, and the published byte total to move by exactly the size change of that row. The named tests cover the rows: one row per path after an update, the changed row rewritten, the deleted post gone. Not covered: the published byte total after a same-path update or a delete; no test reads it. Staging no longer exists, so the October assertion cannot pass on any current build."
     },
     {
       "suite": "staging-limits",
@@ -1861,10 +1877,19 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/migrations.rs",
+          "title": "an_empty_database_reaches_version_eleven_without_the_stage_tables",
+          "proves": "A new database at the latest migration has none of the stage tables and no rows of verified space state."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/migrations.rs",
+          "title": "a_version_ten_database_with_rows_in_the_five_tables_reaches_eleven_and_loses_only_them",
+          "proves": "Migrating a database that holds rows in the stage tables drops those tables and leaves every other row as it was."
         }
       ],
-      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+      "reason": "Partly carried by the named Rust tests. The October run required a promotion to empty every stage table and leave published bytes equal to the promoted value only. The stage tables no longer exist, as the named migration tests show, so a promotion has no staged accounting to release. Not covered: the published byte total after a promotion; no test reads it. Staging no longer exists, so the October assertion cannot pass on any current build."
     },
     {
       "suite": "staging-limits",
@@ -1886,10 +1911,13 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_promotion_and_a_replacement_over_the_projection_maximum_are_refused_and_change_nothing",
+          "proves": "With the projection maximum one byte above what is published, a one-post promotion and a replacement for the same member are each refused as over budget and change none of the member's rows, and both succeed once the maximum is raised."
         }
       ],
-      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+      "reason": "Partly carried by the named Rust test. The October limit was a configured cap on staged bytes across targets (FEEDGEN_STAGE_GLOBAL_MAX_BYTES), refused when two targets together passed it while each stayed under its own byte cap. The present limit is the configured projection maximum (FEEDGEN_PROJECTION_MAX_BYTES): a write is refused when the bytes it adds and everything already published pass it. The limit is store-wide, but the named test has one member only. Not covered: a refusal caused by what other members or Stratos-custody posts have published, and any per-member byte cap, which no longer exists. Staging no longer exists, so the October assertion cannot pass on any current build."
     },
     {
       "suite": "staging-limits",
@@ -1897,10 +1925,25 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_promotion_and_a_replacement_over_the_projection_maximum_are_refused_and_change_nothing",
+          "proves": "With the projection maximum one byte above what is published, a one-post promotion and a replacement for the same member are each refused as over budget and change none of the member's rows, and both succeed once the maximum is raised."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "the_bytes_a_write_adds_are_the_length_of_each_field_of_its_rows",
+          "proves": "The byte count the projection maximum charges for a row is the length of each of its fields; for the four rows of two creates, a like and a delete it is pinned at 1,571."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/interactions.rs",
+          "title": "published_bytes_counts_posts_and_interactions",
+          "proves": "The published total that a write is checked against is the sum of the stored post and interaction bytes, and an interaction's stored bytes are the length of its text fields plus a fixed overhead."
         }
       ],
-      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+      "reason": "Partly carried by the named Rust tests. The October run read the stored database after a refused page: no staged row or byte remained, published bytes were unchanged, and the published byte count equalled the measured size of each stored post. Nothing is staged now, and a refused write changes no row. The named tests pin how a write is charged and what it is checked against. Not covered: that the bytes recorded for a stored space post equal the length of its fields. Staging no longer exists, so the October assertion cannot pass on any current build."
     },
     {
       "suite": "staging-limits",
@@ -1908,10 +1951,19 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_promotion_past_the_per_member_record_limit_is_refused_whole",
+          "proves": "With 20,000 verified records held for one member, a promotion that adds one more is refused as over budget and leaves the member's base and record count unchanged."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_set_past_the_per_member_record_limit_is_refused_before_anything_is_hashed",
+          "proves": "A whole-repo replacement of 20,001 records for one member, under a commit whose digest cannot match, is refused as over budget rather than as a digest mismatch, and changes neither member."
         }
       ],
-      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+      "reason": "Partly carried by the named Rust tests. The October limit was a configured cap on the rows one target could stage (FEEDGEN_STAGE_TARGET_MAX_ROWS), refused while byte room remained. The present limit is a fixed number of verified records per member and space (MAX_SPACE_REPO_RECORDS, 20,000, in stratos-feedgen-ng/src/config.rs), checked when a promotion or a replacement is written. Not covered: a cap an operator can set. Staging no longer exists, so the October assertion cannot pass on any current build."
     },
     {
       "suite": "staging-limits",
@@ -1919,10 +1971,19 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_promotion_past_the_store_wide_row_limit_is_refused_whole",
+          "proves": "With another member's verified state recording 499,990 records, a promotion that takes the member from 10 records to 11 is refused as over budget and changes none of the member's state, paths, served posts or interactions."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/store/space_verification.rs",
+          "title": "a_set_past_the_store_wide_row_limit_is_refused_whole",
+          "proves": "With another member's verified state recording 499,997 records, a replacement that takes the member from three records to four is refused as over budget and leaves the member's rows unchanged."
         }
       ],
-      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+      "reason": "Partly carried by the named Rust tests. The October limit was a configured cap on the rows staged across all targets (FEEDGEN_STAGE_GLOBAL_MAX_ROWS), refused when two targets together passed it while each stayed under its own cap. The present limit is a fixed number of verified records across every member of the store (MAX_SPACE_VERIFICATION_ROWS, 500,000), checked at the write. The named tests write the other member's record count straight into its verified state; no records are synced for it. Not covered: a configured cap, and two members that each sync real records up to the limit. Staging no longer exists, so the October assertion cannot pass on any current build."
     },
     {
       "suite": "staging-limits",
@@ -1962,10 +2023,19 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
+          "title": "a_crashed_poll_leaves_no_state_and_the_next_poll_starts_from_the_verified_rev",
+          "proves": "A poll dropped while its second page is outstanding writes nothing, and the next poll asks from the verified revision with no cursor and promotes to the host state."
+        },
+        {
+          "kind": "test",
+          "file": "stratos-feedgen-ng/src/pds_space_sync/tests.rs",
+          "title": "since_is_the_verified_revision_on_every_request_and_the_page_cursor_is_never_stored",
+          "proves": "Every request of a poll sends the verified revision as since, and the next poll starts again from the new verified revision with no cursor."
         }
       ],
-      "reason": "Superseded, nothing to port to: it measured staged-page accounting or expiry, and staging no longer exists, so it cannot pass on any current build."
+      "reason": "Replaced by the named Rust tests. The October run let a stage pass its age limit, waited for the cleanup to remove the staged cursor, and required the next request to resume from the verified cursor. Nothing is stored between pages now, so there is nothing to expire, and every poll starts from the verified revision. The dropped poll in the first test runs in one process on one store; a dropped write on a reopened file store is the interrupted-stage entry. Staging no longer exists, so the October assertion cannot pass on any current build."
     }
   ]
 }

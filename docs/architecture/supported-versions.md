@@ -68,13 +68,15 @@ and Clubhouse use these interfaces.
 ## What Stratos does not implement
 
 - Handlers for upstream `com.atproto.space.*` methods. Stratos is the authority
-  for its boundaries but does not serve the upstream authority methods,
-  including `authorizeSpaceSync`, `listWriters`, `notifyRepoUpdate` and
-  `notifyCredentialsRevoked`.
+  for its boundaries but does not serve the upstream space-host methods,
+  including `authorizeSpaceSync`, `listWriters` and `notifyRepoUpdate`. It
+  answers each as an unknown method.
 - A `#atproto_pds` service entry in the Stratos DID document. A generic spaces
   client cannot discover Stratos as an authority.
 - Writer discovery. Membership comes from enrollment.
-- Revocation of a credential on a foreign PDS.
+- Revocation of a credential on a foreign PDS. Stratos does not send
+  `com.atproto.space.notifyCredentialsRevoked`, the notice a space host sends a
+  repo host to revoke a credential.
 - A full-content proof. A signature or MAC covers the answer, not every record
   the caller may read.
 - End-to-end encryption. Records are access-controlled, not encrypted against
@@ -92,7 +94,7 @@ and Clubhouse use these interfaces.
   does remove posts.
 - **A credential outlives a hold until it expires.** A credential minted before
   an operator hold or an account takedown stays accepted on a Stratos read route
-  until `exp`. A foreign PDS cannot be told at all. The lifetime is 600 seconds
+  until `exp`. Stratos does not tell a foreign PDS. The lifetime is 600 seconds
   by default for a service credential, never more than 3,600, and 7,200 seconds
   for a DPoP-bound credential.
 - **A declaration without `name` is refused by a PDS older than the November

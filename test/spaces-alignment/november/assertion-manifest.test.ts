@@ -237,6 +237,21 @@ const manifest = JSON.parse(
 
 const entryName = (suite: string, id: string) => `${suite}:${id}`
 
+const escapeRegExp = (text: string) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+// A title must match a declaration, not any text: a title that is a prefix of
+// another test's title would otherwise survive the deletion of its own test.
+function declaresTest(source: string, file: string, title: string): boolean {
+  const name = escapeRegExp(title)
+  const declaration = file.endsWith('.rs')
+    ? new RegExp(`\\bfn ${name}\\(`)
+    : new RegExp(
+        `\\b(?:it|test)(?:\\.each\\((?:[^()]|\\([^()]*\\))*\\))?\\(\\s*(['"\`])${name}\\1`,
+      )
+  return declaration.test(source)
+}
+
 function carrierProblems(entry: Entry, carrier: Carrier): string[] {
   const name = entryName(entry.suite, entry.id)
   switch (carrier.kind) {
@@ -266,7 +281,9 @@ function carrierProblems(entry: Entry, carrier: Carrier): string[] {
       const path = resolve(REPOSITORY_ROOT, carrier.file)
       if (!existsSync(path))
         return [...problems, `${name} names a missing file ${carrier.file}`]
-      if (!readFileSync(path, 'utf8').includes(carrier.title))
+      if (
+        !declaresTest(readFileSync(path, 'utf8'), carrier.file, carrier.title)
+      )
         problems.push(
           `${name} names a test title not in ${carrier.file}: ${carrier.title}`,
         )
@@ -366,6 +383,16 @@ describe('assertion manifest', () => {
     ]).toEqual([102, 4, 42, 1])
   })
 
+  it('counts the entries nothing in the repository carries', () => {
+    const carriedByNothing = manifest.entries.filter((entry) =>
+      entry.carriedBy.every((carrier) => carrier.kind === 'none'),
+    )
+    expect(carriedByNothing).toHaveLength(19)
+    expect(new Set(carriedByNothing.map((entry) => entry.suite))).toEqual(
+      new Set(['credential-revocation-contract', 'writer-sync-contract']),
+    )
+  })
+
   it('keeps all ten mandatory baseline assertions retained under their names', () => {
     expect(ASSERTIONS_AT_THE_START.baseline).toHaveLength(10)
     for (const id of ASSERTIONS_AT_THE_START.baseline!)
@@ -433,6 +460,39 @@ describe('assertion manifest', () => {
     )!
     ;(entry.carriedBy[0] as { title: string }).title = 'a_test_nobody_wrote'
     expect(problemsOf(entries).join('\n')).toContain('a_test_nobody_wrote')
+  })
+
+  it('fails when a named test title is only the prefix of a declared test', () => {
+    for (const [id, prefix] of [
+      ['interrupted-stage', 'a_promotion_that_never_commits_leaves_nothing'],
+      ['stratos-standard-writer-routes-unsupported', 'answers them as unknown'],
+    ]) {
+      const entries = structuredClone(manifest.entries)
+      const entry = entries.find((candidate) => candidate.id === id)!
+      ;(entry.carriedBy[0] as { title: string }).title = prefix!
+      expect(problemsOf(entries).join('\n'), id).toContain(
+        `names a test title not in ${(entry.carriedBy[0] as { file: string }).file}: ${prefix}`,
+      )
+    }
+  })
+
+  it('matches a declaration by its exact title, placeholders included', () => {
+    const source = [
+      "it.each(ROUTES)(\n  'answers $nsid as an unknown method',",
+      'test.each([[1, 2]])("adds %s and %s", () => {})',
+      "  it(`reads Faye's record`, async () => {})",
+      'async fn spike_reads_the_bebop_log() {}',
+    ].join('\n')
+    expect(
+      declaresTest(source, 'a.test.ts', 'answers $nsid as an unknown method'),
+    ).toBe(true)
+    expect(declaresTest(source, 'a.test.ts', 'adds %s and %s')).toBe(true)
+    expect(declaresTest(source, 'a.test.ts', "reads Faye's record")).toBe(true)
+    expect(declaresTest(source, 'a.rs', 'spike_reads_the_bebop_log')).toBe(true)
+    expect(declaresTest(source, 'a.test.ts', 'answers $nsid')).toBe(false)
+    expect(declaresTest(source, 'a.test.ts', 'adds %s')).toBe(false)
+    expect(declaresTest(source, 'a.rs', 'spike_reads_the_bebop')).toBe(false)
+    expect(declaresTest(source, 'a.rs', 'reads_the_bebop_log')).toBe(false)
   })
 
   it('fails when a named test file does not exist', () => {

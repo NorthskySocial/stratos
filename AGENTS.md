@@ -31,11 +31,18 @@ any write, sync, or boundary code.
 | non-spaces     | `stratos` | Stratos            | Stratos, per-actor P-256 key |
 | spaces-capable | `pds`     | the user's own PDS | the user                     |
 
-Three rules follow. They are load-bearing. The first two were observed against
-the earlier upstream alpha PDS, not read from the spec. The third is the URI
-grammar of the combined URI syntax proposal that Stratos targets. The upstream
-packages at the pinned release still use the earlier spelling, and no host has
-accepted the new one; Stratos's own parsers and a hand-written corpus check it.
+Three rules follow. They are load-bearing. The first two rest on an August
+probe of an earlier upstream alpha PDS, not on the spec: an account wrote into
+a space whose authority could not be resolved, and the write succeeded. The
+repository keeps the probe's commit message, not its output or the build it ran
+against, and the probe's first version did not ensure the writer was a second,
+unrelated account. At the November reference revision,
+`com.atproto.space.createRecord` checks the caller's own repo and OAuth grant,
+not the space authority or membership. No November host has been asked. The
+third is the URI grammar of the combined URI syntax proposal that Stratos
+targets. The upstream packages at the pinned release still use the earlier
+spelling, and no host has accepted the new one; Stratos's own parsers and a
+hand-written corpus check it.
 
 1. **Never trust a boundary on a `pds`-custody record.** A repo host does not
    authorize writes against the space authority. Any account can write records

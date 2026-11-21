@@ -491,7 +491,7 @@ export async function prepareAccount(browser, name) {
   const page = await context.newPage()
   await signIn(page, account, clubhouse)
   await enterRoom(page, account, clubhouse, 'general')
-  const seedText = `Plan014 ${account.did} ${randomUUID()}`
+  const seedText = `Bebop ${account.did} ${randomUUID()}`
   const seedWrite = page.waitForResponse(
     (response) =>
       response.request().method() === 'POST' &&

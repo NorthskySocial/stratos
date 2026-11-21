@@ -93,8 +93,10 @@ authority discovery.
 The Stratos `zone.stratos.space.listRepos` enumerates active boundary
 enrollments, not writer updates. Its cursor is a member DID and appears only
 for full pages. The Rust membership reconciler completes that snapshot before
-replacement. Upstream has no `com.atproto.space.listRepos` at the pinned
-reference, so this method answers a question the upstream methods do not.
+replacement. At the pinned reference the upstream `listRepos` is renamed
+`com.atproto.space.listWriters`. The space host serves it, and it lists each
+writer's latest revision or removal, with no host. The Stratos method lists
+active members with custody and host, which `listWriters` does not answer.
 
 Membership comes from enrollment. Never use a writer list that a host reports
 to revoke or admit a member.

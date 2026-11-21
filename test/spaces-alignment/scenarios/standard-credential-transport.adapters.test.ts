@@ -412,7 +412,7 @@ describe('real standard browser adapter bodies', () => {
         },
         page: fixture.page,
       })
-      expect(fixture.text()).toMatch(/^Plan014 did:plc:faye [0-9a-f-]{36}$/)
+      expect(fixture.text()).toMatch(/^Bebop did:plc:faye [0-9a-f-]{36}$/)
       expect(fetch).toHaveBeenCalledTimes(join ? 3 : 1)
       expect(mocks.readFile).toHaveBeenCalledWith(
         '/run/sandbox-secrets/browser-password',

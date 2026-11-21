@@ -110,10 +110,10 @@ async function run(): Promise<void> {
   assert(
     sessionCookie,
     'Captured admin session cookie from OAuth login',
-    sessionCookie ? 'cookie present' : 'no cookie — STOP-worthy per plan 003',
+    sessionCookie ? 'cookie present' : 'no cookie — stop here',
   )
   if (!sessionCookie) {
-    // Per plan 003 STOP condition: do not fall back to a Bearer shortcut.
+    // A Bearer shortcut would skip the OAuth session this script exists to test.
     finish()
   }
 

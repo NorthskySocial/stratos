@@ -112,7 +112,7 @@ export const JOURNEYS: readonly Journey[] = [
     expected:
       'The credential names the authority as issuer and the space as subject, binds the presentation key in cnf.kid, carries no aud, and is signed with the authority key; the #atproto_pds audience is on the delegation it was exchanged for. The receiver checks the signature against the authority DID document and calls no Stratos method.',
     unknown:
-      'Whether the host accepts a credential minted by a foreign authority. This is the question the earlier probe left open.',
+      'Whether a November host accepts a credential minted by a foreign authority. An August probe of an earlier alpha build reported that it did; the repository keeps its commit message, not its output.',
     carriedBy: ['standard-credential-transport', 'rust-production-interop'],
   },
   {
@@ -162,7 +162,7 @@ export const JOURNEYS: readonly Journey[] = [
     expected:
       'Renewal after removal is denied by Stratos; a credential already issued lapses at its expiry.',
     unknown:
-      'Whether the host honours removal sooner than expiry. No host route announces removal.',
+      'Whether the host honours removal sooner than expiry. The host takes com.atproto.space.notifyCredentialsRevoked from the space authority, by credential id, but Stratos never sends it.',
     carriedBy: [
       'standard-credential-transport',
       'rust-production-interop',
@@ -186,9 +186,9 @@ export const JOURNEYS: readonly Journey[] = [
     proves:
       'Whether the host checks the space authority or membership on a write: a second account writes into a space whose authority cannot be resolved.',
     expected:
-      'Stratos treats any record in a member repo as an unverified claim until its own membership and boundary state agree.',
+      "The write should succeed: at the November reference revision, com.atproto.space.createRecord checks only the caller's own repo, its OAuth grant and that the collection is not a policy record before it commits (packages/pds/src/api/com/atproto/space/createRecord.ts). Stratos treats any record in a member repo as an unverified claim until its own membership and boundary state agree.",
     unknown:
-      'The open question of the earlier write probe: if the write succeeds, the host authorizes from the caller session scope alone.',
+      'What a pinned November host does. An August probe of an earlier alpha build reported that such a write succeeded; the repository keeps its commit message, not its output or the build it ran against, and its first version did not ensure the writer was a second, unrelated account.',
     carriedBy: [],
   },
   {
