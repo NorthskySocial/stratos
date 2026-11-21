@@ -4,7 +4,7 @@
  * signed delegation. A member under an operator hold, under an account
  * takedown or under both is refused `NotEnrolled`, and minting works again
  * once the holds are lifted. A service enrollment mints exactly as a member
- * does. A refused mint spends neither the delegation nor the client
+ * does. A mint refused for membership spends neither the delegation nor the client
  * attestation. A credential minted before a hold stays accepted on a read
  * route until it expires: presentation checks the credential, not the member.
  */
@@ -313,7 +313,7 @@ describe('minting a space credential: who may mint', () => {
   })
 
   describe('single-use tokens', () => {
-    it('a refused mint spends neither the delegation nor the client attestation', async () => {
+    it('a mint refused for membership spends neither the delegation nor the client attestation', async () => {
       const client = await makeClient()
       await harness.ctx.boundaryStore!.create({
         ...catalogDefinition(HARNESS_LEADERSHIP),
