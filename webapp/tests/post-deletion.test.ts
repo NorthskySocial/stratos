@@ -6,6 +6,7 @@ import { SPACE_WRITE_SCOPE } from '../src/lib/auth'
 import type { FeedPost } from '../src/lib/feed'
 
 const DID = 'did:plc:misato'
+const LEGACY_SPACE_POST = `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`
 
 function post(overrides: Partial<FeedPost> = {}): FeedPost {
   return {
@@ -141,6 +142,46 @@ describe('deletePost', () => {
     ).rejects.toThrow('You can only delete your own posts.')
     expect(deleteRecord).not.toHaveBeenCalled()
   })
+
+  it('rejects a space post written by another author without a request', async () => {
+    const fetchHandler = vi.fn()
+
+    await expect(
+      deletePost({
+        post: post({
+          uri: `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/three`,
+          isPrivate: true,
+        }),
+        session: session(fetchHandler),
+        publicAgent: agent(),
+        stratosAgent: null,
+      }),
+    ).rejects.toThrow('You can only delete your own posts.')
+    expect(fetchHandler).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['an earlier-spelling record', LEGACY_SPACE_POST],
+    ['an empty string', ''],
+    ['plain text', 'the captain'],
+  ])(
+    'rejects %s as an invalid post URI without a request',
+    async (_label, uri) => {
+      const fetchHandler = vi.fn()
+      const publicDelete = vi.fn()
+
+      await expect(
+        deletePost({
+          post: post({ uri, isPrivate: true }),
+          session: session(fetchHandler),
+          publicAgent: agent(publicDelete),
+          stratosAgent: agent(publicDelete),
+        }),
+      ).rejects.toThrow('The post URI is invalid.')
+      expect(fetchHandler).not.toHaveBeenCalled()
+      expect(publicDelete).not.toHaveBeenCalled()
+    },
+  )
 
   it('reports a failed PDS space deletion', async () => {
     await expect(

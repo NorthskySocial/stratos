@@ -178,6 +178,281 @@ describe('feed extended logic', () => {
     })
   })
 
+  describe('records whose URI names no author', () => {
+    const record = (uri: string) => ({
+      uri,
+      cid: 'cid-bebop',
+      value: { text: 'Bang.', createdAt: '2026-09-07T08:00:00Z' },
+    })
+
+    it('leaves out a Stratos record whose address is not a record address', async () => {
+      const mockAgent = {
+        com: {
+          atproto: {
+            repo: {
+              listRecords: vi.fn().mockResolvedValue({
+                data: {
+                  records: [
+                    record('at://spike.example/zone.stratos.feed.post/1'),
+                    record(
+                      'at://did:plc:spikespiegel/zone.stratos.feed.post/2',
+                    ),
+                  ],
+                },
+              }),
+            },
+          },
+        },
+      } as unknown as Agent
+
+      const posts = await fetchStratosPosts(mockAgent, 'did:plc:spikespiegel')
+      expect(posts.map((post) => post.uri)).toEqual([
+        'at://did:plc:spikespiegel/zone.stratos.feed.post/2',
+      ])
+      expect(posts.map((post) => post.author)).toEqual(['did:plc:spikespiegel'])
+    })
+
+    it('leaves out a served post that names no author and has an unreadable address', async () => {
+      const mockSession = {
+        fetchHandler: vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            feed: [
+              {
+                post: {
+                  uri: 'not an address',
+                  cid: 'cid-bebop',
+                  record: { text: 'Bang.', createdAt: '2026-09-07T08:00:00Z' },
+                },
+              },
+              {
+                post: {
+                  uri: 'not an address either',
+                  cid: 'cid-bebop-2',
+                  record: { text: 'Bang.', createdAt: '2026-09-07T08:00:00Z' },
+                  author: { did: 'did:plc:fayevalentine', handle: 'faye.test' },
+                },
+              },
+            ],
+          }),
+        }),
+      } as unknown as OAuthSession
+
+      const result = await fetchAppviewStratosPosts(
+        mockSession,
+        'https://appview.example',
+      )
+      expect(result.posts.map((post) => post.author)).toEqual([
+        'did:plc:fayevalentine',
+      ])
+    })
+  })
+
+  describe('counting entries left out for want of an author', () => {
+    const LEFT_OUT = 'Feed entries without an author were left out'
+    const servedPost = (uri: string, author?: { did: string }) => ({
+      post: {
+        uri,
+        cid: `cid-${uri.length}`,
+        record: { text: 'Bang.', createdAt: '2026-09-07T08:00:00Z' },
+        ...(author ? { author } : {}),
+      },
+    })
+    const feedgenSession = (feed: unknown[]) =>
+      ({
+        fetchHandler: vi
+          .fn()
+          .mockResolvedValue(new Response(JSON.stringify({ feed }))),
+      }) as unknown as OAuthSession
+
+    it('reports two left-out entries once for a feed load, with no address in the line', async () => {
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      vi.spyOn(console, 'info').mockImplementation(() => {})
+      try {
+        const result = await fetchFeedgenPosts(
+          feedgenSession([
+            servedPost('not an address'),
+            servedPost('at://spike.example/zone.stratos.feed.post/1'),
+            servedPost('at://did:plc:fayevalentine/zone.stratos.feed.post/2', {
+              did: 'did:plc:fayevalentine',
+            }),
+          ]),
+          'did:web:batou.test',
+          'section-9',
+        )
+        expect(result.posts).toHaveLength(1)
+        expect(consoleWarn.mock.calls).toEqual([
+          [{ operation: 'feedgen.getFeed', droppedCount: 2 }, LEFT_OUT],
+        ])
+        expect(JSON.stringify(consoleWarn.mock.calls)).not.toMatch(
+          /not an address|spike\.example|Bang/,
+        )
+      } finally {
+        vi.restoreAllMocks()
+      }
+    })
+
+    it('reports nothing for a load where every entry has an author', async () => {
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      vi.spyOn(console, 'info').mockImplementation(() => {})
+      try {
+        const result = await fetchFeedgenPosts(
+          feedgenSession([
+            servedPost('at://did:plc:fayevalentine/zone.stratos.feed.post/2', {
+              did: 'did:plc:fayevalentine',
+            }),
+          ]),
+          'did:web:batou.test',
+          'section-9',
+        )
+        expect(result.posts).toHaveLength(1)
+        expect(consoleWarn).not.toHaveBeenCalled()
+      } finally {
+        vi.restoreAllMocks()
+      }
+    })
+
+    it('reports left-out records from a repository listing once', async () => {
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const listed = (uri: string) => ({
+        uri,
+        cid: 'cid-bebop',
+        value: { text: 'Bang.', createdAt: '2026-09-07T08:00:00Z' },
+      })
+      const mockAgent = {
+        com: {
+          atproto: {
+            repo: {
+              listRecords: vi.fn().mockResolvedValue({
+                data: {
+                  records: [
+                    listed('at://spike.example/zone.stratos.feed.post/1'),
+                    listed('not an address'),
+                    listed(
+                      'at://did:plc:spikespiegel/zone.stratos.feed.post/2',
+                    ),
+                  ],
+                },
+              }),
+            },
+          },
+        },
+      } as unknown as Agent
+      try {
+        const posts = await fetchStratosPosts(mockAgent, 'did:plc:spikespiegel')
+        expect(posts).toHaveLength(1)
+        expect(consoleWarn.mock.calls).toEqual([
+          [{ operation: 'stratos.listRecords', droppedCount: 2 }, LEFT_OUT],
+        ])
+      } finally {
+        vi.restoreAllMocks()
+      }
+    })
+  })
+
+  describe('the record and indexed time the feed served', () => {
+    const SPACE_POST =
+      'at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/redtail'
+    const served = () => ({
+      feed: [
+        {
+          post: {
+            uri: SPACE_POST,
+            cid: 'bafy-redtail',
+            indexedAt: '2026-09-07T08:00:05.000Z',
+            author: { did: 'did:plc:fayevalentine', handle: 'faye.test' },
+            record: {
+              $type: 'zone.stratos.feed.post',
+              text: 'Redtail.',
+              createdAt: '2026-09-07T08:00:00.000Z',
+              extra: { nested: ['kept', 1] },
+            },
+          },
+        },
+      ],
+    })
+
+    const sessionServing = (body: unknown) =>
+      ({
+        fetchHandler: vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => body,
+        }),
+      }) as unknown as OAuthSession
+
+    it('keeps both from a feed generator answer, equal to the answer and unmodified', async () => {
+      const body = served()
+      const before = structuredClone(body)
+      const result = await fetchFeedgenPosts(
+        sessionServing(body),
+        'did:web:batou.test',
+        'private',
+      )
+      expect(result.ok).toBe(true)
+      expect(result.posts[0].record).toEqual(before.feed[0].post.record)
+      expect(result.posts[0].record).toBe(body.feed[0].post.record)
+      expect(result.posts[0].indexedAt).toBe('2026-09-07T08:00:05.000Z')
+      expect(body).toEqual(before)
+    })
+
+    it('keeps both from the Stratos timeline', async () => {
+      const body = served()
+      const { posts } = await fetchAppviewStratosPosts(
+        sessionServing(body),
+        'https://appview.example',
+      )
+      expect(posts[0].record).toEqual(body.feed[0].post.record)
+      expect(posts[0].indexedAt).toBe('2026-09-07T08:00:05.000Z')
+    })
+
+    it('has neither when the source supplies none', async () => {
+      const body = served()
+      delete (body.feed[0].post as { indexedAt?: string }).indexedAt
+      const { posts } = await fetchAppviewStratosPosts(
+        {
+          fetchHandler: vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+              feed: [{ post: { ...body.feed[0].post, record: undefined } }],
+            }),
+          }),
+        } as unknown as OAuthSession,
+        'https://appview.example',
+      )
+      expect(posts[0]).not.toHaveProperty('record')
+      expect(posts[0]).not.toHaveProperty('indexedAt')
+    })
+
+    it('has neither for an entry from a repository listing', async () => {
+      const agent = {
+        com: {
+          atproto: {
+            repo: {
+              listRecords: vi.fn().mockResolvedValue({
+                data: {
+                  records: [
+                    {
+                      uri: 'at://did:plc:spikespiegel/zone.stratos.feed.post/1',
+                      cid: 'cid1',
+                      value: {
+                        text: 'Bang.',
+                        createdAt: '2026-09-07T08:00:00Z',
+                      },
+                    },
+                  ],
+                },
+              }),
+            },
+          },
+        },
+      } as unknown as Agent
+      const posts = await fetchStratosPosts(agent, 'did:plc:spikespiegel')
+      expect(posts[0]).not.toHaveProperty('record')
+      expect(posts[0]).not.toHaveProperty('indexedAt')
+    })
+  })
+
   describe('fetchAppviewStratosPosts', () => {
     it('fetches and maps appview stratos posts correctly', async () => {
       const mockSession = {

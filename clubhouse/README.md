@@ -56,8 +56,11 @@ default catalogue, room-status, and Stratos-custody post URLs are derived from
   room IDs to authority-space URIs). The PDS is still the authority for these
   writes. Stratos-custody posts go only to `POST /oauth/boundaries/post`, which
   resolves the canonical boundary and verifies membership server-side. Owned
-  posts are deleted through `com.atproto.repo.deleteRecord` for PDS custody or
-  `DELETE /oauth/boundaries/post` for Stratos custody.
+  posts are deleted through `com.atproto.space.deleteRecord` for PDS custody or
+  `DELETE /oauth/boundaries/post` for Stratos custody. A map value that is not
+  a space URI is never used: a signed-in PDS-custody member sees a
+  configuration error in that room and their posts there are refused.
+  Stratos-custody members do not use the map, see no error and can still post.
 
 Clubhouse requests full `zone.stratos.feed.post` record access, including all
 space record actions. Existing browser sessions created with the earlier

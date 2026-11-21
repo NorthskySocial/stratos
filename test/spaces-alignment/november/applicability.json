@@ -9,11 +9,15 @@
         "test/spaces-alignment/scenarios/standard-credential-transport.driver.mjs",
         "test/spaces-alignment/scenarios/writer-sync-contract.driver.mjs",
         "test/spaces-alignment/scenarios/credential-revocation-contract.driver.mjs",
-        "test/spike/spaces/a4-host-discovery.ts"
+        "test/spike/spaces/a4-host-discovery.ts",
+        "test/spaces-alignment/scenarios/client-custody.ts",
+        "test/spaces-alignment/scenarios/client-custody.test.ts",
+        "test/spaces-alignment/scenarios/writer-sync-contract.driver.test.ts",
+        "stratos-service/tests/space-list-repos.test.ts"
       ],
       "workstream": "interop-cutover",
       "decision": "Only reference-host drivers and spikes call the upstream names; update them when the reference host is selected, production never calls them.",
-      "evidence": "rg -l 'com\\.atproto\\.space\\.(getSpaceCredential|listRepos|notifyWrite)' stratos-core/src stratos-service/src stratos-client/src stratos-feedgen-ng/src webapp/src clubhouse/src finds only descriptions and comments (stratos-client/src/lexicons.gen.ts:3109, stratos-core/src/spaces/host-discovery.ts:5, stratos-service/src/features/space-read/handler.ts:38), no call; the same pattern hits only the listed test files among the tests."
+      "evidence": "rg -l 'com\\.atproto\\.space\\.(getSpaceCredential|listRepos|notifyWrite)' stratos-core/src stratos-service/src stratos-client/src stratos-feedgen-ng/src webapp/src clubhouse/src finds only descriptions and comments (stratos-client/src/lexicons.gen.ts:3110, stratos-core/src/spaces/host-discovery.ts:5, stratos-service/src/features/space-read/handler.ts:37), no call; the same pattern hits, among the tests, only stratos-service/tests/space-list-repos.test.ts, test/spike/spaces/a4-host-discovery.ts and the scenario files client-custody.ts, client-custody.test.ts, writer-sync-contract.driver.mjs and writer-sync-contract.driver.test.ts."
     },
     {
       "id": "prompt-1b-field-renames",
@@ -80,7 +84,7 @@
       "ownership": "absent",
       "paths": [],
       "workstream": "none",
-      "decision": "Stratos does not serve checkUserAccess or checkAccess; the custom enrollment oracle is the authority.",
+      "decision": "Stratos does not serve checkUserAccess or checkAccess; the custom membership oracle is the authority.",
       "evidence": "rg -n 'checkUserAccess|checkAccess|managedspace' stratos-core stratos-service stratos-client stratos-feedgen-ng returns nothing."
     },
     {
@@ -96,17 +100,23 @@
     {
       "id": "prompt-3-declarations-and-scopes",
       "promptSection": "3",
-      "surface": "Space type declaration title and named scope spaceType",
+      "surface": "Space type declaration title and the scopes the service and the apps request",
       "ownership": "production-owned",
       "paths": [
         "lexicons-spaces/zone/stratos/space/feed.json",
         "stratos-service/src/shared/space-type-registry.ts",
         "stratos-service/src/oauth/client.ts",
-        "stratos-browser/src/auth.ts"
+        "stratos-browser/src/auth.ts",
+        "webapp/src/lib/auth.ts",
+        "clubhouse/src/lib/auth.ts",
+        "stratos-core/tests/space-type-declaration.test.ts",
+        "stratos-browser/tests/auth.test.ts",
+        "stratos-service/tests/space-scope-upstream.test.ts",
+        "clubhouse/src/lib/auth.test.ts"
       ],
       "workstream": "schemas-and-clients",
-      "decision": "The declaration still uses name, and scopes are built in positional and named form; rename and audit the scope strings.",
-      "evidence": "lexicons-spaces/zone/stratos/space/feed.json:9 has name; stratos-service/src/oauth/client.ts:42 buildSpaceScope."
+      "decision": "The declaration names the space with title, optional and 1 to 64 UTF-8 bytes in the pinned upstream schema, and no longer carries name; the sandbox declaration fixture carries the same title, and the service registry reads neither name nor title, so it did not change. It still has to be published again as a schema record, which belongs to the cutover plan. No scope string changed. Every one is pinned byte for byte and each parses in the pinned upstream scope library: the service asks at enrollment for the space type with the authority percent-encoded, one collection parameter for each hosted collection (post, like, repost) and the actions create and read; stratos-browser builds the scope for one collection, the post, from an action list that defaults to read and create; the webapp passes read, create and delete and Clubhouse read, create, update and delete. None names a wildcard collection or a manage action, so members are not asked to consent again. Least privilege is open: Clubhouse requests update and never uses it, and its repo scope for the post collection grants every repo action; the webapp offers to delete a public post on its own repo while requesting only create on app.bsky.feed.post.",
+      "evidence": "lexicons-spaces/zone/stratos/space/feed.json:9 title; stratos-core/tests/space-type-declaration.test.ts:105-109 the upstream title rule and :111-116 the fixture; stratos-service/src/oauth/client.ts:42-53 buildSpaceScope; stratos-browser/src/auth.ts:80-94 buildSpaceWriteScope; webapp/src/lib/auth.ts:9 the webapp actions and :56-60 its request; clubhouse/src/lib/auth.ts:13-19 and :30-41; stratos-browser/tests/auth.test.ts:70-148 the exact strings; stratos-service/tests/space-scope-upstream.test.ts:129-173 the upstream parse; clubhouse/src/lib/auth.test.ts:26-78 the full requested scope."
     },
     {
       "id": "prompt-4a-credentials",
@@ -247,8 +257,8 @@
         "stratos-feedgen-ng/src/store/space_verification.rs"
       ],
       "workstream": "sync-recovery",
-      "decision": "Membership comes from the custom enrollment oracle with generation checks; removals stay on that path and no writer list is consumed. A member the oracle stops listing is removed with its verified state, and a read, promotion, replacement or clear made under a generation that is no longer the member's current one writes nothing and is retried from the next pass.",
-      "evidence": "stratos-service/src/features/space-read/handler.ts:41 LIST_SPACE_REPOS_METHOD is zone.stratos.space.listRepos; stratos-feedgen-ng/src/store/space_verification.rs:338-369 check_target refuses a generation that is not current as UnauthorizedSpaceMember, which stratos-feedgen-ng/src/pds_space_sync.rs:912-924 store_error_ends_poll turns into a retry."
+      "decision": "Membership comes from the custom membership oracle with generation checks; removals stay on that path and no writer list is consumed. A member the oracle stops listing is removed with its verified state, and a read, promotion, replacement or clear made under a generation that is no longer the member's current one writes nothing and is retried from the next pass.",
+      "evidence": "stratos-service/src/features/space-read/handler.ts:40 LIST_SPACE_REPOS_METHOD is zone.stratos.space.listRepos; stratos-feedgen-ng/src/store/space_verification.rs:338-369 check_target refuses a generation that is not current as UnauthorizedSpaceMember, which stratos-feedgen-ng/src/pds_space_sync.rs:912-924 store_error_ends_poll turns into a retry."
     },
     {
       "id": "prompt-7b-list-repo-ops-commit",
@@ -275,7 +285,7 @@
         "stratos-feedgen-ng/src/store/space.rs"
       ],
       "workstream": "sync-recovery",
-      "decision": "The scheduler enumerates the whole membership from the enrollment oracle each pass, replaces the stored member set under the boundary generation (the replacement purges and invalidates each member the oracle no longer lists, verified state included) and runs one cycle per listed target, four at a time, so no catch-up path depends on a writer cursor. The only state a cycle keeps outside the store is the in-memory per-target lock map and the replacement cooldown map, both bounded.",
+      "decision": "The scheduler enumerates the whole membership from the membership oracle each pass, replaces the stored member set under the boundary generation (the replacement purges and invalidates each member the oracle no longer lists, verified state included) and runs one cycle per listed target, four at a time, so no catch-up path depends on a writer cursor. The only state a cycle keeps outside the store is the in-memory per-target lock map and the replacement cooldown map, both bounded.",
       "evidence": "stratos-feedgen-ng/src/space_membership.rs reads the oracle; stratos-feedgen-ng/src/pds_space_scheduler.rs:289-369 collect_pass enumerates, replaces the member set and spawns the cycles; stratos-feedgen-ng/src/store/space.rs:226-252 purge_departed_pds_member; no writer cursor exists in store/migrations.rs."
     },
     {
@@ -310,7 +320,7 @@
       "paths": [],
       "workstream": "none",
       "decision": "No production package calls an agent.com.atproto.space method or imports a generated space type from the API package.",
-      "evidence": "rg -n 'agent\\.com\\.atproto\\.space|ComAtprotoSpace|SpaceRef|AtUri\\.makeSpace|SpacePermission' stratos-core stratos-service stratos-browser stratos-client webapp clubhouse returns nothing."
+      "evidence": "rg -n 'agent\\.com\\.atproto\\.space|ComAtprotoSpace|SpaceRef|AtUri\\.makeSpace|SpacePermission' stratos-core stratos-service stratos-browser stratos-client webapp clubhouse finds nothing in production source; its only hits are in stratos-service/tests/space-scope-upstream.test.ts, which imports SpacePermission from @atproto/oauth-scopes (not the API package) to parse the scope strings the apps request."
     },
     {
       "id": "prompt-9-lex-bindings",
@@ -353,11 +363,12 @@
       "ownership": "external-library-owned",
       "paths": [
         "stratos-service/package.json",
-        "stratos-service/src/oauth/spaces-capability.ts"
+        "stratos-service/src/oauth/spaces-capability.ts",
+        "stratos-service/tests/space-scope-upstream.test.ts"
       ],
       "workstream": "schemas-and-clients",
-      "decision": "The only importer is spaces-capability.ts. It builds the space as one object with spaceType, authority and skey and passes it with the action to the two-argument allowsSpace; no further change is expected, and the exact November alpha is pinned in stratos-service/package.json.",
-      "evidence": "rg -n '@atproto/oauth-scopes' --glob '!node_modules' --glob '!pnpm-lock.yaml' finds stratos-service/package.json:48 and spaces-capability.ts:1; spaces-capability.ts:10-16 spaceOf, :27 and :41 and :74 allowsSpace calls."
+      "decision": "The only source file that imports it is spaces-capability.ts. It builds the space as one object with spaceType, authority and skey and passes it with the action to the two-argument allowsSpace; it was not changed, and the exact November alpha is pinned in stratos-service/package.json. space-scope-upstream.test.ts also imports the package, in a test, to run SpacePermission over every scope string the service and the two apps request and write the answer beside each string.",
+      "evidence": "rg -n '@atproto/oauth-scopes' --glob '!node_modules' --glob '!pnpm-lock.yaml' finds stratos-service/package.json:48, spaces-capability.ts:1 and stratos-service/tests/space-scope-upstream.test.ts:5; spaces-capability.ts:10-16 spaceOf, :27 and :41 and :74 allowsSpace calls; stratos-service/tests/space-scope-upstream.test.ts:129-173 the parse table."
     },
     {
       "id": "prompt-9-crypto-did",
@@ -509,7 +520,7 @@
     {
       "id": "custom-zone-space-list-repos",
       "promptSection": "custom",
-      "surface": "zone.stratos.space.listRepos enrollment oracle",
+      "surface": "zone.stratos.space.listRepos membership oracle",
       "ownership": "production-owned",
       "paths": [
         "stratos-service/src/features/space-read/handler.ts",
@@ -518,7 +529,7 @@
       ],
       "workstream": "none",
       "decision": "custom, not renamed: it lists current enrollments with custody and host metadata and is not the upstream writer list.",
-      "evidence": "stratos-service/src/features/space-read/handler.ts:41."
+      "evidence": "stratos-service/src/features/space-read/handler.ts:40."
     },
     {
       "id": "custom-zone-space-get-space-credential",
@@ -546,7 +557,7 @@
       ],
       "workstream": "none",
       "decision": "custom, not renamed: boundary-scoped reads for Stratos-custody records.",
-      "evidence": "stratos-service/src/features/space-read/handler.ts:27."
+      "evidence": "stratos-service/src/features/space-read/handler.ts:26."
     },
     {
       "id": "custom-zone-space-list-blobs",
@@ -559,7 +570,7 @@
       ],
       "workstream": "none",
       "decision": "custom, not renamed: space-scoped blob enumeration under the zone namespace.",
-      "evidence": "stratos-service/src/features/space-read/handler.ts:34."
+      "evidence": "stratos-service/src/features/space-read/handler.ts:32."
     },
     {
       "id": "custom-zone-repo-boundary-writes",
@@ -613,8 +624,8 @@
         "stratos-client/src/index.ts"
       ],
       "workstream": "canonical-uri",
-      "decision": "The client carries its own self-contained grammar in space-uri.ts, with no core import: boundaryToSpaceUri, parseSpaceUri and parseSpaceRecordUri use the same prefix, part counts and identifier rules as core, and a test in stratos-service compares the two over the corpus and over generated part sets with one-character corruptions. writes.ts builds the space field of every member-PDS write (create, put, delete and apply) with boundaryToSpaceUri, so the string sent for a boundary is the string core builds for it. An earlier-spelling string fails the client parser with a reason and is never converted. index.ts re-exports the functions and their types, and the README and check-exports.mjs list them (see text-client-and-docs-legacy-uri-spelling).",
-      "evidence": "stratos-client/src/space-uri.ts:15 SPACE_URI_PREFIX, :81-96 splitSpaceUri, :99-107 parseSpaceUri, :114-133 parseSpaceRecordUri and :141-164 boundaryToSpaceUri; stratos-client/src/writes.ts:114-122 addressBoundary; stratos-client/src/index.ts:55-62; stratos-service/tests/client-space-uri-parity.test.ts compares the two grammars."
+      "decision": "The client carries its own self-contained grammar in space-uri.ts, with no core import: boundaryToSpaceUri, parseSpaceUri and parseSpaceRecordUri use the same prefix, part counts and identifier rules as core, and a test in stratos-service compares the two over the corpus and over generated part sets with one-character corruptions. parseRecordAddress is the one classifier the apps use for a record URI: it returns a space record (authority, type, skey, author, collection, rkey, with the authority and the author in separate fields) or a three-part custody record whose authority is a DID, and refuses every other string, including a handle authority and a query, with the one reason 'not a record address'; it decodes nothing. Its custody grammar follows the DID grammar, which differs from core's custody parser for a DID holding _ or both . and %, and for a bad escape; client-record-address-parity.test.ts pins those differences. writes.ts builds the space field of every member-PDS write (create, put, delete and apply) with boundaryToSpaceUri, so the string sent for a boundary is the string core builds for it. An earlier-spelling string fails the client parsers with a reason and is never converted. index.ts re-exports the functions and their types, and the README and check-exports.mjs list them (see text-client-and-docs-legacy-uri-spelling).",
+      "evidence": "stratos-client/src/space-uri.ts:15 SPACE_URI_PREFIX, :103-118 splitSpaceUri, :121-129 parseSpaceUri, :136-155 parseSpaceRecordUri, :157-167 parseCustodyRecordUri, :176-191 parseRecordAddress and :199-222 boundaryToSpaceUri; stratos-client/src/writes.ts:114-122 addressBoundary; stratos-client/src/index.ts:54-66; stratos-service/tests/client-space-uri-parity.test.ts compares the two grammars and stratos-service/tests/client-record-address-parity.test.ts:93 compares the record classifier with core."
     },
     {
       "id": "uri-subject-checks",
@@ -948,24 +959,27 @@
       "ownership": "production-owned",
       "paths": [
         "clubhouse/src/lib/config.ts",
-        "clubhouse/src/lib/post-writer.ts"
+        "clubhouse/src/lib/post-writer.ts",
+        "clubhouse/src/lib/integration.ts",
+        "clubhouse/src/lib/components/RoomPlaceholder.svelte"
       ],
       "workstream": "schemas-and-clients",
-      "decision": "Not changed: still on the at:// check. config.ts parseSpaceUris keeps a configured room-to-space value only when it starts with at://, so a value in the current at:space/ spelling is silently dropped and post-writer.ts then answers that room with RoomPostConfigurationError, while an earlier-spelling value passes the check and is sent as the space parameter of the member PDS create call, where the host refuses it. post-writer.ts holds no parser of its own: it sends the configured string unchanged. Its ownPostRkey accepts a post for deletion only when the URI is at://{did}/zone.stratos.feed.post/{rkey}, so deleting a post whose URI is a space record URI, a PDS-custody post, throws 'You can only delete your own posts.' in either spelling. The client-flow work moves the check at clubhouse/src/lib/config.ts:65 to the client parseSpaceUri, and decides whether the delete path in post-writer.ts:55 takes space posts. The Clubhouse tests keep earlier-spelling configuration literals and are exempt from the legacy-line check until then.",
-      "evidence": "clubhouse/src/lib/config.ts:54-71 parseSpaceUris with the at:// check at :65, and :115; clubhouse/src/lib/post-writer.ts:85-95 sends pdsSpaceUriByRoom[roomId] and :54-64 ownPostRkey."
+      "decision": "config.ts parseSpaceUris keeps a configured room-to-space value only when the client parseSpaceUri accepts it. Any other value (an earlier-spelling string, a custody URI, a record URI, an empty string, a non-string) stays out of the map and is recorded in pdsSpaceProblemByRoom with a message that names the room and says the space it was given is not a valid space address; App.svelte hands the problem of the open room to RoomPlaceholder.svelte, which shows it as an alert only when the room status answer says the signed-in member's custody is pds; a Stratos-custody member, who never reads the map and can still post, a signed-out visitor and a member whose custody is not known yet see no alert. Nothing converts a refused value. post-writer.ts holds no parser of its own: createRoomPost sends the kept string unchanged as the space of com.atproto.space.createRecord, with the signed-in account as repo, and a room with no kept space answers RoomPostConfigurationError. ownRoomPost classifies a post reference with the client parseRecordAddress and throws 'The post reference is invalid.' for a string that is not a record address, and 'You can only delete your own posts.' when the author is not the signed-in account or the collection is not zone.stratos.feed.post. For a space record URI deleteRoomPost sends com.atproto.space.deleteRecord with the space, the account as repo, the collection and the rkey, and it no longer calls the public repo delete; a Stratos-custody room takes the writer seam as before. When the room's custody and the kind of the address disagree, deleteRoomPost answers 'This post cannot be deleted from here. Your posts are kept in a different place from this one.' and sends no delete. integration.ts deletePost calls ownRoomPost before the room-status request, so a refused reference costs no request. Remaining: JSON that does not parse in VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON, or a value that is not an object, is still read as no configuration with no message (config.ts:67-80); and ownRoomPost writes at:space/{authority}/{type}/{skey} from the parsed parts by hand because the client has no formatter for the space of a record address.",
+      "evidence": "clubhouse/src/lib/config.ts:58-60 spaceProblem and :62-81 parseSpaceUris with the check at :74, used at :125; clubhouse/src/lib/post-writer.ts:63-85 OwnRoomPost and ownRoomPost, :106-107 the kept space and :159-175 the space delete; clubhouse/src/lib/integration.ts:327-350 deletePost, with the guard at :333; clubhouse/src/App.svelte:100-104 configurationProblem; clubhouse/src/lib/components/RoomPlaceholder.svelte:71-78 the alert; clubhouse/src/lib/config.test.ts:75-134 and clubhouse/src/lib/post-writer.test.ts:97-153 pin them."
     },
     {
       "id": "uri-webapp-inspector",
       "promptSection": "base",
-      "surface": "Webapp record inspector URI split",
+      "surface": "Webapp record inspector sources and address handling",
       "ownership": "production-owned",
       "paths": [
         "webapp/src/lib/inspector.ts",
-        "webapp/src/lib/RecordInspector.svelte"
+        "webapp/src/lib/RecordInspector.svelte",
+        "webapp/src/lib/PostCard.svelte"
       ],
       "workstream": "schemas-and-clients",
-      "decision": "Not changed: still on the at:// split. parseAtUri strips at:// and splits on /, taking the first three segments as did, collection and rkey. A new-form space record URI has no at:// to strip, so its first three segments (at:space, the authority and the space type) are returned as if they were an author, a collection and a record key; an earlier-spelling URI returns the authority, the word space and the space type. RecordInspector.svelte builds both record addresses as at://{did}/{collection}/{rkey} from those parts, so the inspector is wrong for a space record URI in either spelling. The client-flow work gives it a space mode on the client parseSpaceRecordUri.",
-      "evidence": "webapp/src/lib/inspector.ts:22-26 parseAtUri; webapp/src/lib/RecordInspector.svelte:24-26 builds the addresses."
+      "decision": "chooseInspectorSource picks one of four sources from the post's URI and the signed-in DID through the client parseRecordAddress: custody (a three-part custody URI; the two panels it always had, a public PDS stub and the Stratos hydration), own-space (a space record URI whose author is the signed-in account; one authenticated com.atproto.space.getRecord through the session to the member's own PDS, with no public stub request), feed-snapshot (a space record URI by another author; no request of any kind, and RecordInspector.svelte shows the feed entry in hand under the label Feed snapshot with its URI and, when the feed gave one, its indexed time, or an unavailable state when the entry kept no record) and invalid (anything else; 'This record address is not valid' and no request). The author is never taken from the space authority, so a viewer who is the authority but not the author gets the snapshot. A session change closes the inspector and clears it, nothing is sent with the replacement session, and an answer for an earlier request is dropped. The read depends on the address and the session only, so a feed refresh that gives the same post a new record object sends nothing again, and a snapshot shows the new record at once. PostCard.svelte passes the post's uri, cid, record and indexedAt. Remaining: parseCustodyUri, which runs only after the address was classified as custody, still strips at:// and splits on / (inspector.ts:25-30); readOwnSpaceRecord writes the space URI from the parsed parts by hand (inspector.ts:255); and the own-space read and the snapshot have not been run in a real browser against a spaces PDS, which belongs to the cutover plan.",
+      "evidence": "webapp/src/lib/inspector.ts:25-30 parseCustodyUri, :164-168 InspectorSource, :219-226 sourceOfAddress, :233-238 chooseInspectorSource, :250-293 readOwnSpaceRecord, :296-304 snapshotFromEntry and :310-330 loadInspectorRecord; webapp/src/lib/RecordInspector.svelte:107-140 the load effects, :31-36 and :79 the subtitle and :211-212 the invalid state; webapp/src/lib/PostCard.svelte:377; webapp/tests/inspector-source.test.ts, webapp/tests/record-inspector-sources.test.ts and webapp/tests/e2e/inspector.spec.ts pin the sources."
     },
     {
       "id": "uri-webapp-feed-targets",
@@ -975,11 +989,12 @@
       "paths": [
         "webapp/src/lib/feed.ts",
         "webapp/src/lib/Composer.svelte",
-        "webapp/src/lib/post-deletion.ts"
+        "webapp/src/lib/post-deletion.ts",
+        "webapp/src/lib/PostCard.svelte"
       ],
       "workstream": "schemas-and-clients",
-      "decision": "authorFromUri and postDeleteTargetFromUri try the core parseRecordUri first, so a served new-form URI follows the grammar without a source edit, and otherwise read the URI as at://{did}/{collection}/{rkey}. For a string the core parser refuses, authorFromUri strips an at:// prefix and takes the first segment, so a malformed or earlier-spelling space URI yields a wrong author, and postDeleteTargetFromUri returns null for anything that is not a three-part at:// URI, which post-deletion.ts turns into 'The post URI is invalid.'. groupIntoThreads attaches a reply to its parent by string equality of reply.parent.uri and the parent's post URI, so a reply whose stored parent URI is spelled differently from the served post shows as a top-level post. Composer.svelte copies the parent's URI into the reply reference and formats the space through the core helpers. Everything follows the core grammar except the two at:// fallbacks at webapp/src/lib/feed.ts:205 and :227-228, which stay for the client-flow work. The tests that stand for feed generator output (mixed-feed and feed_extended) now serve the new spelling and pass.",
-      "evidence": "webapp/src/lib/feed.ts:202-206 authorFromUri, :214-244 postDeleteTargetFromUri and :719-754 groupIntoThreads; webapp/src/lib/post-deletion.ts:24-27; webapp/src/lib/Composer.svelte:118-130."
+      "decision": "authorFromUri and postDeleteTargetFromUri use the client parseRecordAddress and no longer parse or split a URI themselves. authorFromUri answers the author for a space record URI (never the authority) or a three-part custody URI with a DID authority, and an empty string for anything else. postDeleteTargetFromUri returns the repo, collection and rkey for a custody URI, adds the space for a space record URI (written at:space/{authority}/{type}/{skey} from the parsed parts), and returns null for anything else, which post-deletion.ts turns into 'The post URI is invalid.'. A feed entry whose author cannot be determined is left out (mapFeedViewPosts and fetchStratosPosts), and each load logs once how many it left out, with no address or record content in the line, and PostCard.svelte names the author of a reply's parent as 'a post' when the parent URI gives none. A feed entry now keeps record, the record exactly as the feed answer carried it, and indexedAt, the time the feed indexed the post; both are optional, come only from a feed answer (a repository listing carries neither), live in the page state and are never written to storage, so they are bounded by what the feed served this viewer: at most 50 entries per request. groupIntoThreads attaches a reply to its parent by string equality of reply.parent.uri and the parent's post URI, so a reply whose stored parent URI is spelled differently from the served post shows as a top-level post. Composer.svelte copies the parent's URI into the reply reference and formats the space of a PDS create with boundaryToSpaceUri; post-deletion.ts sends com.atproto.space.deleteRecord for a space post and, for any other post, com.atproto.repo.deleteRecord. Remaining: the by-hand at:space/ write in postDeleteTargetFromUri (feed.ts:227).",
+      "evidence": "webapp/src/lib/feed.ts:93-99 record and indexedAt on FeedPost, :204-207 authorFromUri, :215-229 postDeleteTargetFromUri, :300-353 mapFeedViewPosts, :466-504 fetchStratosPosts and :745-780 groupIntoThreads; webapp/src/lib/post-deletion.ts:24-27, :44-51 the space delete and :62 the repo delete; webapp/src/lib/Composer.svelte:118-130; webapp/src/lib/PostCard.svelte:292."
     },
     {
       "id": "uri-reply-and-embed-strings",
@@ -1044,7 +1059,7 @@
       ],
       "workstream": "canonical-uri",
       "decision": "space-read/handler.ts maps the requested space to a boundary with spaceUriToBoundary and admits a credential only when its spaceUri equals the requested space string, so a differently spelled equivalent URI is refused; credential-scope.ts and boundary-credential access map the verified credential's spaceUri to a boundary with spaceUriToBoundary; verifiers.ts passes the verified spaceUri through as auth credentials; host-discovery.ts treats the space URI as an opaque lookup key for host overrides. All follow the core parser and none stores the string. No configuration on the service is keyed by a space URI: EnrollmentHostOverrideReader returns the member's repo host and ignores its key, and the space app access setting is keyed by skey or boundary, so nothing needed a URI check when configuration loads.",
-      "evidence": "space-read/handler.ts:150 and :458; credential-scope.ts:69-82; features/boundary/credential-access.ts:13; verifiers.ts:610; stratos-core/src/spaces/host-discovery.ts:34 and :70-75.; stratos-service/src/features/space-read/host-resolution.ts:15-21 EnrollmentHostOverrideReader."
+      "evidence": "space-read/handler.ts:149 and :458; credential-scope.ts:69-82; features/boundary/credential-access.ts:13; verifiers.ts:610; stratos-core/src/spaces/host-discovery.ts:34 and :70-75.; stratos-service/src/features/space-read/host-resolution.ts:15-21 EnrollmentHostOverrideReader."
     },
     {
       "id": "uri-clubhouse-topic-route",
@@ -1055,11 +1070,12 @@
         "clubhouse/src/lib/route.ts",
         "clubhouse/src/App.svelte",
         "clubhouse/src/lib/components/RoomFeed.svelte",
-        "clubhouse/src/lib/feed-authors.ts"
+        "clubhouse/src/lib/feed-authors.ts",
+        "clubhouse/src/lib/components/RoomPlaceholder.svelte"
       ],
       "workstream": "schemas-and-clients",
-      "decision": "Not changed: still on the at:// checks. A topic is the served URI of a feed post, which is a new-form space record URI for a post on a member's own PDS, because the feed generator now serves that spelling. topicPath throws 'A topic AT URI is required' for it and topicUriFromPath returns null for such a topic query value, so openTopic in App.svelte throws and a shared topic link of a PDS-custody post is dropped until the client-flow work moves both checks to the client parseSpaceRecordUri. RoomFeed.svelte finds the open topic and its thread by string equality of post.uri and reply.root.uri with the topic URI, and builds a reply reference from the served post.uri, so a reply whose stored root.uri keeps the earlier spelling no longer joins a topic served in the new spelling. App.svelte closes a deleted topic by comparing the topic URI with post.uri, and feed-authors.ts keys profile data by post.uri; both compare strings from one feed response, so the two sides share one spelling.",
-      "evidence": "clubhouse/src/lib/route.ts:23-27 topicPath with the check at :24 and :30-35 topicUriFromPath with the check at :34; clubhouse/src/App.svelte:84 currentTopicUri, :297-302 openTopic and :484; clubhouse/src/lib/components/RoomFeed.svelte:30-41; clubhouse/src/lib/feed-authors.ts:8-10."
+      "decision": "A topic is the served URI of a feed post: a three-part custody URI for a Stratos-custody post or a space record URI for a post on a member's own PDS. topicPath, topicUriFromPath and topicLinkIsRefused in route.ts accept exactly what the client parseRecordAddress accepts and keep no prefix test or segment split of their own. topicPath throws 'A topic record address is required' for anything else, and openTopic in App.svelte catches that, stays on the page and shows 'This topic link cannot be opened.'; topicUriFromPath returns null for a ?topic= value that is not a record address, so the room opens without a topic and App.svelte shows the same notice from topicLinkIsRefused through RoomPlaceholder.svelte. The notice clears when another room or topic is opened. RoomFeed.svelte finds the open topic and its thread by string equality of post.uri and reply.root.uri with the topic URI, and builds a reply reference from the served post.uri, so a reply whose stored root.uri is spelled differently from the served topic does not join it. App.svelte closes a deleted topic by comparing the topic URI with post.uri, and feed-authors.ts keys profile data by post.uri; both compare strings from one feed response, so the two sides share one spelling. A failed reply shows its message inside the reply dialog only (RoomFeed.svelte:158); the message is cleared when the dialog opens or closes and after a reply succeeds, and a delete failure or a refused topic never appears there.",
+      "evidence": "clubhouse/src/lib/route.ts:25-29 topicPath with the check at :26, :31-35 topicParam, :38-41 topicUriFromPath with the check at :40 and :44-47 topicLinkIsRefused; clubhouse/src/App.svelte:89 currentTopicUri, :90-94 topicNotice, :319-331 openTopic and :513; clubhouse/src/lib/components/RoomPlaceholder.svelte:79-83 the notice; clubhouse/src/lib/components/RoomFeed.svelte:32-43; clubhouse/src/lib/feed-authors.ts:8-10; clubhouse/src/lib/route.test.ts:67-168 and clubhouse/src/room-records.test.ts:393-528 pin the links."
     },
     {
       "id": "uri-room-post-references",
@@ -1069,7 +1085,7 @@
       "paths": ["stratos-service/src/oauth/handlers/room-post.ts"],
       "workstream": "canonical-uri",
       "decision": "Clubhouse sends a reply's root and parent as the served post URIs, which are new-form space record URIs for posts on a member's own PDS. parseStrongRef accepts a reference only when isPostRecordUri accepts its uri: a space record URI the core parser accepts, or a custody URI parseCanonicalRepoUri accepts, whose collection is zone.stratos.feed.post. Any other string, including an earlier-spelling one, a handle authority or a non-canonical form, fails the whole request with 400 InvalidRoomPost. An accepted reference is handed unchanged to createRecord through createApprovedRoomPost, where resolveParentBoundaries reads it (see uri-reply-and-embed-strings). parseRoomPostDeleteRequest reads the URI with AtUri and requires the collection zone.stratos.feed.post and an rkey; AtUri throws on at:space/ and reads an at://authority/space/... string with the collection space, so a space record URI in either spelling is refused with 400 InvalidRoomPostDelete. Room-post deletion serves only Stratos-custody posts, which keep the repo form.",
-      "evidence": "stratos-service/src/oauth/handlers/room-post.ts:33-37 isPostRecordUri, :39-48 parseStrongRef, :50-57 parseReply, :72-92 parseRoomPostDeleteRequest and :201-206 the createApprovedRoomPost call; stratos-service/src/index.ts:494-513 passes the reply into createRecord unchanged; clubhouse/src/lib/components/RoomFeed.svelte:36-41 builds the references; stratos-service/tests/room-post-space-references.integration.test.ts pins both endpoints."
+      "evidence": "stratos-service/src/oauth/handlers/room-post.ts:33-37 isPostRecordUri, :39-48 parseStrongRef, :50-57 parseReply, :72-92 parseRoomPostDeleteRequest and :201-206 the createApprovedRoomPost call; stratos-service/src/index.ts:494-513 passes the reply into createRecord unchanged; clubhouse/src/lib/components/RoomFeed.svelte:38-43 builds the references; stratos-service/tests/room-post-space-references.integration.test.ts pins both endpoints."
     },
     {
       "id": "uri-feed-read-predicates",
@@ -1127,7 +1143,7 @@
       ],
       "workstream": "canonical-uri",
       "decision": "The space lexicons, the moderation subject definition and queryLabels subjects filter, the feed generator getFeed and getBlob fields, and the admin getRepoHost field describe the space URI as at:space/{authority}/{type}/{skey} (and, for a record, the same plus /{author}/{collection}/{rkey}) in description text only; no field gained or lost a format. The generated bundle was regenerated with lexgen and never hand-edited. No com.atproto lexicon was touched.",
-      "evidence": "rg -n 'at://[^ ]*/space/' lexicons -g '*.json' finds nothing; rg -n 'at:space/' lexicons -g '*.json' finds the nine described fields; stratos-client/src/lexicons.gen.ts:2 states it is generated."
+      "evidence": "rg -n 'at://[^ ]*/space/' lexicons -g '*.json' finds nothing; rg -n 'at:space/' lexicons -g '*.json' finds one line in each of the nine lexicons the decision lists; stratos-client/src/lexicons.gen.ts:2 states it is generated."
     },
     {
       "id": "text-client-and-docs-legacy-uri-spelling",
@@ -1139,8 +1155,8 @@
         "stratos-client/scripts/check-exports.mjs"
       ],
       "workstream": "canonical-uri",
-      "decision": "The client README shows the at:space/ spelling and documents boundaryToSpaceUri, parseSpaceUri and parseSpaceRecordUri; check-exports.mjs lists them and their types as required exports and holds no URI. The README must change whenever an exported client function or endpoint changes. The docs tree is a separate row (text-docs-legacy-uri-spelling).",
-      "evidence": "rg -n 'at://[^ ]*/space/' stratos-client/README.md finds nothing; rg -n 'at:space/' stratos-client/README.md shows the grammar; stratos-client/scripts/check-exports.mjs:72-78."
+      "decision": "The client README shows the at:space/ spelling and documents boundaryToSpaceUri, parseSpaceUri, parseSpaceRecordUri and parseRecordAddress, with the shape each returns and that a DID holding a percent escape must be encoded again in a link; check-exports.mjs lists the functions and their types as required exports and holds no URI. The README must change whenever an exported client function or endpoint changes. The docs tree is a separate row (text-docs-legacy-uri-spelling).",
+      "evidence": "rg -n 'at://[^ ]*/space/' stratos-client/README.md finds nothing; rg -n 'at:space/' stratos-client/README.md shows the grammar; stratos-client/scripts/check-exports.mjs:72-82."
     },
     {
       "id": "text-docs-legacy-uri-spelling",
@@ -1165,11 +1181,14 @@
         "clubhouse/src/lib/config.test.ts",
         "clubhouse/src/lib/integration.test.ts",
         "clubhouse/src/lib/join.test.ts",
-        "clubhouse/src/lib/post-writer.test.ts"
+        "clubhouse/src/lib/post-writer.test.ts",
+        "clubhouse/src/lib/auth.test.ts",
+        "clubhouse/src/lib/route.test.ts",
+        "clubhouse/src/room-records.test.ts"
       ],
       "workstream": "canonical-uri",
-      "decision": "Inputs and expected values in these tests hold the at:space/ spelling, built from the corpus or the core constants, or respelled by the fixed transform. The earlier spelling appears only as a named negative input whose line holds the word legacy, and in the Clubhouse tests, whose room configuration literals stay on the earlier spelling until the client-flow work (the legacy-line check exempts clubhouse/). The frozen reference copy of the validator and its differential test are byte-identical. Upstream-derived fixtures are not edited by hand, with one exception: the generator hash line in the header of token-audiences.json was updated by hand, because rewriting the file would have reissued its random tokens.",
-      "evidence": "rg -l 'at://[^ ]*/space/' stratos-core/tests stratos-service/tests stratos-client/tests webapp/tests clubhouse/src/lib lists only files whose matching lines hold legacy, and the four Clubhouse lines in post-writer.test.ts and integration.test.ts."
+      "decision": "Inputs and expected values in these tests hold the at:space/ spelling, built from the corpus or the core constants, or respelled by the fixed transform. The earlier spelling appears only as a named negative input whose line holds the word legacy, in the Clubhouse and webapp tests as in the others: no exemption from the legacy-line check remains for either app. The frozen reference copy of the validator and its differential test are byte-identical. Upstream-derived fixtures are not edited by hand, with one exception: the generator hash line in the header of token-audiences.json was updated by hand, because rewriting the file would have reissued its random tokens.",
+      "evidence": "rg -l 'at://[^ ]*/space/' stratos-core/tests stratos-service/tests stratos-client/tests webapp/tests clubhouse/src lists only files whose matching lines hold legacy."
     },
     {
       "id": "tests-rust-uri-literals",
@@ -1191,11 +1210,12 @@
       "ownership": "production-owned",
       "paths": [
         "stratos-service/src/oauth/spaces-capability.ts",
-        "stratos-service/package.json"
+        "stratos-service/package.json",
+        "stratos-service/tests/space-scope-upstream.test.ts"
       ],
       "workstream": "schemas-and-clients",
-      "decision": "Uses the two-argument allowsSpace with a space object carrying spaceType; the only source file edited for the dependency update, with no behaviour change. The authority and collection are cast to the library's template types without checking, as before.",
-      "evidence": "rg -n '@atproto/oauth-scopes' --glob '!node_modules' --glob '!pnpm-lock.yaml'; spaces-capability.ts:10-16 spaceOf, :22-31 grantAllowsCreate, :38-46 holdsSpaceGrant, :74-79 detectSpacesCapability read and create checks."
+      "decision": "Uses the two-argument allowsSpace with a space object carrying spaceType; the only source file that imports the package, and unchanged by the client-flow work. The authority and collection are cast to the library's template types without checking, as before. The one other importer is the test space-scope-upstream.test.ts, which only reads what the library answers for the requested scope strings.",
+      "evidence": "rg -n '@atproto/oauth-scopes' --glob '!node_modules' --glob '!pnpm-lock.yaml'; spaces-capability.ts:10-16 spaceOf, :22-31 grantAllowsCreate, :38-46 holdsSpaceGrant, :74-79 detectSpacesCapability read and create checks; stratos-service/tests/space-scope-upstream.test.ts:2-5 the import."
     },
     {
       "id": "dependency-scope-check-caller",
@@ -1207,8 +1227,8 @@
         "stratos-service/src/api/records/boundary-writes.ts"
       ],
       "workstream": "schemas-and-clients",
-      "decision": "Calls holdsSpaceGrant and grantAllowsCreate for the upgrade check; no change expected and its tests pin the behaviour.",
-      "evidence": "stratos-service/src/api/records/scope-check.ts:33-46."
+      "decision": "Calls holdsSpaceGrant and grantAllowsCreate for the upgrade check. No scope string the service or an app requests changed, so the inputs of the check are the same; the diff of stratos-service/tests against the base adds two files, the scope parse table and the client classifier parity test, and edits none of the scope or capability tests.",
+      "evidence": "stratos-service/src/api/records/scope-check.ts:33-46 isOutOfDate."
     },
     {
       "id": "tests-aiab-scenarios",

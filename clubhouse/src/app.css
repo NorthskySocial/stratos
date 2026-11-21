@@ -1045,6 +1045,10 @@ h1 {
   font-weight: 700;
 }
 
+.room-notice {
+  margin-bottom: 1rem;
+}
+
 .feed-status-error {
   color: var(--ink);
   background: #ffdfe5;

@@ -22,6 +22,7 @@
   import {
     roomIdFromPath,
     roomPath,
+    topicLinkIsRefused,
     topicPath,
     topicUriFromPath,
   } from './lib/route'
@@ -33,6 +34,7 @@
     ClubhouseIdentity,
     RoomAccessState,
     RoomCatalogEntry,
+    RoomCustody,
     RoomFeedState,
   } from './lib/types'
 
@@ -58,6 +60,7 @@
   let liveMessage = $state('')
   let activeIntegration = $state<ClubhouseIntegration>({})
   let identity = $state<ClubhouseIdentity | null>(null)
+  let viewerCustody = $state<RoomCustody | null>(null)
   let sessionRestoring = $state(true)
   let membershipLoading = $state(true)
   let handle = $state('')
@@ -74,6 +77,8 @@
   let accessRequestEpoch = 0
   let disposed = false
   const deploymentConfig = loadClubhouseConfig()
+  const TOPIC_LINK_REFUSED = 'This topic link cannot be opened.'
+  let topicOpenRefused = $state(false)
 
   const currentRoomId = $derived(roomIdFromPath(pathname))
   const displayStates = $derived(
@@ -82,8 +87,20 @@
       : states,
   )
   const currentTopicUri = $derived(topicUriFromPath(pathname))
+  const topicNotice = $derived(
+    topicOpenRefused || topicLinkIsRefused(pathname)
+      ? TOPIC_LINK_REFUSED
+      : null,
+  )
   const currentRoom = $derived(
     currentRoomId ? rooms.find((room) => room.id === currentRoomId) : undefined,
+  )
+  // Only PDS-custody members post through the room's configured space, so
+  // nobody else is told it is broken.
+  const configurationProblem = $derived(
+    currentRoom && viewerCustody === 'pds'
+      ? (deploymentConfig.pdsSpaceProblemByRoom?.[currentRoom.id] ?? null)
+      : null,
   )
   const currentRoomVisual = $derived(
     currentRoom
@@ -99,6 +116,7 @@
       const destinationRoomId = roomIdFromPath(destination)
       if (destinationRoomId) feedCursors.reset(destinationRoomId)
       pathname = destination
+      topicOpenRefused = false
       void loadSelectedRoom()
     }
     window.addEventListener('popstate', onPopState)
@@ -210,6 +228,7 @@
               activeIntegration.getRoomStates!(entries.map((room) => room.id)),
           )
           if (requestEpoch !== accessRequestEpoch) return
+          viewerCustody = activeIntegration.viewerCustody?.() ?? null
           const nextStates: Record<string, RoomAccessState> = {}
           for (const room of entries) {
             const resolvedState = resolved[room.id]
@@ -219,6 +238,7 @@
           states = nextStates
         } catch {
           if (requestEpoch !== accessRequestEpoch) return
+          viewerCustody = null
           states = Object.fromEntries(
             entries.map((room) => [room.id, 'status-error']),
           )
@@ -284,6 +304,7 @@
     const destination = roomPath(roomId)
     window.history.pushState({}, '', destination)
     pathname = destination
+    topicOpenRefused = false
     void loadSelectedRoom()
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -292,11 +313,19 @@
     invalidateFeed(currentRoomId)
     window.history.pushState({}, '', '/')
     pathname = '/'
+    topicOpenRefused = false
   }
 
   function openTopic(topicUri: string) {
     if (!currentRoomId) return
-    const destination = topicPath(currentRoomId, topicUri)
+    let destination: string
+    try {
+      destination = topicPath(currentRoomId, topicUri)
+    } catch {
+      topicOpenRefused = true
+      return
+    }
+    topicOpenRefused = false
     window.history.pushState({}, '', destination)
     pathname = destination
   }
@@ -306,6 +335,7 @@
     const destination = roomPath(currentRoomId)
     window.history.pushState({}, '', destination)
     pathname = destination
+    topicOpenRefused = false
   }
 
   async function signIn() {
@@ -331,6 +361,7 @@
       accessRequestEpoch += 1
       membershipLoading = false
       identity = null
+      viewerCustody = null
       states = {}
       pendingRoomId = null
       invalidateFeed(currentRoomId)
@@ -453,8 +484,7 @@
     reply?: import('./lib/post-writer').ReplyRef,
   ) {
     if (!currentRoom || !activeIntegration.createPost) {
-      feedMessage = 'Posting needs service configuration for this room.'
-      return
+      throw new Error('Posting needs service configuration for this room.')
     }
     try {
       await withClubhouseSpan('clubhouse.post.create', () =>
@@ -463,9 +493,8 @@
       liveMessage = 'Post sent to the room'
       await loadSelectedRoom()
     } catch (cause) {
-      feedMessage =
+      liveMessage =
         cause instanceof Error ? cause.message : 'Post could not be created'
-      liveMessage = feedMessage
       throw cause
     }
   }
@@ -484,9 +513,8 @@
       if (currentTopicUri === post.uri) closeTopic()
       await loadSelectedRoom()
     } catch (cause) {
-      feedMessage =
+      liveMessage =
         cause instanceof Error ? cause.message : 'Post could not be deleted'
-      liveMessage = feedMessage
       throw cause
     }
   }
@@ -583,6 +611,8 @@
         {hasMore}
         {feedMessage}
         topicUri={currentTopicUri}
+        {topicNotice}
+        {configurationProblem}
         viewerDid={identity?.did ?? null}
         onOpenTopic={openTopic}
         onCloseTopic={closeTopic}

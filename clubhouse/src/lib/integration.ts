@@ -14,6 +14,7 @@ import { captureClubhouseException, withClubhouseSpan } from '../telemetry'
 import {
   createRoomPost,
   deleteRoomPost,
+  ownRoomPost,
   RoomPostConfigurationError,
   type ReplyRef,
   type StratosPostWriter,
@@ -149,6 +150,7 @@ export function createClubhouseIntegration(
   const auth = createClubhouseAuth(config)
   let session: OAuthSession | null = null
   let identity: ClubhouseIdentity | null = null
+  let viewerCustody: RoomCustody | null = null
   let authorProfiles = new Map<string, TypeaheadActor | null>()
   let authorRequests = new Map<string, Promise<void>>()
 
@@ -210,6 +212,7 @@ export function createClubhouseIntegration(
       auth.init(),
     )
     clearAuthorProfiles()
+    viewerCustody = null
     if (!session) {
       identity = null
       return null
@@ -244,8 +247,11 @@ export function createClubhouseIntegration(
       )
     }
     try {
-      return (await requestRoomStatus(session, endpoint, roomIds)).states
+      const status = await requestRoomStatus(session, endpoint, roomIds)
+      viewerCustody = status.custody
+      return status.states
     } catch (error) {
+      viewerCustody = null
       captureClubhouseException(error)
       return Object.fromEntries(
         roomIds.map((roomId) => [roomId, 'status-error']),
@@ -260,10 +266,12 @@ export function createClubhouseIntegration(
       await auth.signOut()
       session = null
       identity = null
+      viewerCustody = null
       clearAuthorProfiles()
     },
     getRoomState,
     getRoomStates,
+    viewerCustody: () => viewerCustody,
     async requestJoin(roomId: string): Promise<RoomAccessState> {
       if (!session) throw new Error('Sign in before joining a room.')
       // Reuse the identity resolved during session restoration. A DID is also
@@ -321,6 +329,8 @@ export function createClubhouseIntegration(
       post: import('./feedgen').ClubhouseFeedPost,
     ) {
       if (!session) throw new Error('Sign in before deleting a post.')
+      // A refused reference must not cost a status request.
+      ownRoomPost(post.uri, session.sub)
       const endpoint = roomStatusEndpoint(config)
       if (!endpoint) {
         throw new RoomPostConfigurationError(

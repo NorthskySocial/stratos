@@ -24,6 +24,10 @@ const createPost = (overrides: Partial<FeedPost> = {}): FeedPost => ({
   ...overrides,
 })
 
+const LEGACY = 'at://did:web:nerv.example/space/zone.stratos.space.feed'
+const LEGACY_AUTHOR_RECORD = `${LEGACY}/engineering/did:plc:faye/zone.stratos.feed.post/1`
+const LEGACY_DELETE_RECORD = `${LEGACY}/nerve/did:plc:asuka/zone.stratos.feed.post/two`
+
 describe('feed logic', () => {
   describe('authorFromUri', () => {
     it('extracts authors from custody and space record URIs', () => {
@@ -35,6 +39,27 @@ describe('feed logic', () => {
       expect(authorFromUri('at://did:plc:spike/zone.stratos.feed.post/1')).toBe(
         'did:plc:spike',
       )
+    })
+
+    it('does not take the space authority for the author', () => {
+      expect(
+        authorFromUri(
+          'at:space/did:web:stratos.example/zone.stratos.space.feed/engineering/did:plc:faye/zone.stratos.feed.post/1',
+        ),
+      ).not.toBe('did:web:stratos.example')
+    })
+
+    it.each([
+      ['an empty string', ''],
+      ['plain text', 'the post about Bebop'],
+      ['a handle author', 'at://spike.example/zone.stratos.feed.post/1'],
+      [
+        'a space URI that names no record',
+        'at:space/did:web:stratos.example/zone.stratos.space.feed/engineering',
+      ],
+      ['an earlier-spelling record', LEGACY_AUTHOR_RECORD],
+    ])('gives an empty string for %s', (_label, uri) => {
+      expect(authorFromUri(uri)).toBe('')
     })
   })
 
@@ -64,6 +89,14 @@ describe('feed logic', () => {
 
     it('rejects malformed post URIs', () => {
       expect(postDeleteTargetFromUri('at://did:plc:rei/not-a-post')).toBeNull()
+    })
+
+    it.each([
+      ['an earlier-spelling record', LEGACY_DELETE_RECORD],
+      ['an empty string', ''],
+      ['plain text', 'the post about Bebop'],
+    ])('rejects %s', (_label, uri) => {
+      expect(postDeleteTargetFromUri(uri)).toBeNull()
     })
   })
 

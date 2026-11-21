@@ -202,12 +202,6 @@ const EARLIER_SPELLING_EXEMPTIONS: Record<string, string> = {
   docs: 'prose and examples wait for the cutover documentation work',
   'test/scripts': 'end-to-end scripts wait for the cutover work',
   'test/feedgen-harness': 'the harness waits for the cutover work',
-  clubhouse:
-    'the room configuration check and its tests wait for the client-flow work',
-  'webapp/src/lib/inspector.ts':
-    'the record inspector waits for the client-flow work',
-  'webapp/tests/inspector.test.ts':
-    'the record inspector tests wait for the client-flow work',
   'stratos-feedgen-ng/src/store/migrations.rs':
     'migration tests describe rows an older build wrote, and migrations are not edited',
 }

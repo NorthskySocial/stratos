@@ -194,6 +194,7 @@ into one large module.
 | `discovery.ts`    | Enrollment discovery from user PDS; locates Stratos service endpoint                                                            |
 | `routing.ts`      | Service routing; directs requests to correct Stratos instance                                                                   |
 | `writes.ts`       | Write helpers that route by custody: `createBoundaryRecord`, `putBoundaryRecord`, `deleteBoundaryRecord`, `applyBoundaryWrites` |
+| `space-uri.ts`    | Space URI and record address grammar: `boundaryToSpaceUri`, `parseSpaceUri`, `parseSpaceRecordUri`, `parseRecordAddress`        |
 | `verification.ts` | Record verification with inclusion proofs and user/service key signature checks                                                 |
 | `scopes.ts`       | OAuth scope declarations                                                                                                        |
 | `types.ts`        | Client type definitions                                                                                                         |

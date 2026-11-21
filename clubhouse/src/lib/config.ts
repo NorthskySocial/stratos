@@ -1,3 +1,5 @@
+import { parseSpaceUri } from '@northskysocial/stratos-client'
+
 /** Public deployment settings injected by Vite at build time. */
 export interface ClubhouseConfig {
   serviceUrl?: string
@@ -9,6 +11,8 @@ export interface ClubhouseConfig {
   plcDirectoryUrl?: string
   /** Deployment-owned authority-space URIs keyed by public room ID. */
   pdsSpaceUriByRoom: Readonly<Record<string, string>>
+  /** Why a room's configured space was refused, keyed by public room ID. */
+  pdsSpaceProblemByRoom?: Readonly<Record<string, string>>
 }
 
 /** Return the public app origin used in OAuth metadata and service redirects. */
@@ -51,22 +55,28 @@ function optionalUrl(value: string | undefined): string | undefined {
   return value.replace(/\/+$/, '')
 }
 
+function spaceProblem(roomId: string): string {
+  return `Posting is not set up for the room "${roomId}": the space it was given is not a valid space address. Ask whoever runs this Clubhouse to correct it.`
+}
+
 function parseSpaceUris(
   value: string | undefined,
-): Readonly<Record<string, string>> {
-  if (!value) return {}
+): Pick<ClubhouseConfig, 'pdsSpaceUriByRoom' | 'pdsSpaceProblemByRoom'> {
+  const none = { pdsSpaceUriByRoom: {}, pdsSpaceProblemByRoom: {} }
+  if (!value) return none
   try {
     const parsed: unknown = JSON.parse(value)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
-      return {}
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, string] =>
-          typeof entry[1] === 'string' && entry[1].startsWith('at://'),
-      ),
-    )
+      return none
+    const spaces: Record<string, string> = {}
+    const problems: Record<string, string> = {}
+    for (const [roomId, uri] of Object.entries(parsed)) {
+      if (typeof uri === 'string' && parseSpaceUri(uri).ok) spaces[roomId] = uri
+      else problems[roomId] = spaceProblem(roomId)
+    }
+    return { pdsSpaceUriByRoom: spaces, pdsSpaceProblemByRoom: problems }
   } catch {
-    return {}
+    return none
   }
 }
 
@@ -112,8 +122,6 @@ export function loadClubhouseConfig(
     publicOrigin: optionalUrl(environment.VITE_CLUBHOUSE_URL),
     roomStatusEndpoint: optionalUrl(environment.VITE_CLUBHOUSE_ROOM_STATUS_URL),
     plcDirectoryUrl: optionalUrl(environment.VITE_PLC_DIRECTORY),
-    pdsSpaceUriByRoom: parseSpaceUris(
-      environment.VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON,
-    ),
+    ...parseSpaceUris(environment.VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON),
   }
 }

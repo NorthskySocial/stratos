@@ -1,4 +1,5 @@
 import type { OAuthSession } from '@atproto/oauth-client-browser'
+import { parseRecordAddress } from '@northskysocial/stratos-client'
 import type { ClubhouseConfig } from './config'
 import type { RoomCustody } from './types'
 
@@ -51,16 +52,36 @@ export interface RoomPostDeleteInput {
   stratosWriter?: StratosPostWriter
 }
 
-function ownPostRkey(uri: string, did: string): string {
-  const prefix = `at://${did}/${POST_COLLECTION}/`
-  if (!uri.startsWith(prefix)) {
+// The address is valid and the member's own, but it names the other custody,
+// so neither delete path could reach the post.
+function postKeptElsewhere(): Error {
+  return new Error(
+    'This post cannot be deleted from here. Your posts are kept in a different place from this one.',
+  )
+}
+
+/** What an own room post's address says about where it lives. */
+export type OwnRoomPost =
+  | { kind: 'custody' }
+  | { kind: 'space'; space: string; rkey: string }
+
+/**
+ * Check that a feed post reference names a post of the signed-in account.
+ * Nothing is sent before this passes.
+ */
+export function ownRoomPost(uri: string, did: string): OwnRoomPost {
+  const address = parseRecordAddress(uri)
+  if (!address.ok) throw new Error('The post reference is invalid.')
+  const { value } = address
+  if (value.author !== did || value.collection !== POST_COLLECTION) {
     throw new Error('You can only delete your own posts.')
   }
-  const rkey = uri.slice(prefix.length)
-  if (!rkey || /[/?#]/.test(rkey)) {
-    throw new Error('The post reference is invalid.')
+  if (value.kind === 'custody') return { kind: 'custody' }
+  return {
+    kind: 'space',
+    space: `at:space/${value.authority}/${value.spaceType}/${value.skey}`,
+    rkey: value.rkey,
   }
-  return rkey
 }
 
 /** Create a topic or reply without accepting a caller-controlled boundary. */
@@ -117,7 +138,7 @@ export async function createRoomPost(input: RoomPostInput): Promise<PostRef> {
 export async function deleteRoomPost(
   input: RoomPostDeleteInput,
 ): Promise<void> {
-  const rkey = ownPostRkey(input.uri, input.session.sub)
+  const target = ownRoomPost(input.uri, input.session.sub)
   if (!input.custody) {
     throw new RoomPostConfigurationError(
       'Deleting needs an active room enrollment.',
@@ -125,6 +146,7 @@ export async function deleteRoomPost(
   }
 
   if (input.custody === 'stratos') {
+    if (target.kind !== 'custody') throw postKeptElsewhere()
     if (!input.stratosWriter) {
       throw new RoomPostConfigurationError(
         'Deleting needs service configuration for this room.',
@@ -134,16 +156,17 @@ export async function deleteRoomPost(
     return
   }
 
+  if (target.kind !== 'space') throw postKeptElsewhere()
   const response = await input.session.fetchHandler(
-    '/xrpc/com.atproto.repo.deleteRecord',
+    '/xrpc/com.atproto.space.deleteRecord',
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        space: target.space,
         repo: input.session.sub,
         collection: POST_COLLECTION,
-        rkey,
-        swapRecord: input.cid,
+        rkey: target.rkey,
       }),
     },
   )

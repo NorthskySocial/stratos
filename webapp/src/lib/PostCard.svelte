@@ -4,6 +4,7 @@
   import {authorFromUri, type FeedPost} from './feed'
   import {displayBoundary} from './boundary-display'
   import RecordInspector from './RecordInspector.svelte'
+  import {chooseInspectorSource, type InspectorSource} from './inspector'
   import {getCid, type StratosImage} from './utils/cid'
   import LikeButton from './LikeButton.svelte'
   import type {StratosEnrollment} from './stratos'
@@ -29,6 +30,16 @@
   let deleting = $state(false)
   let deleteError = $state('')
   let canDelete = $derived(post.author === currentDid)
+
+  const INSPECTOR_OPENER_LABELS: Record<InspectorSource, string> = {
+    custody: 'Inspect the public and private records',
+    'own-space': 'Inspect your record on your PDS',
+    'feed-snapshot': 'Inspect the copy the feed served',
+    invalid: 'Inspect this record',
+  }
+  let inspectorOpenerLabel = $derived(
+    INSPECTOR_OPENER_LABELS[chooseInspectorSource(post, currentDid)],
+  )
 
   const HTTP_PROTOCOLS = ['https:', 'http:'] as const
   const HTTP_OR_BLOB_PROTOCOLS = [...HTTP_PROTOCOLS, 'blob:'] as const
@@ -278,7 +289,7 @@
 <article class="post-card" class:private={post.isPrivate}>
     {#if post.reply}
         <div class="reply-context">
-            ↩ replying to {shortDid(authorFromUri(post.reply.parent.uri))}
+            ↩ replying to {shortDid(authorFromUri(post.reply.parent.uri)) || 'a post'}
         </div>
     {/if}
 
@@ -354,8 +365,8 @@
                     class="inspect-btn"
                     class:active={inspectorOpen}
                     onclick={() => inspectorOpen = !inspectorOpen}
-                    title="Inspect PDS stub vs Stratos record"
-                    aria-label="Inspect record custody"
+                    title={inspectorOpenerLabel}
+                    aria-label={inspectorOpenerLabel}
                     aria-expanded={inspectorOpen}
             >🔍
             </button>
@@ -363,7 +374,7 @@
     </div>
 
     {#if inspectorOpen}
-        <RecordInspector uri={post.uri} onclose={() => inspectorOpen = false}/>
+        <RecordInspector uri={post.uri} cid={post.cid} record={post.record} indexedAt={post.indexedAt} onclose={() => inspectorOpen = false}/>
     {/if}
 
     {#if deleteError}
