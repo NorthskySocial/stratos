@@ -2461,6 +2461,19 @@ mod tests {
         false
     }
 
+    // The feeds can close while the first capped cycle is still reading, so
+    // the second cycle is waited for rather than expected at that instant.
+    async fn more_than_one_cycle_of_pages_is_read(responder: &Responder) -> bool {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            if responder.requested_cursors().len() > super::MAX_LABEL_PAGES_PER_CYCLE {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        false
+    }
+
     async fn feeds_open_within(lifecycle: &ControlLifecycle, window: Duration) -> bool {
         let deadline = std::time::Instant::now() + window;
         while std::time::Instant::now() < deadline {
@@ -2519,7 +2532,10 @@ mod tests {
             feeds_close_within(&scene.lifecycle, TEST_STALENESS / 2 + SCHEDULING_SLACK).await,
             "feeds stayed open past the bound"
         );
-        assert!(scene.responder.requested_cursors().len() > super::MAX_LABEL_PAGES_PER_CYCLE);
+        assert!(
+            more_than_one_cycle_of_pages_is_read(&scene.responder).await,
+            "the poller stopped reading after its first capped cycle"
+        );
         poller.stop().await;
     }
 

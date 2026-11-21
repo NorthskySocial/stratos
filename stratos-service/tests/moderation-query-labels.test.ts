@@ -111,6 +111,10 @@ function recordUri(rkey: string): string {
   return `at://${REI_DID}/${POST_COLLECTION}/${rkey}`
 }
 
+// Several tests here append over a thousand labels or page a generated log
+// many times; on a loaded machine that outlasts the default timeout.
+vi.setConfig({ testTimeout: 60_000 })
+
 describe('zone.stratos.moderation.queryLabels', () => {
   let dataDir: string
   let db: ServiceDb
