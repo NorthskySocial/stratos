@@ -484,8 +484,9 @@ describe('space-credential acceptance', () => {
         keyId: key.did(),
         ttlSeconds: 600,
       })
-      const authorization = `Atproto-Space ${credential}`
-      const parameters = '("authorization" "atproto-space-audience")'
+      const authorization = `Atproto-Space-Credential ${credential}`
+      const parameters =
+        '("authorization" "atproto-space-audience");tag="atproto-space-credential"'
       const bytes = new TextEncoder().encode(
         `"authorization": ${authorization}\n"atproto-space-audience": ${audience}\n"@signature-params": ${parameters}`,
       )
@@ -493,8 +494,8 @@ describe('space-credential acceptance', () => {
       const headers = {
         authorization,
         'atproto-space-audience': audience,
-        'signature-input': `atproto-space=${parameters}`,
-        signature: `atproto-space=:${signature}:`,
+        'signature-input': `sig=${parameters}`,
+        signature: `sig=:${signature}:`,
       }
       const request = ctxWithHeader(authorization, headers)
       request.req.url = path
@@ -503,11 +504,11 @@ describe('space-credential acceptance', () => {
     }
 
     it.each([
-      'Atproto-Space',
-      'Atproto-Space ',
-      'Atproto-Space two tokens',
-      'Atproto-Space rei Atproto-Space invalid',
-      'Atproto-Space\ttoken',
+      'Atproto-Space-Credential',
+      'Atproto-Space-Credential ',
+      'Atproto-Space-Credential two tokens',
+      'Atproto-Space-Credential rei Atproto-Space-Credential invalid',
+      'Atproto-Space-Credential\ttoken',
     ])(
       'rejects malformed explicit authorization %j before fallback',
       async (authorization) => {
@@ -584,7 +585,7 @@ describe('space-credential acceptance', () => {
         const credential = await credentialFor(SPACE_S, jkt)
         await expect(
           verifiers.spaceCredential(
-            ctxWithHeader(`Atproto-Space ${credential}`),
+            ctxWithHeader(`Atproto-Space-Credential ${credential}`),
           ),
         ).rejects.toThrow('HTTP credential key binding required')
       }
@@ -618,7 +619,7 @@ describe('space-credential acceptance', () => {
     it('keeps a prefixed standard scheme on the ordinary optional-auth path', async () => {
       await expect(
         makeVerifiers().optionalStandardOrSpaceCredential(
-          ctxWithHeader('Rei Atproto-Space invalid'),
+          ctxWithHeader('Rei Atproto-Space-Credential invalid'),
         ),
       ).resolves.toEqual({ credentials: { type: 'anonymous' } })
     })
@@ -746,7 +747,7 @@ describe('space-credential acceptance', () => {
         const request = await standardRequest()
         request.req.headers = {
           authorization: request.req.headers.authorization.replace(
-            'Atproto-Space',
+            'Atproto-Space-Credential',
             scheme,
           ),
         }
@@ -762,11 +763,13 @@ describe('space-credential acceptance', () => {
       )
       const legacy = await credentialFor(SPACE_S, 'legacy')
       await expect(
-        verifiers.spaceCredential(ctxWithHeader(`Atproto-Space ${legacy}`)),
+        verifiers.spaceCredential(
+          ctxWithHeader(`Atproto-Space-Credential ${legacy}`),
+        ),
       ).rejects.toBeInstanceOf(AuthRequiredError)
       await expect(
         verifiers.optionalStandardOrSpaceCredential(
-          ctxWithHeader('Atproto-Space invalid'),
+          ctxWithHeader('Atproto-Space-Credential invalid'),
         ),
       ).rejects.toBeInstanceOf(AuthRequiredError)
     })

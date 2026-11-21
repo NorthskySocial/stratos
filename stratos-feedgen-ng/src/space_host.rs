@@ -619,7 +619,10 @@ mod tests {
             .unwrap()
             .build()
             .unwrap();
-        assert_eq!(rei.headers()["authorization"], "Atproto-Space rei");
+        assert_eq!(
+            rei.headers()["authorization"],
+            "Atproto-Space-Credential rei"
+        );
         assert_eq!(rei.headers()["signature"], repeat.headers()["signature"]);
         assert_ne!(rei.headers()["signature"], misato.headers()["signature"]);
         assert_eq!(rei.headers()["atproto-space-audience"], "did:plc:rei");
@@ -630,7 +633,7 @@ mod tests {
                 rei.headers()["signature"]
                     .to_str()
                     .unwrap()
-                    .strip_prefix("atproto-space=:")
+                    .strip_prefix("sig=:")
                     .unwrap()
                     .strip_suffix(':')
                     .unwrap(),
@@ -640,7 +643,7 @@ mod tests {
         for (audience, expected) in [("did:plc:rei", true), ("did:plc:misato", false)] {
             let audience = Did::parse(audience).unwrap();
             let base = format!(
-                "\"authorization\": Atproto-Space rei\n\"atproto-space-audience\": {}\n\"@signature-params\": (\"authorization\" \"atproto-space-audience\")",
+                "\"authorization\": Atproto-Space-Credential rei\n\"atproto-space-audience\": {}\n\"@signature-params\": (\"authorization\" \"atproto-space-audience\");tag=\"atproto-space-credential\"",
                 audience.as_str()
             );
             assert_eq!(key.verify(base.as_bytes(), &signature).is_ok(), expected);

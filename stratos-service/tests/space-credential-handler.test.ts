@@ -261,7 +261,7 @@ async function mintDelegation(opts: DelegationMintOpts): Promise<string> {
   const payload = {
     iss: opts.iss ?? opts.userKey.did(),
     sub: opts.sub ?? SPACE_URI,
-    aud: opts.aud ?? `${SERVICE_DID}#atproto_space_host`,
+    aud: opts.aud ?? `${SERVICE_DID}#atproto_pds`,
     iat,
     exp: opts.exp ?? iat + 60,
     jti: opts.jti ?? `jti-${Date.now()}-${jtiCounter++}`,
@@ -747,7 +747,7 @@ describe('getSpaceCredential — delegation-token path', () => {
   it.each([
     ['wrong type', { typ: 'at+jwt' }],
     ['wrong issuer', { iss: 'did:plc:rei' }],
-    ['wrong audience', { aud: 'did:web:other.test#atproto_space_host' }],
+    ['wrong audience', { aud: 'did:web:other.test#atproto_pds' }],
     [
       'wrong space',
       { sub: makeSpaceUri(SERVICE_DID, 'zone.stratos.space.feed', 'other') },
@@ -927,6 +927,53 @@ describe('getSpaceCredential — delegation-token path', () => {
     expect(second.error?.name).toBe('InvalidToken')
   })
 
+  describe('delegation audience', () => {
+    const presentDelegation = async (
+      server: MockXrpcServer,
+      delegationToken: string,
+    ) => {
+      const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+      return invoke(server, { space: SPACE_URI, delegationToken }, undefined, {
+        req: { method: 'POST', url: MINT_PATH, headers: { dpop: proof } },
+      })
+    }
+
+    it('mints for the authority host audience', async () => {
+      const { userKey, server } = await setup(true)
+      const token = await mintDelegation({
+        userKey,
+        aud: `${SERVICE_DID}#atproto_pds`,
+      })
+      const res = await presentDelegation(server, token)
+      expect(res.error).toBeUndefined()
+      expect(res.body?.credential).toBeTruthy()
+    })
+
+    it.each([
+      ['the retired fragment', `${SERVICE_DID}#atproto_space_host`],
+      ['another fragment', `${SERVICE_DID}#atproto_space`],
+      ['a bare DID', SERVICE_DID],
+    ])(
+      'refuses %s with InvalidToken and leaves the jti unspent',
+      async (_name, aud) => {
+        const { userKey, server } = await setup(true)
+        const jti = 'jti-spike-audience'
+        const refused = await presentDelegation(
+          server,
+          await mintDelegation({ userKey, aud, jti }),
+        )
+        expect(refused.error?.name).toBe('InvalidToken')
+
+        const retry = await presentDelegation(
+          server,
+          await mintDelegation({ userKey, jti }),
+        )
+        expect(retry.error).toBeUndefined()
+        expect(retry.body?.credential).toBeTruthy()
+      },
+    )
+  })
+
   it('dev mode: the delegation path STILL requires the mint proof', async () => {
     // Dev mode relaxes only the DPoP-session path (unbound mint). A delegated
     // mint proves key possession with the mint proof, so its absence must
@@ -983,7 +1030,7 @@ describe('getSpaceCredential — delegation-token path', () => {
     ['wrong typ', { typ: 'nope+jwt' }],
     ['wrong alg', { alg: 'HS256' }],
     ['wrong kid', { kid: '#atproto_pns' }],
-    ['wrong aud', { aud: 'did:web:evil#atproto_space_host' }],
+    ['wrong aud', { aud: 'did:web:evil#atproto_pds' }],
     [
       'expired',
       {

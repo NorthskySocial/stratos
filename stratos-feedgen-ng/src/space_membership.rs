@@ -369,10 +369,10 @@ mod tests {
                 }
             }
             let request = String::from_utf8(bytes).unwrap();
-            assert!(request.contains("authorization: Atproto-Space rei\r\n"));
+            assert!(request.contains("authorization: Atproto-Space-Credential rei\r\n"));
             assert!(request.contains("atproto-space-audience: did:web:stratos.example.test\r\n"));
             assert!(request.contains(
-                "signature-input: atproto-space=(\"authorization\" \"atproto-space-audience\")\r\n"
+                "signature-input: sig=(\"authorization\" \"atproto-space-audience\");tag=\"atproto-space-credential\"\r\n"
             ));
             assert!(!request.contains("dpop:"));
             stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 12\r\nconnection: close\r\n\r\n{\"repos\":[]}").await.unwrap();

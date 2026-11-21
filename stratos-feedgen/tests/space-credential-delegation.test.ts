@@ -43,7 +43,7 @@ describe('mintDelegationToken', () => {
     })
     expect(payload.iss).toBe(FEEDGEN_DID)
     expect(payload.sub).toBe(SPACE_URI)
-    expect(payload.aud).toBe(`${STRATOS_DID}#atproto_space_host`)
+    expect(payload.aud).toBe(`${STRATOS_DID}#atproto_pds`)
     expect(typeof payload.jti).toBe('string')
     expect(payload.iat).toBeGreaterThanOrEqual(before)
     expect(payload.iat).toBeLessThanOrEqual(after)

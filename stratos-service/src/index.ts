@@ -377,6 +377,8 @@ export class StratosServer {
         ],
         id: serviceDid,
         verificationMethod,
+        // Tokens name this authority as `#atproto_pds`, but that entry would
+        // advertise upstream authority APIs this service does not implement.
         service: [
           {
             id: '#stratos',

@@ -1,13 +1,25 @@
 // Writes the fixtures next to this file from the published upstream packages.
 //
-// usage: node generate-oracle-vectors.mjs <oracle-directory>
+// usage: node generate-oracle-vectors.mjs <oracle-directory> [--tokens]
+//                                          [--stratos-produced]
+//
+// Without a flag every file but token-audiences.json and stratos-produced.json
+// is written, and the output is the same on every run. token-audiences.json
+// holds tokens the oracle stamps with the clock and a random jti, so it is
+// written only with --tokens and then kept. stratos-produced.json takes its
+// inputs from constants copied out of Stratos tests (named beside each one) and
+// is written only with --stratos-produced.
+//
+// Every file's header pins this generator's hash. Changing this file means
+// running again, and a file that is not rewritten has to have that one header
+// line updated by hand.
 //
 // The oracle directory is a standalone install of the exact package named
 // below, outside this repository, and also holds the RFC vector file as
 // hpke-test-vectors.json (pinned by hash below). Expected bytes come from that
 // package or from the RFC entry, never from Stratos code. No network, clock or
 // randomness: every key and input is fixed here.
-import { createHash } from 'node:crypto'
+import { ECDH, createHash } from 'node:crypto'
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
@@ -36,7 +48,7 @@ const TEST_ONLY_AUTHOR_KEM_KEY = '22'.repeat(32)
 const TEST_ONLY_EPHEMERAL_KEY = '33'.repeat(32)
 
 const AUDIENCE = 'did:web:bebop.example'
-const AUTHORIZATION = 'Atproto-Space spike-spiegel-test-credential'
+const AUTHORIZATION = 'Atproto-Space-Credential spike-spiegel-test-credential'
 const REPO = 'did:plc:fayevalentine'
 const LEGACY_SPACE =
   'at://did:web:bebop.example/space/zone.stratos.space.feed/crew'
@@ -51,8 +63,16 @@ const REVISIONS = [
 ]
 
 const oracleDirectory = process.argv[2]
-if (!oracleDirectory) {
-  console.error('usage: node generate-oracle-vectors.mjs <oracle-directory>')
+const flags = process.argv.slice(3)
+const writeTokens = flags.includes('--tokens')
+const writeStratosProduced = flags.includes('--stratos-produced')
+if (
+  !oracleDirectory ||
+  flags.some((flag) => flag !== '--tokens' && flag !== '--stratos-produced')
+) {
+  console.error(
+    'usage: node generate-oracle-vectors.mjs <oracle-directory> [--tokens] [--stratos-produced]',
+  )
   process.exit(2)
 }
 
@@ -148,6 +168,42 @@ const signatureField = signedHeaders['signature']
 const withHeaders = (changes) => ({ ...signedHeaders, ...changes })
 const relabel = (value, label) => value.replace(/^sig=/, `${label}=`)
 
+// The oracle only signs the bare profile, so cases that add parameters are
+// signed here over the RFC 9421 base and then judged by the oracle verifier.
+const COMPONENTS = '("authorization" "atproto-space-audience")'
+const signWithParameters = async (keypair, parameters, authorization) => {
+  const params = `${COMPONENTS}${parameters}`
+  const base = [
+    `"authorization": ${authorization}`,
+    `"atproto-space-audience": ${AUDIENCE}`,
+    `"@signature-params": ${params}`,
+  ].join('\n')
+  const signature = await keypair.sign(new TextEncoder().encode(base))
+  return {
+    'signature-input': `sig=${params}`,
+    signature: `sig=:${Buffer.from(signature).toString('base64')}:`,
+  }
+}
+const parametersCase = async (name, parameters, keyId = signer.did()) => ({
+  name,
+  headers: withHeaders(
+    await signWithParameters(signer, parameters, AUTHORIZATION),
+  ),
+  keyId,
+})
+const mixedCaseAuthorization =
+  'aTpRoTo-SpAcE-CrEdEnTiAl spike-spiegel-test-credential'
+const { headers: mixedCaseHeaders } = await space.createSpaceSigHeaders({
+  authorization: mixedCaseAuthorization,
+  audience: AUDIENCE,
+  keypair: signer,
+})
+const otherTagSignature = await signWithParameters(
+  otherSigner,
+  ';tag="faye-valentine-test"',
+  AUTHORIZATION,
+)
+
 const credentialCases = [
   ['accepted as signed', signedHeaders, signer.did()],
   [
@@ -194,10 +250,44 @@ const credentialCases = [
   ['verified against the wrong key', signedHeaders, otherSigner.did()],
   [
     'authorization value altered',
-    withHeaders({ authorization: 'Atproto-Space jet-black-test-credential' }),
+    withHeaders({
+      authorization: 'Atproto-Space-Credential jet-black-test-credential',
+    }),
     signer.did(),
   ],
 ]
+
+const parameterCases = [
+  await parametersCase(
+    'a created parameter',
+    `;created=909187200;tag="${tag}"`,
+  ),
+  await parametersCase(
+    'keyid equal to the key',
+    `;keyid="${signer.did()}";tag="${tag}"`,
+  ),
+  await parametersCase(
+    'keyid of another key',
+    `;keyid="${otherSigner.did()}";tag="${tag}"`,
+  ),
+  await parametersCase(
+    'alg ecdsa-p256-sha256',
+    `;alg="ecdsa-p256-sha256";tag="${tag}"`,
+  ),
+  await parametersCase('another alg', `;alg="ed25519";tag="${tag}"`),
+]
+credentialCases.push(
+  ['scheme in mixed case, signed as written', mixedCaseHeaders, signer.did()],
+  ...parameterCases.map((c) => [c.name, c.headers, c.keyId]),
+  [
+    'a second signature with another tag beside the right one',
+    withHeaders({
+      'signature-input': `${input}, other=${COMPONENTS};tag="faye-valentine-test"`,
+      signature: `${signatureField}, other=${otherTagSignature.signature.replace(/^sig=/, '')}`,
+    }),
+    signer.did(),
+  ],
+)
 
 const credentialResults = []
 for (const [name, headers, keyId] of credentialCases) {
@@ -640,3 +730,365 @@ writeFixture(
     ],
   },
 )
+
+if (writeTokens) {
+  const { Secp256k1Keypair } = await importFrom('@atproto/crypto')
+  const AUTHORITY = 'did:web:bebop.example'
+  const MEMBER = 'did:plc:fayevalentine'
+  const CLIENT_ID = 'https://redhawk.example/client-metadata.json'
+  const CLIENT_KEY_ID = 'ein-test-key-1'
+  const SPACE_URI = `at:space/${AUTHORITY}/zone.stratos.space.feed/crew`
+  const RETIRED_AUDIENCE = `${AUTHORITY}#atproto_space_host`
+
+  // Test-only keys: protect nothing, fix the signatures.
+  const keyOf = (hex) => P256Keypair.import(fromHex(hex))
+  const memberKey = await keyOf('77'.repeat(32))
+  const authorityKey = await keyOf('88'.repeat(32))
+  const holderKey = await keyOf('55'.repeat(32))
+  const clientKey = await keyOf('66'.repeat(32))
+  const otherAuthorityKey = await keyOf('99'.repeat(32))
+  const secpKey = await Secp256k1Keypair.import(fromHex('aa'.repeat(32)))
+
+  const audience = space.spaceHostAud(AUTHORITY)
+  const part = (jwt, index) =>
+    JSON.parse(Buffer.from(jwt.split('.')[index], 'base64url').toString())
+  const b64url = (value) =>
+    Buffer.from(JSON.stringify(value)).toString('base64url')
+  const resign = async (jwt, keypair, change) => {
+    const header = part(jwt, 0)
+    const payload = part(jwt, 1)
+    change({ header, payload })
+    const signingInput = `${b64url(header)}.${b64url(payload)}`
+    const signature = await keypair.sign(new TextEncoder().encode(signingInput))
+    return `${signingInput}.${Buffer.from(signature).toString('base64url')}`
+  }
+
+  // Compact on purpose: the fixtures share a size budget. The oracle's error
+  // code is the stable part of a refusal.
+  const tokenVerdict = async (run) => {
+    try {
+      await run()
+      return 'accepted'
+    } catch (error) {
+      return `refused: ${error.code}`
+    }
+  }
+  const clockedVerdict = async (clockSeconds, run) => {
+    const realNow = Date.now
+    Date.now = () => clockSeconds * 1000
+    try {
+      return await tokenVerdict(run)
+    } finally {
+      Date.now = realNow
+    }
+  }
+  const publicJwk = (keypair, kid) => {
+    const point = ECDH.convertKey(
+      Buffer.from(keypair.publicKeyBytes()),
+      'prime256v1',
+      undefined,
+      undefined,
+      'uncompressed',
+    )
+    return {
+      kty: 'EC',
+      crv: 'P-256',
+      kid,
+      x: point.subarray(1, 33).toString('base64url'),
+      y: point.subarray(33).toString('base64url'),
+    }
+  }
+
+  const describeToken = async (name, type, jwt, keypair, options) => {
+    const payload = part(jwt, 1)
+    const frozenClockSeconds = payload.iat
+    return {
+      name,
+      token: jwt,
+      frozenClockSeconds,
+      verdicts: {
+        parse: await tokenVerdict(() => space.parseSpaceToken(type, jwt)),
+        verify: await clockedVerdict(frozenClockSeconds, () =>
+          space.verifySpaceToken(type, jwt, {
+            getSigningKey: () => keypair.did(),
+            ...options,
+          }),
+        ),
+      },
+    }
+  }
+
+  const delegation = await space.createDelegationToken({
+    iss: MEMBER,
+    sub: SPACE_URI,
+    aud: audience,
+    keypair: memberKey,
+  })
+  const retiredDelegation = await space.createDelegationToken({
+    iss: MEMBER,
+    sub: SPACE_URI,
+    aud: RETIRED_AUDIENCE,
+    keypair: memberKey,
+  })
+  const attestation = await space.createClientAttestation({
+    clientId: CLIENT_ID,
+    aud: audience,
+    kid: CLIENT_KEY_ID,
+    keypair: clientKey,
+  })
+  const credential = await space.createSpaceCredential({
+    iss: AUTHORITY,
+    sub: SPACE_URI,
+    keyId: holderKey.did(),
+    keypair: authorityKey,
+  })
+
+  const credentialOptions = { sub: SPACE_URI }
+  const credentialVariant = (name, keypair, change) =>
+    resign(credential, keypair, change).then((jwt) =>
+      describeToken(name, 'credential', jwt, authorityKey, credentialOptions),
+    )
+
+  const tokens = [
+    await describeToken('delegation', 'delegation', delegation, memberKey, {
+      aud: audience,
+      sub: SPACE_URI,
+    }),
+    await describeToken(
+      'delegation with the retired audience',
+      'delegation',
+      retiredDelegation,
+      memberKey,
+      { aud: audience, sub: SPACE_URI },
+    ),
+    await describeToken(
+      'client attestation',
+      'clientAttestation',
+      attestation,
+      clientKey,
+      { aud: audience },
+    ),
+    await describeToken(
+      'credential',
+      'credential',
+      credential,
+      authorityKey,
+      credentialOptions,
+    ),
+    await credentialVariant(
+      'credential without kid',
+      authorityKey,
+      ({ header }) => {
+        delete header.kid
+      },
+    ),
+    await credentialVariant(
+      'credential with another kid',
+      authorityKey,
+      ({ header }) => {
+        header.kid = '#atproto_other'
+      },
+    ),
+    await credentialVariant(
+      'credential with an aud claim',
+      authorityKey,
+      ({ payload }) => {
+        payload.aud = audience
+      },
+    ),
+    await credentialVariant(
+      'credential with alg none',
+      authorityKey,
+      ({ header }) => {
+        header.alg = 'none'
+      },
+    ),
+    await credentialVariant(
+      'credential bound to a non-P-256 key',
+      authorityKey,
+      ({ payload }) => {
+        payload.cnf = { kid: secpKey.did() }
+      },
+    ),
+    await credentialVariant(
+      'credential without cnf',
+      authorityKey,
+      ({ payload }) => {
+        delete payload.cnf
+      },
+    ),
+    await credentialVariant(
+      'credential signed by another key',
+      otherAuthorityKey,
+      () => {},
+    ),
+  ]
+  writeFixture(
+    'token-audiences.json',
+    {
+      classification: 'upstream-signed-target-uri',
+      oracle,
+      generator,
+      upstreamVerified: true,
+      reproducible: false,
+      reproducibleReason:
+        'The oracle stamps the clock and a random jti into each token. Stored once; tests freeze the clock to frozenClockSeconds.',
+    },
+    {
+      note: 'upstreamVerified is the oracle verdict. sub holds a hand-written at:space/ uri as an opaque claim.',
+      authority: AUTHORITY,
+      audience,
+      spaceUri: SPACE_URI,
+      testOnlyKeys: {
+        memberDid: memberKey.did(),
+        authorityDid: authorityKey.did(),
+        holderDid: holderKey.did(),
+        clientDid: clientKey.did(),
+        clientKeyId: CLIENT_KEY_ID,
+        clientJwk: publicJwk(clientKey, CLIENT_KEY_ID),
+      },
+      tokens,
+    },
+  )
+}
+
+if (writeStratosProduced) {
+  const { Secp256k1Keypair } = await importFrom('@atproto/crypto')
+  const accepted = 'accepted'
+  const verdictCode = async (run) => {
+    try {
+      await run()
+      return accepted
+    } catch (error) {
+      return `refused: ${error.code ?? error.name}`
+    }
+  }
+  const atClock = async (clockSeconds, run) => {
+    const realNow = Date.now
+    Date.now = () => clockSeconds * 1000
+    try {
+      return await verdictCode(run)
+    } finally {
+      Date.now = realNow
+    }
+  }
+  const judgeToken = async (type, token, clockSeconds, signerDid, options) => ({
+    parse: await verdictCode(() => space.parseSpaceToken(type, token)),
+    verify: await atClock(clockSeconds, () =>
+      space.verifySpaceToken(type, token, {
+        getSigningKey: () => signerDid,
+        ...options,
+      }),
+    ),
+  })
+
+  // Copied from the Rust test `presentation_headers_are_the_pinned_strings`
+  // in stratos-feedgen-ng/src/space_http_signature.rs.
+  const RUST_PRESENTATION = {
+    source: 'stratos-feedgen-ng/src/space_http_signature.rs',
+    signingKeyFill: 1,
+    headers: {
+      authorization: 'Atproto-Space-Credential misato-credential',
+      'atproto-space-audience': 'did:plc:tokyo3',
+      'signature-input':
+        'sig=("authorization" "atproto-space-audience");tag="atproto-space-credential"',
+      signature:
+        'sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP6oE97sVb38WYR4Eqy2rh4x2fWZrebVAliLPkE88woMGw==:',
+    },
+  }
+  // Copied from the Rust test `a_delegation_for_fixed_inputs_is_byte_for_byte_stable`
+  // in stratos-feedgen-ng/src/service_auth.rs; it signs at clock second 1000.
+  const RUST_DELEGATION = {
+    source: 'stratos-feedgen-ng/src/service_auth.rs',
+    signingKeyHex:
+      '2fe8e925727a16e4970a5b0a556d9f8263b7c6b894885ca2857c8878938aa97b',
+    authority: 'did:web:localhost%3A3100',
+    spaceUri: 'at:space/did:web:localhost%3A3100/zone.stratos.space.feed/nerv',
+    token:
+      'eyJhbGciOiJFUzI1NksiLCJ0eXAiOiJhdHByb3RvLXNwYWNlLWRlbGVnYXRpb24rand0Iiwia2lkIjoiI2F0cHJvdG8ifQ.eyJpc3MiOiJkaWQ6d2ViOmZlZWRnZW4uZXhhbXBsZS50ZXN0Iiwic3ViIjoiYXQ6c3BhY2UvZGlkOndlYjpsb2NhbGhvc3QlM0EzMTAwL3pvbmUuc3RyYXRvcy5zcGFjZS5mZWVkL25lcnYiLCJhdWQiOiJkaWQ6d2ViOmxvY2FsaG9zdCUzQTMxMDAjYXRwcm90b19wZHMiLCJpYXQiOjEwMDAsImV4cCI6MTA2MCwianRpIjoibm9uY2UifQ.dBaNYuvHe_V--AayTy6vQusFWf4r00gbbEvpJ4AeWRMdbpTrWDB-rdlEsvpczXAEmkcGkHlsAqhu67xtN11EJA',
+    frozenClockSeconds: 1000,
+  }
+  // Copied from stratos-service/tests/space-credential-fixed-mint.test.ts.
+  const SERVICE_CREDENTIAL = {
+    source: 'stratos-service/tests/space-credential-fixed-mint.test.ts',
+    authority: 'did:web:bebop.example',
+    spaceUri: 'at:space/did:web:bebop.example/zone.stratos.space.feed/crew',
+    authoritySigningKeyHex: 'bb'.repeat(32),
+    holderKeyHex: '55'.repeat(32),
+    credentialId: 'spike-spiegel-credential',
+    frozenClockSeconds: 1_000_000_000,
+    token:
+      'eyJ0eXAiOiJhdHByb3RvLXNwYWNlLWNyZWRlbnRpYWwrand0IiwiYWxnIjoiRVMyNTZLIiwia2lkIjoiI2F0cHJvdG8ifQ.eyJpc3MiOiJkaWQ6d2ViOmJlYm9wLmV4YW1wbGUiLCJzdWIiOiJhdDpzcGFjZS9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3JldyIsImlhdCI6MTAwMDAwMDAwMCwiZXhwIjoxMDAwMDAwNjAwLCJqdGkiOiJzcGlrZS1zcGllZ2VsLWNyZWRlbnRpYWwiLCJjbmYiOnsia2lkIjoiZGlkOmtleTp6RG5hZVdNOHptQml3emY4bjQydk1DUGRYQVdQdnQ4VDEzWFFNQlhabVpvTEIzZkNGIn0sInN0cmF0b3NCb3VuZGFyeVJldmlzaW9uIjoxfQ.LPYdky2qhc7JLfDnxcEJH9NdXh-kcpvEk-4mk_WC1rp8P1oexCV-rW3iqDhugUXP1tFLJnnNQDA_bfVaZKl2xQ',
+  }
+
+  const presentationKey = await P256Keypair.import(
+    new Uint8Array(32).fill(RUST_PRESENTATION.signingKeyFill),
+  )
+  const delegationKey = await Secp256k1Keypair.import(
+    fromHex(RUST_DELEGATION.signingKeyHex),
+  )
+  const authorityKey = await Secp256k1Keypair.import(
+    fromHex(SERVICE_CREDENTIAL.authoritySigningKeyHex),
+  )
+
+  writeFixture(
+    'stratos-produced.json',
+    {
+      classification: 'upstream-signed-target-uri',
+      oracle,
+      generator,
+      upstreamVerified: true,
+      reproducible: true,
+    },
+    {
+      note: 'Values Stratos produced, judged by the oracle. upstreamVerified is the oracle verdict. spaceUri is a hand-written at:space/ uri held as an opaque claim.',
+      rustPresentation: {
+        source: RUST_PRESENTATION.source,
+        signingKeyFill: RUST_PRESENTATION.signingKeyFill,
+        keyId: presentationKey.did(),
+        headers: RUST_PRESENTATION.headers,
+        verdict: await verdictCode(() =>
+          space.verifyCredentialSig(
+            RUST_PRESENTATION.headers,
+            presentationKey.did(),
+          ),
+        ),
+      },
+      rustDelegation: {
+        source: RUST_DELEGATION.source,
+        signingKeyHex: RUST_DELEGATION.signingKeyHex,
+        authority: RUST_DELEGATION.authority,
+        spaceUri: RUST_DELEGATION.spaceUri,
+        token: RUST_DELEGATION.token,
+        frozenClockSeconds: RUST_DELEGATION.frozenClockSeconds,
+        verdicts: await judgeToken(
+          'delegation',
+          RUST_DELEGATION.token,
+          RUST_DELEGATION.frozenClockSeconds,
+          delegationKey.did(),
+          {
+            aud: space.spaceHostAud(RUST_DELEGATION.authority),
+            sub: RUST_DELEGATION.spaceUri,
+          },
+        ),
+      },
+      serviceCredential: {
+        source: SERVICE_CREDENTIAL.source,
+        authority: SERVICE_CREDENTIAL.authority,
+        spaceUri: SERVICE_CREDENTIAL.spaceUri,
+        authoritySigningKeyHex: SERVICE_CREDENTIAL.authoritySigningKeyHex,
+        holderKeyHex: SERVICE_CREDENTIAL.holderKeyHex,
+        credentialId: SERVICE_CREDENTIAL.credentialId,
+        token: SERVICE_CREDENTIAL.token,
+        frozenClockSeconds: SERVICE_CREDENTIAL.frozenClockSeconds,
+        verdicts: await judgeToken(
+          'credential',
+          SERVICE_CREDENTIAL.token,
+          SERVICE_CREDENTIAL.frozenClockSeconds,
+          authorityKey.did(),
+          { sub: SERVICE_CREDENTIAL.spaceUri },
+        ),
+      },
+    },
+  )
+}

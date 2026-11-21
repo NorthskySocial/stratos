@@ -1,0 +1,55 @@
+{
+  "header": {
+    "classification": "upstream-signed-target-uri",
+    "oracle": {
+      "package": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-AasGxXJz1htNRNNR1JL/2v4EV45VvC4UrbY1x/w/cFH0avOHFxhDV0MQMMegVYhSi7DtnkJ1smwDxO6K/W402g=="
+    },
+    "generator": {
+      "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
+      "sha256": "ec50ccbc5a5f7f11decce3682a96d9495e662d20dbdbeb273f49afc35296a720"
+    },
+    "upstreamVerified": true,
+    "reproducible": true
+  },
+  "note": "Values Stratos produced, judged by the oracle. upstreamVerified is the oracle verdict. spaceUri is a hand-written at:space/ uri held as an opaque claim.",
+  "rustPresentation": {
+    "source": "stratos-feedgen-ng/src/space_http_signature.rs",
+    "signingKeyFill": 1,
+    "keyId": "did:key:zDnaeXxvmFHMHjqgQTbadpWG7gPHwnga1i7SMwxrV2BSdUjAD",
+    "headers": {
+      "authorization": "Atproto-Space-Credential misato-credential",
+      "atproto-space-audience": "did:plc:tokyo3",
+      "signature-input": "sig=(\"authorization\" \"atproto-space-audience\");tag=\"atproto-space-credential\"",
+      "signature": "sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP6oE97sVb38WYR4Eqy2rh4x2fWZrebVAliLPkE88woMGw==:"
+    },
+    "verdict": "accepted"
+  },
+  "rustDelegation": {
+    "source": "stratos-feedgen-ng/src/service_auth.rs",
+    "signingKeyHex": "2fe8e925727a16e4970a5b0a556d9f8263b7c6b894885ca2857c8878938aa97b",
+    "authority": "did:web:localhost%3A3100",
+    "spaceUri": "at:space/did:web:localhost%3A3100/zone.stratos.space.feed/nerv",
+    "token": "eyJhbGciOiJFUzI1NksiLCJ0eXAiOiJhdHByb3RvLXNwYWNlLWRlbGVnYXRpb24rand0Iiwia2lkIjoiI2F0cHJvdG8ifQ.eyJpc3MiOiJkaWQ6d2ViOmZlZWRnZW4uZXhhbXBsZS50ZXN0Iiwic3ViIjoiYXQ6c3BhY2UvZGlkOndlYjpsb2NhbGhvc3QlM0EzMTAwL3pvbmUuc3RyYXRvcy5zcGFjZS5mZWVkL25lcnYiLCJhdWQiOiJkaWQ6d2ViOmxvY2FsaG9zdCUzQTMxMDAjYXRwcm90b19wZHMiLCJpYXQiOjEwMDAsImV4cCI6MTA2MCwianRpIjoibm9uY2UifQ.dBaNYuvHe_V--AayTy6vQusFWf4r00gbbEvpJ4AeWRMdbpTrWDB-rdlEsvpczXAEmkcGkHlsAqhu67xtN11EJA",
+    "frozenClockSeconds": 1000,
+    "verdicts": {
+      "parse": "accepted",
+      "verify": "accepted"
+    }
+  },
+  "serviceCredential": {
+    "source": "stratos-service/tests/space-credential-fixed-mint.test.ts",
+    "authority": "did:web:bebop.example",
+    "spaceUri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew",
+    "authoritySigningKeyHex": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "holderKeyHex": "5555555555555555555555555555555555555555555555555555555555555555",
+    "credentialId": "spike-spiegel-credential",
+    "token": "eyJ0eXAiOiJhdHByb3RvLXNwYWNlLWNyZWRlbnRpYWwrand0IiwiYWxnIjoiRVMyNTZLIiwia2lkIjoiI2F0cHJvdG8ifQ.eyJpc3MiOiJkaWQ6d2ViOmJlYm9wLmV4YW1wbGUiLCJzdWIiOiJhdDpzcGFjZS9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3JldyIsImlhdCI6MTAwMDAwMDAwMCwiZXhwIjoxMDAwMDAwNjAwLCJqdGkiOiJzcGlrZS1zcGllZ2VsLWNyZWRlbnRpYWwiLCJjbmYiOnsia2lkIjoiZGlkOmtleTp6RG5hZVdNOHptQml3emY4bjQydk1DUGRYQVdQdnQ4VDEzWFFNQlhabVpvTEIzZkNGIn0sInN0cmF0b3NCb3VuZGFyeVJldmlzaW9uIjoxfQ.LPYdky2qhc7JLfDnxcEJH9NdXh-kcpvEk-4mk_WC1rp8P1oexCV-rW3iqDhugUXP1tFLJnnNQDA_bfVaZKl2xQ",
+    "frozenClockSeconds": 1000000000,
+    "verdicts": {
+      "parse": "accepted",
+      "verify": "accepted"
+    }
+  }
+}

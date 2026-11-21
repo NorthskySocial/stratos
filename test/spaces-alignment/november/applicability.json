@@ -171,8 +171,8 @@
         "stratos-feedgen-ng/src/space_host.rs"
       ],
       "workstream": "credential-transport",
-      "decision": "The service verifier looks signatures up by a fixed label and the Rust signer emits one; switch the verifier to tag selection with the exact covered components.",
-      "evidence": "stratos-service/src/infra/auth/space-http-signature.ts:51-65 label lookup; stratos-feedgen-ng/src/space_host.rs:190-193 sets signature-input and signature."
+      "decision": "The service presentation verifier selects the one signature tagged atproto-space-credential under any label and requires the two covered components in order, and the Rust signer emits that tagged signature under the label sig with the Atproto-Space-Credential scheme; the old scheme and the fixed label are not recognised. The custom mint exchange keeps its own label, one covered component and keyid, in separate functions in both languages, and the service refuses an exchange proof on a read route and a presentation proof on the mint route. Cross-checked, not run on a real host: the upstream package accepts the Rust-signed presentation (stratos-produced.json) and gives the same verdict as the service verifier on every vector (credential-signature.json).",
+      "evidence": "stratos-service/src/infra/auth/space-http-signature.ts:28-33 constants, :39 verifySpaceExchangeSignature (refuses the credential tag at :50) and :82-139 verifySpacePresentationSignature (tag selection :89-92, covered components :113); stratos-service/src/infra/auth/verifiers.ts:411-419 recognises only the new scheme and :539 verifies the presentation; stratos-feedgen-ng/src/space_http_signature.rs:8-11 constants, :58-69 exchange_headers and :71-83 presentation_headers; stratos-feedgen-ng/src/space_host.rs:185-192 sends the presentation headers."
     },
     {
       "id": "prompt-6a-shared-secret",
@@ -458,8 +458,8 @@
         "stratos-feedgen-ng/src/service_auth.rs"
       ],
       "workstream": "credential-transport",
-      "decision": "All three still use the #atproto_space_host audience fragment; migrate them together.",
-      "evidence": "delegation-verifier.ts:44 and client-attestation-verifier.ts:43 SPACE_HOST_FRAGMENT; stratos-feedgen-ng/src/service_auth.rs:115."
+      "decision": "Delegations and client attestations name exactly the authority DID plus #atproto_pds as their audience: one constant in the service shared by both verifiers and one constant in the Rust minter. The old fragment, any other fragment, a bare DID and another authority's DID are refused, with no second accepted value and no option. The service DID document gains no #atproto_pds entry. The upstream package accepts a delegation made by the Rust minter (stratos-produced.json) and its own delegation and attestation pass the service verifiers under a frozen clock (token-audiences.json). A PDS-issued delegation reaching the mint route is not run here. The audience change must be coordinated: delegations and attestations cached with the old audience are refused after the upgrade.",
+      "evidence": "stratos-service/src/infra/auth/delegation-verifier.ts:49 SPACE_HOST_FRAGMENT and :202 the audience check; stratos-service/src/infra/auth/client-attestation-verifier.ts:3 imports it and :176 checks the audience; stratos-feedgen-ng/src/service_auth.rs:9 SPACE_HOST_AUDIENCE_FRAGMENT and :118 the delegation audience."
     },
     {
       "id": "prerequisite-kem-key-discovery",
@@ -498,7 +498,7 @@
       ],
       "workstream": "none",
       "decision": "custom, not renamed: Stratos is always the authority and mints under its own enrollment rules.",
-      "evidence": "stratos-service/src/features/space-credential/handler.ts:29; stratos-feedgen-ng/src/credential_issuer.rs:17."
+      "evidence": "stratos-service/src/features/space-credential/handler.ts:29; stratos-feedgen-ng/src/credential_issuer.rs:18."
     },
     {
       "id": "custom-zone-space-get-record",
@@ -683,7 +683,7 @@
       ],
       "workstream": "canonical-uri",
       "decision": "The mint route reads the space parameter, and the space-credential verifier and the delegation verifier read the sub claim, with the core parseSpaceUri, and each requires the authority to be this service. A string outside the grammar, including an earlier-spelling one, is refused: UnknownSpace at the mint route, InvalidSpaceCredentialSubError for a credential sub and InvalidDelegationSubError for a delegation sub. The signed sub is verified as received and never normalised; a token signed over the earlier spelling is refused for its subject and not its signature, and verifies only when it is made again over the new spelling. The minter signs the requested space string into sub verbatim.",
-      "evidence": "handler.ts:149 mint parse, space-credential-verifier.ts:206 and delegation-verifier.ts:184 call parseSpaceUri; stratos-service/tests/space-uri-credentials.integration.test.ts drives the real mint and read routes."
+      "evidence": "handler.ts:149 mint parse, space-credential-verifier.ts:206 and delegation-verifier.ts:189 call parseSpaceUri; stratos-service/tests/space-uri-credentials.integration.test.ts drives the real mint and read routes."
     },
     {
       "id": "uri-rust-record-uri",
@@ -975,7 +975,7 @@
       ],
       "workstream": "canonical-uri",
       "decision": "space-read/handler.ts maps the requested space to a boundary with spaceUriToBoundary and admits a credential only when its spaceUri equals the requested space string, so a differently spelled equivalent URI is refused; credential-scope.ts and boundary-credential access map the verified credential's spaceUri to a boundary with spaceUriToBoundary; verifiers.ts passes the verified spaceUri through as auth credentials; host-discovery.ts treats the space URI as an opaque lookup key for host overrides. All follow the core parser and none stores the string. No configuration on the service is keyed by a space URI: EnrollmentHostOverrideReader returns the member's repo host and ignores its key, and the space app access setting is keyed by skey or boundary, so nothing needed a URI check when configuration loads.",
-      "evidence": "space-read/handler.ts:150 and :458; credential-scope.ts:69-82; features/boundary/credential-access.ts:13; verifiers.ts:605; stratos-core/src/spaces/host-discovery.ts:34 and :70-75.; stratos-service/src/features/space-read/host-resolution.ts:15-21 EnrollmentHostOverrideReader."
+      "evidence": "space-read/handler.ts:150 and :458; credential-scope.ts:69-82; features/boundary/credential-access.ts:13; verifiers.ts:610; stratos-core/src/spaces/host-discovery.ts:34 and :70-75.; stratos-service/src/features/space-read/host-resolution.ts:15-21 EnrollmentHostOverrideReader."
     },
     {
       "id": "uri-clubhouse-topic-route",
@@ -1024,8 +1024,8 @@
         "stratos-feedgen-ng/src/service_auth.rs"
       ],
       "workstream": "canonical-uri",
-      "decision": "The string the feed generator sends, signs and verifies against has one source, boundary_to_space_uri. space_host.rs sends the target space URI as the space query parameter of listRepoOps after validate_request checks only that it is non-empty and at most 2048 bytes; the grammar is checked at the target, in space_sync.rs validate_target. pds_space_sync.rs carries target.space_uri unchanged: it looks the cursor up and stages and discards pages by it, keys the per-target lock on it and passes it to commit verification. space_commit.rs commit_context puts the space URI bytes, length-prefixed, into the context that the commit MAC and signature are checked against, so a commit verifies only when the string is byte for byte the one the commit was made over; a commit made over the earlier spelling fails with a MAC mismatch and is not promoted, and no code retries in another spelling. service_auth.rs mint_space_delegation signs the space URI as the delegation sub claim, and a signed claim is never rewritten. No logic changed in these four files; tests made in the tests with test keys pin the parameter, the delegation sub and the rejected commit.",
-      "evidence": "stratos-feedgen-ng/src/space_host.rs:165-201 repo_request and :281-298 validate_request; stratos-feedgen-ng/src/pds_space_sync.rs:200-202 cursor lookup, :229 and :247 stage, :257-268 verify and :320 lock key; stratos-feedgen-ng/src/space_commit.rs:45-93 verify and :228-250 commit_context; stratos-feedgen-ng/src/service_auth.rs:95-126 mint_space_delegation; the tests at space_host.rs:657, service_auth.rs:299 and space_commit.rs:394."
+      "decision": "The string the feed generator sends, signs and verifies against has one source, boundary_to_space_uri. space_host.rs sends the target space URI as the space query parameter of listRepoOps after validate_request checks only that it is non-empty and at most 2048 bytes; the grammar is checked at the target, in space_sync.rs validate_target. pds_space_sync.rs carries target.space_uri unchanged: it looks the cursor up and stages and discards pages by it, keys the per-target lock on it and passes it to commit verification. space_commit.rs commit_context puts the space URI bytes, length-prefixed, into the context that the commit MAC and signature are checked against, so a commit verifies only when the string is byte for byte the one the commit was made over; a commit made over the earlier spelling fails with a MAC mismatch and is not promoted, and no code retries in another spelling. service_auth.rs mint_space_delegation signs the space URI as the delegation sub claim, and a signed claim is never rewritten. The respelling changed no logic in these four files (the audience fragment constant in service_auth.rs came later: see prerequisite-token-audience); tests made in the tests with test keys pin the parameter, the delegation sub and the rejected commit.",
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:165-201 repo_request and :281-298 validate_request; stratos-feedgen-ng/src/pds_space_sync.rs:200-202 cursor lookup, :229 and :247 stage, :257-268 verify and :320 lock key; stratos-feedgen-ng/src/space_commit.rs:45-93 verify and :228-250 commit_context; stratos-feedgen-ng/src/service_auth.rs:98-129 mint_space_delegation; the tests at space_host.rs:660, service_auth.rs:302 and space_commit.rs:394."
     },
     {
       "id": "uri-lexicon-uri-fields",
@@ -1098,7 +1098,7 @@
         "clubhouse/src/lib/post-writer.test.ts"
       ],
       "workstream": "canonical-uri",
-      "decision": "Inputs and expected values in these tests hold the at:space/ spelling, built from the corpus or the core constants, or respelled by the fixed transform. The earlier spelling appears only as a named negative input whose line holds the word legacy, and in the Clubhouse tests, whose room configuration literals stay on the earlier spelling until the client-flow work (the legacy-line check exempts clubhouse/). The frozen reference copy of the validator and its differential test are byte-identical. Upstream-derived fixtures are not edited by hand.",
+      "decision": "Inputs and expected values in these tests hold the at:space/ spelling, built from the corpus or the core constants, or respelled by the fixed transform. The earlier spelling appears only as a named negative input whose line holds the word legacy, and in the Clubhouse tests, whose room configuration literals stay on the earlier spelling until the client-flow work (the legacy-line check exempts clubhouse/). The frozen reference copy of the validator and its differential test are byte-identical. Upstream-derived fixtures are not edited by hand, with one exception: the generator hash line in the header of token-audiences.json was updated by hand, because rewriting the file would have reissued its random tokens.",
       "evidence": "rg -l 'at://[^ ]*/space/' stratos-core/tests stratos-service/tests stratos-client/tests webapp/tests clubhouse/src/lib lists only files whose matching lines hold legacy, and the four Clubhouse lines in post-writer.test.ts and integration.test.ts."
     },
     {
@@ -1189,8 +1189,8 @@
       "ownership": "production-owned",
       "paths": ["stratos-feedgen"],
       "workstream": "none",
-      "decision": "deprecated, not a target: kept for rollback only and not modernised. The space URI respelling reached it only where it spells a space URI: the getFeed and getBlob uri descriptions in src/lexicon/schemas.ts, the testdata/conformance/v1 fixtures blob-url.json, moderation-labels.json and space-record-uri.json, and one space URI builder each in tests/purge.test.ts and tests/reconcile.test.ts.",
-      "evidence": "AGENTS.md lists stratos-feedgen as deprecated rollback reference. stratos-feedgen/src/lexicon/schemas.ts:76-77 and :237-238, stratos-feedgen/tests/purge.test.ts:26 and stratos-feedgen/tests/reconcile.test.ts:27 hold the at:space/ spelling."
+      "decision": "deprecated, not a target: kept for rollback only and not modernised. The space URI respelling reached it only where it spells a space URI: the getFeed and getBlob uri descriptions in src/lexicon/schemas.ts, the testdata/conformance/v1 fixtures blob-url.json, moderation-labels.json and space-record-uri.json, and one space URI builder each in tests/purge.test.ts and tests/reconcile.test.ts. The audience change reached it in one constant, the fragment in src/space-credential/delegation.ts, and in the two tests that build a delegation, tests/space-credential-delegation.test.ts and tests/space-credential-manager.test.ts.",
+      "evidence": "AGENTS.md lists stratos-feedgen as deprecated rollback reference. stratos-feedgen/src/lexicon/schemas.ts:76-77 and :237-238, stratos-feedgen/tests/purge.test.ts:26 and stratos-feedgen/tests/reconcile.test.ts:27 hold the at:space/ spelling. stratos-feedgen/src/space-credential/delegation.ts:16 holds the audience fragment."
     },
     {
       "id": "deprecated-stratos-indexer",

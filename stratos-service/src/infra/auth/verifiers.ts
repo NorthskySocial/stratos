@@ -401,21 +401,26 @@ function createServiceVerifier(deps: {
  * recognized only so dev mode can present unbound credentials; the verifier
  * rejects a Bearer presentation outside dev mode.
  *
+ * `Atproto-Space-Credential` is the signed-presentation scheme (HTTP message
+ * signature, key-bound credential). The earlier `Atproto-Space` scheme is not
+ * recognised here, so such a request takes the fallback verifier.
+ *
  * @param authHeader - The raw Authorization header value.
  * @returns The token and its scheme when it looks like a space credential.
  */
-function extractSpaceCredentialToken(
-  authHeader: string | undefined,
-): { token: string; scheme: 'dpop' | 'bearer' | 'atproto-space' } | null {
+function extractSpaceCredentialToken(authHeader: string | undefined): {
+  token: string
+  scheme: 'dpop' | 'bearer' | 'atproto-space-credential'
+} | null {
   // RFC 9110 section 11.1: the auth scheme is case-insensitive.
-  if (authHeader && /^atproto-space(?:\s|$)/i.test(authHeader)) {
-    const token = /^atproto-space ([^\s]+)$/i.exec(authHeader)?.[1]
+  if (authHeader && /^atproto-space-credential(?:\s|$)/i.test(authHeader)) {
+    const token = /^atproto-space-credential ([^\s]+)$/i.exec(authHeader)?.[1]
     if (!token) throw new AuthRequiredError('Malformed space authorization')
-    return { token, scheme: 'atproto-space' }
+    return { token, scheme: 'atproto-space-credential' }
   }
   const match = authHeader ? /^(dpop|bearer) +(.+)$/i.exec(authHeader) : null
   if (!match) return null
-  const scheme: 'dpop' | 'bearer' | 'atproto-space' =
+  const scheme: 'dpop' | 'bearer' =
     match[1].toLowerCase() === 'dpop' ? 'dpop' : 'bearer'
   const token = match[2].trim()
   const parts = token.split('.')
@@ -506,7 +511,7 @@ function createSpaceCredentialVerifier(deps: {
           ...rawHeaders.filter((_, index) => index % 2 === 0),
         ].map((name) => name.toLowerCase()),
       )
-      if (scheme === 'atproto-space') {
+      if (scheme === 'atproto-space-credential') {
         if (proofHeaders.has('dpop')) {
           throw new AuthRequiredError('Conflicting credential proof families')
         }

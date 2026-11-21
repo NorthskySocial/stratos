@@ -99,7 +99,7 @@ describe('verifyClientAttestation — distinct typed failures', () => {
     const payload = {
       iss: client.clientId,
       sub: client.clientId,
-      aud: `${SERVICE_DID}#atproto_space_host`,
+      aud: `${SERVICE_DID}#atproto_pds`,
       iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 60,
       jti: 'no-alg',
@@ -154,7 +154,7 @@ describe('verifyClientAttestation — distinct typed failures', () => {
     const token = await mintAttestation({
       client,
       serviceDid: SERVICE_DID,
-      aud: 'did:web:evil#atproto_space_host',
+      aud: 'did:web:evil#atproto_pds',
     })
     await expect(verifyClientAttestation(token, deps)).rejects.toBeInstanceOf(
       InvalidAttestationAudError,
@@ -265,7 +265,7 @@ describe('verifyClientAttestation — jti consumed LAST (ordering)', () => {
       client,
       serviceDid: SERVICE_DID,
       jti,
-      aud: 'did:web:evil#atproto_space_host',
+      aud: 'did:web:evil#atproto_pds',
     })
     await expect(verifyClientAttestation(token, deps)).rejects.toBeInstanceOf(
       InvalidAttestationAudError,

@@ -61,14 +61,14 @@ mod tests {
                 .unwrap();
         assert_ne!(rei.key_id(), misato.key_id());
         let first = rei.presentation_headers(&audience).unwrap();
-        assert_eq!(first.authorization(), "Atproto-Space rei");
+        assert_eq!(first.authorization(), "Atproto-Space-Credential rei");
         assert!(first == rei.presentation_headers(&audience).unwrap());
         assert_eq!(
             misato
                 .presentation_headers(&audience)
                 .unwrap()
                 .authorization(),
-            "Atproto-Space misato"
+            "Atproto-Space-Credential misato"
         );
         assert!(
             GrantedSpaceCredential::new(String::new(), SpaceHttpSignatureKey::generate()).is_err()

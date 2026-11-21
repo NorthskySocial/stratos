@@ -21,7 +21,7 @@ import type { ReplayStore } from './replay-store.js'
  *   - Header `kid` MUST be exactly {@link ATPROTO_KID} (`"#atproto"`).
  *   - Payload `sub` MUST parse as an `at:space/` space URI whose
  *     `spaceDid` equals our configured service DID (we are the authority).
- *   - Payload `aud` MUST be `${serviceDid}#atproto_space_host`.
+ *   - Payload `aud` MUST be `${serviceDid}#atproto_pds`.
  *   - Payload `iat`/`exp` MUST be present and currently valid (with skew).
  *   - The signature MUST verify against the issuer DID document's `#atproto`
  *     verification method **only** (no other method is accepted).
@@ -40,8 +40,13 @@ export const DELEGATION_TYP = 'atproto-space-delegation+jwt'
 export const ALLOWED_ALGS = ['ES256K', 'ES256'] as const
 /** Required JWT `kid` header value (the account's atproto signing key). */
 export const ATPROTO_KID = '#atproto'
-/** Service fragment identifying the space-host audience. */
-export const SPACE_HOST_FRAGMENT = '#atproto_space_host'
+/**
+ * Service fragment naming the authority's host as the audience of delegations
+ * and client attestations. The authority's PDS plays this role in the upstream
+ * spaces contract, so the fragment is `#atproto_pds`; the service DID document
+ * deliberately offers no such service entry.
+ */
+export const SPACE_HOST_FRAGMENT = '#atproto_pds'
 /** Replay-store namespace for delegation nonces. */
 export const DELEGATION_REPLAY_KIND = 'space-delegation'
 /** Default clock-skew tolerance (seconds) for `iat`/`exp`. */
@@ -83,7 +88,7 @@ export class InvalidDelegationKidError extends DelegationVerificationError {}
 export class InvalidDelegationSubError extends DelegationVerificationError {}
 /** `sub`'s `spaceDid` did not match our configured service DID. */
 export class ForeignSpaceDidError extends DelegationVerificationError {}
-/** `aud` was not `${serviceDid}#atproto_space_host`. */
+/** `aud` was not `${serviceDid}#atproto_pds`. */
 export class InvalidDelegationAudError extends DelegationVerificationError {}
 /** `iat`/`exp` were missing, malformed, or outside the valid window. */
 export class DelegationTimingError extends DelegationVerificationError {}
@@ -193,7 +198,7 @@ export async function verifyDelegationToken(
     )
   }
 
-  // 5. aud — must be our space-host service fragment
+  // 5. aud — must name this authority's host (`#atproto_pds`)
   const expectedAud = `${deps.serviceDid}${SPACE_HOST_FRAGMENT}`
   if (payload.aud !== expectedAud) {
     throw new InvalidDelegationAudError(

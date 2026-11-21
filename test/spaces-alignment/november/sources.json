@@ -93,27 +93,27 @@
     },
     {
       "path": "commit-and-ops.json",
-      "sha256": "f2009d7e0f0461788f1e3f3bbf1f44312f20dfa0786d1985b6fa8d415c5eac16",
+      "sha256": "97be24913e58c4d4bf67cff3221f536eb7fac9cf8650f6e2054f2155873a2e03",
       "classification": "upstream-legacy-uri"
     },
     {
       "path": "credential-signature.json",
-      "sha256": "3f9a3270c879fdb7096152a7b308c32fb54dbca1ab89f2f4a2114fb092bc594b",
+      "sha256": "990d36caec19cf8043a0b2eb801672864c292b80f14c589a065a7193846e06ed",
       "classification": "upstream-uri-free"
     },
     {
       "path": "hpke-export-oracle.json",
-      "sha256": "b729d1e686700acf4a4a230ed7939e0e3ba18016cc13f4bb323edd0ccbc404b0",
+      "sha256": "b9f1afdeac5cd3d1fe07c8265ac7e3c052dc9002f8e31e6058f2799f2088b63c",
       "classification": "upstream-uri-free"
     },
     {
       "path": "hpke-export-rfc.json",
-      "sha256": "06d54b2a7b75769b07b6d9d5b13ffd93a1ea56d74bfa2dac81594b6874c1e237",
+      "sha256": "67cd3ce56ec9afa94a41c589181e91b1bf76d476a5bbcea0964458db12fa7a76",
       "classification": "rfc"
     },
     {
       "path": "lthash.json",
-      "sha256": "6a844c5135ac5814a7aa417ba10fbb121c8fd40400372135a56f30039f3f47eb",
+      "sha256": "577be0e41144b2ecad10aa2b32fd8990abdcf11b3c0cf38544ca3cf63206c0af",
       "classification": "upstream-uri-free"
     },
     {
@@ -123,13 +123,23 @@
     },
     {
       "path": "star-framing.json",
-      "sha256": "2a9dd494242378b03efea91e2dde362cfbf90882d294574e4a69b1e385bd670c",
+      "sha256": "31bb5fb5ffcd17b5ef70c610c3723578cb1ceef9191006bb00d738bf0cc2bf44",
       "classification": "upstream-legacy-uri"
+    },
+    {
+      "path": "stratos-produced.json",
+      "sha256": "3f5b084445c7b047f6fc9de8e0d3b0d10b94c08f6560eb41ab3a53a7dc90584a",
+      "classification": "upstream-signed-target-uri"
     },
     {
       "path": "target-uri-cases.json",
       "sha256": "6ad5fda8007406e4ce632b5d759adf82f6ef7becec82cd3a3160b16500162d19",
       "classification": "target-uri-synthetic"
+    },
+    {
+      "path": "token-audiences.json",
+      "sha256": "b6a06304f6cc560eba0fbd18fc71e46a25320523203c26af5e696ab3df04c099",
+      "classification": "upstream-signed-target-uri"
     }
   ]
 }

@@ -1,6 +1,7 @@
 import { parseDidKey, verifySignature } from '@atproto/crypto'
 import { StratosError } from '@northskysocial/stratos-core'
 import {
+  type InnerList,
   isByteSequence,
   isInnerList,
   parseDictionary,
@@ -24,36 +25,79 @@ export class SpaceHttpSignatureError extends StratosError {
   }
 }
 
+const EXCHANGE_LABEL = 'atproto-space'
+export const SPACE_CREDENTIAL_SIGNATURE_TAG = 'atproto-space-credential'
+const EXCHANGE_COMPONENTS = ['authorization']
+const PRESENTATION_COMPONENTS = ['authorization', 'atproto-space-audience']
+const PRESENTATION_AUTHORIZATION = /^Atproto-Space-Credential \S+$/i
+const EXCHANGE_AUTHORIZATION = /^Bearer \S+$/i
+
+/**
+ * Verifies the custom mint exchange: one `atproto-space` signature over the
+ * bearer delegation, naming its own key. Returns that key.
+ */
 export async function verifySpaceExchangeSignature(
   request: SpaceSignatureRequest,
 ): Promise<string> {
-  return verifySpaceSignature(request, ['authorization'])
+  return guardSignature(async () => {
+    const headers = readSignatureHeaders(request.rawHeaders)
+    const { inputs, signatures } = parseSignatureFields(headers)
+    const input = inputs.get(EXCHANGE_LABEL)
+    const signature = signatures.get(EXCHANGE_LABEL)
+    if (
+      !input ||
+      !isInnerList(input) ||
+      input[1].get('tag') === SPACE_CREDENTIAL_SIGNATURE_TAG ||
+      !signature ||
+      isInnerList(signature) ||
+      !isByteSequence(signature[0]) ||
+      signature[1].size !== 0
+    ) {
+      throw new SpaceHttpSignatureError('Malformed atproto-space signature')
+    }
+    requireCoveredComponents(input, EXCHANGE_COMPONENTS)
+    requireAlgorithm(input)
+    const keyId = input[1].get('keyid')
+    requireP256DidKey(keyId)
+    if (!EXCHANGE_AUTHORIZATION.test(requireHeader(headers, 'authorization'))) {
+      throw new SpaceHttpSignatureError('Incorrect authorization scheme')
+    }
+    await verifyOverBase(
+      headers,
+      EXCHANGE_COMPONENTS,
+      input,
+      signature[0].toBase64(),
+      keyId,
+    )
+    return keyId
+  })
 }
 
+/**
+ * Verifies the standard presentation of a space credential: the one signature
+ * whose `tag` is `atproto-space-credential`, under whatever label it carries,
+ * over the credential and the space audience. The key is the one the
+ * credential is bound to; the signature may restate it but never replace it.
+ */
 export async function verifySpacePresentationSignature(
   request: SpaceSignatureRequest,
   binding: SpacePresentationBinding,
 ): Promise<string> {
-  return verifySpaceSignature(
-    request,
-    ['authorization', 'atproto-space-audience'],
-    binding,
-  )
-}
-
-async function verifySpaceSignature(
-  request: SpaceSignatureRequest,
-  components: string[],
-  binding?: SpacePresentationBinding,
-): Promise<string> {
-  try {
+  return guardSignature(async () => {
     const headers = readSignatureHeaders(request.rawHeaders)
-    const input = parseDictionary(
-      requireHeader(headers, 'signature-input'),
-    ).get('atproto-space')
-    const signature = parseDictionary(requireHeader(headers, 'signature')).get(
-      'atproto-space',
+    const { inputs, signatures } = parseSignatureFields(headers)
+    const tagged = [...inputs].filter(
+      ([, member]) =>
+        isInnerList(member) &&
+        member[1].get('tag') === SPACE_CREDENTIAL_SIGNATURE_TAG,
     )
+    if (tagged.length > 1) {
+      throw new SpaceHttpSignatureError(
+        'More than one credential-tagged signature',
+      )
+    }
+    const [label, input] = tagged[0] ?? []
+    const signature = label === undefined ? undefined : signatures.get(label)
     if (
       !input ||
       !isInnerList(input) ||
@@ -62,32 +106,78 @@ async function verifySpaceSignature(
       !isByteSequence(signature[0]) ||
       signature[1].size !== 0
     ) {
-      throw new SpaceHttpSignatureError('Malformed atproto-space signature')
+      throw new SpaceHttpSignatureError(
+        'Missing or malformed credential-tagged signature',
+      )
     }
-    const keyId = validateSignatureProfile(input, components, binding)
-    validateAuthorization(headers, binding)
-    const lines = components.map(
-      (name) => `"${name}": ${requireHeader(headers, name)}`,
-    )
-    lines.push(`"@signature-params": ${serializeInnerList(input)}`)
-    const bytes = Buffer.from(signature[0].toBase64(), 'base64')
+    requireCoveredComponents(input, PRESENTATION_COMPONENTS)
+    requireAlgorithm(input)
+    requireP256DidKey(binding.keyId)
+    if (input[1].has('keyid') && input[1].get('keyid') !== binding.keyId) {
+      throw new SpaceHttpSignatureError(
+        'Signature keyid does not match credential',
+      )
+    }
     if (
-      bytes.length !== 64 ||
-      !(await verifySignature(
-        keyId,
-        new TextEncoder().encode(lines.join('\n')),
-        bytes,
-        { allowMalleableSig: true },
-      ))
+      !PRESENTATION_AUTHORIZATION.test(requireHeader(headers, 'authorization'))
     ) {
-      throw new SpaceHttpSignatureError('Invalid HTTP message signature')
+      throw new SpaceHttpSignatureError('Incorrect authorization scheme')
     }
-    return keyId
+    const audience = requireHeader(headers, 'atproto-space-audience')
+    if (!binding.expectedAudience || audience !== binding.expectedAudience) {
+      throw new SpaceHttpSignatureError('Incorrect space audience')
+    }
+    await verifyOverBase(
+      headers,
+      PRESENTATION_COMPONENTS,
+      input,
+      signature[0].toBase64(),
+      binding.keyId,
+    )
+    return binding.keyId
+  })
+}
+
+async function guardSignature(verify: () => Promise<string>): Promise<string> {
+  try {
+    return await verify()
   } catch (cause) {
     if (cause instanceof SpaceHttpSignatureError) throw cause
     throw new SpaceHttpSignatureError('Invalid HTTP message signature', {
       cause,
     })
+  }
+}
+
+function parseSignatureFields(headers: Map<string, string>) {
+  return {
+    inputs: parseDictionary(requireHeader(headers, 'signature-input')),
+    signatures: parseDictionary(requireHeader(headers, 'signature')),
+  }
+}
+
+async function verifyOverBase(
+  headers: Map<string, string>,
+  components: string[],
+  input: InnerList,
+  signatureBase64: string,
+  keyId: string,
+): Promise<void> {
+  const lines = components.map(
+    (name) => `"${name}": ${requireHeader(headers, name)}`,
+  )
+  lines.push(`"@signature-params": ${serializeInnerList(input)}`)
+  const bytes = Buffer.from(signatureBase64, 'base64')
+  if (
+    bytes.length !== 64 ||
+    !(await verifySignature(
+      keyId,
+      new TextEncoder().encode(lines.join('\n')),
+      bytes,
+      { allowMalleableSig: true },
+    ))
+  ) {
+    throw new SpaceHttpSignatureError('Invalid HTTP message signature')
   }
 }
 
@@ -124,45 +214,26 @@ function requireHeader(headers: Map<string, string>, name: string): string {
   return value
 }
 
-function validateSignatureProfile(
-  input: import('structured-headers').InnerList,
+function requireCoveredComponents(
+  input: InnerList,
   components: string[],
-  binding?: SpacePresentationBinding,
-): string {
-  const [covered, params] = input
+): void {
   if (
-    serializeList(covered) !== components.map((name) => `"${name}"`).join(', ')
+    serializeList(input[0]) !== components.map((name) => `"${name}"`).join(', ')
   ) {
     throw new SpaceHttpSignatureError('Incorrect covered components')
   }
+}
+
+function requireAlgorithm(input: InnerList): void {
+  const params = input[1]
   if (params.has('alg') && params.get('alg') !== 'ecdsa-p256-sha256') {
     throw new SpaceHttpSignatureError('Incorrect signature algorithm')
   }
-  const keyId = binding?.keyId ?? params.get('keyid')
-  if (typeof keyId !== 'string' || parseDidKey(keyId).jwtAlg !== 'ES256') {
-    throw new SpaceHttpSignatureError('Signature requires a P-256 did:key')
-  }
-  if (binding && params.has('keyid') && params.get('keyid') !== keyId) {
-    throw new SpaceHttpSignatureError(
-      'Signature keyid does not match credential',
-    )
-  }
-  return keyId
 }
 
-function validateAuthorization(
-  headers: Map<string, string>,
-  binding?: SpacePresentationBinding,
-): void {
-  const authorization = requireHeader(headers, 'authorization')
-  const scheme = binding ? /^Atproto-Space \S+$/i : /^Bearer \S+$/i
-  if (!scheme.test(authorization)) {
-    throw new SpaceHttpSignatureError('Incorrect authorization scheme')
-  }
-  if (binding) {
-    const audience = requireHeader(headers, 'atproto-space-audience')
-    if (!binding.expectedAudience || audience !== binding.expectedAudience) {
-      throw new SpaceHttpSignatureError('Incorrect space audience')
-    }
+function requireP256DidKey(keyId: unknown): asserts keyId is string {
+  if (typeof keyId !== 'string' || parseDidKey(keyId).jwtAlg !== 'ES256') {
+    throw new SpaceHttpSignatureError('Signature requires a P-256 did:key')
   }
 }

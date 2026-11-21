@@ -441,4 +441,89 @@ mod tests {
         ));
         assert_eq!(issuer.calls.load(Ordering::SeqCst), 4);
     }
+
+    struct KeyRecordingIssuer(Mutex<Vec<String>>);
+
+    impl KeyRecordingIssuer {
+        fn minted_keys(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl SpaceCredentialIssuer for KeyRecordingIssuer {
+        async fn mint(
+            &self,
+            _: &str,
+            key: &SpaceHttpSignatureKey,
+            now: u64,
+        ) -> Result<IssuedSpaceCredential, CredentialMintError> {
+            self.0.lock().unwrap().push(key.key_id().to_owned());
+            Ok(IssuedSpaceCredential {
+                credential: format!("for.{}.x", key.key_id()),
+                expires_at: CredentialExpiry::from_epoch_seconds(now + 60),
+            })
+        }
+    }
+
+    fn assert_pair(held: &crate::space_credential::HeldSpaceCredential, minted_with: &str) {
+        let audience = crate::identifier::Did::parse("did:plc:tokyo3").unwrap();
+        assert_eq!(held.key_id(), minted_with);
+        assert_eq!(
+            held.presentation_headers(&audience)
+                .unwrap()
+                .authorization(),
+            format!("Atproto-Space-Credential for.{minted_with}.x")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_renewed_credential_is_held_with_the_key_it_was_minted_for() {
+        static NOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1000);
+        let issuer = Arc::new(KeyRecordingIssuer(Mutex::new(Vec::new())));
+        let manager =
+            SpaceCredentialManager::with_clock(issuer.clone(), || NOW.load(Ordering::SeqCst));
+        let boundary = "did:web:stratos.example.test/rei";
+        let first = manager.get(boundary).await.unwrap();
+        NOW.store(1054, Ordering::SeqCst);
+        let renewed = manager.get(boundary).await.unwrap();
+        let minted = issuer.minted_keys();
+        assert_eq!(minted.len(), 2);
+        assert_ne!(minted[0], minted[1]);
+        assert_pair(&first, &minted[0]);
+        assert_pair(&renewed, &minted[1]);
+    }
+
+    #[tokio::test]
+    async fn two_boundaries_never_share_a_key() {
+        let issuer = Arc::new(KeyRecordingIssuer(Mutex::new(Vec::new())));
+        let manager = SpaceCredentialManager::with_clock(issuer.clone(), fixed_now);
+        let rei = manager
+            .get("did:web:stratos.example.test/rei")
+            .await
+            .unwrap();
+        let asuka = manager
+            .get("did:web:stratos.example.test/asuka")
+            .await
+            .unwrap();
+        let minted = issuer.minted_keys();
+        assert_ne!(rei.key_id(), asuka.key_id());
+        assert_pair(&rei, &minted[0]);
+        assert_pair(&asuka, &minted[1]);
+    }
+
+    #[tokio::test]
+    async fn after_invalidation_the_next_use_mints_with_a_new_key() {
+        let issuer = Arc::new(KeyRecordingIssuer(Mutex::new(Vec::new())));
+        let manager = SpaceCredentialManager::with_clock(issuer.clone(), fixed_now);
+        let boundary = "did:web:stratos.example.test/rei";
+        let rejected = manager.get(boundary).await.unwrap();
+        manager.invalidate(boundary, &rejected);
+        let next = manager.get(boundary).await.unwrap();
+        let minted = issuer.minted_keys();
+        assert_eq!(minted.len(), 2);
+        assert_ne!(rejected.key_id(), next.key_id());
+        assert_pair(&rejected, &minted[0]);
+        assert_pair(&next, &minted[1]);
+    }
 }

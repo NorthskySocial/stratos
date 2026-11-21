@@ -91,7 +91,7 @@ async function signedDelegation(
   const payload = {
     iss: userDid,
     sub,
-    aud: `${HARNESS_SERVICE_DID}#atproto_space_host`,
+    aud: `${HARNESS_SERVICE_DID}#atproto_pds`,
     iat: issuedAt,
     exp: issuedAt + 60,
     jti: `jti-${Math.random().toString(36).slice(2)}`,

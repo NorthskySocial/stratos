@@ -6,6 +6,7 @@ import {
   verifySpaceExchangeSignature,
   verifySpacePresentationSignature,
 } from '../src/infra/auth/space-http-signature.js'
+import { presentationVectors } from './helpers/space-presentation.js'
 
 const request = (headers: Record<string, string>) => ({
   rawHeaders: Object.entries(headers).flat(),
@@ -15,22 +16,31 @@ const binding = {
   expectedAudience: 'did:plc:tokyo3',
 }
 const key = () => P256Keypair.import(new Uint8Array(32).fill(1))
+const presentation = presentationVectors.accepted.headers
+const presentationBinding = {
+  keyId: presentationVectors.accepted.keyId,
+  expectedAudience: presentationVectors.accepted.audience,
+}
 
 async function signed(input: string, audience?: string, suffix = '') {
   const authorization = audience
-    ? 'Atproto-Space misato-credential'
+    ? 'Atproto-Space-Credential misato-credential'
     : 'Bearer rei-delegation'
+  const parameters = audience
+    ? `${input};tag="atproto-space-credential"`
+    : input
+  const label = audience ? 'sig' : 'atproto-space'
   const base = [`"authorization": ${authorization}`]
   if (audience) base.push(`"atproto-space-audience": ${audience}`)
-  base.push(`"@signature-params": ${input}`)
+  base.push(`"@signature-params": ${parameters}`)
   const signature = await (
     await key()
   ).sign(new TextEncoder().encode(base.join('\n') + suffix))
   return {
     authorization,
     ...(audience ? { 'atproto-space-audience': audience } : {}),
-    'signature-input': `atproto-space=${input}`,
-    signature: `atproto-space=:${Buffer.from(signature).toString('base64')}:`,
+    'signature-input': `${label}=${parameters}`,
+    signature: `${label}=:${Buffer.from(signature).toString('base64')}:`,
   }
 }
 
@@ -110,14 +120,15 @@ describe('pinned upstream Spaces HTTP signatures', () => {
     ['Bearer rei-delegation extra', false],
     ['extra Bearer rei-delegation', false],
     ['DPoP rei-delegation', false],
-    ['Atproto-Space misato-credential extra', true],
-    ['extra Atproto-Space misato-credential', true],
+    ['Atproto-Space misato-credential', true],
+    ['Atproto-Space-Credential misato-credential extra', true],
+    ['extra Atproto-Space-Credential misato-credential', true],
     ['Bearer misato-credential', true],
   ])(
     'rejects a cryptographically valid wrong scheme %s',
     async (authorization, presentation) => {
       const input = presentation
-        ? '("authorization" "atproto-space-audience")'
+        ? '("authorization" "atproto-space-audience");tag="atproto-space-credential"'
         : `("authorization");keyid="${fixtures.keyId}"`
       const base = [`"authorization": ${authorization}`]
       if (presentation)
@@ -128,8 +139,8 @@ describe('pinned upstream Spaces HTTP signatures', () => {
       ).sign(new TextEncoder().encode(base.join('\n')))
       const req = request({
         authorization,
-        'signature-input': `atproto-space=${input}`,
-        signature: `atproto-space=:${Buffer.from(signature).toString('base64')}:`,
+        'signature-input': `${presentation ? 'sig' : 'atproto-space'}=${input}`,
+        signature: `${presentation ? 'sig' : 'atproto-space'}=:${Buffer.from(signature).toString('base64')}:`,
         ...(presentation
           ? { 'atproto-space-audience': binding.expectedAudience }
           : {}),
@@ -181,15 +192,15 @@ describe('pinned upstream Spaces HTTP signatures', () => {
       message: 'Signature keyid does not match credential',
     })
     await expect(
-      verifySpacePresentationSignature(request(fixtures.presentation), {
-        ...binding,
+      verifySpacePresentationSignature(request(presentation), {
+        ...presentationBinding,
         expectedAudience: 'did:plc:asuka',
       }),
     ).rejects.toMatchObject({ message: 'Incorrect space audience' })
     await expect(
       verifySpacePresentationSignature(
-        request({ ...fixtures.presentation, 'atproto-space-audience': '' }),
-        binding,
+        request({ ...presentation, 'atproto-space-audience': '' }),
+        presentationBinding,
       ),
     ).rejects.toMatchObject({
       message: 'Missing atproto-space-audience header',
@@ -202,7 +213,7 @@ describe('pinned upstream Spaces HTTP signatures', () => {
     ).rejects.toMatchObject({ message: 'Signature requires a P-256 did:key' })
   })
 
-  it('verifies upstream-produced exchange and presentation fixtures', async () => {
+  it('verifies the upstream-produced exchange and presentation fixtures', async () => {
     expect(fixtures.source).toContain(
       '5b95b2f2723a2882824fbb0b819fd6aad884ef20',
     )
@@ -210,18 +221,21 @@ describe('pinned upstream Spaces HTTP signatures', () => {
       verifySpaceExchangeSignature(request(fixtures.exchange)),
     ).resolves.toBe(fixtures.keyId)
     await expect(
-      verifySpacePresentationSignature(request(fixtures.presentation), binding),
-    ).resolves.toBe(fixtures.keyId)
+      verifySpacePresentationSignature(
+        request(presentation),
+        presentationBinding,
+      ),
+    ).resolves.toBe(presentationBinding.keyId)
   })
 
   it('permits presentation reuse without method or URL binding', async () => {
     for (let i = 0; i < 2; i++) {
       await expect(
         verifySpacePresentationSignature(
-          request(fixtures.presentation),
-          binding,
+          request(presentation),
+          presentationBinding,
         ),
-      ).resolves.toBe(fixtures.keyId)
+      ).resolves.toBe(presentationBinding.keyId)
     }
   })
 
@@ -256,7 +270,7 @@ describe('pinned upstream Spaces HTTP signatures', () => {
 
   it('accepts both compact S forms but does not relax default crypto policy', async () => {
     const signature = Buffer.from(
-      fixtures.presentation.signature.slice('atproto-space=:'.length, -1),
+      presentation.signature.slice('sig=:'.length, -1),
       'base64',
     )
     const order = BigInt(
@@ -272,17 +286,19 @@ describe('pinned upstream Spaces HTTP signatures', () => {
       await expect(
         verifySpacePresentationSignature(
           request({
-            ...fixtures.presentation,
-            signature: `atproto-space=:${bytes.toString('base64')}:`,
+            ...presentation,
+            signature: `sig=:${bytes.toString('base64')}:`,
           }),
-          binding,
+          presentationBinding,
         ),
-      ).resolves.toBe(fixtures.keyId)
+      ).resolves.toBe(presentationBinding.keyId)
       if (value > order / 2n) {
         const base = new TextEncoder().encode(
-          `"authorization": Atproto-Space misato-credential\n"atproto-space-audience": did:plc:tokyo3\n"@signature-params": ("authorization" "atproto-space-audience")`,
+          `"authorization": ${presentation.authorization}\n"atproto-space-audience": ${presentationBinding.expectedAudience}\n"@signature-params": ${presentation['signature-input'].slice('sig='.length)}`,
         )
-        expect(await verifySignature(fixtures.keyId, base, bytes)).toBe(false)
+        expect(
+          await verifySignature(presentationBinding.keyId, base, bytes),
+        ).toBe(false)
       }
     }
   })
@@ -322,13 +338,13 @@ describe('pinned upstream Spaces HTTP signatures', () => {
     'signature',
     'signature-input',
   ])('rejects raw duplicate %s regardless of casing', async (name) => {
-    const req = request(fixtures.presentation)
+    const req = request(presentation)
     req.rawHeaders.push(
       name.toUpperCase(),
-      fixtures.presentation[name as keyof typeof fixtures.presentation],
+      presentation[name as keyof typeof presentation],
     )
     await expect(
-      verifySpacePresentationSignature(req, binding),
+      verifySpacePresentationSignature(req, presentationBinding),
     ).rejects.toBeInstanceOf(SpaceHttpSignatureError)
   })
 
@@ -391,8 +407,8 @@ describe('pinned upstream Spaces HTTP signatures', () => {
       '',
     ]) {
       await expect(
-        verifySpacePresentationSignature(request(fixtures.presentation), {
-          ...binding,
+        verifySpacePresentationSignature(request(presentation), {
+          ...presentationBinding,
           keyId,
         }),
       ).rejects.toBeInstanceOf(SpaceHttpSignatureError)
@@ -404,35 +420,38 @@ describe('pinned upstream Spaces HTTP signatures', () => {
     ).rejects.toBeInstanceOf(SpaceHttpSignatureError)
     for (const expectedAudience of ['', 'did:plc:asuka']) {
       await expect(
-        verifySpacePresentationSignature(request(fixtures.presentation), {
-          ...binding,
+        verifySpacePresentationSignature(request(presentation), {
+          ...presentationBinding,
           expectedAudience,
         }),
       ).rejects.toBeInstanceOf(SpaceHttpSignatureError)
     }
     await expect(
-      verifySpaceExchangeSignature(request(fixtures.presentation)),
+      verifySpaceExchangeSignature(request(presentation)),
     ).rejects.toBeInstanceOf(SpaceHttpSignatureError)
     await expect(
-      verifySpacePresentationSignature(request(fixtures.exchange), binding),
+      verifySpacePresentationSignature(
+        request(fixtures.exchange),
+        presentationBinding,
+      ),
     ).rejects.toBeInstanceOf(SpaceHttpSignatureError)
   })
 
   it('rejects missing headers, changed audience and trailing LF', async () => {
-    for (const name of Object.keys(fixtures.presentation)) {
-      const headers: Record<string, string> = { ...fixtures.presentation }
+    for (const name of Object.keys(presentation)) {
+      const headers: Record<string, string> = { ...presentation }
       delete headers[name]
       await expect(
-        verifySpacePresentationSignature(request(headers), binding),
+        verifySpacePresentationSignature(request(headers), presentationBinding),
       ).rejects.toBeInstanceOf(SpaceHttpSignatureError)
     }
     await expect(
       verifySpacePresentationSignature(
         request({
-          ...fixtures.presentation,
+          ...presentation,
           'atproto-space-audience': 'did:plc:asuka',
         }),
-        binding,
+        presentationBinding,
       ),
     ).rejects.toBeInstanceOf(SpaceHttpSignatureError)
     await expect(

@@ -277,8 +277,10 @@ and uses RFC 9421 `Signature-Input` and `Signature` headers with the
 P-256 `did:key` in `keyid`. Do not send a DPoP header with this profile.
 The resulting credential binds `cnf.kid`, not `cnf.jkt`.
 
-Present that credential as `Authorization: Atproto-Space <credential JWT>`.
-The signature covers exactly `authorization` then `atproto-space-audience`.
+Present that credential as `Authorization: Atproto-Space-Credential <credential JWT>`.
+The signature covers exactly `authorization` then `atproto-space-audience` and
+carries `tag="atproto-space-credential"`. Stratos finds it by that tag, under
+any label.
 Set `Atproto-Space-Audience` to the actual repo owner's DID for
 `zone.stratos.space.getRecord`, `zone.stratos.space.listBlobs`,
 `zone.stratos.sync.listRepoOps`, and `zone.stratos.sync.listRecordPaths`.

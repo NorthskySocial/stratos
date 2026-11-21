@@ -38,7 +38,7 @@ const SPACE_URI = makeSpaceUri(
   'app.bsky.feed.generator',
   'myspace',
 )
-const AUD = `${SERVICE_DID}#atproto_space_host`
+const AUD = `${SERVICE_DID}#atproto_pds`
 
 /**
  * A minimal in-memory `NxExStore` that mimics `SET NX EX` semantics: the first

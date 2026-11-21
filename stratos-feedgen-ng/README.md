@@ -19,8 +19,9 @@ fresh P-256 `did:key`, and sends only `space` in JSON. Authority service-member
 and app admission still apply. Ordinary service JWTs and caller authentication
 are unchanged; this is not the independent DPoP ADR in PR #217.
 
-Read requests use `Authorization: Atproto-Space`, `Atproto-Space-Audience`,
-`Signature-Input`, and `Signature`. Repo operations name the actual repo owner
+Read requests use `Authorization: Atproto-Space-Credential`,
+`Atproto-Space-Audience`, `Signature-Input`, and `Signature`. The signature
+carries `tag="atproto-space-credential"`. Repo operations name the actual repo owner
 DID; authority membership listing names the space authority DID. Neither a host
 nor a service fragment is a read audience. Presentations may be reused at the
 same audience until the credential expires; no method or URL proof is added.

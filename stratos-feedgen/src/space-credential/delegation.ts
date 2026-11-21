@@ -13,7 +13,7 @@ import type { Keypair } from '@atproto/crypto'
 
 const DELEGATION_TYP = 'atproto-space-delegation+jwt'
 const ATPROTO_KID = '#atproto'
-const SPACE_HOST_FRAGMENT = '#atproto_space_host'
+const SPACE_HOST_FRAGMENT = '#atproto_pds'
 
 /**
  * Delegation token lifetime, in seconds. The verifier's `MAX_DELEGATION_LIFETIME`

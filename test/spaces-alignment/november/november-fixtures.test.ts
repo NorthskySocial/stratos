@@ -14,6 +14,7 @@ const CLASSIFICATIONS = [
   'upstream-uri-free',
   'target-uri-synthetic',
   'target-uri-conformance',
+  'upstream-signed-target-uri',
 ]
 const HEX_64 = /^[0-9a-f]{64}$/
 const LEGACY_SPACE_URI = /at:\/\/[^"\s]*\/space\//
@@ -299,6 +300,320 @@ describe('november fixture attribution', () => {
   })
 })
 
+describe('credential presentation vectors', () => {
+  interface PresentationCase {
+    name: string
+    headers: Record<string, string>
+    keyId: string
+    verdict: { accepted: boolean; error?: string; message?: string }
+  }
+  const fixture = loadFixture('credential-signature.json') as FixtureFile & {
+    accepted: { authorization: string; headers: Record<string, string> }
+    cases: PresentationCase[]
+  }
+  const EXPECTED_VERDICTS: Array<[string, boolean]> = [
+    ['accepted as signed', true],
+    ['accepted under another label with the right tag', true],
+    ['two signatures carry the tag', false],
+    ['no signature carries the tag', false],
+    ['components reordered', false],
+    ['an extra component', false],
+    ['verified against the wrong key', false],
+    ['authorization value altered', false],
+    ['scheme in mixed case, signed as written', true],
+    ['a created parameter', true],
+    ['keyid equal to the key', true],
+    ['keyid of another key', false],
+    ['alg ecdsa-p256-sha256', true],
+    ['another alg', false],
+    ['a second signature with another tag beside the right one', true],
+  ]
+
+  it('presents the credential under the Atproto-Space-Credential scheme', () => {
+    expect(fixture.accepted.authorization).toMatch(
+      /^Atproto-Space-Credential \S+$/,
+    )
+    expect(fixture.accepted.headers['authorization']).toBe(
+      fixture.accepted.authorization,
+    )
+  })
+
+  it('holds one oracle verdict for each case, with the expected outcome', () => {
+    const actual = fixture.cases.map((entry) => [
+      entry.name,
+      entry.verdict.accepted,
+    ])
+    expect(actual).toEqual(EXPECTED_VERDICTS)
+  })
+
+  it('records an error name and message for every refusal', () => {
+    for (const entry of fixture.cases) {
+      if (entry.verdict.accepted) continue
+      expect(entry.verdict.error, entry.name).toEqual(expect.any(String))
+      expect(entry.verdict.message, entry.name).toEqual(expect.any(String))
+    }
+  })
+})
+
+describe('token audience vectors', () => {
+  const AUTHORITY = 'did:web:bebop.example'
+  const FILE = 'token-audiences.json'
+  const VERDICT = /^(accepted|refused: \w+)$/
+  const REQUIRED_TOKENS = [
+    'delegation',
+    'delegation with the retired audience',
+    'client attestation',
+    'credential',
+    'credential without kid',
+    'credential with another kid',
+    'credential with an aud claim',
+    'credential with alg none',
+    'credential bound to a non-P-256 key',
+    'credential without cnf',
+    'credential signed by another key',
+  ]
+
+  interface TokenEntry {
+    name: string
+    token: string
+    frozenClockSeconds: number
+    verdicts: { parse: string; verify: string }
+  }
+  const fixture = loadFixture(FILE) as FixtureFile & {
+    authority: string
+    tokens: TokenEntry[]
+  }
+  const decodePart = (token: string, index: number): Record<string, unknown> =>
+    JSON.parse(Buffer.from(token.split('.')[index], 'base64url').toString())
+  const entry = (name: string): TokenEntry => {
+    const found = fixture.tokens.find((candidate) => candidate.name === name)
+    if (!found) throw new Error(`no token named ${name}`)
+    return found
+  }
+
+  it('is signed by the oracle and stored once, with its reason', () => {
+    expect(fixture.header.classification).toBe('upstream-signed-target-uri')
+    expect(fixture.header.upstreamVerified).toBe(true)
+    expect(fixture.header.reproducible).toBe(false)
+    expect(fixture.header.reproducibleReason).toMatch(/clock/)
+    expect(fixture.header.reproducibleReason).toMatch(/random/)
+  })
+
+  it('holds every required token, each with a clock and both verdicts', () => {
+    expect(fixture.tokens.map((token) => token.name)).toEqual(REQUIRED_TOKENS)
+    for (const token of fixture.tokens) {
+      expect(token.token.split('.'), token.name).toHaveLength(3)
+      expect(Number.isInteger(token.frozenClockSeconds), token.name).toBe(true)
+      expect(token.verdicts.parse, token.name).toMatch(VERDICT)
+      expect(token.verdicts.verify, token.name).toMatch(VERDICT)
+    }
+  })
+
+  it('names the authority host service as the audience of delegations and attestations', () => {
+    for (const name of ['delegation', 'client attestation']) {
+      expect(decodePart(entry(name).token, 1)['aud'], name).toBe(
+        `${AUTHORITY}#atproto_pds`,
+      )
+    }
+    expect(decodePart(entry('delegation').token, 1)['sub']).toMatch(
+      /^at:space\/did:web:bebop\.example\/[^/]+\/[^/]+$/,
+    )
+    expect(
+      decodePart(entry('delegation with the retired audience').token, 1)['aud'],
+    ).toBe(`${AUTHORITY}#atproto_space_host`)
+  })
+
+  it('records the oracle verdicts the services must agree with', () => {
+    const outcome = (name: string) => {
+      const { parse, verify } = entry(name).verdicts
+      return [parse, verify]
+    }
+    const ACCEPTED = 'accepted'
+    expect(outcome('delegation')).toEqual([ACCEPTED, ACCEPTED])
+    expect(outcome('delegation with the retired audience')).toEqual([
+      ACCEPTED,
+      'refused: BadJwtAudience',
+    ])
+    expect(outcome('client attestation')).toEqual([ACCEPTED, ACCEPTED])
+    expect(outcome('credential')).toEqual([ACCEPTED, ACCEPTED])
+    expect(outcome('credential without kid')).toEqual([
+      'refused: BadJwt',
+      'refused: BadJwt',
+    ])
+    expect(outcome('credential with another kid')).toEqual([
+      'refused: BadJwt',
+      'refused: BadJwt',
+    ])
+    expect(outcome('credential with an aud claim')).toEqual([
+      ACCEPTED,
+      ACCEPTED,
+    ])
+    expect(outcome('credential bound to a non-P-256 key')).toEqual([
+      ACCEPTED,
+      ACCEPTED,
+    ])
+    expect(outcome('credential without cnf')).toEqual([
+      'refused: BadJwtCnf',
+      'refused: BadJwtCnf',
+    ])
+    expect(outcome('credential signed by another key')).toEqual([
+      ACCEPTED,
+      'refused: BadJwtSignature',
+    ])
+    expect(outcome('credential with alg none')).toEqual([
+      ACCEPTED,
+      'refused: BadJwtSignature',
+    ])
+  })
+
+  it('gives the verify step a clock that covers each token', () => {
+    for (const token of fixture.tokens) {
+      const payload = decodePart(token.token, 1)
+      expect(token.frozenClockSeconds, token.name).toBeGreaterThanOrEqual(
+        payload['iat'] as number,
+      )
+      expect(token.frozenClockSeconds, token.name).toBeLessThan(
+        payload['exp'] as number,
+      )
+    }
+  })
+})
+
+describe('values Stratos produced, judged by the upstream package', () => {
+  const FILE = 'stratos-produced.json'
+  const REPO_ROOT = resolve(HERE, '../../..')
+  const ACCEPTED = 'accepted'
+
+  interface Verdicts {
+    parse: string
+    verify: string
+  }
+  const fixture = loadFixture(FILE) as FixtureFile & {
+    rustPresentation: {
+      source: string
+      signingKeyFill: number
+      keyId: string
+      headers: Record<string, string>
+      verdict: string
+    }
+    rustDelegation: {
+      source: string
+      signingKeyHex: string
+      authority: string
+      spaceUri: string
+      token: string
+      frozenClockSeconds: number
+      verdicts: Verdicts
+    }
+    serviceCredential: {
+      source: string
+      authority: string
+      spaceUri: string
+      authoritySigningKeyHex: string
+      holderKeyHex: string
+      credentialId: string
+      token: string
+      frozenClockSeconds: number
+      verdicts: Verdicts
+    }
+  }
+  const { rustPresentation, rustDelegation, serviceCredential } = fixture
+
+  const sourceText = (path: string): string =>
+    readFileSync(resolve(REPO_ROOT, path), 'utf8')
+  // The value of `const NAME: &str = "...";` in Rust, or `const NAME = '...'`
+  // in TypeScript, as the compiler reads the literal.
+  const constantIn = (path: string, name: string): string => {
+    const text = sourceText(path)
+    const rust = new RegExp(
+      `const ${name}: &str =\\s*"((?:[^"\\\\]|\\\\.)*)";`,
+    ).exec(text)
+    if (rust) return rust[1].replace(/\\(.)/g, '$1')
+    const typescript = new RegExp(`const ${name} =\\s*'([^']*)'`).exec(text)
+    if (typescript) return typescript[1]
+    throw new Error(`no constant ${name} in ${path}`)
+  }
+  const claimsOf = (token: string): Record<string, unknown> =>
+    JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())
+
+  it('is judged by the oracle and reproducible', () => {
+    expect(fixture.header.classification).toBe('upstream-signed-target-uri')
+    expect(fixture.header.upstreamVerified).toBe(true)
+    expect(fixture.header.reproducible).toBe(true)
+  })
+
+  it('has every verdict accepted', () => {
+    expect(rustPresentation.verdict).toBe(ACCEPTED)
+    expect(rustDelegation.verdicts).toEqual({
+      parse: ACCEPTED,
+      verify: ACCEPTED,
+    })
+    expect(serviceCredential.verdicts).toEqual({
+      parse: ACCEPTED,
+      verify: ACCEPTED,
+    })
+  })
+
+  it('judges the Rust presentation exactly as the Rust test pins it', () => {
+    const { source, headers, signingKeyFill } = rustPresentation
+    expect(headers['authorization']).toBe(
+      constantIn(source, 'FIXED_PRESENTATION_AUTHORIZATION'),
+    )
+    expect(headers['atproto-space-audience']).toBe(
+      constantIn(source, 'FIXED_AUDIENCE'),
+    )
+    expect(headers['signature-input']).toBe(
+      constantIn(source, 'FIXED_PRESENTATION_SIGNATURE_INPUT'),
+    )
+    expect(headers['signature']).toBe(
+      constantIn(source, 'FIXED_PRESENTATION_SIGNATURE'),
+    )
+    expect(sourceText(source)).toContain(
+      `SigningKey::from_slice(&[${signingKeyFill}; 32])`,
+    )
+    expect(Object.keys(headers).sort()).toEqual([
+      'atproto-space-audience',
+      'authorization',
+      'signature',
+      'signature-input',
+    ])
+  })
+
+  it('judges the Rust delegation exactly as the Rust test pins it', () => {
+    const { source, token, signingKeyHex, authority, spaceUri } = rustDelegation
+    expect(token).toBe(constantIn(source, 'FIXED_DELEGATION_TOKEN'))
+    expect(signingKeyHex).toBe(constantIn(source, 'TEST_ONLY_SIGNING_KEY'))
+    expect(authority).toBe(constantIn(source, 'PORT_AUTHORITY_DID'))
+    expect(spaceUri).toBe(constantIn(source, 'PORT_AUTHORITY_SPACE'))
+    const claims = claimsOf(token)
+    expect(claims['sub']).toBe(spaceUri)
+    expect(claims['aud']).toBe(`${authority}#atproto_pds`)
+    expect(claims['iat']).toBe(rustDelegation.frozenClockSeconds)
+  })
+
+  it('judges the service credential exactly as the service test pins it', () => {
+    const { source, token, credentialId } = serviceCredential
+    expect(token).toBe(constantIn(source, 'FIXED_CREDENTIAL'))
+    expect(serviceCredential.authoritySigningKeyHex).toBe(
+      constantIn(source, 'AUTHORITY_SIGNING_KEY_HEX'),
+    )
+    expect(serviceCredential.holderKeyHex).toBe(
+      constantIn(source, 'HOLDER_KEY_HEX'),
+    )
+    expect(credentialId).toBe(constantIn(source, 'CREDENTIAL_ID'))
+    expect(serviceCredential.authority).toBe(
+      constantIn(source, 'AUTHORITY_DID'),
+    )
+    const claims = claimsOf(token)
+    expect(claims['jti']).toBe(credentialId)
+    expect(claims['sub']).toBe(serviceCredential.spaceUri)
+    expect(claims['iat']).toBe(serviceCredential.frozenClockSeconds)
+    expect(sourceText(source)).toContain(
+      `const FROZEN_CLOCK_SECONDS = ${String(serviceCredential.frozenClockSeconds).replace(/\B(?=(\d{3})+$)/g, '_')}`,
+    )
+  })
+})
+
 describe('november fixture byte fields', () => {
   const names = fixturePaths()
 
@@ -337,6 +652,6 @@ describe('november fixture byte fields', () => {
       (sum, name) => sum + readFileSync(resolve(FIXTURES_DIR, name)).length,
       0,
     )
-    expect(total).toBeLessThan(64 * 1024)
+    expect(total).toBeLessThan(128 * 1024)
   })
 })
