@@ -2,13 +2,15 @@
 //
 // usage: node generate-oracle-vectors.mjs <oracle-directory> [--tokens]
 //                                          [--stratos-produced]
+//                                          [--commit-mac] [--kem-keys]
 //
-// Without a flag every file but token-audiences.json and stratos-produced.json
-// is written, and the output is the same on every run. token-audiences.json
-// holds tokens the oracle stamps with the clock and a random jti, so it is
-// written only with --tokens and then kept. stratos-produced.json takes its
-// inputs from constants copied out of Stratos tests (named beside each one) and
-// is written only with --stratos-produced.
+// Without a flag every file but token-audiences.json, stratos-produced.json,
+// commit-mac.json and kem-keys.json is written, and the output is the same on
+// every run. token-audiences.json holds tokens the oracle stamps with the clock
+// and a random jti, so it is written only with --tokens and then kept.
+// stratos-produced.json takes its inputs from constants copied out of Stratos
+// tests (named beside each one) and is written only with --stratos-produced.
+// commit-mac.json and kem-keys.json are reproducible and each has its own flag.
 //
 // Every file's header pins this generator's hash. Changing this file means
 // running again, and a file that is not rewritten has to have that one header
@@ -66,12 +68,17 @@ const oracleDirectory = process.argv[2]
 const flags = process.argv.slice(3)
 const writeTokens = flags.includes('--tokens')
 const writeStratosProduced = flags.includes('--stratos-produced')
-if (
-  !oracleDirectory ||
-  flags.some((flag) => flag !== '--tokens' && flag !== '--stratos-produced')
-) {
+const writeCommitMac = flags.includes('--commit-mac')
+const writeKemKeys = flags.includes('--kem-keys')
+const KNOWN_FLAGS = [
+  '--tokens',
+  '--stratos-produced',
+  '--commit-mac',
+  '--kem-keys',
+]
+if (!oracleDirectory || flags.some((flag) => !KNOWN_FLAGS.includes(flag))) {
   console.error(
-    'usage: node generate-oracle-vectors.mjs <oracle-directory> [--tokens] [--stratos-produced]',
+    `usage: node generate-oracle-vectors.mjs <oracle-directory> [${KNOWN_FLAGS.join('] [')}]`,
   )
   process.exit(2)
 }
@@ -113,12 +120,36 @@ const bytesField = (bytes, encoding = 'base64') => ({
 const fromHex = (hex) => Uint8Array.from(Buffer.from(hex, 'hex'))
 
 // Lays JSON out as prettier does (short primitive arrays on one line) so the
-// committed bytes are exactly what this generator writes.
+// committed bytes are exactly what this generator writes. A value wrapped in
+// inlineIfShort stays on one line when it fits, as prettier keeps an object
+// written on one line; nothing else is collapsed.
 const PRINT_WIDTH = 80
-const layout = (value, indent, prefixWidth) => {
+class InlineIfShort {
+  constructor(value) {
+    this.value = value
+  }
+}
+const inlineIfShort = (value) => new InlineIfShort(value)
+const flat = (value) => {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(flat).join(', ')}]`
+  const entries = Object.entries(value).map(
+    ([key, child]) => `${JSON.stringify(key)}: ${flat(child)}`,
+  )
+  return entries.length === 0 ? '{}' : `{ ${entries.join(', ')} }`
+}
+// trailing is the width of the comma that follows the value, if any.
+const layout = (value, indent, prefixWidth, trailing = 0) => {
+  if (value instanceof InlineIfShort) {
+    const line = flat(value.value)
+    if (indent + prefixWidth + line.length + trailing <= PRINT_WIDTH)
+      return line
+    return layout(value.value, indent, prefixWidth, trailing)
+  }
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   const pad = ' '.repeat(indent + 2)
   const close = ' '.repeat(indent)
+  const commaAfter = (index, count) => (index < count - 1 ? 1 : 0)
   if (Array.isArray(value)) {
     if (value.length === 0) return '[]'
     const primitive = value.every(
@@ -126,16 +157,21 @@ const layout = (value, indent, prefixWidth) => {
     )
     if (primitive) {
       const inline = `[${value.map((item) => JSON.stringify(item)).join(', ')}]`
-      if (indent + prefixWidth + inline.length + 1 <= PRINT_WIDTH) return inline
+      if (indent + prefixWidth + inline.length + trailing <= PRINT_WIDTH)
+        return inline
     }
-    const items = value.map((item) => `${pad}${layout(item, indent + 2, 0)}`)
+    const items = value.map(
+      (item, index) =>
+        `${pad}${layout(item, indent + 2, 0, commaAfter(index, value.length))}`,
+    )
     return `[\n${items.join(',\n')}\n${close}]`
   }
   const entries = Object.entries(value)
   if (entries.length === 0) return '{}'
-  const lines = entries.map(([key, child]) => {
+  const lines = entries.map(([key, child], index) => {
     const head = `${JSON.stringify(key)}: `
-    return `${pad}${head}${layout(child, indent + 2, head.length)}`
+    const after = commaAfter(index, entries.length)
+    return `${pad}${head}${layout(child, indent + 2, head.length, after)}`
   })
   return `{\n${lines.join(',\n')}\n${close}}`
 }
@@ -1021,6 +1057,45 @@ if (writeStratosProduced) {
       'eyJ0eXAiOiJhdHByb3RvLXNwYWNlLWNyZWRlbnRpYWwrand0IiwiYWxnIjoiRVMyNTZLIiwia2lkIjoiI2F0cHJvdG8ifQ.eyJpc3MiOiJkaWQ6d2ViOmJlYm9wLmV4YW1wbGUiLCJzdWIiOiJhdDpzcGFjZS9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3JldyIsImlhdCI6MTAwMDAwMDAwMCwiZXhwIjoxMDAwMDAwNjAwLCJqdGkiOiJzcGlrZS1zcGllZ2VsLWNyZWRlbnRpYWwiLCJjbmYiOnsia2lkIjoiZGlkOmtleTp6RG5hZVdNOHptQml3emY4bjQydk1DUGRYQVdQdnQ4VDEzWFFNQlhabVpvTEIzZkNGIn0sInN0cmF0b3NCb3VuZGFyeVJldmlzaW9uIjoxfQ.LPYdky2qhc7JLfDnxcEJH9NdXh-kcpvEk-4mk_WC1rp8P1oexCV-rW3iqDhugUXP1tFLJnnNQDA_bfVaZKl2xQ',
   }
 
+  // Copied from the Rust tests in the `oracle_cross_check` module of
+  // stratos-feedgen-ng/src/space_mac.rs: what the Rust code makes for the fixed
+  // ephemeral key of hpke-export-oracle.json.
+  const RUST_MAC_REQUEST = {
+    source: 'stratos-feedgen-ng/src/space_mac.rs',
+    acceptSignature:
+      'mac=("atproto-space-commit";sf);keyid="did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi";tag="atproto-space-commit"',
+    sharedSecretBase64: '2XYP6iF5whnXMOd8HStZcRr/FOrpIZNfLnyoleNwbw4=',
+  }
+  const rustSecret = Uint8Array.from(
+    Buffer.from(RUST_MAC_REQUEST.sharedSecretBase64, 'base64'),
+  )
+  const crossCheckCommit = {
+    ver: 1,
+    repo: REPO,
+    space: 'at:space/did:web:nerv.example/zone.stratos.space.feed/tokyo3',
+    rev: REVISIONS[3],
+    data: new Uint8Array(
+      createHash('sha256').update('rei-ayanami-tokyo3').digest(),
+    ),
+  }
+  const crossCheckRequest = space.parseMacRequest(
+    RUST_MAC_REQUEST.acceptSignature,
+    space.COMMIT_MAC_PROFILE,
+  )
+  const oracleSecret =
+    crossCheckRequest &&
+    space.decapsulate(authorKem, crossCheckRequest.keyShare)
+  const secretsAgree =
+    oracleSecret !== undefined &&
+    Buffer.from(oracleSecret).equals(Buffer.from(rustSecret))
+  const { headers: crossCheckHeaders } =
+    crossCheckRequest && secretsAgree
+      ? space.createCommitMacHeaders(crossCheckCommit, {
+          ...crossCheckRequest,
+          sharedSecret: rustSecret,
+        })
+      : { headers: undefined }
+
   const presentationKey = await P256Keypair.import(
     new Uint8Array(32).fill(RUST_PRESENTATION.signingKeyFill),
   )
@@ -1072,6 +1147,25 @@ if (writeStratosProduced) {
           },
         ),
       },
+      rustMacRequest: {
+        source: RUST_MAC_REQUEST.source,
+        acceptSignature: RUST_MAC_REQUEST.acceptSignature,
+        sharedSecret: bytesField(rustSecret),
+        commit: {
+          ver: crossCheckCommit.ver,
+          repo: crossCheckCommit.repo,
+          space: crossCheckCommit.space,
+          rev: crossCheckCommit.rev,
+          data: bytesField(crossCheckCommit.data),
+        },
+        oracle: {
+          parseRequest: crossCheckRequest ? 'accepted' : 'refused',
+          keyShare: crossCheckRequest?.keyShare ?? null,
+          decapsulate: secretsAgree ? 'same-secret' : 'different-secret',
+          createCommitMacHeaders: crossCheckHeaders ? 'made' : 'not-made',
+        },
+        responseHeaders: crossCheckHeaders ?? null,
+      },
       serviceCredential: {
         source: SERVICE_CREDENTIAL.source,
         authority: SERVICE_CREDENTIAL.authority,
@@ -1089,6 +1183,417 @@ if (writeStratosProduced) {
           { sub: SERVICE_CREDENTIAL.spaceUri },
         ),
       },
+    },
+  )
+}
+
+if (writeCommitMac) {
+  const { hmacSha256 } = await importFrom('@atproto/crypto')
+  const { ByteSequence, serializeDictionary } =
+    await importFrom('structured-headers')
+
+  const MAC_SPACE =
+    'at:space/did:web:bebop.example/zone.stratos.space.feed/crew'
+  const COVERED = 'atproto-space-commit'
+  const INPUT = 'signature-input'
+  const SIGNATURE = 'signature'
+  const REQUEST = 'acceptSignature'
+  const TAG = `tag="${COVERED}"`
+  const dataOf = (seed) =>
+    new Uint8Array(createHash('sha256').update(seed).digest())
+  const macCommit = {
+    ver: 1,
+    repo: REPO,
+    space: MAC_SPACE,
+    rev: REVISIONS[3],
+    data: dataOf('faye-valentine-bebop'),
+  }
+  const FIELD_ORDER = ['ver', 'repo', 'space', 'rev', 'data']
+  const members = (commit, order = FIELD_ORDER) =>
+    new Map(
+      order.map((name) => [
+        name,
+        [
+          name === 'data'
+            ? new ByteSequence(Buffer.from(commit.data).toString('base64'))
+            : commit[name],
+          new Map(),
+        ],
+      ]),
+    )
+  const memberText = (commit, name) =>
+    serializeDictionary(members(commit, [name]))
+  const base64Of = (bytes) => Buffer.from(bytes).toString('base64')
+  const macField = (mac) => `mac=:${base64Of(mac)}:`
+  const macOver = (header, signatureParams) =>
+    hmacSha256(
+      sharedSecret,
+      new TextEncoder().encode(
+        `"${COVERED}";sf: ${header}\n"@signature-params": ${signatureParams}`,
+      ),
+    )
+
+  const { headers: accepted } = space.createCommitMacHeaders(macCommit, {
+    ...macRequest,
+    sharedSecret,
+  })
+  const params = macRequest.signatureParams
+  if (accepted[INPUT] !== `mac=${params}`)
+    throw new Error('signature-input is not the requested parameters')
+  const acceptedMac = macOver(accepted[COVERED], params)
+  if (accepted[SIGNATURE] !== macField(acceptedMac))
+    throw new Error('the signature base is not the one the oracle MACs')
+
+  const CHANGED = {
+    ver: 2,
+    repo: 'did:plc:jetblack',
+    space: 'at:space/did:web:bebop.example/zone.stratos.space.feed/ein',
+    rev: REVISIONS[2],
+    data: dataOf('ein-the-data-dog'),
+  }
+  const bodyJson = (change) =>
+    Object.fromEntries(
+      Object.entries(change).map(([name, value]) => [
+        name,
+        value instanceof Uint8Array ? bytesField(value) : value,
+      ]),
+    )
+  const swap = (text, [from, to]) => {
+    if (!text.includes(from)) throw new Error(`no ${from} in ${text}`)
+    return text.replace(from, to)
+  }
+
+  const applyCase = (entry) => {
+    const headers = { ...accepted }
+    for (const [name, pair] of Object.entries(entry.edit ?? {}))
+      if (name !== REQUEST) headers[name] = swap(headers[name], pair)
+    Object.assign(headers, entry.set)
+    for (const name of entry.remove ?? []) delete headers[name]
+    return headers
+  }
+  const judgeCase = async (entry) => {
+    const headers = applyCase(entry)
+    const commit = { ...macCommit, ...entry.bodyChange }
+    const {
+      accepted: isAccepted,
+      error,
+      message,
+    } = await verdictOf(() =>
+      space.verifyCommitMac(commit, {
+        keyShare,
+        sharedSecret,
+        headers: new Headers(headers),
+      }),
+    )
+    if (error !== undefined && error !== 'SpaceMacError')
+      throw new Error(`unexpected ${error}`)
+    return isAccepted ? 'accepted' : `refused: ${message}`
+  }
+  const caseJson = ({ name, edit, set, remove, bodyChange }) => ({
+    name,
+    ...(edit && { edit: inlineIfShort(edit) }),
+    ...(set && { set: inlineIfShort(set) }),
+    ...(remove && { remove }),
+    ...(bodyChange && { bodyChange: inlineIfShort(bodyJson(bodyChange)) }),
+  })
+
+  // An edited covered header with a MAC the oracle's own HMAC makes over it,
+  // for the cases where the header changes and the MAC has to follow.
+  const remade = (edit) => ({
+    edit: { [COVERED]: edit },
+    set: {
+      [SIGNATURE]: macField(macOver(swap(accepted[COVERED], edit), params)),
+    },
+  })
+  const TAG_AT = ';tag='
+  const algEdit = [TAG_AT, ';alg="hmac-sha256";tag=']
+  const algRequest = space.parseMacRequest(
+    swap(macRequestHeader, algEdit),
+    COVERED,
+  )
+  const { headers: algHeaders } = space.createCommitMacHeaders(macCommit, {
+    ...algRequest,
+    sharedSecret,
+  })
+  const reorder = [`ver=1, repo="${REPO}"`, `repo="${REPO}", ver=1`]
+  const field = (name) => [
+    memberText(macCommit, name),
+    memberText({ ...macCommit, [name]: CHANGED[name] }, name),
+  ]
+  const INPUT_EDITS = {
+    'no tagged member': [TAG_AT, ';tug='],
+    'tag atproto-space-repo': [
+      `${TAG_AT}"${COVERED}`,
+      `${TAG_AT}"atproto-space-repo`,
+    ],
+    'covered component without sf': ['";sf)', '")'],
+    'an extra covered component': ['";sf)', '";sf "content-type")'],
+    'keyid of another key share': [keyShare, otherSigner.did()],
+    'another alg': [TAG_AT, ';alg="ed25519";tag='],
+  }
+
+  const caseInputs = [
+    { name: 'accepted as made' },
+    {
+      name: 'under another label',
+      edit: { [INPUT]: ['mac=', 'faye='], [SIGNATURE]: ['mac=', 'faye='] },
+    },
+    {
+      name: 'a second signature of another tag',
+      edit: {
+        [INPUT]: [
+          'mac=',
+          `other=("${COVERED}";sf);tag="faye-valentine-test", mac=`,
+        ],
+        [SIGNATURE]: ['mac=', 'other=:Zm9v:, mac='],
+      },
+    },
+    {
+      name: 'alg hmac-sha256 in the request',
+      edit: { [REQUEST]: algEdit, [INPUT]: algEdit },
+      set: { [SIGNATURE]: algHeaders[SIGNATURE] },
+    },
+    {
+      name: 'extra spaces between members',
+      edit: { [COVERED]: [', ', ',   '] },
+    },
+    {
+      name: 'members re-ordered with the old mac',
+      edit: { [COVERED]: reorder },
+    },
+    {
+      name: 'members re-ordered, mac over that order',
+      ...remade(reorder),
+    },
+    {
+      name: 'an extra member, mac over it',
+      ...remade(['ver=1,', 'ver=1, note="swordfish",']),
+    },
+    {
+      name: 'a member parameter, mac over it',
+      ...remade(['ver=1', 'ver=1;note="spike"']),
+    },
+    ...FIELD_ORDER.map((name) => ({
+      name: `${name} changed in the header only`,
+      edit: { [COVERED]: field(name) },
+    })),
+    ...FIELD_ORDER.map((name) => ({
+      name: `${name} changed in the body only`,
+      bodyChange: { [name]: CHANGED[name] },
+    })),
+    {
+      name: 'two tagged members',
+      edit: { [INPUT]: ['mac=', `faye=();${TAG}, mac=`] },
+    },
+    ...Object.entries(INPUT_EDITS).map(([name, pair]) => ({
+      name,
+      edit: { [INPUT]: pair },
+    })),
+    {
+      name: 'signature of 31 bytes',
+      set: { [SIGNATURE]: macField(acceptedMac.slice(0, 31)) },
+    },
+    { name: 'covered header missing', remove: [COVERED] },
+    {
+      name: 'only an Atproto-Space-Mac header',
+      set: { 'atproto-space-mac': base64Of(acceptedMac) },
+      remove: [COVERED, INPUT, SIGNATURE],
+    },
+  ]
+  const cases = []
+  for (const entry of caseInputs)
+    cases.push({ ...caseJson(entry), verdict: await judgeCase(entry) })
+
+  // The oracle accepts these with a MAC made over them; Stratos refuses each,
+  // so the expected verdict is written by hand and the oracle's is recorded.
+  const strictCommit = async (name, change, reason) => {
+    const commit = { ...macCommit, ...change }
+    const { headers } = space.createCommitMacHeaders(commit, {
+      ...macRequest,
+      sharedSecret,
+    })
+    const [changed] = Object.keys(change)
+    const entry = {
+      name,
+      edit: {
+        [COVERED]: [
+          memberText(macCommit, changed),
+          memberText(commit, changed),
+        ],
+      },
+      set: { [SIGNATURE]: headers[SIGNATURE] },
+      bodyChange: change,
+    }
+    return {
+      ...caseJson(entry),
+      oracleVerdict: await judgeCase(entry),
+      expectedStratos: 'refused',
+      reason,
+    }
+  }
+  const stricter = [
+    await strictCommit(
+      'ver 2 in header and body',
+      { ver: 2 },
+      'ver must be the integer 1',
+    ),
+    await strictCommit(
+      'rev that is not a TID',
+      { rev: 'not-a-tid' },
+      'rev must be a TID',
+    ),
+    await strictCommit(
+      'data of 31 bytes',
+      { data: macCommit.data.slice(0, 31) },
+      'data must be exactly 32 bytes',
+    ),
+    await strictCommit(
+      'ver as the string "1"',
+      { ver: '1' },
+      'the body commit must have exactly typed fields',
+    ),
+  ]
+
+  writeFixture(
+    'commit-mac.json',
+    {
+      classification: 'upstream-signed-target-uri',
+      oracle,
+      generator,
+      upstreamVerified: true,
+      reproducible: true,
+    },
+    {
+      note: 'edit replaces the first text with the second in an accepted header; set overwrites; remove drops; bodyChange alters the commit compared. verdict is the oracle verifyCommitMac verdict. space is an opaque at:space/ claim. stricter: the oracle accepts, Stratos refuses (hand label).',
+      acceptSignature: macRequestHeader,
+      sharedSecret: bytesField(sharedSecret),
+      commit: bodyJson(macCommit),
+      headers: accepted,
+      cases,
+      stricter,
+    },
+  )
+}
+
+if (writeKemKeys) {
+  const { Secp256k1Keypair, formatDidVerificationMethod, bytesToMultibase } =
+    await importFrom('@atproto/crypto')
+
+  const DOCUMENT_DID = 'did:plc:spike'
+  const OTHER_DID = 'did:plc:vicioussyndicate'
+  const secp256k1Key = await Secp256k1Keypair.import(fromHex('66'.repeat(32)))
+  const multikeyOf = (keypair) => keypair.did().slice('did:key:'.length)
+  const method = (id, type, publicKeyMultibase) => ({
+    id,
+    type,
+    publicKeyMultibase,
+  })
+  const kemMultikey = (id) => method(id, 'Multikey', multikeyOf(authorKem))
+  const signingMethod = method('#atproto', 'Multikey', multikeyOf(signer))
+  const document = (verificationMethod, id = DOCUMENT_DID) => ({
+    id,
+    verificationMethod,
+  })
+  const KEM_ID = '#atproto_kem'
+
+  // The key judgement is the oracle's: its crypto package decodes the method and
+  // its encapsulate refuses anything that is not a P-256 did:key. Which method a
+  // document selects is written by hand from the rules in did/src/atproto.ts.
+  const judgeKey = async (candidate) => {
+    const { accepted, message } = await verdictOf(() =>
+      space.encapsulate(formatDidVerificationMethod(candidate)),
+    )
+    return accepted ? 'accepted' : `refused: ${message}`
+  }
+
+  const found = (name, doc, selected) => ({
+    name,
+    doc,
+    selected,
+    outcome: { kemKey: formatDidVerificationMethod(selected) },
+  })
+  const refused = (name, doc, reason, selected) => ({
+    name,
+    doc,
+    selected,
+    outcome: { refused: reason },
+  })
+  const malformed = method(KEM_ID, 'Multikey', 'zNot0AValidBase58Key')
+  const secp256k1Method = method(KEM_ID, 'Multikey', multikeyOf(secp256k1Key))
+  const relative = kemMultikey(KEM_ID)
+  const absolute = kemMultikey(`${DOCUMENT_DID}${KEM_ID}`)
+  const legacy = method(
+    KEM_ID,
+    'EcdsaSecp256r1VerificationKey2019',
+    bytesToMultibase(authorKem.publicKeyBytes(), 'base58btc'),
+  )
+  const rivalKem = method(
+    `${DOCUMENT_DID}${KEM_ID}`,
+    'Multikey',
+    multikeyOf(signer),
+  )
+  const otherDidMethod = kemMultikey(`${OTHER_DID}${KEM_ID}`)
+
+  const entries = [
+    found(
+      'a Multikey method with a relative id',
+      document([relative]),
+      relative,
+    ),
+    found('the same with an absolute id', document([absolute]), absolute),
+    found('the legacy type with bare key bytes', document([legacy]), legacy),
+    found(
+      'a KEM key different from the signing key',
+      document([signingMethod, relative]),
+      relative,
+    ),
+    refused('no KEM method', document([signingMethod]), 'no-kem-method'),
+    refused(
+      'a KEM method holding a secp256k1 key',
+      document([secp256k1Method]),
+      'wrong-curve',
+      secp256k1Method,
+    ),
+    refused(
+      'a Multikey with a malformed multibase string',
+      document([malformed]),
+      'malformed-key',
+      malformed,
+    ),
+    refused(
+      'a document whose id is another DID',
+      document([otherDidMethod], OTHER_DID),
+      'document-id-mismatch',
+    ),
+    refused(
+      'two methods with the KEM id',
+      document([relative, rivalKem]),
+      'ambiguous-kem-method',
+    ),
+  ]
+  const cases = []
+  for (const { name, doc, selected, outcome } of entries) {
+    cases.push({
+      name,
+      document: doc,
+      expected: outcome,
+      ...(selected && { oracleKeyVerdict: await judgeKey(selected) }),
+    })
+  }
+
+  writeFixture(
+    'kem-keys.json',
+    {
+      classification: 'upstream-uri-free',
+      oracle,
+      generator,
+      upstreamVerified: true,
+      reproducible: true,
+    },
+    {
+      note: 'Hand-written documents for a synthetic DID; controller is not read, so it is left out. Keys are encoded by the oracle crypto package; oracleKeyVerdict is its encapsulate verdict on the selected method. The selected method and each refused reason are hand labels.',
+      did: DOCUMENT_DID,
+      cases,
     },
   )
 }

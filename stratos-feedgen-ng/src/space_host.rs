@@ -1,15 +1,22 @@
-use std::{env, net::SocketAddr, sync::Arc, time::Duration};
+use std::{env, future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use reqwest::{Client, redirect::Policy};
 use serde::Deserialize;
 use serde_json::Value;
+use tokio::time::Instant;
 use url::Url;
 
 use crate::{
     identifier::Did,
     identity::{PrivateCidr, is_public_address, parse_private_cidrs},
     space_http_signature::SpaceHttpSignatureHeaders,
+    space_identity::{AuthorKemKeyResolver, KemKeyLookupError},
+    space_kem::{AuthorKemKey, encapsulate},
+    space_mac::{
+        CommitResponseHeaders, MacRequestContext, MacVerifiedCommit, MacVerifyError,
+        verify_commit_response,
+    },
     space_sync::{MAX_SPACE_PAGE_OPS, SpacePage, SpaceRepoOp},
 };
 
@@ -200,6 +207,220 @@ impl PinnedSpaceHostClient {
     }
 }
 
+impl PinnedSpaceHostClient {
+    /// `listRepoOps` with the response authenticated: the body is returned only
+    /// with the commit its MAC covers. A stale KEM key is refreshed once and
+    /// the whole request is sent again with a new key share; every wait is
+    /// bounded by `deadline`.
+    pub async fn list_repo_ops_authenticated(
+        &self,
+        kem_keys: &dyn AuthorKemKeyResolver,
+        space_uri: &str,
+        actor_did: &str,
+        cursor: Option<&str>,
+        limit: usize,
+        deadline: Instant,
+    ) -> Result<AuthenticatedPage, AuthenticatedReadError> {
+        let query = RepoOpsQuery {
+            space_uri,
+            actor_did,
+            cursor,
+            limit,
+        };
+        authenticated_read(self, kem_keys, &query, deadline).await
+    }
+}
+
+/// A page body together with the commit that was verified for it. There is no
+/// way to take the bytes without the commit.
+pub struct AuthenticatedPage {
+    body: Vec<u8>,
+    commit: MacVerifiedCommit,
+}
+
+impl AuthenticatedPage {
+    pub fn body(&self) -> &[u8] {
+        &self.body
+    }
+
+    pub fn commit(&self) -> &MacVerifiedCommit {
+        &self.commit
+    }
+}
+
+/// `KemKeyUnavailable` defers the target; every other variant fails it.
+#[derive(Debug, Eq, PartialEq)]
+pub enum AuthenticatedReadError {
+    KemKeyUnavailable,
+    KemKeyInvalid,
+    Host(SpaceHostError),
+    Authentication(MacVerifyError),
+    DeadlineExceeded,
+}
+
+impl AuthenticatedReadError {
+    pub fn is_deferred(&self) -> bool {
+        matches!(self, Self::KemKeyUnavailable)
+    }
+}
+
+impl std::fmt::Display for AuthenticatedReadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::KemKeyUnavailable => formatter.write_str("author key service is unavailable"),
+            Self::KemKeyInvalid => formatter.write_str("author has no usable KEM key"),
+            Self::Host(error) => error.fmt(formatter),
+            Self::Authentication(error) => error.fmt(formatter),
+            Self::DeadlineExceeded => formatter.write_str("authenticated read ran out of time"),
+        }
+    }
+}
+
+impl std::error::Error for AuthenticatedReadError {}
+
+/// One page request, as it is sent and as the response's commit is bound to it.
+pub(crate) struct RepoOpsQuery<'a> {
+    space_uri: &'a str,
+    actor_did: &'a str,
+    cursor: Option<&'a str>,
+    limit: usize,
+}
+
+/// A success response: its body and the raw lines of the three headers that
+/// authenticate it. Nothing outside this module reads the body from it.
+#[derive(Clone)]
+pub(crate) struct SignedReadResponse {
+    body: Vec<u8>,
+    headers: CommitResponseHeaders,
+}
+
+/// Sending one request and collecting a success response. The pinned client
+/// implements it with the client it already builds; a non-success status is
+/// the existing request error.
+#[async_trait]
+pub(crate) trait RepoOpsTransport: Send + Sync {
+    async fn send(
+        &self,
+        query: &RepoOpsQuery<'_>,
+        accept_signature: &str,
+    ) -> Result<SignedReadResponse, SpaceHostError>;
+}
+
+#[async_trait]
+impl RepoOpsTransport for PinnedSpaceHostClient {
+    async fn send(
+        &self,
+        query: &RepoOpsQuery<'_>,
+        accept_signature: &str,
+    ) -> Result<SignedReadResponse, SpaceHostError> {
+        let response = self
+            .repo_request(query.space_uri, query.actor_did, query.cursor, query.limit)
+            .await?
+            .header("accept-signature", accept_signature)
+            .send()
+            .await
+            .map_err(classify_request_error)?;
+        if !response.status().is_success() {
+            return Err(request_error(response).await);
+        }
+        let headers = CommitResponseHeaders {
+            commit: header_lines(&response, "atproto-space-commit"),
+            signature_input: header_lines(&response, "signature-input"),
+            signature: header_lines(&response, "signature"),
+        };
+        let body = response_bytes(response, MAX_PAGE_BYTES).await?;
+        Ok(SignedReadResponse { body, headers })
+    }
+}
+
+// `get_all` yields each header line the host sent; `get` would hide a repeat.
+fn header_lines(response: &reqwest::Response, name: &str) -> Vec<String> {
+    response
+        .headers()
+        .get_all(name)
+        .iter()
+        .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
+        .collect()
+}
+
+async fn authenticated_read(
+    transport: &dyn RepoOpsTransport,
+    kem_keys: &dyn AuthorKemKeyResolver,
+    query: &RepoOpsQuery<'_>,
+    deadline: Instant,
+) -> Result<AuthenticatedPage, AuthenticatedReadError> {
+    let first_key = before(deadline, kem_keys.author_kem_key(query.actor_did))
+        .await?
+        .map_err(kem_lookup_failure)?;
+    match attempt(transport, &first_key, query, deadline).await {
+        Err(AuthenticatedReadError::Authentication(MacVerifyError::MacMismatch)) => {}
+        outcome => return outcome,
+    }
+    let refreshed_key = before(deadline, kem_keys.refreshed_author_kem_key(query.actor_did))
+        .await?
+        .map_err(kem_lookup_failure)?;
+    if refreshed_key == first_key {
+        return Err(AuthenticatedReadError::Authentication(
+            MacVerifyError::MacMismatch,
+        ));
+    }
+    attempt(transport, &refreshed_key, query, deadline).await
+}
+
+// Each attempt makes its own ephemeral key and consumes its own context.
+async fn attempt(
+    transport: &dyn RepoOpsTransport,
+    kem_key: &AuthorKemKey,
+    query: &RepoOpsQuery<'_>,
+    deadline: Instant,
+) -> Result<AuthenticatedPage, AuthenticatedReadError> {
+    let secret = encapsulate(kem_key).map_err(|_| AuthenticatedReadError::KemKeyInvalid)?;
+    let context = MacRequestContext::new(secret, query.actor_did, query.space_uri);
+    let accept_signature = context.accept_signature();
+    let response = before(deadline, transport.send(query, &accept_signature))
+        .await?
+        .map_err(AuthenticatedReadError::Host)?;
+    let commit = body_commit(&response.body)?;
+    let verified = verify_commit_response(context, &response.headers, &commit)
+        .map_err(AuthenticatedReadError::Authentication)?;
+    Ok(AuthenticatedPage {
+        body: response.body,
+        commit: verified,
+    })
+}
+
+async fn before<T>(
+    deadline: Instant,
+    wait: impl Future<Output = T>,
+) -> Result<T, AuthenticatedReadError> {
+    if Instant::now() >= deadline {
+        return Err(AuthenticatedReadError::DeadlineExceeded);
+    }
+    tokio::time::timeout_at(deadline, wait)
+        .await
+        .map_err(|_| AuthenticatedReadError::DeadlineExceeded)
+}
+
+fn kem_lookup_failure(error: KemKeyLookupError) -> AuthenticatedReadError {
+    match error {
+        KemKeyLookupError::Unavailable => AuthenticatedReadError::KemKeyUnavailable,
+        KemKeyLookupError::Invalid => AuthenticatedReadError::KemKeyInvalid,
+    }
+}
+
+fn body_commit(body: &[u8]) -> Result<Value, AuthenticatedReadError> {
+    #[derive(Deserialize)]
+    struct CommitMember {
+        commit: Option<Value>,
+    }
+    serde_json::from_slice::<CommitMember>(body)
+        .ok()
+        .and_then(|member| member.commit)
+        .ok_or(AuthenticatedReadError::Host(
+            SpaceHostError::InvalidResponse,
+        ))
+}
+
 pub struct SpaceHostPage {
     pub page: SpacePage,
     pub commit: Option<SpaceCommit>,
@@ -210,6 +431,11 @@ pub struct SpaceCommit {
 }
 
 impl SpaceCommit {
+    #[cfg(test)]
+    pub(crate) fn from_value(raw: Value) -> Self {
+        Self { raw }
+    }
+
     pub fn as_value(&self) -> &Value {
         &self.raw
     }
@@ -692,5 +918,561 @@ mod tests {
             sent[0],
             "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop"
         );
+    }
+}
+
+// In-process test host for the authenticated read: it answers through the
+// transport seam and derives its secret with the code under test, so these
+// tests prove flow (a fresh key per request, one refresh, at most one retry,
+// the deadline, what is returned) and never the derivation, which the oracle
+// vectors in `space_kem` and `space_mac` cover.
+#[cfg(test)]
+mod authenticated_read_tests {
+    use std::{
+        collections::VecDeque,
+        sync::{
+            Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use hmac::{Hmac, Mac};
+    use p256::{SecretKey, elliptic_curve::sec1::ToEncodedPoint};
+    use serde_json::json;
+    use sha2::Sha256;
+    use tokio::time::Instant;
+
+    use super::*;
+    use crate::{
+        auth::IdentityResolutionError,
+        identity::{DidDocumentSource, HttpIdentityKeyResolver},
+        space_identity::AuthorKemKeyResolver,
+        space_kem::{AuthorKemKey, decapsulate},
+        space_mac::{MacDefect, MacVerifyError},
+        space_signature_fields::{members_with_tag, parse_dictionary},
+    };
+
+    const AUTHOR: &str = "did:plc:fayevalentine";
+    const SPACE: &str = "at:space/did:web:bebop.example/zone.stratos.space.feed/crew";
+    const OTHER_SPACE: &str = "at:space/did:web:bebop.example/zone.stratos.space.feed/ein";
+    const REV: &str = "3jzfcijpj2z2d";
+    const BODY_MARKER: &str = "See you space cowboy";
+    const COMMIT_DATA: [u8; 32] = [7; 32];
+    const ROOMY_DEADLINE: Duration = Duration::from_secs(30);
+
+    fn private_key(byte: u8) -> SecretKey {
+        SecretKey::from_slice(&[byte; 32]).expect("valid scalar")
+    }
+
+    fn public_key(private: &SecretKey) -> AuthorKemKey {
+        AuthorKemKey::from_sec1_bytes(private.public_key().to_encoded_point(false).as_bytes())
+            .expect("public key")
+    }
+
+    #[derive(Clone, Copy)]
+    enum Listing {
+        Serving,
+        Unreachable,
+        NoKemMethod,
+    }
+
+    // The DID document source behind a real resolver, so cached and refreshed
+    // lookups behave as they do in production.
+    struct Directory {
+        published: Mutex<AuthorKemKey>,
+        listing: Mutex<Listing>,
+        fetches: AtomicUsize,
+    }
+
+    impl Directory {
+        fn publishing(key: AuthorKemKey) -> Arc<Self> {
+            Arc::new(Self {
+                published: Mutex::new(key),
+                listing: Mutex::new(Listing::Serving),
+                fetches: AtomicUsize::new(0),
+            })
+        }
+
+        fn publish(&self, key: AuthorKemKey) {
+            *self.published.lock().unwrap() = key;
+        }
+
+        fn list_as(&self, listing: Listing) {
+            *self.listing.lock().unwrap() = listing;
+        }
+
+        fn fetches(&self) -> usize {
+            self.fetches.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl DidDocumentSource for Directory {
+        async fn fetch(&self, did: &str) -> Result<String, IdentityResolutionError> {
+            self.fetches.fetch_add(1, Ordering::SeqCst);
+            let multikey = self
+                .published
+                .lock()
+                .unwrap()
+                .did_key()
+                .strip_prefix("did:key:")
+                .unwrap()
+                .to_owned();
+            let methods = match *self.listing.lock().unwrap() {
+                Listing::Unreachable => return Err(IdentityResolutionError::Unavailable),
+                Listing::NoKemMethod => json!([]),
+                Listing::Serving => json!([{
+                    "id": "#atproto_kem",
+                    "type": "Multikey",
+                    "publicKeyMultibase": multikey,
+                }]),
+            };
+            Ok(json!({ "id": did, "verificationMethod": methods }).to_string())
+        }
+    }
+
+    #[derive(Clone)]
+    enum Answer {
+        Honest,
+        SignedForRepo(&'static str),
+        SignedForSpace(&'static str),
+        BodyCommitRev(&'static str),
+        NoSignatureHeaders,
+        SignatureHeaderTwice,
+        UnpaddedCommitData,
+        ReplayFirstResponse,
+        Refused { status: u16, code: &'static str },
+        TakesTooLong,
+    }
+
+    struct TestHost {
+        private_key: Mutex<SecretKey>,
+        script: Mutex<VecDeque<Answer>>,
+        key_shares: Mutex<Vec<String>>,
+        first_response: Mutex<Option<SignedReadResponse>>,
+    }
+
+    impl TestHost {
+        fn holding(private_key: SecretKey, script: Vec<Answer>) -> Arc<Self> {
+            Arc::new(Self {
+                private_key: Mutex::new(private_key),
+                script: Mutex::new(script.into()),
+                key_shares: Mutex::new(Vec::new()),
+                first_response: Mutex::new(None),
+            })
+        }
+
+        fn requests(&self) -> usize {
+            self.key_shares.lock().unwrap().len()
+        }
+
+        fn key_shares(&self) -> Vec<String> {
+            self.key_shares.lock().unwrap().clone()
+        }
+
+        fn respond(
+            &self,
+            key_share: &str,
+            repo: &str,
+            space: &str,
+            body_rev: &str,
+        ) -> SignedReadResponse {
+            self.respond_with_data_text(
+                key_share,
+                repo,
+                space,
+                body_rev,
+                &STANDARD.encode(COMMIT_DATA),
+            )
+        }
+
+        // The MAC is computed over the header text as sent, whatever the
+        // base64 form of `data` in it.
+        fn respond_with_data_text(
+            &self,
+            key_share: &str,
+            repo: &str,
+            space: &str,
+            body_rev: &str,
+            data_text: &str,
+        ) -> SignedReadResponse {
+            let secret = decapsulate(&self.private_key.lock().unwrap(), key_share).unwrap();
+            let commit_header = format!(
+                "ver=1, repo=\"{repo}\", space=\"{space}\", rev=\"{REV}\", data=:{data_text}:"
+            );
+            let params = format!(
+                "(\"atproto-space-commit\";sf);keyid=\"{key_share}\";tag=\"atproto-space-commit\""
+            );
+            let mut mac = Hmac::<Sha256>::new_from_slice(secret.secret()).unwrap();
+            mac.update(
+                format!(
+                    "\"atproto-space-commit\";sf: {commit_header}\n\"@signature-params\": {params}"
+                )
+                .as_bytes(),
+            );
+            let body = json!({
+                "ops": [{ "text": BODY_MARKER }],
+                "commit": {
+                    "ver": 1,
+                    "repo": repo,
+                    "space": space,
+                    "rev": body_rev,
+                    "data": { "$bytes": STANDARD.encode(COMMIT_DATA).trim_end_matches('=') },
+                },
+            });
+            SignedReadResponse {
+                body: serde_json::to_vec(&body).unwrap(),
+                headers: CommitResponseHeaders {
+                    commit: vec![commit_header],
+                    signature_input: vec![format!("mac={params}")],
+                    signature: vec![format!(
+                        "mac=:{}:",
+                        STANDARD.encode(mac.finalize().into_bytes())
+                    )],
+                },
+            }
+        }
+    }
+
+    fn requested_key_share(accept_signature: &str) -> String {
+        let dictionary = parse_dictionary(accept_signature).expect("accept-signature");
+        let [member] = members_with_tag(&dictionary, "atproto-space-commit")
+            .try_into()
+            .ok()
+            .expect("one request");
+        member
+            .members
+            .params
+            .get("keyid")
+            .and_then(|value| value.as_string())
+            .expect("keyid")
+            .as_str()
+            .to_owned()
+    }
+
+    #[async_trait]
+    impl RepoOpsTransport for TestHost {
+        async fn send(
+            &self,
+            query: &RepoOpsQuery<'_>,
+            accept_signature: &str,
+        ) -> Result<SignedReadResponse, SpaceHostError> {
+            let key_share = requested_key_share(accept_signature);
+            self.key_shares.lock().unwrap().push(key_share.clone());
+            let answer = self
+                .script
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or(Answer::Honest);
+            let honest =
+                |repo: &str, space: &str, rev: &str| self.respond(&key_share, repo, space, rev);
+            let response = match answer {
+                Answer::Honest => honest(query.actor_did, query.space_uri, REV),
+                Answer::SignedForRepo(repo) => honest(repo, query.space_uri, REV),
+                Answer::SignedForSpace(space) => honest(query.actor_did, space, REV),
+                Answer::BodyCommitRev(rev) => {
+                    let mut response = honest(query.actor_did, query.space_uri, REV);
+                    let mut body: Value = serde_json::from_slice(&response.body).unwrap();
+                    body["commit"]["rev"] = json!(rev);
+                    response.body = serde_json::to_vec(&body).unwrap();
+                    response
+                }
+                Answer::NoSignatureHeaders => SignedReadResponse {
+                    headers: CommitResponseHeaders::default(),
+                    ..honest(query.actor_did, query.space_uri, REV)
+                },
+                Answer::SignatureHeaderTwice => {
+                    let mut response = honest(query.actor_did, query.space_uri, REV);
+                    let line = response.headers.signature[0].clone();
+                    response.headers.signature.push(line);
+                    response
+                }
+                Answer::UnpaddedCommitData => self.respond_with_data_text(
+                    &key_share,
+                    query.actor_did,
+                    query.space_uri,
+                    REV,
+                    STANDARD.encode(COMMIT_DATA).trim_end_matches('='),
+                ),
+                Answer::ReplayFirstResponse => self
+                    .first_response
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .expect("a first response to replay"),
+                Answer::Refused { status, code } => {
+                    return Err(SpaceHostError::Request {
+                        status,
+                        code: Some(code.to_owned()),
+                    });
+                }
+                Answer::TakesTooLong => {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    honest(query.actor_did, query.space_uri, REV)
+                }
+            };
+            self.first_response
+                .lock()
+                .unwrap()
+                .get_or_insert_with(|| response.clone());
+            Ok(response)
+        }
+    }
+
+    struct Setup {
+        directory: Arc<Directory>,
+        resolver: HttpIdentityKeyResolver,
+        host: Arc<TestHost>,
+    }
+
+    fn setup(script: Vec<Answer>) -> Setup {
+        let author = private_key(0x22);
+        let directory = Directory::publishing(public_key(&author));
+        Setup {
+            resolver: HttpIdentityKeyResolver::with_document_source(directory.clone()),
+            directory,
+            host: TestHost::holding(author, script),
+        }
+    }
+
+    async fn read(setup: &Setup) -> Result<AuthenticatedPage, AuthenticatedReadError> {
+        read_with_deadline(setup, Instant::now() + ROOMY_DEADLINE).await
+    }
+
+    async fn read_with_deadline(
+        setup: &Setup,
+        deadline: Instant,
+    ) -> Result<AuthenticatedPage, AuthenticatedReadError> {
+        authenticated_read(
+            setup.host.as_ref(),
+            &setup.resolver as &dyn AuthorKemKeyResolver,
+            &RepoOpsQuery {
+                space_uri: SPACE,
+                actor_did: AUTHOR,
+                cursor: None,
+                limit: 100,
+            },
+            deadline,
+        )
+        .await
+    }
+
+    fn authentication_failure(defect: MacDefect) -> AuthenticatedReadError {
+        AuthenticatedReadError::Authentication(MacVerifyError::Invalid(defect))
+    }
+
+    #[tokio::test]
+    async fn a_verified_read_returns_the_body_bytes_with_the_commit() {
+        let setup = setup(vec![]);
+        let page = read(&setup).await.expect("verified page");
+        assert_eq!(page.commit().repo(), AUTHOR);
+        assert_eq!(page.commit().space(), SPACE);
+        assert_eq!(page.commit().rev(), REV);
+        let body: Value = serde_json::from_slice(page.body()).unwrap();
+        assert_eq!(body["ops"][0]["text"], BODY_MARKER);
+        assert_eq!(setup.host.requests(), 1);
+    }
+
+    #[tokio::test]
+    async fn two_reads_send_two_different_key_shares() {
+        let setup = setup(vec![]);
+        read(&setup).await.expect("first read");
+        read(&setup).await.expect("second read");
+        let shares = setup.host.key_shares();
+        assert_eq!(shares.len(), 2);
+        assert_ne!(shares[0], shares[1]);
+        assert_eq!(
+            setup.directory.fetches(),
+            1,
+            "the second read used the cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_response_made_for_the_first_request_does_not_verify_for_a_second() {
+        let setup = setup(vec![Answer::Honest, Answer::ReplayFirstResponse]);
+        read(&setup).await.expect("first read");
+        let error = read(&setup).await.err().expect("replay refused");
+        assert_eq!(error, authentication_failure(MacDefect::KeyShareMismatch));
+        assert_eq!(setup.host.requests(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_stale_kem_key_is_refreshed_and_one_new_request_with_a_new_key_share_verifies() {
+        let setup = setup(vec![]);
+        let rotated = private_key(0x44);
+        *setup.host.private_key.lock().unwrap() = rotated.clone();
+        // The resolver has not seen the rotation yet.
+        let cached = setup.resolver.author_kem_key(AUTHOR).await.unwrap();
+        assert_eq!(cached, public_key(&private_key(0x22)));
+        setup.directory.publish(public_key(&rotated));
+
+        let page = read(&setup).await.expect("verified after the retry");
+
+        let shares = setup.host.key_shares();
+        assert_eq!(shares.len(), 2, "exactly two requests");
+        assert_ne!(shares[0], shares[1]);
+        assert_eq!(page.commit().repo(), AUTHOR);
+        assert_eq!(setup.directory.fetches(), 2, "one lookup, one refresh");
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_key_after_the_refresh_fails_without_a_second_request() {
+        let setup = setup(vec![]);
+        *setup.host.private_key.lock().unwrap() = private_key(0x44);
+
+        let error = read(&setup).await.err().expect("mismatch");
+
+        assert_eq!(
+            error,
+            AuthenticatedReadError::Authentication(MacVerifyError::MacMismatch)
+        );
+        assert_eq!(setup.host.requests(), 1);
+        assert_eq!(setup.directory.fetches(), 2, "the key was refreshed once");
+    }
+
+    #[tokio::test]
+    async fn a_second_wrong_response_fails_after_exactly_two_requests() {
+        let setup = setup(vec![]);
+        // The host answers under a key the directory never publishes.
+        *setup.host.private_key.lock().unwrap() = private_key(0x55);
+        setup.resolver.author_kem_key(AUTHOR).await.unwrap();
+        setup.directory.publish(public_key(&private_key(0x66)));
+
+        let error = read(&setup).await.err().expect("still wrong");
+
+        assert_eq!(
+            error,
+            AuthenticatedReadError::Authentication(MacVerifyError::MacMismatch)
+        );
+        assert_eq!(setup.host.requests(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_body_commit_that_differs_from_the_signed_header_fails_without_a_retry() {
+        let setup = setup(vec![Answer::BodyCommitRev("3jzfcijpj2z2c")]);
+        let error = read(&setup).await.err().expect("body differs");
+        assert_eq!(
+            error,
+            authentication_failure(MacDefect::CommitDiffersFromSignedHeader)
+        );
+        assert_eq!(setup.host.requests(), 1);
+        assert_eq!(setup.directory.fetches(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_response_naming_another_repo_or_space_fails_without_a_retry() {
+        for answer in [
+            Answer::SignedForRepo("did:plc:jetblack"),
+            Answer::SignedForSpace(OTHER_SPACE),
+        ] {
+            let setup = setup(vec![answer]);
+            let error = read(&setup).await.err().expect("wrong request");
+            assert_eq!(error, authentication_failure(MacDefect::RequestMismatch));
+            assert_eq!(setup.host.requests(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_response_without_the_new_authentication_returns_no_body() {
+        for (answer, defect) in [
+            (Answer::NoSignatureHeaders, MacDefect::HeaderMissing),
+            (Answer::SignatureHeaderTwice, MacDefect::HeaderRepeated),
+        ] {
+            let setup = setup(vec![answer]);
+            let error = read(&setup).await.err().expect("refused");
+            assert_eq!(error, authentication_failure(defect));
+            assert_eq!(
+                setup.host.requests(),
+                1,
+                "a missing header is not a stale key"
+            );
+        }
+    }
+
+    // A field the oracle and this verifier would MAC differently is refused
+    // on purpose, as an invalid response rather than a stale key.
+    #[tokio::test]
+    async fn an_unpadded_commit_data_fails_after_one_request_with_no_refresh() {
+        let setup = setup(vec![Answer::UnpaddedCommitData]);
+        let error = read(&setup).await.err().expect("refused");
+        assert_eq!(
+            error,
+            authentication_failure(MacDefect::NonCanonicalByteSequence)
+        );
+        assert_eq!(setup.host.requests(), 1);
+        assert_eq!(setup.directory.fetches(), 1, "the key was not refreshed");
+    }
+
+    #[tokio::test]
+    async fn a_refusal_status_is_the_existing_request_error() {
+        let setup = setup(vec![Answer::Refused {
+            status: 400,
+            code: "InvalidSpaceMac",
+        }]);
+        let error = read(&setup).await.err().expect("refused");
+        assert_eq!(
+            error,
+            AuthenticatedReadError::Host(SpaceHostError::Request {
+                status: 400,
+                code: Some("InvalidSpaceMac".to_owned()),
+            })
+        );
+        assert_eq!(setup.host.requests(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_deadline_that_passes_during_the_second_request_fails_with_no_third_request() {
+        let setup = setup(vec![Answer::Honest, Answer::TakesTooLong]);
+        let rotated = private_key(0x44);
+        *setup.host.private_key.lock().unwrap() = rotated.clone();
+        setup.resolver.author_kem_key(AUTHOR).await.unwrap();
+        setup.directory.publish(public_key(&rotated));
+        // The first answer is under the old key and fails the MAC; the second
+        // request then outlives the deadline.
+        let deadline = Instant::now() + Duration::from_millis(300);
+
+        let started = Instant::now();
+        let error = read_with_deadline(&setup, deadline)
+            .await
+            .err()
+            .expect("late");
+
+        assert_eq!(error, AuthenticatedReadError::DeadlineExceeded);
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_eq!(setup.host.requests(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_deadline_that_has_passed_sends_nothing() {
+        let setup = setup(vec![]);
+        let error = read_with_deadline(&setup, Instant::now())
+            .await
+            .err()
+            .expect("late");
+        assert_eq!(error, AuthenticatedReadError::DeadlineExceeded);
+        assert_eq!(setup.host.requests(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_kem_lookup_defers_and_sends_nothing() {
+        let setup = setup(vec![]);
+        setup.directory.list_as(Listing::Unreachable);
+        let error = read(&setup).await.err().expect("deferred");
+        assert_eq!(error, AuthenticatedReadError::KemKeyUnavailable);
+        assert!(error.is_deferred());
+        assert_eq!(setup.host.requests(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_invalid_kem_lookup_fails_and_sends_nothing() {
+        let setup = setup(vec![]);
+        setup.directory.list_as(Listing::NoKemMethod);
+        let error = read(&setup).await.err().expect("failed");
+        assert_eq!(error, AuthenticatedReadError::KemKeyInvalid);
+        assert!(!error.is_deferred());
+        assert_eq!(setup.host.requests(), 0);
     }
 }

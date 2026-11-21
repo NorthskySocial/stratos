@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -13,12 +13,26 @@ use crate::{
     lifecycle::ControlLifecycle,
     membership_reconciler::{MembershipReconciler, MembershipReconciliationError},
     pds_space_sync::{PdsSpaceSyncError, PdsSpaceSyncOutcome, PdsSpaceSynchronizer},
+    space_host::SpaceHostError,
     telemetry::{FeedTelemetry, SpaceSyncOutcome},
 };
 
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_STATUS_AGE: Duration = Duration::from_secs(90);
 const MAX_TARGET_CONCURRENCY: usize = 4;
+// The only error names a host can answer with that reach the log, each with the
+// reason it is logged under. A name outside this list is logged as `other`, so
+// host-supplied text never reaches a log line.
+const LOGGED_HOST_REFUSALS: [(&str, &str); 5] = [
+    ("InvalidSpaceMac", "invalid_space_mac"),
+    ("InvalidSpaceUri", "invalid_space_uri"),
+    ("InvalidCredential", "invalid_credential"),
+    ("BadSpaceAudience", "bad_space_audience"),
+    ("RepoNotFound", "repo_not_found"),
+];
+const OTHER_HOST_REFUSAL: &str = "other";
+const MISSING_MEMBER_GENERATION: &str = "member_generation";
+const UNJOINED_TARGET_TASK: &str = "task";
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -237,14 +251,54 @@ async fn run_pass(
     boundaries: &BTreeSet<String>,
     retention: &ProjectionRetention,
 ) -> PdsSpacePass {
+    let (pass, reasons) =
+        collect_pass(lifecycle, membership, synchronizer, boundaries, retention).await;
+    if let Some(line) = reasons.log_line() {
+        eprintln!("{line}");
+    }
+    pass
+}
+
+/// Failed targets of one cycle, counted by the reason each failed.
+#[derive(Debug, Default)]
+struct TargetFailureReasons(BTreeMap<&'static str, usize>);
+
+impl TargetFailureReasons {
+    fn record(&mut self, reason: &'static str) {
+        *self.0.entry(reason).or_default() += 1;
+    }
+
+    fn log_line(&self) -> Option<String> {
+        if self.0.is_empty() {
+            return None;
+        }
+        let counts = self
+            .0
+            .iter()
+            .map(|(reason, count)| format!("{reason}={count}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        Some(format!("event=pds_space_target_failures {counts}"))
+    }
+}
+
+async fn collect_pass(
+    lifecycle: Arc<ControlLifecycle>,
+    membership: Arc<MembershipReconciler>,
+    synchronizer: Arc<PdsSpaceSynchronizer>,
+    boundaries: &BTreeSet<String>,
+    retention: &ProjectionRetention,
+) -> (PdsSpacePass, TargetFailureReasons) {
+    let mut reasons = TargetFailureReasons::default();
     let now = OffsetDateTime::now_utc();
     let observed_at = format_utc_millis(now);
     let Some(retained_at) = retention_deadline(now, retention) else {
-        return PdsSpacePass {
+        let pass = PdsSpacePass {
             boundaries: boundaries.len(),
             membership_failures: boundaries.len(),
             ..PdsSpacePass::default()
         };
+        return (pass, reasons);
     };
     let mut pass = PdsSpacePass {
         boundaries: boundaries.len(),
@@ -286,12 +340,13 @@ async fn run_pass(
         for mut target in snapshot.targets {
             let Some(member_generation) = generations.get(&target.did).copied() else {
                 pass.target_failures += 1;
+                reasons.record(MISSING_MEMBER_GENERATION);
                 continue;
             };
             target.generation = member_generation;
             pass.targets += 1;
             if workers.len() == MAX_TARGET_CONCURRENCY {
-                record_target_result(&mut pass, workers.join_next().await);
+                record_target_result(&mut pass, &mut reasons, workers.join_next().await);
             }
             let lifecycle = Arc::clone(&lifecycle);
             let synchronizer = Arc::clone(&synchronizer);
@@ -305,13 +360,14 @@ async fn run_pass(
         }
     }
     while !workers.is_empty() {
-        record_target_result(&mut pass, workers.join_next().await);
+        record_target_result(&mut pass, &mut reasons, workers.join_next().await);
     }
-    pass
+    (pass, reasons)
 }
 
 fn record_target_result(
     pass: &mut PdsSpacePass,
+    reasons: &mut TargetFailureReasons,
     result: Option<
         Result<
             Result<PdsSpaceSyncOutcome, crate::pds_space_sync::PdsSpaceSyncError>,
@@ -325,6 +381,7 @@ fn record_target_result(
         Some(Ok(Ok(PdsSpaceSyncOutcome::RejectedCommit))) => pass.rejected += 1,
         Some(Ok(Err(error))) => {
             pass.target_failures += 1;
+            reasons.record(failure_reason(&error));
             eprintln!(
                 "event=pds_space_target_failed kind={}",
                 target_failure_kind(&error)
@@ -332,6 +389,7 @@ fn record_target_result(
         }
         Some(Err(_)) | None => {
             pass.target_failures += 1;
+            reasons.record(UNJOINED_TARGET_TASK);
             eprintln!("event=pds_space_target_failed kind=task");
         }
     }
@@ -345,6 +403,18 @@ fn membership_failure_kind(error: &MembershipReconciliationError) -> &'static st
         MembershipReconciliationError::CursorStalled => "cursor_stalled",
         MembershipReconciliationError::PageLimit => "page_limit",
         MembershipReconciliationError::Store(_) => "store",
+    }
+}
+
+// A host refusal is told apart by the error name the host sent, but only when
+// that name is one this service knows; every other failure keeps its kind.
+fn failure_reason(error: &PdsSpaceSyncError) -> &'static str {
+    match error {
+        PdsSpaceSyncError::Host(SpaceHostError::Request { code, .. }) => LOGGED_HOST_REFUSALS
+            .iter()
+            .find(|(name, _)| Some(*name) == code.as_deref())
+            .map_or(OTHER_HOST_REFUSAL, |(_, reason)| reason),
+        other => target_failure_kind(other),
     }
 }
 
@@ -757,5 +827,164 @@ mod tests {
         tokio::time::timeout(Duration::from_millis(100), scheduler.stop())
             .await
             .expect("scheduler stop should interrupt its sleep");
+    }
+
+    struct RefusingPages(std::collections::BTreeMap<String, Option<String>>);
+
+    #[async_trait]
+    impl SpacePageSource for RefusingPages {
+        async fn connect(
+            &self,
+            _: &crate::membership_reconciler::PdsPollTarget,
+            _: Arc<crate::space_credential::HeldSpaceCredential>,
+        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
+            Ok(Arc::new(Self(self.0.clone())))
+        }
+    }
+
+    #[async_trait]
+    impl SpacePageReader for RefusingPages {
+        async fn list_page(
+            &self,
+            target: &crate::membership_reconciler::PdsPollTarget,
+            _: Option<&str>,
+            _: usize,
+        ) -> Result<SpaceHostPage, SpaceHostError> {
+            Err(SpaceHostError::Request {
+                status: 400,
+                code: self.0.get(&target.did).cloned().flatten(),
+            })
+        }
+    }
+
+    const MEMBER_DIDS: [&str; 3] = [
+        "did:plc:spikespiegel",
+        "did:plc:jetblack",
+        "did:plc:fayevalentine",
+    ];
+
+    async fn cycle_where_hosts_refuse(
+        refusals: [Option<&str>; 3],
+    ) -> (PdsSpacePass, super::TargetFailureReasons) {
+        let credentials = credentials();
+        let membership = Arc::new(MembershipReconciler::new(
+            Arc::new(MembershipPages(Mutex::new(
+                [Ok(SpaceMembershipPage {
+                    members: MEMBER_DIDS
+                        .iter()
+                        .map(|did| SpaceRepoMember {
+                            did: (*did).to_owned(),
+                            custody: RepoCustody::Pds,
+                            host: Some("https://pds.example.test/".to_owned()),
+                        })
+                        .collect(),
+                    next_cursor: None,
+                })]
+                .into(),
+            ))),
+            Arc::clone(&credentials),
+        ));
+        let pages = RefusingPages(
+            MEMBER_DIDS
+                .iter()
+                .zip(refusals)
+                .map(|(did, code)| ((*did).to_owned(), code.map(str::to_owned)))
+                .collect(),
+        );
+        let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
+            Arc::new(pages),
+            credentials,
+            Arc::new(VerifiedCommit),
+        ));
+        super::collect_pass(
+            lifecycle(),
+            membership,
+            synchronizer,
+            &[BOUNDARY.to_owned()].into_iter().collect(),
+            &retention(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_cycle_with_two_invalid_space_mac_refusals_and_an_unknown_name_logs_one_counted_line()
+    {
+        let (pass, reasons) = cycle_where_hosts_refuse([
+            Some("InvalidSpaceMac"),
+            Some("InvalidSpaceMac"),
+            Some("Hostile\nName\u{1b}[31m"),
+        ])
+        .await;
+
+        assert_eq!(pass.targets, 3);
+        assert_eq!(pass.target_failures, 3);
+        assert_eq!(pass.promoted, 0);
+        assert_eq!(
+            reasons.log_line().as_deref(),
+            Some("event=pds_space_target_failures invalid_space_mac=2 other=1")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cycle_without_failed_targets_logs_no_failure_line() {
+        let credentials = credentials();
+        let membership = Arc::new(MembershipReconciler::new(
+            Arc::new(MembershipPages(Mutex::new(VecDeque::new()))),
+            Arc::clone(&credentials),
+        ));
+        let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
+            Arc::new(EmptyPages),
+            credentials,
+            Arc::new(VerifiedCommit),
+        ));
+        let (pass, reasons) = super::collect_pass(
+            lifecycle(),
+            membership,
+            synchronizer,
+            &std::collections::BTreeSet::new(),
+            &retention(),
+        )
+        .await;
+        assert_eq!(pass.target_failures, 0);
+        assert_eq!(reasons.log_line(), None);
+    }
+
+    #[test]
+    fn only_the_listed_host_error_names_are_ever_logged() {
+        let refusal = |code: Option<&str>| {
+            crate::pds_space_sync::PdsSpaceSyncError::Host(SpaceHostError::Request {
+                status: 400,
+                code: code.map(str::to_owned),
+            })
+        };
+        for (name, reason) in [
+            ("InvalidSpaceMac", "invalid_space_mac"),
+            ("InvalidSpaceUri", "invalid_space_uri"),
+            ("InvalidCredential", "invalid_credential"),
+            ("BadSpaceAudience", "bad_space_audience"),
+            ("RepoNotFound", "repo_not_found"),
+        ] {
+            assert_eq!(super::failure_reason(&refusal(Some(name))), reason);
+        }
+        for code in [
+            None,
+            Some("invalidspacemac"),
+            Some("InvalidSpaceMac "),
+            Some("InvalidSpaceMac\n"),
+            Some("InvalidRequest"),
+            Some(""),
+        ] {
+            assert_eq!(super::failure_reason(&refusal(code)), "other", "{code:?}");
+        }
+        assert_eq!(
+            super::failure_reason(&crate::pds_space_sync::PdsSpaceSyncError::Host(
+                SpaceHostError::Timeout
+            )),
+            "host"
+        );
+        assert_eq!(
+            super::failure_reason(&crate::pds_space_sync::PdsSpaceSyncError::CursorStalled),
+            "cursor_stalled"
+        );
     }
 }

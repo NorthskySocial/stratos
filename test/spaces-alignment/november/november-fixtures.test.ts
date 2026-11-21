@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -610,6 +610,339 @@ describe('values Stratos produced, judged by the upstream package', () => {
     expect(claims['iat']).toBe(serviceCredential.frozenClockSeconds)
     expect(sourceText(source)).toContain(
       `const FROZEN_CLOCK_SECONDS = ${String(serviceCredential.frozenClockSeconds).replace(/\B(?=(\d{3})+$)/g, '_')}`,
+    )
+  })
+
+  describe('the Rust MAC request', () => {
+    const { rustMacRequest } = fixture as unknown as {
+      rustMacRequest: {
+        source: string
+        acceptSignature: string
+        sharedSecret: ByteField
+        commit: { space: string; data: ByteField }
+        oracle: {
+          parseRequest: string
+          keyShare: string
+          decapsulate: string
+          createCommitMacHeaders: string
+        }
+        responseHeaders: Record<string, string>
+      }
+    }
+
+    it('has the oracle accept the request, derive the same secret and answer it', () => {
+      expect(rustMacRequest.oracle).toEqual({
+        parseRequest: ACCEPTED,
+        keyShare: expect.stringMatching(/^did:key:z/),
+        decapsulate: 'same-secret',
+        createCommitMacHeaders: 'made',
+      })
+      expect(rustMacRequest.acceptSignature).toContain(
+        `keyid="${rustMacRequest.oracle.keyShare}"`,
+      )
+      expect(Object.keys(rustMacRequest.responseHeaders).sort()).toEqual([
+        'atproto-space-commit',
+        'signature',
+        'signature-input',
+      ])
+      expect(rustMacRequest.responseHeaders['atproto-space-commit']).toContain(
+        `space="${rustMacRequest.commit.space}"`,
+      )
+      expect(rustMacRequest.commit.space).toMatch(/^at:space\/did:web:/)
+    })
+
+    it('judges the constants the Rust test pins', () => {
+      expect(rustMacRequest.acceptSignature).toBe(
+        constantIn(rustMacRequest.source, 'FIXED_ACCEPT_SIGNATURE'),
+      )
+      expect(rustMacRequest.sharedSecret.value).toBe(
+        constantIn(rustMacRequest.source, 'FIXED_SHARED_SECRET_BASE64'),
+      )
+    })
+  })
+})
+
+describe('commit mac vectors', () => {
+  const FILE = 'commit-mac.json'
+  const COVERED = 'atproto-space-commit'
+  const ACCEPTED = 'accepted'
+  const REFUSED = /^refused: \S/
+
+  interface MacCase {
+    name: string
+    edit?: Record<string, [string, string]>
+    set?: Record<string, string>
+    remove?: string[]
+    bodyChange?: Record<string, unknown>
+    verdict: string
+  }
+  interface StricterCase extends Omit<MacCase, 'verdict'> {
+    oracleVerdict: string
+    expectedStratos: string
+    reason: string
+  }
+  const fixture = loadFixture(FILE) as FixtureFile & {
+    acceptSignature: string
+    sharedSecret: ByteField
+    commit: {
+      ver: number
+      repo: string
+      space: string
+      rev: string
+      data: ByteField
+    }
+    headers: Record<string, string>
+    cases: MacCase[]
+    stricter: StricterCase[]
+  }
+  const exportFixture = loadFixture(
+    'hpke-export-oracle.json',
+  ) as FixtureFile & {
+    oracleExport: { keyShareDid: string; sharedSecret: ByteField }
+  }
+
+  const EXPECTED_VERDICTS: Array<[string, boolean]> = [
+    ['accepted as made', true],
+    ['under another label', true],
+    ['a second signature of another tag', true],
+    ['alg hmac-sha256 in the request', true],
+    ['extra spaces between members', true],
+    ['members re-ordered with the old mac', false],
+    ['members re-ordered, mac over that order', true],
+    ['an extra member, mac over it', true],
+    ['a member parameter, mac over it', true],
+    ['ver changed in the header only', false],
+    ['repo changed in the header only', false],
+    ['space changed in the header only', false],
+    ['rev changed in the header only', false],
+    ['data changed in the header only', false],
+    ['ver changed in the body only', false],
+    ['repo changed in the body only', false],
+    ['space changed in the body only', false],
+    ['rev changed in the body only', false],
+    ['data changed in the body only', false],
+    ['two tagged members', false],
+    ['no tagged member', false],
+    ['tag atproto-space-repo', false],
+    ['covered component without sf', false],
+    ['an extra covered component', false],
+    ['keyid of another key share', false],
+    ['another alg', false],
+    ['signature of 31 bytes', false],
+    ['covered header missing', false],
+    ['only an Atproto-Space-Mac header', false],
+  ]
+  const EXPECTED_STRICTER = [
+    'ver 2 in header and body',
+    'rev that is not a TID',
+    'data of 31 bytes',
+    'ver as the string "1"',
+  ]
+
+  it('is made and judged by the oracle and reproducible', () => {
+    expect(fixture.header.classification).toBe('upstream-signed-target-uri')
+    expect(fixture.header.upstreamVerified).toBe(true)
+    expect(fixture.header.reproducible).toBe(true)
+  })
+
+  it('uses the key share and secret the export fixture pins', () => {
+    const { keyShareDid, sharedSecret } = exportFixture.oracleExport
+    expect(fixture.sharedSecret).toEqual(sharedSecret)
+    expect(fixture.acceptSignature).toBe(
+      `mac=("atproto-space-commit";sf);keyid="${keyShareDid}";tag="atproto-space-commit"`,
+    )
+    expect(fixture.headers['signature-input']).toBe(fixture.acceptSignature)
+  })
+
+  it('carries an opaque new-form space uri and a 32 byte data digest', () => {
+    expect(fixture.commit.space).toMatch(/^at:space\/did:[^/]+\/[^/]+\/[^/]+$/)
+    expect(fixture.commit.ver).toBe(1)
+    expect(fixture.commit.data.length).toBe(32)
+  })
+
+  it('holds a mac that is the HMAC-SHA256 of the signature base under the secret', () => {
+    const { headers } = fixture
+    const params = /^mac=(.*)$/.exec(headers['signature-input'])?.[1]
+    const base = [
+      `"${COVERED}";sf: ${headers[COVERED]}`,
+      `"@signature-params": ${params}`,
+    ].join('\n')
+    const mac = createHmac(
+      'sha256',
+      Buffer.from(fixture.sharedSecret.value, 'base64'),
+    )
+      .update(base)
+      .digest('base64')
+    expect(headers['signature']).toBe(`mac=:${mac}:`)
+  })
+
+  it('holds one oracle verdict for each case, with the expected outcome', () => {
+    expect(
+      fixture.cases.map((entry) => [entry.name, entry.verdict === ACCEPTED]),
+    ).toEqual(EXPECTED_VERDICTS)
+  })
+
+  it('gives the oracle message for every refusal', () => {
+    for (const entry of fixture.cases) {
+      expect(
+        entry.verdict === ACCEPTED || REFUSED.test(entry.verdict),
+        entry.name,
+      ).toBe(true)
+    }
+  })
+
+  it('changes only headers the accepted response has, or the old mac header', () => {
+    const known = new Set([
+      ...Object.keys(fixture.headers),
+      'acceptSignature',
+      'atproto-space-mac',
+    ])
+    for (const entry of fixture.cases) {
+      const named = [
+        ...Object.keys(entry.edit ?? {}),
+        ...Object.keys(entry.set ?? {}),
+        ...(entry.remove ?? []),
+      ]
+      for (const name of named) expect(known.has(name), entry.name).toBe(true)
+    }
+  })
+
+  it('edits only text the accepted headers hold', () => {
+    const subject: Record<string, string> = {
+      ...fixture.headers,
+      acceptSignature: fixture.acceptSignature,
+    }
+    for (const entry of [...fixture.cases, ...fixture.stricter]) {
+      for (const [name, [from]] of Object.entries(entry.edit ?? {}))
+        expect(subject[name], `${entry.name}: ${name}`).toContain(from)
+    }
+  })
+
+  it('names the stricter cases, which the oracle accepts and Stratos refuses', () => {
+    expect(fixture.stricter.map((entry) => entry.name)).toEqual(
+      EXPECTED_STRICTER,
+    )
+    for (const entry of fixture.stricter) {
+      expect(entry.oracleVerdict, entry.name).toBe(ACCEPTED)
+      expect(entry.expectedStratos, entry.name).toBe('refused')
+      expect(entry.reason, entry.name).toEqual(expect.any(String))
+    }
+  })
+})
+
+describe('kem key vectors', () => {
+  const FILE = 'kem-keys.json'
+  const SYNTHETIC_DID = 'did:plc:spike'
+  const OTHER_DID = 'did:plc:vicioussyndicate'
+
+  interface KemMethod {
+    id: string
+    type: string
+    publicKeyMultibase: string
+  }
+  interface KemCase {
+    name: string
+    document: { id: string; verificationMethod: KemMethod[] }
+    expected: { kemKey?: string; refused?: string }
+    oracleKeyVerdict?: string
+  }
+  const fixture = loadFixture(FILE) as FixtureFile & {
+    did: string
+    cases: KemCase[]
+  }
+  const exportFixture = loadFixture(
+    'hpke-export-oracle.json',
+  ) as FixtureFile & { oracleExport: { authorKemDid: string } }
+  const EXPECTED_OUTCOMES: Array<[string, 'found' | 'refused']> = [
+    ['a Multikey method with a relative id', 'found'],
+    ['the same with an absolute id', 'found'],
+    ['the legacy type with bare key bytes', 'found'],
+    ['a KEM key different from the signing key', 'found'],
+    ['no KEM method', 'refused'],
+    ['a KEM method holding a secp256k1 key', 'refused'],
+    ['a Multikey with a malformed multibase string', 'refused'],
+    ['a document whose id is another DID', 'refused'],
+    ['two methods with the KEM id', 'refused'],
+  ]
+  const byName = (name: string): KemCase => {
+    const found = fixture.cases.find((candidate) => candidate.name === name)
+    if (!found) throw new Error(`no case named ${name}`)
+    return found
+  }
+
+  it('is uri free and judged by the oracle', () => {
+    expect(fixture.header.classification).toBe('upstream-uri-free')
+    expect(fixture.header.upstreamVerified).toBe(true)
+    expect(fixture.header.reproducible).toBe(true)
+  })
+
+  it('holds one outcome for each document', () => {
+    expect(
+      fixture.cases.map((entry) => [
+        entry.name,
+        entry.expected.kemKey ? 'found' : 'refused',
+      ]),
+    ).toEqual(EXPECTED_OUTCOMES)
+    for (const entry of fixture.cases)
+      expect(Object.keys(entry.expected), entry.name).toHaveLength(1)
+  })
+
+  it('writes the one key three ways, and keeps the signing key apart', () => {
+    const relative = byName('a Multikey method with a relative id')
+    const absolute = byName('the same with an absolute id')
+    const legacy = byName('the legacy type with bare key bytes')
+    const different = byName('a KEM key different from the signing key')
+    const [relativeMethod] = relative.document.verificationMethod
+    const [legacyMethod] = legacy.document.verificationMethod
+    expect(relativeMethod.id).toBe('#atproto_kem')
+    expect(absolute.document.verificationMethod[0].id).toBe(
+      `${SYNTHETIC_DID}#atproto_kem`,
+    )
+    expect(legacyMethod.type).toBe('EcdsaSecp256r1VerificationKey2019')
+    expect(relativeMethod.publicKeyMultibase).toMatch(/^zDn/)
+    expect(legacyMethod.publicKeyMultibase).not.toMatch(/^zDn/)
+    expect(relative.expected.kemKey).toBe(
+      exportFixture.oracleExport.authorKemDid,
+    )
+    expect(absolute.expected.kemKey).toBe(relative.expected.kemKey)
+    expect(legacy.expected.kemKey).toBe(relative.expected.kemKey)
+    const [signing, kem] = different.document.verificationMethod
+    expect([signing.id, kem.id]).toEqual(['#atproto', '#atproto_kem'])
+    expect(`did:key:${signing.publicKeyMultibase}`).not.toBe(
+      different.expected.kemKey,
+    )
+    expect(different.expected.kemKey).toBe(relative.expected.kemKey)
+  })
+
+  it('has the oracle refuse the keys it can not use as a P-256 KEM key', () => {
+    expect(
+      byName('a Multikey method with a relative id').oracleKeyVerdict,
+    ).toBe('accepted')
+    for (const name of [
+      'a KEM method holding a secp256k1 key',
+      'a Multikey with a malformed multibase string',
+    ])
+      expect(byName(name).oracleKeyVerdict, name).toMatch(/^refused: \S/)
+  })
+
+  it('names the DID each document describes, except the one that names another', () => {
+    for (const entry of fixture.cases) {
+      const expectedId =
+        entry.name === 'a document whose id is another DID'
+          ? OTHER_DID
+          : SYNTHETIC_DID
+      expect(entry.document.id, entry.name).toBe(expectedId)
+    }
+    expect(fixture.did).toBe(SYNTHETIC_DID)
+  })
+
+  it('gives two methods the same KEM id in the ambiguous document', () => {
+    const { verificationMethod } = byName(
+      'two methods with the KEM id',
+    ).document
+    expect(verificationMethod).toHaveLength(2)
+    expect(verificationMethod.every((m) => m.id.endsWith('#atproto_kem'))).toBe(
+      true,
     )
   })
 })

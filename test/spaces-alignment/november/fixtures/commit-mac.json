@@ -1,0 +1,328 @@
+{
+  "header": {
+    "classification": "upstream-signed-target-uri",
+    "oracle": {
+      "package": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-AasGxXJz1htNRNNR1JL/2v4EV45VvC4UrbY1x/w/cFH0avOHFxhDV0MQMMegVYhSi7DtnkJ1smwDxO6K/W402g=="
+    },
+    "generator": {
+      "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
+      "sha256": "b79ac67e1f8b887fd15e4441a9c967502e206306a91b6a4607045f21b99cb9fe"
+    },
+    "upstreamVerified": true,
+    "reproducible": true
+  },
+  "note": "edit replaces the first text with the second in an accepted header; set overwrites; remove drops; bodyChange alters the commit compared. verdict is the oracle verifyCommitMac verdict. space is an opaque at:space/ claim. stricter: the oracle accepts, Stratos refuses (hand label).",
+  "acceptSignature": "mac=(\"atproto-space-commit\";sf);keyid=\"did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi\";tag=\"atproto-space-commit\"",
+  "sharedSecret": {
+    "encoding": "base64",
+    "value": "2XYP6iF5whnXMOd8HStZcRr/FOrpIZNfLnyoleNwbw4=",
+    "length": 32
+  },
+  "commit": {
+    "ver": 1,
+    "repo": "did:plc:fayevalentine",
+    "space": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew",
+    "rev": "3jzfcijpj2z2d",
+    "data": {
+      "encoding": "base64",
+      "value": "agoKI6VfAyLnrmZiOFhya093wpW3RVR69wv39HqiQw0=",
+      "length": 32
+    }
+  },
+  "headers": {
+    "atproto-space-commit": "ver=1, repo=\"did:plc:fayevalentine\", space=\"at:space/did:web:bebop.example/zone.stratos.space.feed/crew\", rev=\"3jzfcijpj2z2d\", data=:agoKI6VfAyLnrmZiOFhya093wpW3RVR69wv39HqiQw0=:",
+    "signature-input": "mac=(\"atproto-space-commit\";sf);keyid=\"did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi\";tag=\"atproto-space-commit\"",
+    "signature": "mac=:EGpcL4x15ooRBB7cgpRNiuM/k6S9RLbvJmFnuWHwbKk=:"
+  },
+  "cases": [
+    {
+      "name": "accepted as made",
+      "verdict": "accepted"
+    },
+    {
+      "name": "under another label",
+      "edit": {
+        "signature-input": ["mac=", "faye="],
+        "signature": ["mac=", "faye="]
+      },
+      "verdict": "accepted"
+    },
+    {
+      "name": "a second signature of another tag",
+      "edit": {
+        "signature-input": [
+          "mac=",
+          "other=(\"atproto-space-commit\";sf);tag=\"faye-valentine-test\", mac="
+        ],
+        "signature": ["mac=", "other=:Zm9v:, mac="]
+      },
+      "verdict": "accepted"
+    },
+    {
+      "name": "alg hmac-sha256 in the request",
+      "edit": {
+        "acceptSignature": [";tag=", ";alg=\"hmac-sha256\";tag="],
+        "signature-input": [";tag=", ";alg=\"hmac-sha256\";tag="]
+      },
+      "set": {
+        "signature": "mac=:zI4ZnkQwM2+FHyzHoSRQoLrA7eBLP4z3MMCSeO4KB8M=:"
+      },
+      "verdict": "accepted"
+    },
+    {
+      "name": "extra spaces between members",
+      "edit": { "atproto-space-commit": [", ", ",   "] },
+      "verdict": "accepted"
+    },
+    {
+      "name": "members re-ordered with the old mac",
+      "edit": {
+        "atproto-space-commit": [
+          "ver=1, repo=\"did:plc:fayevalentine\"",
+          "repo=\"did:plc:fayevalentine\", ver=1"
+        ]
+      },
+      "verdict": "refused: MAC does not match"
+    },
+    {
+      "name": "members re-ordered, mac over that order",
+      "edit": {
+        "atproto-space-commit": [
+          "ver=1, repo=\"did:plc:fayevalentine\"",
+          "repo=\"did:plc:fayevalentine\", ver=1"
+        ]
+      },
+      "set": {
+        "signature": "mac=:S+sm9JtLI/8ouIAL6HP+NI+EvFXWOOf2T1Rc6ajINlE=:"
+      },
+      "verdict": "accepted"
+    },
+    {
+      "name": "an extra member, mac over it",
+      "edit": {
+        "atproto-space-commit": ["ver=1,", "ver=1, note=\"swordfish\","]
+      },
+      "set": {
+        "signature": "mac=:QkPVSmCS1P0zWQGHzd9G3Ep5SqVLXmV+KFFIlvDSaYU=:"
+      },
+      "verdict": "accepted"
+    },
+    {
+      "name": "a member parameter, mac over it",
+      "edit": { "atproto-space-commit": ["ver=1", "ver=1;note=\"spike\""] },
+      "set": {
+        "signature": "mac=:ERJDdMrBHgadBcS9+zL+0x8bNKa6Cj4fbPjQL0k1dBA=:"
+      },
+      "verdict": "accepted"
+    },
+    {
+      "name": "ver changed in the header only",
+      "edit": { "atproto-space-commit": ["ver=1", "ver=2"] },
+      "verdict": "refused: MAC does not match"
+    },
+    {
+      "name": "repo changed in the header only",
+      "edit": {
+        "atproto-space-commit": [
+          "repo=\"did:plc:fayevalentine\"",
+          "repo=\"did:plc:jetblack\""
+        ]
+      },
+      "verdict": "refused: MAC does not match"
+    },
+    {
+      "name": "space changed in the header only",
+      "edit": {
+        "atproto-space-commit": [
+          "space=\"at:space/did:web:bebop.example/zone.stratos.space.feed/crew\"",
+          "space=\"at:space/did:web:bebop.example/zone.stratos.space.feed/ein\""
+        ]
+      },
+      "verdict": "refused: MAC does not match"
+    },
+    {
+      "name": "rev changed in the header only",
+      "edit": {
+        "atproto-space-commit": [
+          "rev=\"3jzfcijpj2z2d\"",
+          "rev=\"3jzfcijpj2z2c\""
+        ]
+      },
+      "verdict": "refused: MAC does not match"
+    },
+    {
+      "name": "data changed in the header only",
+      "edit": {
+        "atproto-space-commit": [
+          "data=:agoKI6VfAyLnrmZiOFhya093wpW3RVR69wv39HqiQw0=:",
+          "data=:K6uVinsq5fL5bRHMjFQUO1R54OoF4y5+cq2vU1Y+3ng=:"
+        ]
+      },
+      "verdict": "refused: MAC does not match"
+    },
+    {
+      "name": "ver changed in the body only",
+      "bodyChange": { "ver": 2 },
+      "verdict": "refused: commit does not match its MAC"
+    },
+    {
+      "name": "repo changed in the body only",
+      "bodyChange": { "repo": "did:plc:jetblack" },
+      "verdict": "refused: commit does not match its MAC"
+    },
+    {
+      "name": "space changed in the body only",
+      "bodyChange": {
+        "space": "at:space/did:web:bebop.example/zone.stratos.space.feed/ein"
+      },
+      "verdict": "refused: commit does not match its MAC"
+    },
+    {
+      "name": "rev changed in the body only",
+      "bodyChange": { "rev": "3jzfcijpj2z2c" },
+      "verdict": "refused: commit does not match its MAC"
+    },
+    {
+      "name": "data changed in the body only",
+      "bodyChange": {
+        "data": {
+          "encoding": "base64",
+          "value": "K6uVinsq5fL5bRHMjFQUO1R54OoF4y5+cq2vU1Y+3ng=",
+          "length": 32
+        }
+      },
+      "verdict": "refused: commit does not match its MAC"
+    },
+    {
+      "name": "two tagged members",
+      "edit": {
+        "signature-input": [
+          "mac=",
+          "faye=();tag=\"atproto-space-commit\", mac="
+        ]
+      },
+      "verdict": "refused: more than one signature with tag \"atproto-space-commit\""
+    },
+    {
+      "name": "no tagged member",
+      "edit": { "signature-input": [";tag=", ";tug="] },
+      "verdict": "refused: missing or malformed signature with tag \"atproto-space-commit\""
+    },
+    {
+      "name": "tag atproto-space-repo",
+      "edit": {
+        "signature-input": [
+          ";tag=\"atproto-space-commit",
+          ";tag=\"atproto-space-repo"
+        ]
+      },
+      "verdict": "refused: missing or malformed signature with tag \"atproto-space-commit\""
+    },
+    {
+      "name": "covered component without sf",
+      "edit": { "signature-input": ["\";sf)", "\")"] },
+      "verdict": "refused: signature must cover exactly (\"atproto-space-commit\";sf), in order"
+    },
+    {
+      "name": "an extra covered component",
+      "edit": { "signature-input": ["\";sf)", "\";sf \"content-type\")"] },
+      "verdict": "refused: signature must cover exactly (\"atproto-space-commit\";sf), in order"
+    },
+    {
+      "name": "keyid of another key share",
+      "edit": {
+        "signature-input": [
+          "did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi",
+          "did:key:zDnaeWa2Nsx8xsu5Qb8K5eSBXHkBvmauc1pgwZ5mjP92wFr5J"
+        ]
+      },
+      "verdict": "refused: signature keyid does not match the expected key"
+    },
+    {
+      "name": "another alg",
+      "edit": { "signature-input": [";tag=", ";alg=\"ed25519\";tag="] },
+      "verdict": "refused: signature algorithm must be hmac-sha256"
+    },
+    {
+      "name": "signature of 31 bytes",
+      "set": {
+        "signature": "mac=:EGpcL4x15ooRBB7cgpRNiuM/k6S9RLbvJmFnuWHwbA==:"
+      },
+      "verdict": "refused: MAC does not match"
+    },
+    {
+      "name": "covered header missing",
+      "remove": ["atproto-space-commit"],
+      "verdict": "refused: missing or malformed atproto-space-commit header"
+    },
+    {
+      "name": "only an Atproto-Space-Mac header",
+      "set": {
+        "atproto-space-mac": "EGpcL4x15ooRBB7cgpRNiuM/k6S9RLbvJmFnuWHwbKk="
+      },
+      "remove": ["atproto-space-commit", "signature-input", "signature"],
+      "verdict": "refused: missing or malformed signature headers"
+    }
+  ],
+  "stricter": [
+    {
+      "name": "ver 2 in header and body",
+      "edit": { "atproto-space-commit": ["ver=1", "ver=2"] },
+      "set": {
+        "signature": "mac=:zT1aFGgXDMOL3oYi3b1tV/J55lFiI6kp+lh/7GsfI94=:"
+      },
+      "bodyChange": { "ver": 2 },
+      "oracleVerdict": "accepted",
+      "expectedStratos": "refused",
+      "reason": "ver must be the integer 1"
+    },
+    {
+      "name": "rev that is not a TID",
+      "edit": {
+        "atproto-space-commit": ["rev=\"3jzfcijpj2z2d\"", "rev=\"not-a-tid\""]
+      },
+      "set": {
+        "signature": "mac=:bLHogv5h65OPOUb+aijMOhUOm3ufXzbIgg2BdJVaYbo=:"
+      },
+      "bodyChange": { "rev": "not-a-tid" },
+      "oracleVerdict": "accepted",
+      "expectedStratos": "refused",
+      "reason": "rev must be a TID"
+    },
+    {
+      "name": "data of 31 bytes",
+      "edit": {
+        "atproto-space-commit": [
+          "data=:agoKI6VfAyLnrmZiOFhya093wpW3RVR69wv39HqiQw0=:",
+          "data=:agoKI6VfAyLnrmZiOFhya093wpW3RVR69wv39HqiQw==:"
+        ]
+      },
+      "set": {
+        "signature": "mac=:i/wQMRWCW1U9asRZs9icxV0QyiH5SHwE+5Ny19fsjoo=:"
+      },
+      "bodyChange": {
+        "data": {
+          "encoding": "base64",
+          "value": "agoKI6VfAyLnrmZiOFhya093wpW3RVR69wv39HqiQw==",
+          "length": 31
+        }
+      },
+      "oracleVerdict": "accepted",
+      "expectedStratos": "refused",
+      "reason": "data must be exactly 32 bytes"
+    },
+    {
+      "name": "ver as the string \"1\"",
+      "edit": { "atproto-space-commit": ["ver=1", "ver=\"1\""] },
+      "set": {
+        "signature": "mac=:V7hzHAhNXc+WDP8jWnjOkO/FuyAofB8Z15R46q5tKRU=:"
+      },
+      "bodyChange": { "ver": "1" },
+      "oracleVerdict": "accepted",
+      "expectedStratos": "refused",
+      "reason": "the body commit must have exactly typed fields"
+    }
+  ]
+}

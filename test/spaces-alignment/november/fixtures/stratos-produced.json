@@ -8,7 +8,7 @@
     },
     "generator": {
       "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
-      "sha256": "ec50ccbc5a5f7f11decce3682a96d9495e662d20dbdbeb273f49afc35296a720"
+      "sha256": "b79ac67e1f8b887fd15e4441a9c967502e206306a91b6a4607045f21b99cb9fe"
     },
     "upstreamVerified": true,
     "reproducible": true
@@ -36,6 +36,37 @@
     "verdicts": {
       "parse": "accepted",
       "verify": "accepted"
+    }
+  },
+  "rustMacRequest": {
+    "source": "stratos-feedgen-ng/src/space_mac.rs",
+    "acceptSignature": "mac=(\"atproto-space-commit\";sf);keyid=\"did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi\";tag=\"atproto-space-commit\"",
+    "sharedSecret": {
+      "encoding": "base64",
+      "value": "2XYP6iF5whnXMOd8HStZcRr/FOrpIZNfLnyoleNwbw4=",
+      "length": 32
+    },
+    "commit": {
+      "ver": 1,
+      "repo": "did:plc:fayevalentine",
+      "space": "at:space/did:web:nerv.example/zone.stratos.space.feed/tokyo3",
+      "rev": "3jzfcijpj2z2d",
+      "data": {
+        "encoding": "base64",
+        "value": "leq8+PrKkqIGIZOb6faBC5ZQVo6QWd7gWU+DYYA2Gvc=",
+        "length": 32
+      }
+    },
+    "oracle": {
+      "parseRequest": "accepted",
+      "keyShare": "did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi",
+      "decapsulate": "same-secret",
+      "createCommitMacHeaders": "made"
+    },
+    "responseHeaders": {
+      "atproto-space-commit": "ver=1, repo=\"did:plc:fayevalentine\", space=\"at:space/did:web:nerv.example/zone.stratos.space.feed/tokyo3\", rev=\"3jzfcijpj2z2d\", data=:leq8+PrKkqIGIZOb6faBC5ZQVo6QWd7gWU+DYYA2Gvc=:",
+      "signature-input": "mac=(\"atproto-space-commit\";sf);keyid=\"did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi\";tag=\"atproto-space-commit\"",
+      "signature": "mac=:itUXEGMO6im3tCI8E5KcrMuDyb4WKyqO3hh28tdfiuk=:"
     }
   },
   "serviceCredential": {

@@ -14,7 +14,7 @@ bs58 = "0.5"
 cid = "0.11"
 futures-util = "0.3"
 libc = "0.2"
-p256 = { version = "0.13", features = ["ecdsa"] }
+p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
 k256 = { version = "0.13", features = ["ecdsa"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 serde = { version = "1", features = ["derive"] }
@@ -29,6 +29,9 @@ url = "2"
 serde_urlencoded = "0.7"
 sha2 = "0.10"
 hmac = "0.12"
+hkdf = "0.12"
+sfv = "0.16"
+zeroize = "1"
 multihash = "0.19"
 opentelemetry = { version = "0.33", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["metrics"] }

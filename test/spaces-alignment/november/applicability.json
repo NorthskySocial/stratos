@@ -26,7 +26,7 @@
       ],
       "workstream": "sync-recovery",
       "decision": "The Rust consumer decodes the listRepoOps page with an optional commit; later work requires the commit on every page and keeps custom zone.stratos response shapes unchanged.",
-      "evidence": "stratos-feedgen-ng/src/space_host.rs:393-399 RawPage with an optional commit; pds_space_sync.rs:256-268 verifies only after the terminal page."
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:619-625 RawPage with an optional commit; pds_space_sync.rs:257-268 verifies only after the terminal page."
     },
     {
       "id": "prompt-1c-error-renames",
@@ -172,27 +172,30 @@
       ],
       "workstream": "credential-transport",
       "decision": "The service presentation verifier selects the one signature tagged atproto-space-credential under any label and requires the two covered components in order, and the Rust signer emits that tagged signature under the label sig with the Atproto-Space-Credential scheme; the old scheme and the fixed label are not recognised. The custom mint exchange keeps its own label, one covered component and keyid, in separate functions in both languages, and the service refuses an exchange proof on a read route and a presentation proof on the mint route. Cross-checked, not run on a real host: the upstream package accepts the Rust-signed presentation (stratos-produced.json) and gives the same verdict as the service verifier on every vector (credential-signature.json).",
-      "evidence": "stratos-service/src/infra/auth/space-http-signature.ts:28-33 constants, :39 verifySpaceExchangeSignature (refuses the credential tag at :50) and :82-139 verifySpacePresentationSignature (tag selection :89-92, covered components :113); stratos-service/src/infra/auth/verifiers.ts:411-419 recognises only the new scheme and :539 verifies the presentation; stratos-feedgen-ng/src/space_http_signature.rs:8-11 constants, :58-69 exchange_headers and :71-83 presentation_headers; stratos-feedgen-ng/src/space_host.rs:185-192 sends the presentation headers."
+      "evidence": "stratos-service/src/infra/auth/space-http-signature.ts:28-33 constants, :39 verifySpaceExchangeSignature (refuses the credential tag at :50) and :82-139 verifySpacePresentationSignature (tag selection :89-92, covered components :113); stratos-service/src/infra/auth/verifiers.ts:411-419 recognises only the new scheme and :539 verifies the presentation; stratos-feedgen-ng/src/space_http_signature.rs:8-11 constants, :58-69 exchange_headers and :71-83 presentation_headers; stratos-feedgen-ng/src/space_host.rs:192-200 sends the presentation headers."
     },
     {
       "id": "prompt-6a-shared-secret",
       "promptSection": "6a",
       "surface": "HPKE secret export for the MAC shared secret",
-      "ownership": "absent",
-      "paths": [],
+      "ownership": "production-owned",
+      "paths": ["stratos-feedgen-ng/src/space_kem.rs"],
       "workstream": "response-authentication",
-      "decision": "The Rust consumer has no KEM key discovery or shared secret; add HPKE export-only derivation there.",
-      "evidence": "rg -n -i 'hpke|hkdf|kem|key_share' stratos-feedgen-ng/src returns nothing."
+      "decision": "The feed generator derives the MAC shared secret the way the upstream package does, with no HPKE crate: P-256 ECDH between a fresh one-time key and the author's KEM key, then the labelled HKDF steps of the one export-only suite (P-256 KEM, HKDF-SHA256) with the export context atproto-mac, 32 bytes. encapsulate makes a new one-time key on every call and returns a RequestSecret whose secret is zeroed on drop, whose Debug redacts it and whose secret code outside the crate cannot read. Cross-checked, not run on a real host: the RFC 9180 export-only entry (hpke-export-rfc.json), the pinned package's secret for a fixed key pair and its MAC under the Rust-derived secret (hpke-export-oracle.json, commit-mac.json), and the pinned package deriving the same secret from the Rust request header (stratos-produced.json). The derivation is not called by the synchronizer; only the authenticated read in space_host.rs uses it, and nothing calls that read.",
+      "evidence": "stratos-feedgen-ng/src/space_kem.rs:20 MAC_EXPORT_INFO, :106-129 RequestSecret, its crate-private secret accessor (:116) and its redacting Debug, with the doc example at :99-105 that must fail to compile outside the crate, :132-134 encapsulate, :169-185 encapsulate_with, :261-266 key_schedule_context, :268-275 derive_exporter_secret, :277-289 export and :291-302 derive_export; the tests at :358 (RFC entry), :424 (oracle key share and secret) and :455 (oracle commit MAC under the Rust secret); rg -n 'list_repo_ops_authenticated' stratos-feedgen-ng/src finds only its definition at stratos-feedgen-ng/src/space_host.rs:215 and no caller."
     },
     {
       "id": "prompt-6b-mac-request",
       "promptSection": "6b",
       "surface": "Accept-Signature MAC request",
-      "ownership": "absent",
-      "paths": [],
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/space_mac.rs",
+        "stratos-feedgen-ng/src/space_host.rs"
+      ],
       "workstream": "response-authentication",
-      "decision": "No MAC request header is sent by the Rust host client.",
-      "evidence": "rg -n -i 'accept-signature|want-mac' stratos-feedgen-ng/src returns nothing; requests at stratos-feedgen-ng/src/space_host.rs:185-193 carry no MAC request."
+      "decision": "MacRequestContext::accept_signature builds the request value mac=(\"atproto-space-commit\";sf);keyid=\"<key share>\";tag=\"atproto-space-commit\", and the authenticated read in space_host.rs sends it as Accept-Signature with the same credential presentation headers as the existing read, one fresh key share per request, page and retry. The existing list_repo_ops and repo_request, which the synchronizer calls, still send no MAC request, so production sends none today. Cross-checked, not run on a real host: the pinned package's own request text for the fixed key share equals the Rust one (commit-mac.json), and its parser accepts the Rust request and derives the same secret (stratos-produced.json). The real send path of PinnedSpaceHostClient and its collection of response header lines are read, not exercised by a test; the tests use an in-process transport that proves flow only.",
+      "evidence": "stratos-feedgen-ng/src/space_mac.rs:58-64 accept_signature; stratos-feedgen-ng/src/space_host.rs:311-333 the send that adds the header (:319) after repo_request (:172-201), and :337-344 header_lines; :346-368 authenticated_read and :377 the new key per attempt; rg -n -i 'accept-signature' stratos-feedgen-ng/src finds two lines outside the test modules, the send at space_host.rs:319 and the doc comment of accept_signature at space_mac.rs:58, and one in a test (space_host.rs:1139)."
     },
     {
       "id": "prompt-6c-mac-response",
@@ -201,8 +204,8 @@
       "ownership": "absent",
       "paths": [],
       "workstream": "response-authentication",
-      "decision": "Stratos serves no MAC-bearing space responses.",
-      "evidence": "rg -n -i 'atproto-space-commit|atproto-space-record|Signature-Input' stratos-service/src finds only request-signature handling for credentials: the verifier (stratos-service/src/infra/auth/space-http-signature.ts:52 and :107), the proof check in stratos-service/src/infra/auth/verifiers.ts:546, the credential handler's header probe at stratos-service/src/features/space-credential/handler.ts:289 and the CORS header list at stratos-service/src/index.ts:204."
+      "decision": "Stratos serves no MAC-bearing space responses; the feed generator verifies them (see prompt-6d-mac-verification) but serves none.",
+      "evidence": "rg -n -i 'atproto-space-commit|atproto-space-record|Signature-Input' stratos-service/src finds only request-signature handling for credentials: the presentation parser's header read (stratos-service/src/infra/auth/space-http-signature.ts:154) and its list of allowed request headers (:197), the proof check in stratos-service/src/infra/auth/verifiers.ts:551, the credential handler's header probe at stratos-service/src/features/space-credential/handler.ts:289 and the CORS header list at stratos-service/src/index.ts:204."
     },
     {
       "id": "prompt-6d-mac-verification",
@@ -211,11 +214,15 @@
       "ownership": "production-owned",
       "paths": [
         "stratos-feedgen-ng/src/space_commit.rs",
-        "stratos-feedgen-ng/src/space_host.rs"
+        "stratos-feedgen-ng/src/space_host.rs",
+        "stratos-feedgen-ng/src/space_mac.rs",
+        "stratos-feedgen-ng/src/space_signature_fields.rs",
+        "stratos-feedgen-ng/src/pds_space_sync.rs",
+        "stratos-feedgen-ng/src/pds_space_scheduler.rs"
       ],
       "workstream": "response-authentication",
-      "decision": "The Rust verifier checks an ikm and mac inside the commit body; replace it with response-header verification, never keeping the old format.",
-      "evidence": "stratos-feedgen-ng/src/space_commit.rs:113-120 SignedSpaceCommit has hash, ikm, mac, signature."
+      "decision": "Two verifiers exist and only the old one is the production path. The old verifier in space_commit.rs checks an ikm and mac inside the commit body, and pds_space_sync.rs hands it the commit from the page body; a host that answers only with the response headers is refused with InvalidSpaceMac or returns a commit the old verifier rejects as malformed, nothing is promoted, and the scheduler logs one line per cycle counting failed targets by a fixed list of reasons, never host text. The new verifier, verify_commit_response in space_mac.rs, reads the Atproto-Space-Commit, Signature-Input and Signature response headers against the one-time key of its own request: exactly one member tagged atproto-space-commit that covers only that header, HMAC-SHA256 over the header re-serialized in the order received compared in constant time, then the five commit fields equal the body's commit and repo and space equal the request's. It is stricter than the pinned package on purpose: a byte sequence in any of the three headers must be the padded base64 of its bytes and no value or parameter may be a decimal, because the package MACs a byte sequence's text as received and writes 1.0 as 1, while the Rust serializer writes the padded bytes and keeps 1.0; such a header is refused as invalid before the MAC, not as a MAC mismatch, so it never triggers the key refresh. It returns a MacVerifiedCommit that only space_mac.rs can make, and the authenticated read in space_host.rs hands back a body only together with one. The synchronizer calls neither, nothing converts between the two verdicts and nothing falls back from one to the other. Still to do: replace the old verifier with the new one in the synchronizer and delete space_commit.rs; op decoding, the set hash and comparing the commit's data with the finished state are not part of the new read. Cross-checked, not run on a real host: every response case of commit-mac.json gets the pinned package's verdict, and the pinned package's response headers for the Rust request verify (stratos-produced.json).",
+      "evidence": "stratos-feedgen-ng/src/space_commit.rs:113-120 SignedSpaceCommit has hash, ikm, mac, signature, and stratos-feedgen-ng/src/pds_space_sync.rs:261-268 calls the verifier through the commit port with the old commit; stratos-feedgen-ng/src/space_mac.rs:79-84 MacVerifiedCommit and :194-263 verify_commit_response, which parses the three headers before anything else (:199-201); stratos-feedgen-ng/src/space_host.rs:215-231 list_repo_ops_authenticated, :236-249 AuthenticatedPage and :346-368 authenticated_read; stratos-feedgen-ng/src/space_signature_fields.rs:35-53 parse_dictionary with the decimal rule at :46-48 and the byte-sequence rule at :49-51, :73-103 the scan for the received text of byte sequences, and :117-143 members_with_tag; the reasons list at pds_space_scheduler.rs:26-32 and its line at :281; rg -n 'space_mac|space_kem|space_identity|MacVerifiedCommit' stratos-feedgen-ng/src/pds_space_sync.rs stratos-feedgen-ng/src/main.rs finds nothing."
     },
     {
       "id": "prompt-6e-repo-host-mac",
@@ -250,8 +257,8 @@
         "stratos-feedgen-ng/src/pds_space_sync.rs"
       ],
       "workstream": "sync-recovery",
-      "decision": "Today the consumer verifies only against the commit of the terminal page and has no RepoNotFound handling, so a RepoNotFound answer surfaces as a host error. Later work verifies the commit on every page and maps RepoNotFound to an empty repo.",
-      "evidence": "stratos-feedgen-ng/src/space_host.rs:173 requests com.atproto.space.listRepoOps; stratos-feedgen-ng/src/pds_space_sync.rs:257-268 verifies after the terminal page; rg -n 'RepoNotFound' stratos-feedgen-ng/src returns nothing."
+      "decision": "Today the consumer verifies only against the commit of the terminal page and has no RepoNotFound handling, so a RepoNotFound answer surfaces as a host error that fails the target and is counted under repo_not_found in the scheduler's log line. Later work verifies the commit on every page and maps RepoNotFound to an empty repo.",
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:180 names the com.atproto.space.listRepoOps endpoint; stratos-feedgen-ng/src/pds_space_sync.rs:257-268 verifies after the terminal page; rg -n 'RepoNotFound' stratos-feedgen-ng/src finds the name only in the scheduler's fixed list of reasons a failed target is counted under (stratos-feedgen-ng/src/pds_space_scheduler.rs:31) and in that list's test (:965); nothing else handles the error."
     },
     {
       "id": "prompt-7c-garbage-collection",
@@ -354,7 +361,7 @@
       "ownership": "external-library-owned",
       "paths": ["stratos-service/package.json", "stratos-client/package.json"],
       "workstream": "response-authentication",
-      "decision": "No call to hkdfSha256 exists; HPKE work happens in Rust, so the TypeScript packages stay on their stable ranges.",
+      "decision": "No call to hkdfSha256 or extractKemKey exists in the TypeScript packages; the HPKE derivation and the KEM key discovery are in Rust (space_kem.rs, space_identity.rs) on RustCrypto crates, so the TypeScript packages stay on their stable ranges.",
       "evidence": "rg -n 'hkdfSha256|extractKemKey' stratos-core/src stratos-service/src stratos-client/src returns nothing."
     },
     {
@@ -422,7 +429,7 @@
       "paths": ["stratos-feedgen-ng/src/space_host.rs"],
       "workstream": "verified-state",
       "decision": "RawOp keeps rev, collection, rkey and cid but has no prev, so op chains cannot be verified; add prev handling.",
-      "evidence": "stratos-feedgen-ng/src/space_host.rs:401-409 RawOp."
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:627-635 RawOp."
     },
     {
       "id": "prerequisite-terminal-revision",
@@ -465,11 +472,15 @@
       "id": "prerequisite-kem-key-discovery",
       "promptSection": "prerequisite:2026-10-22",
       "surface": "Author #atproto_kem key discovery",
-      "ownership": "absent",
-      "paths": [],
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/space_identity.rs",
+        "stratos-feedgen-ng/src/identity.rs",
+        "stratos-feedgen-ng/src/space_kem.rs"
+      ],
       "workstream": "response-authentication",
-      "decision": "The base resolves no KEM key from a DID document; the Rust consumer adds that with the HPKE work.",
-      "evidence": "rg -n 'atproto_kem' production source returns nothing."
+      "decision": "KEM key discovery exists, apart from signing-key discovery. AuthorKemKeyResolver in space_identity.rs has two named operations, cached and refreshed. HttpIdentityKeyResolver in identity.rs implements it on the same document fetch, address checks, timeout, redirect denial and size bound as signing keys, with a cache and in-flight entry keyed by kind and DID, so a signing lookup can never read a KEM entry; the cached and the refreshed operation each call the shared resolution directly and share one result mapper. kem_key_from_document takes the one verification method whose id is #atproto_kem or {did}#atproto_kem, of type Multikey (multibase key with the P-256 multicodec) or EcdsaSecp256r1VerificationKey2019 (read as base58btc of the bare key bytes only); the key must be a valid P-256 point. It is stricter than upstream: the document id must equal the DID and exactly one KEM method may exist. A did:key author has no KEM key. A missing, wrong-curve, wrong-type or malformed key is a failed target and an unreachable resolver is a deferred one. Checked against the key forms of kem-keys.json, made by the pinned package's crypto library; not run against a real DID document or PLC entry. Only the authenticated read uses it, and nothing calls that read.",
+      "evidence": "stratos-feedgen-ng/src/space_identity.rs:51-58 the trait and :95-119 kem_key_from_document; stratos-feedgen-ng/src/identity.rs:56-59 KeyKind, :158-173 the trait implementation, :175-183 kem_key_lookup_result, the result mapper both operations share, and :282 the KEM branch of fetch_key; stratos-feedgen-ng/src/space_kem.rs:63-77 from_multikey; rg -n 'atproto_kem' stratos-feedgen-ng/src finds, outside the test modules, the method id constant at space_identity.rs:12 and doc comments at space_identity.rs:1, space_identity.rs:94 and space_kem.rs:47, and no signing-key code."
     },
     {
       "id": "custom-zone-space-list-repos",
@@ -1021,11 +1032,12 @@
         "stratos-feedgen-ng/src/space_host.rs",
         "stratos-feedgen-ng/src/pds_space_sync.rs",
         "stratos-feedgen-ng/src/space_commit.rs",
-        "stratos-feedgen-ng/src/service_auth.rs"
+        "stratos-feedgen-ng/src/service_auth.rs",
+        "stratos-feedgen-ng/src/space_mac.rs"
       ],
       "workstream": "canonical-uri",
-      "decision": "The string the feed generator sends, signs and verifies against has one source, boundary_to_space_uri. space_host.rs sends the target space URI as the space query parameter of listRepoOps after validate_request checks only that it is non-empty and at most 2048 bytes; the grammar is checked at the target, in space_sync.rs validate_target. pds_space_sync.rs carries target.space_uri unchanged: it looks the cursor up and stages and discards pages by it, keys the per-target lock on it and passes it to commit verification. space_commit.rs commit_context puts the space URI bytes, length-prefixed, into the context that the commit MAC and signature are checked against, so a commit verifies only when the string is byte for byte the one the commit was made over; a commit made over the earlier spelling fails with a MAC mismatch and is not promoted, and no code retries in another spelling. service_auth.rs mint_space_delegation signs the space URI as the delegation sub claim, and a signed claim is never rewritten. The respelling changed no logic in these four files (the audience fragment constant in service_auth.rs came later: see prerequisite-token-audience); tests made in the tests with test keys pin the parameter, the delegation sub and the rejected commit.",
-      "evidence": "stratos-feedgen-ng/src/space_host.rs:165-201 repo_request and :281-298 validate_request; stratos-feedgen-ng/src/pds_space_sync.rs:200-202 cursor lookup, :229 and :247 stage, :257-268 verify and :320 lock key; stratos-feedgen-ng/src/space_commit.rs:45-93 verify and :228-250 commit_context; stratos-feedgen-ng/src/service_auth.rs:98-129 mint_space_delegation; the tests at space_host.rs:660, service_auth.rs:302 and space_commit.rs:394."
+      "decision": "The string the feed generator sends, signs and verifies against has one source, boundary_to_space_uri. space_host.rs sends the target space URI as the space query parameter of listRepoOps after validate_request checks only that it is non-empty and at most 2048 bytes; the grammar is checked at the target, in space_sync.rs validate_target. pds_space_sync.rs carries target.space_uri unchanged: it looks the cursor up and stages and discards pages by it, keys the per-target lock on it and passes it to commit verification. space_commit.rs commit_context puts the space URI bytes, length-prefixed, into the context that the commit MAC and signature are checked against, so a commit verifies only when the string is byte for byte the one the commit was made over; a commit made over the earlier spelling fails with a MAC mismatch and is not promoted, and no code retries in another spelling. service_auth.rs mint_space_delegation signs the space URI as the delegation sub claim, and a signed claim is never rewritten. space_mac.rs, the response-header verifier that the synchronizer does not call yet, compares the commit's space and the request's space as bytes after the MAC checks, and a response made for another space is refused as a request mismatch; it parses no URI. The respelling changed no logic in the four files before it (the audience fragment constant in service_auth.rs came later: see prerequisite-token-audience); tests made in the tests with test keys pin the parameter, the delegation sub and the rejected commit.",
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:172-201 repo_request and :507-523 validate_request; stratos-feedgen-ng/src/pds_space_sync.rs:200-202 cursor lookup, :229 and :247 stage, :257-268 verify and :320 lock key; stratos-feedgen-ng/src/space_commit.rs:45-93 verify and :228-250 commit_context; stratos-feedgen-ng/src/service_auth.rs:98-129 mint_space_delegation; the tests at space_host.rs:886, service_auth.rs:302 and space_commit.rs:394; stratos-feedgen-ng/src/space_mac.rs:254-256 the space and repo comparison."
     },
     {
       "id": "uri-lexicon-uri-fields",

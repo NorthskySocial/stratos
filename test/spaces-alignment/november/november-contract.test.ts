@@ -228,6 +228,7 @@ const KNOWN_URI_CONSUMERS: Record<string, string> = {
   'stratos-feedgen-ng/src/space_host.rs': 'uri-rust-space-host-requests',
   'stratos-feedgen-ng/src/pds_space_sync.rs': 'uri-rust-space-host-requests',
   'stratos-feedgen-ng/src/space_commit.rs': 'uri-rust-space-host-requests',
+  'stratos-feedgen-ng/src/space_mac.rs': 'uri-rust-space-host-requests',
   'stratos-feedgen-ng/src/service_auth.rs': 'uri-rust-space-host-requests',
   'stratos-feedgen-ng/src/label_poller.rs': 'uri-label-page-parsing',
   'stratos-core/src/validation/post-validator.ts':

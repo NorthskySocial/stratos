@@ -11,7 +11,11 @@ use serde::Deserialize;
 use tokio::sync::{Notify, futures::OwnedNotified};
 use url::Url;
 
-use crate::auth::{IdentityKeyResolver, IdentityResolutionError};
+use crate::{
+    auth::{IdentityKeyResolver, IdentityResolutionError},
+    space_identity::{AuthorKemKeyResolver, KemKeyLookupError, is_did_key, kem_key_from_document},
+    space_kem::AuthorKemKey,
+};
 
 const DEFAULT_PLC_URL: &str = "https://plc.directory";
 const RESOLVER_TIMEOUT: Duration = Duration::from_secs(3);
@@ -24,9 +28,64 @@ const CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_IN_FLIGHT_RESOLUTIONS: usize = 128;
 
 pub struct HttpIdentityKeyResolver {
+    documents: Arc<dyn DidDocumentSource>,
+    state: Arc<Mutex<ResolverState>>,
+}
+
+#[async_trait]
+pub(crate) trait DidDocumentSource: Send + Sync {
+    async fn fetch(&self, did: &str) -> Result<String, IdentityResolutionError>;
+}
+
+struct NetworkDocuments {
     plc_url: Url,
     plc_private_cidrs: Vec<PrivateCidr>,
-    state: Arc<Mutex<ResolverState>>,
+}
+
+#[async_trait]
+impl DidDocumentSource for NetworkDocuments {
+    async fn fetch(&self, did: &str) -> Result<String, IdentityResolutionError> {
+        let url = did_document_url(did, &self.plc_url)?;
+        let private_cidrs =
+            private_cidrs_for_document(did, &url, &self.plc_url, &self.plc_private_cidrs);
+        fetch_document(url, private_cidrs).await
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum KeyKind {
+    Signing,
+    Kem,
+}
+
+// Both kinds share one cache and one in-flight table. The kind is part of the
+// key, so no string can name an entry of the other kind. A bare string is only
+// ever a signing key; KEM entries are only built from `KeyKind::Kem`.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct CacheKey {
+    kind: KeyKind,
+    did: String,
+}
+
+impl CacheKey {
+    fn new(kind: KeyKind, did: &str) -> Self {
+        Self {
+            kind,
+            did: did.to_owned(),
+        }
+    }
+}
+
+impl From<&str> for CacheKey {
+    fn from(did: &str) -> Self {
+        Self::new(KeyKind::Signing, did)
+    }
+}
+
+impl From<&String> for CacheKey {
+    fn from(did: &String) -> Self {
+        Self::new(KeyKind::Signing, did)
+    }
 }
 
 impl HttpIdentityKeyResolver {
@@ -45,10 +104,81 @@ impl HttpIdentityKeyResolver {
             .transpose()?
             .unwrap_or_default();
         Ok(Self {
-            plc_url,
-            plc_private_cidrs,
+            documents: Arc::new(NetworkDocuments {
+                plc_url,
+                plc_private_cidrs,
+            }),
             state: Arc::new(Mutex::new(ResolverState::new())),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_document_source(documents: Arc<dyn DidDocumentSource>) -> Self {
+        Self {
+            documents,
+            state: Arc::new(Mutex::new(ResolverState::new())),
+        }
+    }
+
+    async fn resolve_entry(
+        &self,
+        kind: KeyKind,
+        did: &str,
+        force_refresh: bool,
+    ) -> Result<String, IdentityResolutionError> {
+        let cache_key = CacheKey::new(kind, did);
+        match self.begin_resolution(cache_key.clone(), force_refresh) {
+            Resolution::Cached(key) => Ok(key),
+            Resolution::Rejected => Err(IdentityResolutionError::Unavailable),
+            Resolution::Wait(flight, notified) => wait_for_flight(flight, notified).await,
+            Resolution::Fetch(flight) => {
+                let did = did.to_owned();
+                let documents = Arc::clone(&self.documents);
+                let state = Arc::clone(&self.state);
+                let owner = Arc::clone(&flight);
+                tokio::spawn(async move {
+                    let result = fetch_key(documents.as_ref(), kind, &did).await;
+                    if let Ok(key) = &result {
+                        state
+                            .lock()
+                            .expect("identity cache poisoned")
+                            .cache
+                            .insert(cache_key.clone(), key);
+                    }
+                    complete_flight(&state, cache_key, &owner, result);
+                });
+                let notified = Arc::clone(&flight.notify).notified_owned();
+                wait_for_flight(flight, notified).await
+            }
+        }
+    }
+}
+
+// A did:key author has no KEM key, so neither lookup fetches anything for one.
+#[async_trait]
+impl AuthorKemKeyResolver for HttpIdentityKeyResolver {
+    async fn author_kem_key(&self, did: &str) -> Result<AuthorKemKey, KemKeyLookupError> {
+        if is_did_key(did) {
+            return Err(KemKeyLookupError::Invalid);
+        }
+        kem_key_lookup_result(self.resolve_entry(KeyKind::Kem, did, false).await)
+    }
+
+    async fn refreshed_author_kem_key(&self, did: &str) -> Result<AuthorKemKey, KemKeyLookupError> {
+        if is_did_key(did) {
+            return Err(KemKeyLookupError::Invalid);
+        }
+        kem_key_lookup_result(self.resolve_entry(KeyKind::Kem, did, true).await)
+    }
+}
+
+fn kem_key_lookup_result(
+    resolved: Result<String, IdentityResolutionError>,
+) -> Result<AuthorKemKey, KemKeyLookupError> {
+    match resolved {
+        Ok(did_key) => AuthorKemKey::from_did_key(&did_key).map_err(|_| KemKeyLookupError::Invalid),
+        Err(IdentityResolutionError::Unavailable) => Err(KemKeyLookupError::Unavailable),
+        Err(_) => Err(KemKeyLookupError::Invalid),
     }
 }
 
@@ -62,31 +192,8 @@ impl IdentityKeyResolver for HttpIdentityKeyResolver {
         if did.starts_with("did:key:") {
             return Ok(did.to_owned());
         }
-        match self.begin_resolution(did, force_refresh) {
-            Resolution::Cached(key) => Ok(key),
-            Resolution::Rejected => Err(IdentityResolutionError::Unavailable),
-            Resolution::Wait(flight, notified) => wait_for_flight(flight, notified).await,
-            Resolution::Fetch(flight) => {
-                let did = did.to_owned();
-                let plc_url = self.plc_url.clone();
-                let plc_private_cidrs = self.plc_private_cidrs.clone();
-                let state = Arc::clone(&self.state);
-                let owner = Arc::clone(&flight);
-                tokio::spawn(async move {
-                    let result = fetch_key(&plc_url, &plc_private_cidrs, &did).await;
-                    if let Ok(key) = &result {
-                        state
-                            .lock()
-                            .expect("identity cache poisoned")
-                            .cache
-                            .insert(&did, key);
-                    }
-                    complete_flight(&state, &did, &owner, result);
-                });
-                let notified = Arc::clone(&flight.notify).notified_owned();
-                wait_for_flight(flight, notified).await
-            }
-        }
+        self.resolve_entry(KeyKind::Signing, did, force_refresh)
+            .await
     }
 }
 
@@ -99,7 +206,7 @@ enum Resolution {
 
 struct ResolverState {
     cache: IdentityKeyCache,
-    in_flight: BTreeMap<String, Arc<ResolutionFlight>>,
+    in_flight: BTreeMap<CacheKey, Arc<ResolutionFlight>>,
 }
 
 impl ResolverState {
@@ -126,12 +233,13 @@ impl ResolutionFlight {
 }
 
 impl HttpIdentityKeyResolver {
-    fn begin_resolution(&self, did: &str, force_refresh: bool) -> Resolution {
+    fn begin_resolution(&self, key: impl Into<CacheKey>, force_refresh: bool) -> Resolution {
+        let key = key.into();
         let mut state = self.state.lock().expect("identity cache poisoned");
-        if !force_refresh && let Some(key) = state.cache.get(did) {
+        if !force_refresh && let Some(key) = state.cache.get(key.clone()) {
             return Resolution::Cached(key);
         }
-        if let Some(flight) = state.in_flight.get(did) {
+        if let Some(flight) = state.in_flight.get(&key) {
             let flight = Arc::clone(flight);
             let notified = Arc::clone(&flight.notify).notified_owned();
             return Resolution::Wait(flight, notified);
@@ -140,7 +248,7 @@ impl HttpIdentityKeyResolver {
             return Resolution::Rejected;
         }
         let flight = Arc::new(ResolutionFlight::new());
-        state.in_flight.insert(did.to_owned(), Arc::clone(&flight));
+        state.in_flight.insert(key, Arc::clone(&flight));
         Resolution::Fetch(flight)
     }
 }
@@ -164,14 +272,17 @@ async fn wait_for_flight(
 }
 
 async fn fetch_key(
-    plc_url: &Url,
-    plc_private_cidrs: &[PrivateCidr],
+    documents: &dyn DidDocumentSource,
+    kind: KeyKind,
     did: &str,
 ) -> Result<String, IdentityResolutionError> {
-    let url = did_document_url(did, plc_url)?;
-    let private_cidrs = private_cidrs_for_document(did, &url, plc_url, plc_private_cidrs);
-    let document = fetch_document(url, private_cidrs).await?;
-    did_key_from_document(did, &document)
+    let document = documents.fetch(did).await?;
+    match kind {
+        KeyKind::Signing => did_key_from_document(did, &document),
+        KeyKind::Kem => kem_key_from_document(did, &document)
+            .map(|key| key.did_key())
+            .map_err(|_| IdentityResolutionError::InvalidDocument),
+    }
 }
 
 fn private_cidrs_for_document<'a>(
@@ -185,18 +296,19 @@ fn private_cidrs_for_document<'a>(
 
 fn complete_flight(
     state: &Arc<Mutex<ResolverState>>,
-    did: &str,
+    key: impl Into<CacheKey>,
     flight: &Arc<ResolutionFlight>,
     result: Result<String, IdentityResolutionError>,
 ) {
+    let key = key.into();
     *flight.result.lock().expect("identity flight poisoned") = Some(result);
     let mut state = state.lock().expect("identity cache poisoned");
     if state
         .in_flight
-        .get(did)
+        .get(&key)
         .is_some_and(|current| Arc::ptr_eq(current, flight))
     {
-        state.in_flight.remove(did);
+        state.in_flight.remove(&key);
     }
     drop(state);
     flight.notify.notify_waiters();
@@ -486,7 +598,7 @@ pub(crate) fn is_public_address(address: IpAddr) -> bool {
 }
 
 struct IdentityKeyCache {
-    entries: BTreeMap<String, CachedKey>,
+    entries: BTreeMap<CacheKey, CachedKey>,
     bytes: usize,
     capacity: usize,
     max_entries: usize,
@@ -511,11 +623,12 @@ impl IdentityKeyCache {
         }
     }
 
-    fn get(&mut self, did: &str) -> Option<String> {
+    fn get(&mut self, key: impl Into<CacheKey>) -> Option<String> {
+        let key = key.into();
         let now = SystemTime::now();
-        let entry = self.entries.get_mut(did)?;
+        let entry = self.entries.get_mut(&key)?;
         if entry.expires_at <= now {
-            self.remove(did);
+            self.remove(&key);
             return None;
         }
         if entry.stale_at <= now {
@@ -526,9 +639,10 @@ impl IdentityKeyCache {
         Some(entry.key.clone())
     }
 
-    fn insert(&mut self, did: &str, key: &str) {
-        self.remove(did);
-        let weight = cache_weight(did, key);
+    fn insert(&mut self, entry_key: impl Into<CacheKey>, key: &str) {
+        let entry_key = entry_key.into();
+        self.remove(&entry_key);
+        let weight = cache_weight(&entry_key, key);
         if weight > self.capacity || self.max_entries == 0 {
             return;
         }
@@ -539,7 +653,7 @@ impl IdentityKeyCache {
                 .entries
                 .iter()
                 .min_by_key(|(_, entry)| entry.last_access)
-                .map(|(did, _)| did.clone())
+                .map(|(entry_key, _)| entry_key.clone())
             else {
                 return;
             };
@@ -549,7 +663,7 @@ impl IdentityKeyCache {
         self.next_access = self.next_access.wrapping_add(1);
         self.bytes += weight;
         self.entries.insert(
-            did.to_owned(),
+            entry_key,
             CachedKey {
                 key: key.to_owned(),
                 stale_at: now + CACHE_STALE_TTL,
@@ -559,15 +673,15 @@ impl IdentityKeyCache {
         );
     }
 
-    fn remove(&mut self, did: &str) {
-        if let Some(entry) = self.entries.remove(did) {
-            self.bytes -= cache_weight(did, &entry.key);
+    fn remove(&mut self, entry_key: &CacheKey) {
+        if let Some(entry) = self.entries.remove(entry_key) {
+            self.bytes -= cache_weight(entry_key, &entry.key);
         }
     }
 }
 
-fn cache_weight(did: &str, key: &str) -> usize {
-    CACHE_ENTRY_OVERHEAD + did.len() + key.len()
+fn cache_weight(entry_key: &CacheKey, key: &str) -> usize {
+    CACHE_ENTRY_OVERHEAD + entry_key.did.len() + key.len()
 }
 
 #[cfg(test)]

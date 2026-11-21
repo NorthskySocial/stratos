@@ -924,4 +924,120 @@ mod tests {
             assert_eq!(before.key_id() == after.key_id(), status == 403);
         }
     }
+
+    struct NovemberHost;
+
+    #[async_trait]
+    impl SpacePageSource for NovemberHost {
+        async fn connect(
+            &self,
+            _: &PdsPollTarget,
+            _: Arc<crate::space_credential::HeldSpaceCredential>,
+        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
+            Ok(Arc::new(Self))
+        }
+    }
+
+    #[async_trait]
+    impl SpacePageReader for NovemberHost {
+        async fn list_page(
+            &self,
+            _: &PdsPollTarget,
+            _: Option<&str>,
+            _: usize,
+        ) -> Result<SpaceHostPage, SpaceHostError> {
+            Err(SpaceHostError::Request {
+                status: 400,
+                code: Some("InvalidSpaceMac".to_owned()),
+            })
+        }
+    }
+
+    // What a host that needs response authentication answers when the request
+    // asked for none: the sync returns the host error and nothing is promoted.
+    #[tokio::test]
+    async fn a_host_that_refuses_for_a_missing_mac_request_promotes_nothing() {
+        let lifecycle = lifecycle();
+        let error = synchronizer_with(
+            Arc::new(NovemberHost),
+            Arc::new(Decision(CommitVerification::Verified)),
+        )
+        .sync_target(&lifecycle, &target(), NOW, "2026-09-23T00:00:00.000Z")
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            PdsSpaceSyncError::Host(SpaceHostError::Request {
+                status: 400,
+                code: Some(ref code),
+            }) if code == "InvalidSpaceMac"
+        ));
+        assert_eq!(
+            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
+            None
+        );
+    }
+
+    struct Unresolvable;
+
+    #[async_trait]
+    impl crate::auth::IdentityKeyResolver for Unresolvable {
+        async fn resolve_atproto_key(
+            &self,
+            _: &str,
+            _: bool,
+        ) -> Result<String, crate::auth::IdentityResolutionError> {
+            Err(crate::auth::IdentityResolutionError::Unavailable)
+        }
+    }
+
+    // A November host answers with `ver`, `repo`, `space`, `rev` and `data` under
+    // new-style MAC headers, which the old path never reads. The real
+    // synchronizer hands that commit to the real old verifier over a real
+    // in-memory store.
+    #[tokio::test]
+    async fn a_november_style_commit_is_malformed_to_the_old_verifier_and_nothing_is_promoted() {
+        let lifecycle = lifecycle();
+        let november_commit = crate::space_host::SpaceCommit::from_value(json!({
+            "ver": 1,
+            "repo": DID,
+            "space": SPACE,
+            "rev": "3jzfcijpj2z2d",
+            "data": { "$bytes": "okNpRMGkR5B3cOe6XMIggnjUNiWAJUuWe8RpRkj4rmI" },
+        }));
+        let mut terminal = page(None);
+        terminal.commit = Some(november_commit);
+
+        let result = synchronizer_with(
+            Arc::new(Pages(Arc::new(Mutex::new(
+                vec![page(Some("next")), terminal].into(),
+            )))),
+            Arc::new(crate::space_commit::SpaceCommitVerifier::new(Box::new(
+                Unresolvable,
+            ))),
+        )
+        .sync_target(&lifecycle, &target(), NOW, "2026-09-23T00:00:00.000Z")
+        .await
+        .unwrap();
+
+        assert_eq!(result, PdsSpaceSyncOutcome::RejectedCommit);
+        assert_eq!(
+            lifecycle.pds_space_cursor(BOUNDARY, SPACE, DID).unwrap(),
+            None
+        );
+        assert!(
+            lifecycle
+                .promote_pds_space_stage_at_generation(
+                    BOUNDARY,
+                    SPACE,
+                    DID,
+                    "2026-09-23T00:00:00.000Z",
+                    NOW,
+                    0,
+                )
+                .is_err(),
+            "the discarded stage must leave nothing to promote"
+        );
+    }
 }
