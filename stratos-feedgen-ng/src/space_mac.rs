@@ -556,6 +556,49 @@ mod tests {
                 Some(MacVerifyError::Invalid(MacDefect::HeaderMissing))
             );
         }
+
+        // Stricter than the oracle on purpose: each edit re-serializes to the
+        // text the original MAC covers, so only the decimal rule refuses it.
+        #[test]
+        fn a_decimal_a_later_duplicate_overwrote_is_invalid_with_the_original_mac() {
+            let fixture = fixture();
+            let unedited = materialise(&fixture, &json!({ "name": "unedited" }), "accepted");
+            assert!(
+                verify_commit_response(context_for(&fixture), &unedited.headers, &unedited.body)
+                    .is_ok()
+            );
+            let outcomes: Vec<_> = [
+                (COVERED, "ver=1,", "ver=1.0, ver=1,"),
+                ("signature-input", ";keyid=", ";keyid=1.0;keyid="),
+                ("signature", "mac=", "mac=1.0, mac="),
+            ]
+            .into_iter()
+            .map(|(header, from, to)| {
+                let entry = json!({ "name": header, "edit": { header: [from, to] } });
+                let case = materialise(&fixture, &entry, "refused");
+                let outcome =
+                    verify_commit_response(context_for(&fixture), &case.headers, &case.body);
+                (header, outcome.err())
+            })
+            .collect();
+            assert_eq!(
+                outcomes,
+                [
+                    (
+                        COVERED,
+                        Some(MacVerifyError::Invalid(MacDefect::DecimalValue))
+                    ),
+                    (
+                        "signature-input",
+                        Some(MacVerifyError::Invalid(MacDefect::DecimalValue))
+                    ),
+                    (
+                        "signature",
+                        Some(MacVerifyError::Invalid(MacDefect::DecimalValue))
+                    ),
+                ]
+            );
+        }
     }
 
     mod generated {

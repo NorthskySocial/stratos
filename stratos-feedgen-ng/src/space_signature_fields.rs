@@ -1,13 +1,11 @@
 //! Structured-field helpers for the response MAC: bounded parsing, finding the
 //! member tagged for a profile, and the text the MAC covers. Values are read
-//! through `sfv`. The one hand-written scan finds the received text of byte
-//! sequences, which `sfv` decodes and does not keep.
+//! through `sfv`. The one hand-written scan reads the text received for what
+//! `sfv` does not keep: the text of byte sequences, which it decodes, and the
+//! values of a key that a later duplicate overwrote.
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use sfv::{
-    BareItem, Dictionary, FieldType, InnerList, Item, KeyRef, List, ListEntry, Parameters, Parser,
-    Version,
-};
+use sfv::{Dictionary, FieldType, InnerList, KeyRef, List, ListEntry, Parser, Version};
 
 /// A host-controlled field this large is refused before any parsing.
 pub const MAX_FIELD_BYTES: usize = 4096;
@@ -28,10 +26,12 @@ pub enum FieldError {
 /// the size bound has already limited the work.
 ///
 /// Stricter than upstream: a byte sequence must be written as the padded
-/// base64 of its bytes, and no value or parameter may be a decimal. Upstream
-/// re-serializes a byte sequence as received and `1.0` as `1`; `sfv` writes
-/// the padded bytes and `1.0`. Accepting either would let the two sides MAC
-/// different text for the same field.
+/// base64 of its bytes, and no decimal may appear anywhere in the field.
+/// Upstream re-serializes a byte sequence as received and `1.0` as `1`; `sfv`
+/// writes the padded bytes and `1.0`. Accepting either would let the two sides
+/// MAC different text for the same field. Both rules read the text received,
+/// because a value that a later duplicate key overwrote is gone from the
+/// parsed dictionary but not from the text a host may have MACed.
 pub fn parse_dictionary(text: &str) -> Result<Dictionary, FieldError> {
     if text.len() > MAX_FIELD_BYTES {
         return Err(FieldError::TooLong);
@@ -43,63 +43,59 @@ pub fn parse_dictionary(text: &str) -> Result<Dictionary, FieldError> {
     if dictionary.len() > MAX_DICTIONARY_MEMBERS {
         return Err(FieldError::TooManyMembers);
     }
-    if holds_decimal(&dictionary) {
+    let received = scan_received_text(text);
+    if received.holds_decimal {
         return Err(FieldError::Decimal);
     }
-    if !byte_sequence_texts(text).all(is_padded_base64) {
+    if !received.byte_sequences.into_iter().all(is_padded_base64) {
         return Err(FieldError::NonCanonicalByteSequence);
     }
     Ok(dictionary)
 }
 
-fn holds_decimal(dictionary: &Dictionary) -> bool {
-    let is_decimal = |bare_item: &BareItem| matches!(bare_item, BareItem::Decimal(_));
-    let params_hold_decimal = |params: &Parameters| params.values().any(is_decimal);
-    let item_holds_decimal =
-        |item: &Item| is_decimal(&item.bare_item) || params_hold_decimal(&item.params);
-    dictionary.values().any(|entry| match entry {
-        ListEntry::Item(item) => item_holds_decimal(item),
-        ListEntry::InnerList(inner_list) => {
-            inner_list.items.iter().any(item_holds_decimal)
-                || params_hold_decimal(&inner_list.params)
-        }
-    })
+struct ReceivedText<'a> {
+    /// The text between the colons of each byte sequence.
+    byte_sequences: Vec<&'a str>,
+    holds_decimal: bool,
 }
 
-/// The text between the colons of each byte sequence in `field`, including
-/// members a later duplicate key overwrote. Only for text `sfv` has accepted:
-/// there every string is closed and every key or token is a maximal run of its
-/// characters, so a colon outside both opens or closes a byte sequence.
-fn byte_sequence_texts(field: &str) -> impl Iterator<Item = &str> {
+/// Only for text `sfv` has accepted: there every string is closed and every
+/// key or token is a maximal run of its characters, so outside them a colon
+/// opens or closes a byte sequence and a `.` is the point of a decimal.
+fn scan_received_text(field: &str) -> ReceivedText<'_> {
     let bytes = field.as_bytes();
+    let mut received = ReceivedText {
+        byte_sequences: Vec::new(),
+        holds_decimal: false,
+    };
     let mut at = 0;
-    std::iter::from_fn(move || {
-        while at < bytes.len() {
-            let start = at;
-            at += 1;
-            match bytes[start] {
-                b'"' => {
-                    while at < bytes.len() && bytes[at] != b'"' {
-                        at += if bytes[at] == b'\\' { 2 } else { 1 };
-                    }
+    while at < bytes.len() {
+        let start = at;
+        at += 1;
+        match bytes[start] {
+            b'"' => {
+                while at < bytes.len() && bytes[at] != b'"' {
+                    at += if bytes[at] == b'\\' { 2 } else { 1 };
+                }
+                at += 1;
+            }
+            b':' => {
+                let Some(length) = bytes[at..].iter().position(|&byte| byte == b':') else {
+                    break;
+                };
+                received.byte_sequences.push(&field[at..at + length]);
+                at += length + 1;
+            }
+            b'.' => received.holds_decimal = true,
+            byte if byte.is_ascii_alphabetic() || byte == b'*' => {
+                while at < bytes.len() && is_token_character(bytes[at]) {
                     at += 1;
                 }
-                b':' => {
-                    let length = bytes[at..].iter().position(|&byte| byte == b':')?;
-                    let content = &field[at..at + length];
-                    at += length + 1;
-                    return Some(content);
-                }
-                byte if byte.is_ascii_alphabetic() || byte == b'*' => {
-                    while at < bytes.len() && is_token_character(bytes[at]) {
-                        at += 1;
-                    }
-                }
-                _ => {}
             }
+            _ => {}
         }
-        None
-    })
+    }
+    received
 }
 
 // RFC 8941 `tchar`, plus the `:` and `/` a token may hold after its first
@@ -247,6 +243,20 @@ mod tests {
         ("a=\"q\\\\\", b=:AQ:", Some("a=\"q\\\\\", b=:AQ:")),
         ("a=foo:AQ:, b=:AQ==:", Some("a=foo:AQ:, b=:AQ==:")),
         ("a=*x:/y", Some("a=*x:/y")),
+        ("ver=1.0, ver=1", Some("ver=1")),
+        ("a=1;p=1.0;p=1", Some("a=1;p=1")),
+        ("a=(1.0 2), a=1", Some("a=1")),
+        ("a=(1;p=1.0;p=1)", Some("a=(1;p=1)")),
+        ("a=();p=0.5;p=1", Some("a=();p=1")),
+        ("a=(1 2);p=1.0;p=1", Some("a=(1 2);p=1")),
+        ("a=(1;p=0.5)", Some("a=(1;p=0.5)")),
+        ("a=foo.bar", Some("a=foo.bar")),
+        ("a=b.c", Some("a=b.c")),
+        ("a=*1.5", Some("a=*1.5")),
+        ("*1.5=1", Some("*1.5=1")),
+        ("a=1;p.q=2", Some("a=1;p.q=2")),
+        ("a=\"q\\\"1.0\"", Some("a=\"q\\\"1.0\"")),
+        ("a=:A.==:", None),
     ];
 
     // Inputs of the table above that the oracle accepts and Stratos refuses on
@@ -274,6 +284,13 @@ mod tests {
         ("a=1;p=1.0", FieldError::Decimal),
         ("a=();p=0.5", FieldError::Decimal),
         ("a=(1.0 2)", FieldError::Decimal),
+        ("ver=1.0, ver=1", FieldError::Decimal),
+        ("a=1;p=1.0;p=1", FieldError::Decimal),
+        ("a=(1.0 2), a=1", FieldError::Decimal),
+        ("a=(1;p=1.0;p=1)", FieldError::Decimal),
+        ("a=();p=0.5;p=1", FieldError::Decimal),
+        ("a=(1 2);p=1.0;p=1", FieldError::Decimal),
+        ("a=(1;p=0.5)", FieldError::Decimal),
     ];
 
     fn refused_on_purpose(input: &str) -> bool {
@@ -372,6 +389,70 @@ mod tests {
         for text in ["note=\"1.0\"", "a.b=1", "ver=1"] {
             assert!(parse_dictionary(text).is_ok(), "{text}");
         }
+    }
+
+    // `sfv` keeps only the last value of a repeated key, so a decimal it
+    // overwrote is visible only in the text received.
+    #[test]
+    fn a_decimal_a_later_duplicate_key_overwrote_is_refused() {
+        for text in [
+            "ver=1.0, ver=1",
+            "ver=1;p=1.0;p=1",
+            "crew=(1.0 2), crew=1",
+            "crew=(1;p=1.0;p=1)",
+            "crew=();p=0.5;p=1",
+            "crew=(1 2);p=1.0;p=1",
+        ] {
+            assert_eq!(
+                parse_dictionary(text).err(),
+                Some(FieldError::Decimal),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_dot_in_a_string_a_token_or_a_key_is_not_a_decimal() {
+        for text in [
+            "note=\"1.0\"",
+            "note=\"q\\\"1.0\"",
+            "note=\"nerv\\\\1.0\"",
+            "crew=spike.spiegel",
+            "ship=bebop;crew=ein.corgi",
+            "crew=(faye.valentine ed)",
+            "crew=*1.5",
+            "a.b=1",
+            "*1.5=1",
+            "ver=1;p.q=2",
+            "crew=(1;p.q=2)",
+        ] {
+            assert!(parse_dictionary(text).is_ok(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_decimal_after_a_string_with_escapes_is_found() {
+        for text in [
+            "note=\"q\\\"\", ver=1.0",
+            "note=\"nerv\\\\\", ver=1.0",
+            "note=\"1\", ver=2.5",
+        ] {
+            assert_eq!(
+                parse_dictionary(text).err(),
+                Some(FieldError::Decimal),
+                "{text}"
+            );
+        }
+    }
+
+    // Base64 has no `.`, so `sfv` refuses such a field before the decimal
+    // rule could see it.
+    #[test]
+    fn a_dot_inside_a_byte_sequence_is_malformed_not_a_decimal() {
+        assert_eq!(
+            parse_dictionary("data=:A.==:").err(),
+            Some(FieldError::Malformed)
+        );
     }
 
     #[test]
