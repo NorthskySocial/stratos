@@ -1262,6 +1262,27 @@ mod tests {
         );
     }
 
+    // The CID a decoder that ignores padding gives the short-padded thumb, as
+    // Node's upstream reader does; a runtime with Uint8Array.fromBase64 reads
+    // a plain map there and gives another.
+    const SHORT_PADDED_THUMB_CID: &str =
+        "bafyreiguhlxyybpe6ql2ocvo3qm4kjsxjrmluppm2kss7z2nefpvn36nt4";
+
+    #[test]
+    fn a_value_with_short_base64_padding_is_refused_even_with_the_cid_it_once_had() {
+        let thumb =
+            |text: &str| json!({ "$type": POST, "text": "Ein", "thumb": { "$bytes": text } });
+        let mut op = create_post("data-dog", &thumb("AQ=="));
+        assert_eq!(op["cid"], SHORT_PADDED_THUMB_CID);
+        op["value"] = thumb("AQ=");
+        assert_eq!(
+            applied(vec![op]),
+            Err(ChangeSetRefusal::ValueNotEncodable(
+                RecordRefusal::InvalidBytes
+            ))
+        );
+    }
+
     #[test]
     fn an_update_whose_prev_disagrees_with_the_set_is_refused() {
         let first = post_value("See you space cowboy");

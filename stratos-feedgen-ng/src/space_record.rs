@@ -48,11 +48,17 @@ const SIMPLE_FALSE: u8 = 0xf4;
 const SIMPLE_TRUE: u8 = 0xf5;
 const SIMPLE_NULL: u8 = 0xf6;
 
-// Standard alphabet; padding is accepted or absent; bits after the last whole
-// byte must be zero so that one byte string has one text.
-const BYTES_DECODER: GeneralPurpose = GeneralPurpose::new(
+// Standard alphabet; bits after the last whole byte must be zero so that one
+// byte string has one text. Padding is absent or exact: upstream reads short
+// padding as bytes on some runtimes and as a plain map on others, so such a
+// text names no one record.
+const UNPADDED_BYTES_DECODER: GeneralPurpose = GeneralPurpose::new(
     &STANDARD,
-    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::RequireNone),
+);
+const PADDED_BYTES_DECODER: GeneralPurpose = GeneralPurpose::new(
+    &STANDARD,
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::RequireCanonical),
 );
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -207,7 +213,12 @@ fn encode_link(text: &str, out: &mut Vec<u8>) -> Result<(), RecordRefusal> {
 }
 
 fn encode_byte_string(text: &str, out: &mut Vec<u8>) -> Result<(), RecordRefusal> {
-    let bytes = BYTES_DECODER
+    let decoder = if text.ends_with('=') {
+        &PADDED_BYTES_DECODER
+    } else {
+        &UNPADDED_BYTES_DECODER
+    };
+    let bytes = decoder
         .decode(text)
         .map_err(|_| RecordRefusal::InvalidBytes)?;
     write_head_and_payload(MAJOR_BYTES, &bytes, out);
@@ -774,6 +785,259 @@ mod tests {
             .iter()
             .filter_map(disagreement)
             .collect();
+        assert_eq!(disagreements, Vec::<String>::new());
+    }
+
+    // Oracle edge table: $bytes padding, each text in a map, a nested map and
+    // an array. The oracle column is the same reader and serializeRecord run on
+    // Node 24, which has no Uint8Array.fromBase64, so lex-data decodes with
+    // Node's Buffer. On a runtime with Uint8Array.fromBase64 every verdict is
+    // the same except for the short padding, which there stays a plain map
+    // (`{"x":{"$bytes":"AQ="}}` gives a16178a1662462797465736341513d). An
+    // accepted oracle whose bytes hold the key $bytes is that plain map.
+
+    const PADDING_SHORT: &str = "the padding is present but short; whether upstream reads bytes or a plain map depends on the runtime: a runtime without Uint8Array.fromBase64, such as the Node the oracle ran on, decodes the bytes, and a runtime with it keeps the map; a PDS writes canonical base64, so such a text has no one upstream record";
+    const PADDING_WRONG: &str = "the padding is present but wrong; upstream keeps a plain map holding the text on every runtime, and Stratos refuses a $bytes that is neither unpadded nor correctly padded instead of encoding it as a map";
+
+    fn stricter_bytes(
+        name: &'static str,
+        json: &str,
+        oracle: &'static str,
+        because: &'static str,
+    ) -> EdgeRow {
+        EdgeRow {
+            stratos: Some(RecordRefusal::InvalidBytes),
+            stricter_because: Some(because),
+            ..equal(name, json, oracle)
+        }
+    }
+
+    fn bytes_padding_rows() -> Vec<EdgeRow> {
+        vec![
+            stricter_bytes(
+                "$bytes AQ= in a map",
+                r#"{"x":{"$bytes":"AQ="}}"#,
+                "accepted a161784101 bafyreiasfua7p4g6yxuwaveo7bi3gyfoqhxgy74y6ofefvvxix6xcucv3i",
+                PADDING_SHORT,
+            ),
+            stricter_bytes(
+                "$bytes AQ= in a nested map",
+                r#"{"x":{"y":{"$bytes":"AQ="}}}"#,
+                "accepted a16178a161794101 bafyreidybuozngcjoywexm7s2lg5ctnxa7yd7rmxit45c5pbvmyhsp3cvi",
+                PADDING_SHORT,
+            ),
+            stricter_bytes(
+                "$bytes AQ= in an array",
+                r#"{"x":[{"$bytes":"AQ="}]}"#,
+                "accepted a16178814101 bafyreicug4jxtwxqjhihmfdr2kkeqqhcpmtxgp726t2umn5jgjhtol6nje",
+                PADDING_SHORT,
+            ),
+            equal(
+                "$bytes AQ in a map",
+                r#"{"x":{"$bytes":"AQ"}}"#,
+                "accepted a161784101 bafyreiasfua7p4g6yxuwaveo7bi3gyfoqhxgy74y6ofefvvxix6xcucv3i",
+            ),
+            equal(
+                "$bytes AQ in a nested map",
+                r#"{"x":{"y":{"$bytes":"AQ"}}}"#,
+                "accepted a16178a161794101 bafyreidybuozngcjoywexm7s2lg5ctnxa7yd7rmxit45c5pbvmyhsp3cvi",
+            ),
+            equal(
+                "$bytes AQ in an array",
+                r#"{"x":[{"$bytes":"AQ"}]}"#,
+                "accepted a16178814101 bafyreicug4jxtwxqjhihmfdr2kkeqqhcpmtxgp726t2umn5jgjhtol6nje",
+            ),
+            equal(
+                "$bytes AQ== in a map",
+                r#"{"x":{"$bytes":"AQ=="}}"#,
+                "accepted a161784101 bafyreiasfua7p4g6yxuwaveo7bi3gyfoqhxgy74y6ofefvvxix6xcucv3i",
+            ),
+            equal(
+                "$bytes AQ== in a nested map",
+                r#"{"x":{"y":{"$bytes":"AQ=="}}}"#,
+                "accepted a16178a161794101 bafyreidybuozngcjoywexm7s2lg5ctnxa7yd7rmxit45c5pbvmyhsp3cvi",
+            ),
+            equal(
+                "$bytes AQ== in an array",
+                r#"{"x":[{"$bytes":"AQ=="}]}"#,
+                "accepted a16178814101 bafyreicug4jxtwxqjhihmfdr2kkeqqhcpmtxgp726t2umn5jgjhtol6nje",
+            ),
+            equal(
+                "$bytes AQI in a map",
+                r#"{"x":{"$bytes":"AQI"}}"#,
+                "accepted a16178420102 bafyreiaueki7kpmqkybkz6zb4fgwjoonzv7vja7cn3nzmr7zomsomh5q3i",
+            ),
+            equal(
+                "$bytes AQI in a nested map",
+                r#"{"x":{"y":{"$bytes":"AQI"}}}"#,
+                "accepted a16178a16179420102 bafyreia2lemfbco6xxiiewvpeq4kdnbilhi4l2piphrrn4udiclitpyplq",
+            ),
+            equal(
+                "$bytes AQI in an array",
+                r#"{"x":[{"$bytes":"AQI"}]}"#,
+                "accepted a1617881420102 bafyreigiig6e524ftaryjenlx57dvaulxjf44pyykbchc6creegaioo52y",
+            ),
+            equal(
+                "$bytes AQI= in a map",
+                r#"{"x":{"$bytes":"AQI="}}"#,
+                "accepted a16178420102 bafyreiaueki7kpmqkybkz6zb4fgwjoonzv7vja7cn3nzmr7zomsomh5q3i",
+            ),
+            equal(
+                "$bytes AQI= in a nested map",
+                r#"{"x":{"y":{"$bytes":"AQI="}}}"#,
+                "accepted a16178a16179420102 bafyreia2lemfbco6xxiiewvpeq4kdnbilhi4l2piphrrn4udiclitpyplq",
+            ),
+            equal(
+                "$bytes AQI= in an array",
+                r#"{"x":[{"$bytes":"AQI="}]}"#,
+                "accepted a1617881420102 bafyreigiig6e524ftaryjenlx57dvaulxjf44pyykbchc6creegaioo52y",
+            ),
+            stricter_bytes(
+                "$bytes AQI== in a map",
+                r#"{"x":{"$bytes":"AQI=="}}"#,
+                "accepted a16178a166246279746573654151493d3d bafyreigjgqjkclh2sqpqni4q6itqsxunohlqqmrlpxfxg5pics7hhvx3nm",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes AQI== in a nested map",
+                r#"{"x":{"y":{"$bytes":"AQI=="}}}"#,
+                "accepted a16178a16179a166246279746573654151493d3d bafyreif3wszovrm6ajpx7qhvmj33k4o7yumlmrc66csaph4le4gekti72e",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes AQI== in an array",
+                r#"{"x":[{"$bytes":"AQI=="}]}"#,
+                "accepted a1617881a166246279746573654151493d3d bafyreibozstuw6l47tnt2diseuy6revtmh4imiknxganr5rfv7reztzxjq",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes AQ=== in a map",
+                r#"{"x":{"$bytes":"AQ==="}}"#,
+                "accepted a16178a1662462797465736541513d3d3d bafyreiem3vsrcuxhm7pc53etvme4kl7pumpcc5dkfznrxa24dxktvrb6bm",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes AQ=== in a nested map",
+                r#"{"x":{"y":{"$bytes":"AQ==="}}}"#,
+                "accepted a16178a16179a1662462797465736541513d3d3d bafyreid4zodekfzbmhy4g2uixkk2v2m5w6fm6jxt4p2ydqziqhklvsfdb4",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes AQ=== in an array",
+                r#"{"x":[{"$bytes":"AQ==="}]}"#,
+                "accepted a1617881a1662462797465736541513d3d3d bafyreifw7zlvo3lccpsbu7n5rolsgy7pjjyebiyp2l64lx567t4o6s5xla",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes = in a map",
+                r#"{"x":{"$bytes":"="}}"#,
+                "accepted a16178a166246279746573613d bafyreie2suwginzpgwxvqsl5uiiqvs4j62ohkzt2uyfugja3klg63kgpvm",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes = in a nested map",
+                r#"{"x":{"y":{"$bytes":"="}}}"#,
+                "accepted a16178a16179a166246279746573613d bafyreihx2olswsbsekm7756t5f2ufymmyhefyxvngn4j64djphqri3l24u",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes = in an array",
+                r#"{"x":[{"$bytes":"="}]}"#,
+                "accepted a1617881a166246279746573613d bafyreicnyz5lchh3xaqlkapxqw6tq62jcbui36dujh6id5pc45t7dij57y",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes == in a map",
+                r#"{"x":{"$bytes":"=="}}"#,
+                "accepted a16178a166246279746573623d3d bafyreiau2nfyexepuzkh6ycrixfttj4nbhqzkjvxg4lzutfbqyzxj46aa4",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes == in a nested map",
+                r#"{"x":{"y":{"$bytes":"=="}}}"#,
+                "accepted a16178a16179a166246279746573623d3d bafyreiegznuj4m4rglxpcwxgd3er37dkemxow4wxh76b7xwxo72r2mstpa",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes == in an array",
+                r#"{"x":[{"$bytes":"=="}]}"#,
+                "accepted a1617881a166246279746573623d3d bafyreiac7vqyl5l3hnkgv5trdplweztutcckx3hmcbzjh7d6epnk4vrwnu",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes AQID= in a map",
+                r#"{"x":{"$bytes":"AQID="}}"#,
+                "accepted a16178a16624627974657365415149443d bafyreihfmrdawxpxa4xsuauzac24nnhnpg35w7tfbz57bnlca4a6adxatq",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes AQID= in a nested map",
+                r#"{"x":{"y":{"$bytes":"AQID="}}}"#,
+                "accepted a16178a16179a16624627974657365415149443d bafyreidbxljbabo6q3dryjz76hh7xngjen2fv4vytq3gxspqwbcq7nmslq",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes AQID= in an array",
+                r#"{"x":[{"$bytes":"AQID="}]}"#,
+                "accepted a1617881a16624627974657365415149443d bafyreidk5ozqzczhrtgsa5psiqklx3ubylyhffsv7qdzrfrsmkzijxegke",
+                PADDING_WRONG,
+            ),
+            equal(
+                "$bytes AQID in a map",
+                r#"{"x":{"$bytes":"AQID"}}"#,
+                "accepted a1617843010203 bafyreihhjsgtmkiqlcsz4oqagqnvkhcdleeqkuzwgyoxmcttco3cwgibny",
+            ),
+            equal(
+                "$bytes AQID in a nested map",
+                r#"{"x":{"y":{"$bytes":"AQID"}}}"#,
+                "accepted a16178a1617943010203 bafyreiakdjwq6blueqr2hechkocagcoj3sdkfbohp6kusiufktecrmnshm",
+            ),
+            equal(
+                "$bytes AQID in an array",
+                r#"{"x":[{"$bytes":"AQID"}]}"#,
+                "accepted a161788143010203 bafyreibjgfhdk3mo2m3s2p6u54dgbv6re5z6tpbnqkk4zslhtnexismjxm",
+            ),
+            stricter_bytes(
+                "$bytes AQ=A in a map",
+                r#"{"x":{"$bytes":"AQ=A"}}"#,
+                "accepted a16178a1662462797465736441513d41 bafyreieyrg2f47t3qj2v73emhfo6iocuw3ti5nbwu4xphxm35tsm7mmb5m",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes AQ=A in a nested map",
+                r#"{"x":{"y":{"$bytes":"AQ=A"}}}"#,
+                "accepted a16178a16179a1662462797465736441513d41 bafyreiayhvvj6aeehe6tiu74mw53lewylfis5rqkmnazcyow5nyuayvh5a",
+                PADDING_WRONG,
+            ),
+            stricter_bytes(
+                "$bytes AQ=A in an array",
+                r#"{"x":[{"$bytes":"AQ=A"}]}"#,
+                "accepted a1617881a1662462797465736441513d41 bafyreifn2aquiujkpmu6ddbsqup2etosaa77k6v46vqycae5x24fptat6q",
+                PADDING_WRONG,
+            ),
+            equal(
+                "$bytes empty in a map",
+                r#"{"x":{"$bytes":""}}"#,
+                "accepted a1617840 bafyreid7mca4eo4rlybzskekofgd3msvlwtvvif2ljkdo2wrbo5f3bgvoi",
+            ),
+            equal(
+                "$bytes empty in a nested map",
+                r#"{"x":{"y":{"$bytes":""}}}"#,
+                "accepted a16178a1617940 bafyreiarsradmgzoo4qzrloko66no2og6dlcshohiimudlmetqq5kraszy",
+            ),
+            equal(
+                "$bytes empty in an array",
+                r#"{"x":[{"$bytes":""}]}"#,
+                "accepted a161788140 bafyreiags75loey4hynlehun3fwhdyfocp6dbvly44kz2cetdzqqbqvf34",
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_bytes_padding_edge_input_gets_the_oracle_verdict_or_its_labelled_refusal() {
+        let rows = bytes_padding_rows();
+        assert_eq!(rows.len(), 39);
+        let disagreements: Vec<String> = rows.iter().filter_map(disagreement).collect();
         assert_eq!(disagreements, Vec::<String>::new());
     }
 
