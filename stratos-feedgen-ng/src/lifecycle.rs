@@ -15,10 +15,13 @@ use crate::{
     readiness::{FeedReadinessGate, ReconciliationOutcome},
     service::ProjectionReader,
     service_event::{EnrollmentAction, EnrollmentEvent},
+    space_mac::MacVerifiedCommit,
+    space_ops::ChangeSet,
     space_sync::{PreparedSpacePage, SpaceSyncError, SpaceSyncTarget},
     store::{
         ActorEnrollment, ActorPage, ActorSyncState, EnrollmentReconciliation, LabelPageEffects,
-        PdsSpaceMember, StoreError, StoreInterrupt,
+        PdsSpaceMember, StoreError, StoreInterrupt, VerifiedSpaceBase, VerifiedSpaceRecord,
+        VerifiedSpaceTarget,
     },
     telemetry::FeedTelemetry,
 };
@@ -689,6 +692,62 @@ impl ControlLifecycle {
                 observed_at,
                 generation,
             )
+    }
+
+    /// The checkpoint a verified promotion builds on. A caller holding a
+    /// generation that is no longer the member's current one is refused before
+    /// it reads anything.
+    pub fn verified_space_base_at_generation(
+        &self,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
+        generation: u64,
+    ) -> Result<Option<VerifiedSpaceBase>, StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let projection = self.projection.lock().expect("projection lock poisoned");
+        if projection.pds_member_generation(boundary, actor_did)? != Some(generation) {
+            return Err(StoreError::UnauthorizedSpaceMember);
+        }
+        projection.verified_space_base(space_uri, actor_did)
+    }
+
+    pub fn promote_verified_space_repo(
+        &self,
+        target: &VerifiedSpaceTarget,
+        base_rev: Option<&str>,
+        commit: &MacVerifiedCommit,
+        change_set: &ChangeSet,
+        retained_at: &str,
+        observed_at: &str,
+    ) -> Result<(), StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .promote_verified_space_repo(
+                target,
+                base_rev,
+                commit,
+                change_set,
+                retained_at,
+                observed_at,
+            )
+    }
+
+    pub fn replace_verified_space_repo(
+        &self,
+        target: &VerifiedSpaceTarget,
+        commit: &MacVerifiedCommit,
+        records: &[VerifiedSpaceRecord],
+        retained_at: &str,
+        observed_at: &str,
+    ) -> Result<(), StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .replace_verified_space_repo(target, commit, records, retained_at, observed_at)
     }
 
     pub fn discard_pds_space_stage(
@@ -1965,5 +2024,206 @@ mod tests {
             [faye_uri(LIKE, "two")]
         );
         assert_eq!(faye_cursor(&lifecycle), Some(8));
+    }
+
+    const CREW: &str = "did:web:bebop.example/crew";
+    const CREW_SPACE: &str = "at:space/did:web:bebop.example/zone.stratos.space.feed/crew";
+    const MEMBER: &str = "did:plc:fayevalentine";
+    const FIRST_REV: &str = "3jzfcijpj2z2a";
+    const OBSERVED: &str = "2026-09-22T00:00:00.000Z";
+    const RETAINED: &str = "2026-09-23T00:00:00.000Z";
+
+    fn lifecycle_with_member() -> (ControlLifecycle, crate::store::VerifiedSpaceTarget) {
+        let lifecycle = ControlLifecycle::new(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+        );
+        lifecycle
+            .replace_pds_space_members(
+                CREW,
+                vec![crate::store::PdsSpaceMember {
+                    did: MEMBER.to_owned(),
+                }],
+                OBSERVED,
+            )
+            .unwrap();
+        let target = crate::store::VerifiedSpaceTarget {
+            boundary: CREW.to_owned(),
+            space_uri: CREW_SPACE.to_owned(),
+            actor_did: MEMBER.to_owned(),
+            host: "https://pds.bebop.example".to_owned(),
+            generation: lifecycle
+                .pds_member_generation(CREW, MEMBER)
+                .unwrap()
+                .unwrap(),
+        };
+        (lifecycle, target)
+    }
+
+    fn empty_repo_commit() -> crate::space_mac::MacVerifiedCommit {
+        crate::space_mac::MacVerifiedCommit::for_tests(
+            MEMBER,
+            CREW_SPACE,
+            FIRST_REV,
+            crate::space_set_hash::SetHashState::empty().digest(),
+        )
+    }
+
+    #[test]
+    fn a_verified_replacement_reaches_the_store_and_its_base_can_be_read_back() {
+        let (lifecycle, target) = lifecycle_with_member();
+        assert_eq!(
+            lifecycle
+                .verified_space_base_at_generation(CREW, CREW_SPACE, MEMBER, target.generation)
+                .unwrap(),
+            None
+        );
+
+        lifecycle
+            .replace_verified_space_repo(&target, &empty_repo_commit(), &[], RETAINED, OBSERVED)
+            .unwrap();
+
+        let base = lifecycle
+            .verified_space_base_at_generation(CREW, CREW_SPACE, MEMBER, target.generation)
+            .unwrap()
+            .unwrap();
+        assert_eq!(base.rev, FIRST_REV);
+        assert_eq!(base.host, "https://pds.bebop.example");
+    }
+
+    #[test]
+    fn a_verified_promotion_reaches_the_store() {
+        let (lifecycle, target) = lifecycle_with_member();
+        let change_set =
+            crate::space_ops::ChangeSet::apply(crate::space_set_hash::SetHashState::empty(), &[])
+                .unwrap();
+
+        lifecycle
+            .promote_verified_space_repo(
+                &target,
+                None,
+                &empty_repo_commit(),
+                &change_set,
+                RETAINED,
+                OBSERVED,
+            )
+            .unwrap();
+
+        let base = lifecycle
+            .verified_space_base_at_generation(CREW, CREW_SPACE, MEMBER, target.generation)
+            .unwrap()
+            .unwrap();
+        assert_eq!(base.rev, FIRST_REV);
+        let stale = lifecycle.promote_verified_space_repo(
+            &target,
+            None,
+            &empty_repo_commit(),
+            &change_set,
+            RETAINED,
+            OBSERVED,
+        );
+        assert!(
+            matches!(stale, Err(crate::store::StoreError::SpaceRepoBaseMoved)),
+            "{stale:?}"
+        );
+    }
+
+    const BRIDGE_SPACE: &str = "at:space/did:web:bebop.example/zone.stratos.space.feed/bridge";
+
+    fn bridge_target_and_commit(
+        target: crate::store::VerifiedSpaceTarget,
+    ) -> (
+        crate::store::VerifiedSpaceTarget,
+        crate::space_mac::MacVerifiedCommit,
+    ) {
+        let commit = crate::space_mac::MacVerifiedCommit::for_tests(
+            MEMBER,
+            BRIDGE_SPACE,
+            FIRST_REV,
+            crate::space_set_hash::SetHashState::empty().digest(),
+        );
+        let target = crate::store::VerifiedSpaceTarget {
+            space_uri: BRIDGE_SPACE.to_owned(),
+            ..target
+        };
+        (target, commit)
+    }
+
+    fn crew_request() -> ReadRequest<'static> {
+        ReadRequest {
+            boundary: CREW,
+            ..request()
+        }
+    }
+
+    #[test]
+    fn a_verified_promotion_into_a_space_its_boundary_does_not_name_leaves_reads_valid() {
+        let (lifecycle, crew_target) = lifecycle_with_member();
+        let (target, commit) = bridge_target_and_commit(crew_target);
+        let change_set =
+            crate::space_ops::ChangeSet::apply(crate::space_set_hash::SetHashState::empty(), &[])
+                .unwrap();
+        let (token, page) = {
+            let mut projection = lifecycle.projection.lock().unwrap();
+            projection.establish_session();
+            projection.prepare(crew_request()).unwrap().unwrap()
+        };
+
+        let outcome = lifecycle.promote_verified_space_repo(
+            &target,
+            None,
+            &commit,
+            &change_set,
+            RETAINED,
+            OBSERVED,
+        );
+
+        assert!(
+            matches!(outcome, Err(crate::store::StoreError::SpaceRepoInvalid)),
+            "{outcome:?}"
+        );
+        assert!(lifecycle.read(|projection| projection.release(token, page, 2).is_some()));
+    }
+
+    #[test]
+    fn a_verified_replacement_into_a_space_its_boundary_does_not_name_leaves_reads_valid() {
+        let (lifecycle, crew_target) = lifecycle_with_member();
+        let (target, commit) = bridge_target_and_commit(crew_target);
+        let (token, page) = {
+            let mut projection = lifecycle.projection.lock().unwrap();
+            projection.establish_session();
+            projection.prepare(crew_request()).unwrap().unwrap()
+        };
+
+        let outcome =
+            lifecycle.replace_verified_space_repo(&target, &commit, &[], RETAINED, OBSERVED);
+
+        assert!(
+            matches!(outcome, Err(crate::store::StoreError::SpaceRepoInvalid)),
+            "{outcome:?}"
+        );
+        assert!(lifecycle.read(|projection| projection.release(token, page, 2).is_some()));
+    }
+
+    #[test]
+    fn reading_the_base_under_a_stale_generation_is_refused() {
+        let (lifecycle, target) = lifecycle_with_member();
+
+        let outcome = lifecycle.verified_space_base_at_generation(
+            CREW,
+            CREW_SPACE,
+            MEMBER,
+            target.generation + 1,
+        );
+
+        assert!(
+            matches!(
+                outcome,
+                Err(crate::store::StoreError::UnauthorizedSpaceMember)
+            ),
+            "{outcome:?}"
+        );
     }
 }

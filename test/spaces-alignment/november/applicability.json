@@ -26,7 +26,7 @@
       ],
       "workstream": "sync-recovery",
       "decision": "The Rust consumer decodes the listRepoOps page with an optional commit; later work requires the commit on every page and keeps custom zone.stratos response shapes unchanged.",
-      "evidence": "stratos-feedgen-ng/src/space_host.rs:619-625 RawPage with an optional commit; pds_space_sync.rs:257-268 verifies only after the terminal page."
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:618-625 RawPage with an optional commit; pds_space_sync.rs:257-260 goes on to the next page unless the page is terminal and :261-268 verifies only after the terminal page."
     },
     {
       "id": "prompt-1c-error-renames",
@@ -222,7 +222,7 @@
       ],
       "workstream": "response-authentication",
       "decision": "Two verifiers exist and only the old one is the production path. The old verifier in space_commit.rs checks an ikm and mac inside the commit body, and pds_space_sync.rs hands it the commit from the page body; a host that answers only with the response headers is refused with InvalidSpaceMac or returns a commit the old verifier rejects as malformed, nothing is promoted, and the scheduler logs one line per cycle counting failed targets by a fixed list of reasons, never host text. The new verifier, verify_commit_response in space_mac.rs, reads the Atproto-Space-Commit, Signature-Input and Signature response headers against the one-time key of its own request: exactly one member tagged atproto-space-commit that covers only that header, HMAC-SHA256 over the header re-serialized in the order received compared in constant time, then the five commit fields equal the body's commit and repo and space equal the request's. It is stricter than the pinned package on purpose: a byte sequence in any of the three headers must be the padded base64 of its bytes and no decimal may appear anywhere in them, not even in a member or parameter that a later duplicate key overwrote, because the package MACs a byte sequence's text as received and writes 1.0 as 1, while the Rust serializer writes the padded bytes and keeps 1.0; such a header is refused as invalid before the MAC, not as a MAC mismatch, so it never triggers the key refresh. It returns a MacVerifiedCommit that only space_mac.rs can make, and the authenticated read in space_host.rs hands back a body only together with one. The synchronizer calls neither, nothing converts between the two verdicts and nothing falls back from one to the other. Still to do: replace the old verifier with the new one in the synchronizer and delete space_commit.rs; op decoding, the set hash and comparing the commit's data with the finished state are not part of the new read. Cross-checked, not run on a real host: every response case of commit-mac.json gets the pinned package's verdict, and the pinned package's response headers for the Rust request verify (stratos-produced.json).",
-      "evidence": "stratos-feedgen-ng/src/space_commit.rs:113-120 SignedSpaceCommit has hash, ikm, mac, signature, and stratos-feedgen-ng/src/pds_space_sync.rs:261-268 calls the verifier through the commit port with the old commit; stratos-feedgen-ng/src/space_mac.rs:79-84 MacVerifiedCommit and :194-263 verify_commit_response, which parses the three headers before anything else (:199-201); stratos-feedgen-ng/src/space_host.rs:215-231 list_repo_ops_authenticated, :236-249 AuthenticatedPage and :346-368 authenticated_read; stratos-feedgen-ng/src/space_signature_fields.rs:35-54 parse_dictionary with the decimal rule at :47-49 and the byte-sequence rule at :50-52, both read from the scan at :46, :56-99 the scan of the received text for byte sequences and decimals, and :113-139 members_with_tag; the reasons list at pds_space_scheduler.rs:26-32 and its line at :281; rg -n 'space_mac|space_kem|space_identity|MacVerifiedCommit' stratos-feedgen-ng/src/pds_space_sync.rs stratos-feedgen-ng/src/main.rs finds nothing."
+      "evidence": "stratos-feedgen-ng/src/space_commit.rs:113-120 SignedSpaceCommit has hash, ikm, mac, signature, and stratos-feedgen-ng/src/pds_space_sync.rs:261-268 calls the verifier through the commit port with the old commit; stratos-feedgen-ng/src/space_mac.rs:75-84 MacVerifiedCommit and :203-275 verify_commit_response, which parses the three headers before anything else (:211-213); stratos-feedgen-ng/src/space_host.rs:215-231 list_repo_ops_authenticated, :234-249 AuthenticatedPage and :346-368 authenticated_read; stratos-feedgen-ng/src/space_signature_fields.rs:35-54 parse_dictionary with the decimal rule at :47-49 and the byte-sequence rule at :50-52, both read from the scan at :46, :62-99 the scan of the received text for byte sequences and decimals, and :118-139 members_with_tag; the reasons list at pds_space_scheduler.rs:26-32 and its line at :281; rg -n 'space_mac|space_kem|space_identity|MacVerifiedCommit' stratos-feedgen-ng/src/pds_space_sync.rs stratos-feedgen-ng/src/main.rs finds nothing."
     },
     {
       "id": "prompt-6e-repo-host-mac",
@@ -258,7 +258,7 @@
       ],
       "workstream": "sync-recovery",
       "decision": "Today the consumer verifies only against the commit of the terminal page and has no RepoNotFound handling, so a RepoNotFound answer surfaces as a host error that fails the target and is counted under repo_not_found in the scheduler's log line. Later work verifies the commit on every page and maps RepoNotFound to an empty repo.",
-      "evidence": "stratos-feedgen-ng/src/space_host.rs:180 names the com.atproto.space.listRepoOps endpoint; stratos-feedgen-ng/src/pds_space_sync.rs:257-268 verifies after the terminal page; rg -n 'RepoNotFound' stratos-feedgen-ng/src finds the name only in the scheduler's fixed list of reasons a failed target is counted under (stratos-feedgen-ng/src/pds_space_scheduler.rs:31) and in that list's test (:965); nothing else handles the error."
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:180 names the com.atproto.space.listRepoOps endpoint; stratos-feedgen-ng/src/pds_space_sync.rs:257-260 goes on to the next page unless the page is terminal and :261-268 verifies after the terminal page; rg -n 'RepoNotFound' stratos-feedgen-ng/src finds the name only in the scheduler's fixed list of reasons a failed target is counted under (stratos-feedgen-ng/src/pds_space_scheduler.rs:31) and in that list's test (:965); nothing else handles the error."
     },
     {
       "id": "prompt-7c-garbage-collection",
@@ -415,21 +415,31 @@
       "id": "prerequisite-lthash-commit",
       "promptSection": "prerequisite:2026-10-22",
       "surface": "LtHash set-hash commit authentication",
-      "ownership": "absent",
-      "paths": [],
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/space_set_hash.rs",
+        "stratos-feedgen-ng/src/space_record.rs",
+        "stratos-feedgen-ng/src/space_ops.rs",
+        "stratos-feedgen-ng/src/store/space_verification.rs",
+        "stratos-feedgen-ng/src/space_commit.rs"
+      ],
       "workstream": "verified-state",
-      "decision": "The base has no set hash over repo state; the Rust consumer trusts a hash, ikm and mac commit shape.",
-      "evidence": "rg -n -i 'lthash|blake3|set_hash' stratos-feedgen-ng/src stratos-core/src stratos-service/src returns nothing; stratos-feedgen-ng/src/space_commit.rs:113-120."
+      "decision": "The set hash, the record CID check, the operation decoder and the store functions that promote a change set or replace a whole repo state exist and are called by nothing in the synchronizer. SetHashState holds 1,024 little-endian 16-bit lanes; each element {collection}/{rkey}/{cid} expands through BLAKE3 extended output and is added or subtracted, and the digest is the SHA-256 of the 2,048-byte state. encode_record and record_cid give a record's canonical bytes and CID. decode_op_page and ChangeSet::apply apply typed operations to a state. promote_verified_space_repo and replace_verified_space_repo recompute the state inside one immediate transaction and compare its digest with the data of a MacVerifiedCommit; the store never takes a hash from its caller. The old path is still production and still works on a migrated database: SignedSpaceCommit in space_commit.rs carries hash, ikm and mac in the commit body, and pds_space_sync.rs hands it the commit of the page. Still to do: calling the authenticated read, paging, since, STAR reading, recovery decisions, error classes, switching the synchronizer and deleting the old verifier. Cross-checked, not run on a real host: the pinned package's set hash vectors (lthash.json), op pages and commits (op-pages.json) and record bytes and CIDs (record-cid.json) are reproduced, and the pinned package computes the CIDs, the state and the digest that the Rust tests pin (stratos-produced.json).",
+      "evidence": "stratos-feedgen-ng/src/space_set_hash.rs:40-43 SetHashState and :45-84 its operations; stratos-feedgen-ng/src/space_record.rs:104-110 encode_record and :112-118 record_cid; stratos-feedgen-ng/src/space_ops.rs:117-143 decode_op_page, :288-345 ChangeSet::apply; stratos-feedgen-ng/src/store/space_verification.rs:63-89 promote_verified_space_repo and :91-117 replace_verified_space_repo; stratos-feedgen-ng/src/space_commit.rs:113-120 SignedSpaceCommit; rg -n 'space_ops|space_set_hash|space_verification|verified_space|promote_verified|replace_verified|space_repo_' stratos-feedgen-ng/src/pds_space_sync.rs stratos-feedgen-ng/src/pds_space_scheduler.rs stratos-feedgen-ng/src/main.rs stratos-feedgen-ng/src/space_commit.rs finds only stratos-feedgen-ng/src/pds_space_sync.rs:796 and :857, the test that proves the old path never writes the new tables."
     },
     {
       "id": "prerequisite-prev-cid-ops",
       "promptSection": "prerequisite:2026-10-29",
       "surface": "Operation prev and cid fields",
       "ownership": "production-owned",
-      "paths": ["stratos-feedgen-ng/src/space_host.rs"],
+      "paths": [
+        "stratos-feedgen-ng/src/space_host.rs",
+        "stratos-feedgen-ng/src/space_ops.rs",
+        "stratos-feedgen-ng/src/store/space_verification.rs"
+      ],
       "workstream": "verified-state",
-      "decision": "RawOp keeps rev, collection, rkey and cid but has no prev, so op chains cannot be verified; add prev handling.",
-      "evidence": "stratos-feedgen-ng/src/space_host.rs:627-635 RawOp."
+      "decision": "The old path is unchanged: RawOp keeps rev, collection, rkey and cid but has no prev, and the synchronizer still stages by rev and cid. New code beside it reads prev: decode_op_page keeps rev, collection, rkey, cid, prev and the record value of each operation, ChangeSet::apply refuses an operation whose prev is not what the earlier operations of the same path left, and the store compares each change's prev with the CID stored for that path before it hashes anything. Nothing in the synchronizer calls the new code.",
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:627-635 RawOp; stratos-feedgen-ng/src/space_ops.rs:27-36 RepoOp, :117-143 decode_op_page and :288-345 ChangeSet::apply; stratos-feedgen-ng/src/store/space_verification.rs:282-385 write_verified_promotion."
     },
     {
       "id": "prerequisite-terminal-revision",
@@ -438,11 +448,12 @@
       "ownership": "production-owned",
       "paths": [
         "stratos-feedgen-ng/src/pds_space_sync.rs",
-        "stratos-feedgen-ng/src/store/space.rs"
+        "stratos-feedgen-ng/src/store/space.rs",
+        "stratos-feedgen-ng/src/store/space_verification.rs"
       ],
       "workstream": "verified-state",
-      "decision": "Promotion is by page cursor; later work verifies the final revision against the verified commit before promoting.",
-      "evidence": "stratos-feedgen-ng/src/pds_space_sync.rs:200-268 cursor start and terminal check."
+      "decision": "Production still promotes by page cursor after the old verifier has accepted the commit of the terminal page. The new store function promote_verified_space_repo promotes only when the digest of the state it recomputed equals the data of the commit, the commit's rev is not below the base rev, and the base rev the caller read is still the stored one; replace_verified_space_repo needs no base. Nothing in the synchronizer calls either, so the terminal check in pds_space_sync.rs is unchanged.",
+      "evidence": "stratos-feedgen-ng/src/pds_space_sync.rs:200-202 cursor lookup, :219 terminal flag and :261-268 verification after the terminal page; stratos-feedgen-ng/src/store/space_verification.rs:282-385 write_verified_promotion and :387-461 write_verified_replacement."
     },
     {
       "id": "prerequisite-star-framing",
@@ -713,12 +724,14 @@
       "ownership": "production-owned",
       "paths": [
         "stratos-feedgen-ng/src/store/space.rs",
+        "stratos-feedgen-ng/src/store/space_verification.rs",
         "stratos-feedgen-ng/src/space_sync.rs",
+        "stratos-feedgen-ng/src/space_ops.rs",
         "stratos-feedgen-ng/src/space_membership.rs"
       ],
       "workstream": "canonical-uri",
-      "decision": "store/space.rs is_space_uri is SpaceUri::parse; validate_space_stage_uri parses a staged URI with RecordUri::parse and requires its space to equal the page's parsed space and its author to be the page actor; the member purge matches post URIs by SpaceUri::authority_prefix. space_sync.rs validate_target parses the target space with SpaceUri::parse and requires the authority, the feed space type and the key to match the boundary; prepare_space_page builds each record URI with SpaceUri::record_uri and parses it again with RecordUri::parse_space_record; a like or repost subject is admitted only when RecordUri::parse accepts it. space_membership.rs space_authority parses with SpaceUri::parse and requires the feed space type. An earlier-spelling string fails each of these as InvalidTarget, InvalidRequest or InvalidProjectionMutation, like any non-space string. These are derived projection tables keyed by URI strings; rows an earlier build wrote are never matched (see the cache migration rule in the hand-off).",
-      "evidence": "store/space.rs:6-8 is_space_uri, :112-121 validate_space_stage_uri, :401-408 validate_space_stage_scope and :685-695 purge_departed_pds_member; space_sync.rs:173-180 record URI check, :254-276 validate_target and :286-298 is_admitted_record; space_membership.rs:172-178 space_authority."
+      "decision": "store/space.rs is_space_uri is SpaceUri::parse; validate_space_stage_uri parses a staged URI with RecordUri::parse and requires its space to equal the page's parsed space and its author to be the page actor; the member purge matches post URIs by SpaceUri::authority_prefix; the verified-state replacement finds a member's posts and interactions in one space by parsing each stored URI with RecordUri::parse and comparing the parsed space and author (is_record_of), never by prefix or by spelling. space_sync.rs validate_target parses the target space with SpaceUri::parse and requires the authority, the feed space type and the key to match the boundary; prepare_space_page builds each record URI with SpaceUri::record_uri and parses it again with RecordUri::parse_space_record; a like or repost subject is admitted only when RecordUri::parse accepts it. space_membership.rs space_authority parses with SpaceUri::parse and requires the feed space type. An earlier-spelling string fails each of these as InvalidTarget, InvalidRequest or InvalidProjectionMutation, like any non-space string. The verified-state functions promote_verified_space_repo and replace_verified_space_repo refuse a target whose boundary is not the one its space names, as SpaceRepoInvalid and before they read any state. These are derived projection tables keyed by URI strings; rows an earlier build wrote are never matched (see the cache migration rule in the hand-off).",
+      "evidence": "store/space.rs:6-8 is_space_uri, :112-121 validate_space_stage_uri, :401-408 validate_space_stage_scope and :680-736 purge_departed_pds_member; space_sync.rs:173-180 record URI check, :254-276 validate_target and :286-298 is_admitted_record; space_membership.rs:172-178 space_authority; stratos-feedgen-ng/src/store/space_verification.rs:544-559 is_record_of."
     },
     {
       "id": "uri-interaction-index",
@@ -731,7 +744,7 @@
       ],
       "workstream": "canonical-uri",
       "decision": "Derived index: interaction rows count only when subject_uri equals a post_boundary uri of the interaction's own boundary, and a trigger removes them with the post, so an interaction stored under one spelling never counts for a post stored under the other. validate_interaction parses the interaction uri and the subject_uri with RecordUri::parse, and a Stratos-custody upsert or delete must be a RecordUri::Repo; the actor stream skips a like or repost whose subject does not parse, which includes an earlier-spelling subject. Rows written before the spelling change keep the old string, are never rewritten and are purged by the cache migration.",
-      "evidence": "interactions.rs:160-178 evict_orphan_interactions, :193-220 validate_interaction_changes and :233-250 validate_interaction; migrations.rs:262-287 version 9 trigger; stratos-feedgen-ng/src/actor_event.rs:232-241 reads the subject."
+      "evidence": "interactions.rs:160-178 evict_orphan_interactions, :193-220 validate_interaction_changes and :233-250 validate_interaction; migrations.rs:262-287 version 9 trigger; stratos-feedgen-ng/src/actor_event.rs:232-240 reads the subject."
     },
     {
       "id": "uri-takedown-set",
@@ -744,7 +757,7 @@
       ],
       "workstream": "canonical-uri",
       "decision": "Derived from the service label log and matched by string equality, under any authority. A record label is stored only when its subject URI parsed under the grammar, so a takedown row holds a new-form or custody URI; a post stored in the earlier spelling never matches it. The cache migration purges rows in the earlier spelling and sets label_cursor back to zero so the takedown set is rebuilt from the service log (see the hand-off).",
-      "evidence": "stratos-feedgen-ng/src/store/labels.rs:34-43 record_taken_down and :105-110 subject_key; migrations.rs:249-259 the label_subject table."
+      "evidence": "stratos-feedgen-ng/src/store/labels.rs:34-43 record_taken_down and :105-110 subject_key; migrations.rs:249-259 the label_subject table and its index."
     },
     {
       "id": "uri-label-page-parsing",
@@ -766,8 +779,8 @@
       "ownership": "production-owned",
       "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
       "workstream": "verified-state",
-      "decision": "Derived projection: post.uri, post_boundary.uri, space_cursor.space_uri, space_sync_stage.uri and space_uri, pending_verification.space_uri and suppression_marker.uri hold URI strings. Nothing rebuilds them by itself: the actor stream resumes from actor_cursor, and each PDS-custody target resumes from its stage or space cursor, which space_sync_cursor looks up by exact space_uri. A lookup under another spelling finds no cursor row, so that target is polled again from its first page.",
-      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:10-120; stratos-feedgen-ng/src/store/space.rs:980-999 space_sync_cursor, reached through stratos-feedgen-ng/src/lifecycle.rs:637-648."
+      "decision": "Derived projection: post.uri, post_boundary.uri, space_cursor.space_uri, space_sync_stage.uri and space_uri, pending_verification.space_uri and suppression_marker.uri hold URI strings. Migration 10 deletes post_boundary, post and suppression_marker rows whose uri is not a custody URI (starts with at:// and has exactly four slashes) and every row of space_sync_stage, space_sync_pending_verification and space_cursor, and keeps custody posts and their boundaries. The old path still writes space_cursor, the stage tables and space posts after that: space_sync_cursor looks a cursor up by exact space_uri, a migrated database holds none, so each PDS-custody target is read from its first page, as on a new database, and a test proves it stages and promotes there without writing the new tables. Rows the old path writes are replaced when a verified sync later replaces that member's projection.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:9-120 version 1; stratos-feedgen-ng/src/store/migrations.rs:288-342 migration 10; stratos-feedgen-ng/src/store/space.rs:994-1014 space_sync_cursor, reached through stratos-feedgen-ng/src/lifecycle.rs:640-651 pds_space_cursor; the test that the old path stages and promotes on a migrated database without writing the new tables is stratos-feedgen-ng/src/pds_space_sync.rs:782-867."
     },
     {
       "id": "uri-feedgen-migration-v2-boundary-columns",
@@ -776,8 +789,8 @@
       "ownership": "production-owned",
       "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
       "workstream": "verified-state",
-      "decision": "Adds boundary columns and indexes keyed with space_uri; derived.",
-      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:121-131."
+      "decision": "Adds boundary columns and indexes keyed with space_uri on space_cursor and space_sync_pending_verification; derived. Migration 10 empties both tables, so the columns and indexes stay and hold no rows after it.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:121-130 version 2; stratos-feedgen-ng/src/store/migrations.rs:288-342 migration 10."
     },
     {
       "id": "uri-feedgen-migration-v3-actor-enrollment",
@@ -786,8 +799,8 @@
       "ownership": "production-owned",
       "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
       "workstream": "verified-state",
-      "decision": "Keyed by actor DID and holds no space URI; the cache migration must preserve it unchanged.",
-      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:132-142."
+      "decision": "Keyed by actor DID and holds no space URI; migration 10 does not touch it.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:131-141 version 3; stratos-feedgen-ng/src/store/migrations.rs:288-342 migration 10, which has no statement on actor_enrollment."
     },
     {
       "id": "uri-feedgen-migration-v4-enrollment-index",
@@ -796,8 +809,8 @@
       "ownership": "production-owned",
       "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
       "workstream": "verified-state",
-      "decision": "Index on enrolled and did only; the cache migration must preserve it unchanged.",
-      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:143-149."
+      "decision": "Index on enrolled and did only; migration 10 does not touch it.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:142-148 version 4; stratos-feedgen-ng/src/store/migrations.rs:288-342 migration 10, which has no statement on actor_enrollment."
     },
     {
       "id": "uri-feedgen-migration-v5-stage-cursor",
@@ -806,8 +819,8 @@
       "ownership": "production-owned",
       "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
       "workstream": "verified-state",
-      "decision": "Staged cursors keyed by space_uri; derived and discardable with the stage.",
-      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:150-177."
+      "decision": "Staged cursors keyed by space_uri; derived and discardable with the stage. Migration 10 deletes every row of space_sync_stage_cursor; the old path writes it again when it stages a first page.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:149-176 version 5; stratos-feedgen-ng/src/store/migrations.rs:288-342 migration 10."
     },
     {
       "id": "uri-feedgen-migration-v6-pds-generations",
@@ -816,8 +829,8 @@
       "ownership": "production-owned",
       "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
       "workstream": "verified-state",
-      "decision": "Generation tables keyed by boundary and DID, not by URI; they gate staging and promotion and must be preserved.",
-      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:178-194."
+      "decision": "Generation tables keyed by boundary and DID, not by URI; migration 10 does not touch them. They gate staging and promotion on the old path and gate every verified promotion and replacement on the new one (has_pds_member_generation), so they must be preserved.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:177-193 version 6; stratos-feedgen-ng/src/store/space.rs:785-803 has_pds_member_generation; stratos-feedgen-ng/src/store/migrations.rs:288-342 migration 10, which has no statement on pds_boundary_generation or pds_member_generation."
     },
     {
       "id": "uri-feedgen-migration-v7-stage-lifetime",
@@ -826,8 +839,8 @@
       "ownership": "production-owned",
       "paths": ["stratos-feedgen-ng/src/store/migrations.rs"],
       "workstream": "verified-state",
-      "decision": "Stage lifetime rows keyed by space_uri with triggers on the stage tables; derived.",
-      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:195-241."
+      "decision": "Stage lifetime rows keyed by space_uri with triggers on the stage tables; derived. Migration 10 deletes the stage rows, which fire the triggers, and deletes space_sync_stage_lifetime itself.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:194-238 version 7; stratos-feedgen-ng/src/store/migrations.rs:288-342 migration 10."
     },
     {
       "id": "uri-feedgen-migration-v8-label-subjects",
@@ -839,8 +852,8 @@
         "stratos-feedgen-ng/src/store/labels.rs"
       ],
       "workstream": "verified-state",
-      "decision": "Derived from the service label log: label_cursor holds a log sequence and label_subject.subject_key holds the record URI string or account DID as the log served it. The migration is not edited: no schema change, no new migration and no epoch bump. Rows holding a space URI in the earlier spelling never match a new-form string and are never rewritten; the cache migration purges them and sets label_cursor back to zero so the takedown set is rebuilt (see the hand-off). The migration tests keep a few rows in the earlier spelling that describe what an older build wrote, and the legacy-line check exempts that file.",
-      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:241-261 version 8 and stratos-feedgen-ng/src/store/labels.rs:105-110 subject_key."
+      "decision": "Derived from the service label log: label_cursor holds a log sequence and label_subject.subject_key holds the record URI string or account DID as the log served it. Migration 8 itself is not edited. Migration 10 deletes label_subject rows of kind record whose key is not a custody URI and every label_cursor row, so the poller reads the log again from zero and rebuilds the takedown set; account takedowns and custody-record takedowns stay in force meanwhile. The migration tests keep a few rows in the earlier spelling that describe what an older build wrote, and the legacy-line check exempts that file.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:239-261 version 8; stratos-feedgen-ng/src/store/migrations.rs:288-342 migration 10; stratos-feedgen-ng/src/store/labels.rs:105-110 subject_key."
     },
     {
       "id": "uri-feedgen-migration-v9-interactions",
@@ -852,8 +865,24 @@
         "stratos-feedgen-ng/src/store/interactions.rs"
       ],
       "workstream": "verified-state",
-      "decision": "interaction.uri is the like or repost record URI: repo form for Stratos-custody rows from the actor stream, and at:space/ form for PDS-custody rows from space sync. subject_uri is the liked or reposted post URI and can be space form for both custody classes; both parse with RecordUri::parse, so a subject in the earlier spelling is skipped on the actor stream and refused by the store. Stratos-custody rows come only from the actor stream, which resumes from actor_cursor, so rows purged without resetting that cursor are not sent again; the owner accepted losing the custody-sourced likes of space posts. Rows written before the spelling change keep the old string and are purged by the cache migration.",
-      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:262-287; stratos-feedgen-ng/src/actor_event.rs:218-241 builds the repo-form interaction URI and reads the subject; stratos-feedgen-ng/src/space_sync.rs:172-180 builds space-form record URIs; stratos-feedgen-ng/src/store/interactions.rs:233-250 validate_interaction; stratos-feedgen-ng/src/store/actor.rs:275-283 reset_actor_cursor."
+      "decision": "interaction.uri is the like or repost record URI: repo form for Stratos-custody rows from the actor stream, and at:space/ form for PDS-custody rows from space sync. subject_uri is the liked or reposted post URI and can be space form for both custody classes; both parse with RecordUri::parse, so a subject in the earlier spelling is skipped on the actor stream and refused by the store. Migration 10 deletes interaction rows whose uri or subject_uri is not a custody URI and keeps custody interactions on custody posts. Stratos-custody rows come only from the actor stream, which resumes from actor_cursor; migration 10 does not reset it, so the custody-sourced likes of purged space posts are not sent again, and the owner accepted that loss.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:262-287 version 9; stratos-feedgen-ng/src/store/migrations.rs:288-342 migration 10; stratos-feedgen-ng/src/store/interactions.rs:233-250 validate_interaction; stratos-feedgen-ng/src/actor_event.rs:210-269 interaction_mutation, which builds the repo-form URI and reads the subject; stratos-feedgen-ng/src/store/actor.rs:275-283 reset_actor_cursor."
+    },
+    {
+      "id": "uri-feedgen-migration-v10-verified-state",
+      "promptSection": "base",
+      "surface": "Feedgen migration 10: the earlier-spelling purge and the verified space state tables",
+      "ownership": "production-owned",
+      "paths": [
+        "stratos-feedgen-ng/src/store/migrations.rs",
+        "stratos-feedgen-ng/src/store/space_verification.rs",
+        "stratos-feedgen-ng/src/store/space.rs",
+        "stratos-feedgen-ng/src/store/retention.rs",
+        "stratos-feedgen-ng/src/config.rs"
+      ],
+      "workstream": "verified-state",
+      "decision": "One transaction, in this order: delete interaction, post_boundary, post and suppression_marker rows whose uri is not a custody URI; delete every row of the stage tables, space_sync_stage_lifetime and space_cursor; delete record label_subject rows whose key is not a custody URI and every label_cursor row; create space_repo_state (one checkpoint row per space and member: boundary, host, membership generation, rev, the 2,048-byte set hash state, record count) and space_repo_record (one row per record path with its CID). A database at version 10 is not touched again, a failure leaves version 9 and every row, and a database above 10 is refused. Rows in the two new tables are not feed rows: retention never deletes them and the budgets in config.rs bound them (20,000 records for one member's repo in one space and 500,000 rows in the store; one promotion also carries at most MAX_SPACE_PAGE_OPS, 1,000, changes). Every place that removes or resets a member's space state (the departed-member purge, the reset, the invalidation, the boundary purge) deletes that member's or that boundary's rows in the two tables in the same transaction. The old path is not switched: an older build's file migrates and the old path keeps working on it; the new tables are written only by promote_verified_space_repo and replace_verified_space_repo, which the synchronizer does not call.",
+      "evidence": "stratos-feedgen-ng/src/store/migrations.rs:288-342 migration 10; stratos-feedgen-ng/src/store/space_verification.rs:91-117 replace_verified_space_repo; stratos-feedgen-ng/src/store/space.rs:738-754 delete_verified_space_state, called from purge_departed_pds_member (stratos-feedgen-ng/src/store/space.rs:680-736), invalidate_pds_member (stratos-feedgen-ng/src/store/space.rs:756-783) and reset_pds_member_space_state (stratos-feedgen-ng/src/store/space.rs:933-973); stratos-feedgen-ng/src/store/retention.rs:203-260 purge_boundary; stratos-feedgen-ng/src/config.rs:307-309 MAX_SPACE_REPO_RECORDS and :310-313 MAX_SPACE_VERIFICATION_ROWS, the budgets, and stratos-feedgen-ng/src/space_sync.rs:15-15 MAX_SPACE_PAGE_OPS; rg -n 'space_ops|space_set_hash|space_verification|verified_space|promote_verified|replace_verified|space_repo_' stratos-feedgen-ng/src/pds_space_sync.rs stratos-feedgen-ng/src/pds_space_scheduler.rs stratos-feedgen-ng/src/main.rs stratos-feedgen-ng/src/space_commit.rs finds only stratos-feedgen-ng/src/pds_space_sync.rs:796 and :857, the test that proves the old path never writes the new tables."
     },
     {
       "id": "uri-feed-pagination-cursors",
@@ -952,8 +981,8 @@
         "stratos-feedgen-ng/src/store/retention.rs"
       ],
       "workstream": "canonical-uri",
-      "decision": "actor_event.rs builds repo-form URIs for the actor stream and requires RecordUri::Repo, and accepts a like or repost subject in either form through RecordUri::parse and skips one that does not parse, which includes an earlier-spelling subject; store.rs validate_actor_page requires the repo form for actor pages; feed_service.rs blob_views and lifecycle.rs blob lookup return nothing for a URI that is not repo form, so space-form posts get no blobs on those paths; membership_reconciler.rs calls boundary_to_space_uri per boundary and carries the string into the poll targets; service.rs and lifecycle.rs pass space_uri strings to the store unparsed; store/retention.rs selects and deletes expired stage rows by space_uri equality and breaks retained_at ties by uri when it purges posts. None of these files recognises the earlier spelling. Derived state.",
-      "evidence": "rg -n 'RecordUri::|space_uri|boundary_to_space_uri' on each listed file; actor_event.rs:109-115 and :223-241, store.rs:487-525, feed_service.rs:270, lifecycle.rs:165, membership_reconciler.rs:108-142, store/retention.rs:124-145, :13 and :152."
+      "decision": "actor_event.rs builds repo-form URIs for the actor stream and requires RecordUri::Repo, and accepts a like or repost subject in either form through RecordUri::parse and skips one that does not parse, which includes an earlier-spelling subject; store.rs validate_actor_page requires the repo form for actor pages; feed_service.rs blob_views and lifecycle.rs blob lookup return nothing for a URI that is not repo form, so space-form posts get no blobs on those paths; membership_reconciler.rs calls boundary_to_space_uri per boundary and carries the string into the poll targets; service.rs and lifecycle.rs pass space_uri strings to the store unparsed, and their verified-state pass-throughs hand the store a target whose space_uri the store parses with SpaceUri; store/retention.rs selects and deletes expired stage rows by space_uri equality, breaks retained_at ties by uri when it purges posts, and purge_boundary deletes the verified-state rows of a boundary by boundary equality. None of these files recognises the earlier spelling. Derived state.",
+      "evidence": "rg -n 'RecordUri::|space_uri|boundary_to_space_uri' on each listed file; stratos-feedgen-ng/src/actor_event.rs:108-114 the post URI check and :210-269 interaction_mutation; stratos-feedgen-ng/src/store.rs:513-539 validate_actor_page; stratos-feedgen-ng/src/feed_service.rs:269-285 blob_views; stratos-feedgen-ng/src/lifecycle.rs:159-213 prepare_viewer_blob; stratos-feedgen-ng/src/membership_reconciler.rs:103-153 discover; stratos-feedgen-ng/src/service.rs:180-182 stage_pds_space_page and :195-214 promote_pds_space_stage_at_generation in ProjectionReader; stratos-feedgen-ng/src/lifecycle.rs:653-659 stage_pds_space_page and :674-695 promote_pds_space_stage_at_generation in ControlLifecycle; stratos-feedgen-ng/src/store/retention.rs:4-21 purge_expired (its post delete breaks ties by uri), :37-201 compact_projection_with_budget (expired stage targets by space_uri, then the post delete) and :203-260 purge_boundary."
     },
     {
       "id": "uri-service-emitters",
@@ -1021,7 +1050,7 @@
       "paths": ["stratos-feedgen-ng/src/store/read.rs"],
       "workstream": "canonical-uri",
       "decision": "list_initial_posts and list_posts_after_cursor join post_boundary to post on uri and order a page by sort_at descending, then uri ascending, so among posts with the same sort_at the order is the byte order of the URI strings. That order differs between at:// and at:space/ URIs, and a row an earlier build wrote in the old spelling sorts by its own bytes, and the cursor comparison uses the same string order (see uri-feed-pagination-cursors). interaction_summaries matches interaction.subject_uri against the served post URIs with IN and returns the counts keyed by subject_uri; ProjectionReader::prepare passes the page's post URIs, and feed_service.rs joins the summaries back by post.uri, so an interaction whose subject_uri is spelled differently from the stored post URI is not counted. blob_post finds a post by exact uri equality for the getBlob uri parameter. All of this is derived projection state.",
-      "evidence": "stratos-feedgen-ng/src/store/read.rs:105-125 list_initial_posts with its ORDER BY at :117, :127-152 list_posts_after_cursor, :37-81 interaction_summaries with the IN filter at :62, and :83-103 blob_post with p.uri = ?1 at :91; stratos-feedgen-ng/src/service.rs:361-371 passes the page URIs; stratos-feedgen-ng/src/feed_service.rs:227 summaries.remove(&post.uri)."
+      "evidence": "stratos-feedgen-ng/src/store/read.rs:105-125 list_initial_posts with its ORDER BY at :117, :127-152 list_posts_after_cursor, :37-81 interaction_summaries with the IN filter at :62, and :83-103 blob_post with p.uri = ?1 at :91; stratos-feedgen-ng/src/service.rs:390-420 prepare passes the page URIs; stratos-feedgen-ng/src/feed_service.rs:227 summaries.remove(&post.uri)."
     },
     {
       "id": "uri-rust-space-host-requests",
@@ -1037,7 +1066,7 @@
       ],
       "workstream": "canonical-uri",
       "decision": "The string the feed generator sends, signs and verifies against has one source, boundary_to_space_uri. space_host.rs sends the target space URI as the space query parameter of listRepoOps after validate_request checks only that it is non-empty and at most 2048 bytes; the grammar is checked at the target, in space_sync.rs validate_target. pds_space_sync.rs carries target.space_uri unchanged: it looks the cursor up and stages and discards pages by it, keys the per-target lock on it and passes it to commit verification. space_commit.rs commit_context puts the space URI bytes, length-prefixed, into the context that the commit MAC and signature are checked against, so a commit verifies only when the string is byte for byte the one the commit was made over; a commit made over the earlier spelling fails with a MAC mismatch and is not promoted, and no code retries in another spelling. service_auth.rs mint_space_delegation signs the space URI as the delegation sub claim, and a signed claim is never rewritten. space_mac.rs, the response-header verifier that the synchronizer does not call yet, compares the commit's space and the request's space as bytes after the MAC checks, and a response made for another space is refused as a request mismatch; it parses no URI. The respelling changed no logic in the four files before it (the audience fragment constant in service_auth.rs came later: see prerequisite-token-audience); tests made in the tests with test keys pin the parameter, the delegation sub and the rejected commit.",
-      "evidence": "stratos-feedgen-ng/src/space_host.rs:172-201 repo_request and :507-523 validate_request; stratos-feedgen-ng/src/pds_space_sync.rs:200-202 cursor lookup, :229 and :247 stage, :257-268 verify and :320 lock key; stratos-feedgen-ng/src/space_commit.rs:45-93 verify and :228-250 commit_context; stratos-feedgen-ng/src/service_auth.rs:98-129 mint_space_delegation; the tests at space_host.rs:886, service_auth.rs:302 and space_commit.rs:394; stratos-feedgen-ng/src/space_mac.rs:254-256 the space and repo comparison."
+      "evidence": "stratos-feedgen-ng/src/space_host.rs:172-201 repo_request and :507-523 validate_request; stratos-feedgen-ng/src/pds_space_sync.rs:200-202 cursor lookup, :229 target lookup, :239 stage, :247 discard, :261-268 verify and :320 lock key; stratos-feedgen-ng/src/space_commit.rs:45-93 verify and :228-250 commit_context; stratos-feedgen-ng/src/service_auth.rs:98-129 mint_space_delegation; the tests at space_host.rs:885, service_auth.rs:302 and space_commit.rs:393; stratos-feedgen-ng/src/space_mac.rs:266-268 the space and repo comparison."
     },
     {
       "id": "uri-lexicon-uri-fields",
@@ -1124,7 +1153,7 @@
       ],
       "workstream": "canonical-uri",
       "decision": "store/tests.rs and the other colocated Rust tests hold at:space/ URIs as inputs; the earlier spelling appears only as named negative inputs whose line holds legacy (store/tests.rs LEGACY_SPACE_POST and its neighbours) and in the migration tests in store/migrations.rs, which describe rows an older build wrote and are exempt from the legacy-line check. conformance.rs reads the November corpus and the new blob-url-space-record.json from test/spaces-alignment/november/fixtures, and no longer reads space-record-uri.json. It still reads blob-url.json and moderation-labels.json from the deprecated feed generator's testdata. Those two and space-record-uri.json were respelled in place to at:space/ and hold no earlier-spelling entry: the deprecated package's conformance-portable test reads blob-url.json and space-record-uri.json, and moderation-labels.json is shared with the service moderation-label fixture test.",
-      "evidence": "stratos-feedgen-ng/src/store/tests.rs:72-76 space_post and :1415-1420 the legacy inputs; stratos-feedgen-ng/src/conformance.rs:244-332 the corpus test, :334-351 blob-url.json, :353-375 blob-url-space-record.json and :425-436 moderation-labels.json; stratos-feedgen/testdata/conformance/v1/blob-url.json:14 and stratos-feedgen/testdata/conformance/v1/space-record-uri.json:6 the respelled space entries; stratos-feedgen/tests/conformance-portable.test.ts:73 and :88 read them."
+      "evidence": "stratos-feedgen-ng/src/store/tests.rs:72-76 space_post and :1415-1420 the legacy inputs; stratos-feedgen-ng/src/conformance.rs:244-332 the corpus test, :334-351 blob-url.json, :353-375 blob-url-space-record.json and :425-476 moderation-labels.json; stratos-feedgen/testdata/conformance/v1/blob-url.json:14 and stratos-feedgen/testdata/conformance/v1/space-record-uri.json:6 the respelled space entries; stratos-feedgen/tests/conformance-portable.test.ts:73 and :88 read them."
     },
     {
       "id": "dependency-oauth-scopes-importer",

@@ -519,7 +519,7 @@ fn load_space_stage_rows(
         .map_err(StoreError::Open)
 }
 
-fn apply_verified_space_stage_row(
+pub(super) fn apply_verified_space_stage_row(
     transaction: &rusqlite::Transaction<'_>,
     space_uri: &str,
     actor_did: &str,
@@ -731,6 +731,25 @@ fn purge_departed_pds_member(
             params![did, boundary],
         )
         .map_err(StoreError::Open)?;
+    delete_verified_space_state(transaction, boundary, did)?;
+    Ok(())
+}
+
+/// The verified path rows and checkpoint of a member go with every other space
+/// state of that member, in the same transaction.
+fn delete_verified_space_state(
+    transaction: &rusqlite::Transaction<'_>,
+    boundary: &str,
+    did: &str,
+) -> Result<(), StoreError> {
+    for table in ["space_repo_record", "space_repo_state"] {
+        transaction
+            .execute(
+                &format!("DELETE FROM {table} WHERE did = ?1 AND boundary = ?2"),
+                params![did, boundary],
+            )
+            .map_err(StoreError::Open)?;
+    }
     Ok(())
 }
 
@@ -759,10 +778,11 @@ pub(super) fn invalidate_pds_member(
             params![boundary, did],
         )
         .map_err(StoreError::Open)?;
+    delete_verified_space_state(transaction, boundary, did)?;
     Ok(())
 }
 
-fn has_pds_member_generation(
+pub(super) fn has_pds_member_generation(
     transaction: &rusqlite::Transaction<'_>,
     boundary: &str,
     did: &str,
@@ -938,6 +958,7 @@ impl EncryptedStore {
                 )
                 .map_err(StoreError::Open)?;
         }
+        delete_verified_space_state(&transaction, boundary, did)?;
         // A sync already in flight holds the old generation, so its stage and
         // promotion are refused and cannot write a cursor back after the reset.
         // Membership itself is untouched.
@@ -1200,6 +1221,57 @@ mod revocation_tests {
             next_cursor: Some("pending".to_owned()),
             updated_at: NOW.to_owned(),
         }
+    }
+
+    fn verified_state_of(store: &EncryptedStore, did: &str) {
+        store
+            .connection
+            .execute(
+                "INSERT INTO space_repo_state (space_uri, did, boundary, host, generation, rev, set_hash, record_count, updated_at)
+                 VALUES (?1, ?2, ?3, 'https://pds.bebop.example', 0, '3jzfcijpj2z2a', zeroblob(2048), 1, ?4)",
+                params![SPACE, did, BOUNDARY, NOW],
+            )
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "INSERT INTO space_repo_record (space_uri, did, collection, rkey, boundary, cid)
+                 VALUES (?1, ?2, 'app.bsky.graph.follow', 'faye', ?3, 'bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')",
+                params![SPACE, did, BOUNDARY],
+            )
+            .unwrap();
+    }
+
+    fn verified_rows(store: &EncryptedStore, did: &str) -> (i64, i64) {
+        let count = |table: &str| -> i64 {
+            store
+                .connection
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE did = ?1"),
+                    [did],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        (count("space_repo_state"), count("space_repo_record"))
+    }
+
+    #[test]
+    fn purging_a_departed_member_removes_the_verified_state_of_that_member_only() {
+        let mut store = store();
+        verified_state_of(&store, DID);
+        verified_state_of(&store, OTHER_DID);
+        assert_eq!(verified_rows(&store, DID), (1, 1));
+
+        let transaction = store
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        purge_departed_pds_member(&transaction, BOUNDARY, DID).unwrap();
+        transaction.commit().unwrap();
+
+        assert_eq!(verified_rows(&store, DID), (0, 0));
+        assert_eq!(verified_rows(&store, OTHER_DID), (1, 1));
     }
 
     fn private_mutation() -> SpaceStageMutation {

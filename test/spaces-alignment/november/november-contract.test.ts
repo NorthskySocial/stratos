@@ -123,6 +123,7 @@ const URI_INVENTORY_IDS = [
   'uri-feedgen-migration-v7-stage-lifetime',
   'uri-feedgen-migration-v8-label-subjects',
   'uri-feedgen-migration-v9-interactions',
+  'uri-feedgen-migration-v10-verified-state',
   'uri-feed-pagination-cursors',
   'uri-rust-credential-cache',
   'uri-clubhouse-space-map',

@@ -1,0 +1,159 @@
+{
+  "header": {
+    "classification": "upstream-signed-target-uri",
+    "oracle": {
+      "package": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-AasGxXJz1htNRNNR1JL/2v4EV45VvC4UrbY1x/w/cFH0avOHFxhDV0MQMMegVYhSi7DtnkJ1smwDxO6K/W402g==",
+      "additionalPackages": [
+        {
+          "package": "@atproto/lex-json",
+          "version": "0.0.0-spaces-alpha-20261117141222",
+          "integrity": "sha512-rF7Ogq8ZSLjmO82l9ZMjlO7zcKTm/079pQPTdMx92bIdRuWRk3TT3bF+iNkkwE1KNfKpKGACGxpvTXosb4ircg=="
+        }
+      ]
+    },
+    "generator": {
+      "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
+      "sha256": "8021522efa5c1c6845958047b54a9b192d161b8abc9c16fb6e1ead0e87b6f116"
+    },
+    "upstreamVerified": true,
+    "reproducible": true
+  },
+  "note": "Three pages in the wire shape of listRepoOps over a hand-written new-form space string. Each commit is made by the oracle RepoCommit after that page, so its data is the set hash digest of the repo then. Values and cids are those of record-cid.json.",
+  "pages": [
+    {
+      "ops": [
+        {
+          "rev": "3jzfcijpj2z2a",
+          "collection": "zone.stratos.feed.post",
+          "rkey": "swordfish",
+          "cid": "bafyreiblisg4mhig4cyda6j2cizhefufa7n3smi5jxdlxug3t45ztfe5pq",
+          "prev": null,
+          "value": {
+            "$type": "zone.stratos.feed.post",
+            "text": "See you space cowboy"
+          }
+        },
+        {
+          "rev": "3jzfcijpj2z2b",
+          "collection": "zone.stratos.feed.post",
+          "rkey": "swordfish",
+          "cid": "bafyreia2riwiofeyueakvuobrujsfp6rovaqbfkbi5v455itkaoyxf4wii",
+          "prev": "bafyreiblisg4mhig4cyda6j2cizhefufa7n3smi5jxdlxug3t45ztfe5pq",
+          "value": {
+            "$type": "zone.stratos.feed.post",
+            "text": "See you space cowboy, edited"
+          }
+        },
+        {
+          "rev": "3jzfcijpj2z2b",
+          "collection": "app.bsky.feed.like",
+          "rkey": "ed",
+          "cid": "bafyreiap6kjr6q5agaxyb6t3sozd2lpvsqr5nhwvzxhdxlrrytfop6744a",
+          "prev": null,
+          "value": {
+            "$type": "app.bsky.feed.like",
+            "subject": {
+              "uri": "at://did:plc:fayevalentine/zone.stratos.feed.post/swordfish",
+              "cid": "bafyreihypg3uvx3sc754r22emkw6ujpiqjozie6puum4ie4egt2jqxz6wa"
+            }
+          }
+        },
+        {
+          "rev": "3jzfcijpj2z2b",
+          "collection": "app.bsky.feed.repost",
+          "rkey": "jet",
+          "cid": "bafyreibbhi2yoxc2qpkwu5areztzr73klz3eue3ygac6jdyiw7aarv7k2e",
+          "prev": null,
+          "value": {
+            "$type": "app.bsky.feed.repost",
+            "subject": {
+              "uri": "at://did:plc:fayevalentine/zone.stratos.feed.post/swordfish",
+              "cid": "bafyreihypg3uvx3sc754r22emkw6ujpiqjozie6puum4ie4egt2jqxz6wa"
+            }
+          }
+        },
+        {
+          "rev": "3jzfcijpj2z2b",
+          "collection": "app.bsky.graph.follow",
+          "rkey": "faye",
+          "cid": "bafyreiapbmc4vcdo7b4m72byyth4cynim3xprtghbfhssdn66gj622d2hq",
+          "prev": null,
+          "value": {
+            "$type": "app.bsky.graph.follow",
+            "subject": "did:plc:jetblack"
+          }
+        }
+      ],
+      "commit": {
+        "ver": 1,
+        "repo": "did:plc:fayevalentine",
+        "space": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew",
+        "rev": "3jzfcijpj2z2b",
+        "data": {
+          "$bytes": "wCaJafNHwH4APHZEjTkeR+OaBvDsyw09As56lv3o+Uc"
+        }
+      }
+    },
+    {
+      "ops": [
+        {
+          "rev": "3jzfcijpj2z2c",
+          "collection": "zone.stratos.feed.post",
+          "rkey": "ein",
+          "cid": "bafyreid66mju6bipbp2fuq2yp2o3w4klwyhzotzdlt3ajvbdquimiarsm4",
+          "prev": null,
+          "value": {
+            "$type": "zone.stratos.feed.post",
+            "text": "Bark"
+          }
+        },
+        {
+          "rev": "3jzfcijpj2z2d",
+          "collection": "app.bsky.feed.like",
+          "rkey": "ed",
+          "cid": null,
+          "prev": "bafyreiap6kjr6q5agaxyb6t3sozd2lpvsqr5nhwvzxhdxlrrytfop6744a"
+        },
+        {
+          "rev": "3jzfcijpj2z2d",
+          "collection": "zone.stratos.feed.post",
+          "rkey": "swordfish",
+          "cid": "bafyreiccr7epf4hee6fqyqdqeocowao75uakqh6vbr6bsugbylyd5q6pr4",
+          "prev": "bafyreia2riwiofeyueakvuobrujsfp6rovaqbfkbi5v455itkaoyxf4wii",
+          "value": {
+            "$type": "zone.stratos.feed.post",
+            "text": "See you space cowboy, again"
+          }
+        }
+      ],
+      "commit": {
+        "ver": 1,
+        "repo": "did:plc:fayevalentine",
+        "space": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew",
+        "rev": "3jzfcijpj2z2d",
+        "data": {
+          "$bytes": "rJZ+6mFSJKc6Nb1uZDqMVkUu3T4VDq3sSiklIvTs6aI"
+        }
+      }
+    },
+    {
+      "ops": [],
+      "commit": {
+        "ver": 1,
+        "repo": "did:plc:fayevalentine",
+        "space": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew",
+        "rev": "3jzfcijpj2z2d",
+        "data": {
+          "$bytes": "rJZ+6mFSJKc6Nb1uZDqMVkUu3T4VDq3sSiklIvTs6aI"
+        }
+      }
+    }
+  ],
+  "stateAfterLastPage": {
+    "encoding": "base64",
+    "value": "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",
+    "length": 2048
+  }
+}

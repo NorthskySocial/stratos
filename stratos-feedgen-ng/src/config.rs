@@ -304,6 +304,13 @@ const DEFAULT_STAGE_TARGET_ROWS: u64 = MAX_SPACE_PROMOTION_STAGE_ROWS as u64;
 const DEFAULT_STAGE_GLOBAL_ROWS: u64 = 8_192;
 pub(crate) const MAX_SPACE_PROMOTION_STAGE_ROWS: i64 = 1_024;
 pub(crate) const MAX_SPACE_PROMOTION_STAGE_BYTES: i64 = 8 * 1024 * 1024;
+/// One member's repo in one space is kept whole as path rows, so a host cannot
+/// grow the cache by publishing more records than a feed member plausibly holds.
+pub const MAX_SPACE_REPO_RECORDS: usize = 20_000;
+/// Path rows across every member and space. They are not feed rows: they do not
+/// count against the retention budget and retention never deletes them, so they
+/// need a bound of their own.
+pub const MAX_SPACE_VERIFICATION_ROWS: usize = 500_000;
 
 fn parse_retention(
     storage: &StorageProfile,

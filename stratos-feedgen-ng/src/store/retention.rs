@@ -238,6 +238,16 @@ impl EncryptedStore {
                 [boundary],
             )
             .map_err(StoreError::Open)?;
+        // Verified state must not outlive the projection it vouches for, or a
+        // later incremental promotion would skip records that are gone.
+        for table in ["space_repo_record", "space_repo_state"] {
+            transaction
+                .execute(
+                    &format!("DELETE FROM {table} WHERE boundary = ?1"),
+                    [boundary],
+                )
+                .map_err(StoreError::Open)?;
+        }
         transaction
             .execute("DELETE FROM post_boundary WHERE boundary = ?1", [boundary])
             .map_err(StoreError::Open)?;

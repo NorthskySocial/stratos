@@ -2,11 +2,13 @@ use crate::{
     admission::{ReadAdmission, ReadToken},
     cursor::FeedCursor,
     moderation_label::LabelPage,
+    space_mac::MacVerifiedCommit,
+    space_ops::ChangeSet,
     space_sync::{PreparedSpacePage, SpaceSyncError, SpaceSyncTarget, stage_space_page},
     store::{
         ActorEnrollment, ActorPage, ActorSyncState, EncryptedStore, EnrollmentReconciliation,
         FeedPage, LabelPageEffects, PdsSpaceMember, ProjectionCompaction, StoreError,
-        StoreInterrupt,
+        StoreInterrupt, VerifiedSpaceBase, VerifiedSpaceRecord, VerifiedSpaceTarget,
     },
 };
 use std::collections::BTreeSet;
@@ -208,6 +210,51 @@ impl ProjectionReader {
             generation,
         )?;
         self.admission.invalidate_boundary(boundary);
+        Ok(())
+    }
+    pub fn verified_space_base(
+        &self,
+        space_uri: &str,
+        actor_did: &str,
+    ) -> Result<Option<VerifiedSpaceBase>, StoreError> {
+        self.store.verified_space_base(space_uri, actor_did)
+    }
+    pub fn promote_verified_space_repo(
+        &mut self,
+        target: &VerifiedSpaceTarget,
+        base_rev: Option<&str>,
+        commit: &MacVerifiedCommit,
+        change_set: &ChangeSet,
+        retained_at: &str,
+        observed_at: &str,
+    ) -> Result<(), StoreError> {
+        self.store.promote_verified_space_repo(
+            target,
+            base_rev,
+            commit,
+            change_set,
+            retained_at,
+            observed_at,
+        )?;
+        self.admission.invalidate_boundary(&target.boundary);
+        Ok(())
+    }
+    pub fn replace_verified_space_repo(
+        &mut self,
+        target: &VerifiedSpaceTarget,
+        commit: &MacVerifiedCommit,
+        records: &[VerifiedSpaceRecord],
+        retained_at: &str,
+        observed_at: &str,
+    ) -> Result<(), StoreError> {
+        self.store.replace_verified_space_repo(
+            target,
+            commit,
+            records,
+            retained_at,
+            observed_at,
+        )?;
+        self.admission.invalidate_boundary(&target.boundary);
         Ok(())
     }
     pub fn discard_pds_space_stage(
@@ -767,5 +814,107 @@ mod tests {
 
         assert!(reader.release(old_token, old_page, 2).is_none());
         assert!(reader.release(new_token, new_page, 2).is_none());
+    }
+
+    const CREW: &str = "did:web:bebop.example/crew";
+    const CREW_SPACE: &str = "at:space/did:web:bebop.example/zone.stratos.space.feed/crew";
+    const FAYE: &str = "did:plc:fayevalentine";
+    const FIRST_REV: &str = "3jzfcijpj2z2a";
+    const OBSERVED: &str = "2026-09-22T00:00:00.000Z";
+    const RETAINED: &str = "2026-09-23T00:00:00.000Z";
+
+    fn reader_with_member() -> (ProjectionReader, crate::store::VerifiedSpaceTarget) {
+        let mut reader = ProjectionReader::new(
+            EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+        );
+        reader
+            .replace_pds_space_members(
+                CREW,
+                vec![crate::store::PdsSpaceMember {
+                    did: FAYE.to_owned(),
+                }],
+                OBSERVED,
+            )
+            .unwrap();
+        let target = crate::store::VerifiedSpaceTarget {
+            boundary: CREW.to_owned(),
+            space_uri: CREW_SPACE.to_owned(),
+            actor_did: FAYE.to_owned(),
+            host: "https://pds.bebop.example".to_owned(),
+            generation: reader.pds_member_generation(CREW, FAYE).unwrap().unwrap(),
+        };
+        (reader, target)
+    }
+
+    fn empty_repo_commit() -> crate::space_mac::MacVerifiedCommit {
+        crate::space_mac::MacVerifiedCommit::for_tests(
+            FAYE,
+            CREW_SPACE,
+            FIRST_REV,
+            crate::space_set_hash::SetHashState::empty().digest(),
+        )
+    }
+
+    #[test]
+    fn promoting_a_verified_change_set_invalidates_only_the_reads_of_its_boundary() {
+        let (mut reader, target) = reader_with_member();
+        reader.establish_session();
+        let (token, page) = reader.prepare(read_request(CREW)).unwrap().unwrap();
+        let (other_token, other_page) = reader.prepare(read_request("other")).unwrap().unwrap();
+        let change_set =
+            crate::space_ops::ChangeSet::apply(crate::space_set_hash::SetHashState::empty(), &[])
+                .unwrap();
+
+        reader
+            .promote_verified_space_repo(
+                &target,
+                None,
+                &empty_repo_commit(),
+                &change_set,
+                RETAINED,
+                OBSERVED,
+            )
+            .unwrap();
+
+        assert!(reader.release(token, page, 2).is_none());
+        assert!(reader.release(other_token, other_page, 2).is_some());
+        assert_eq!(
+            reader
+                .verified_space_base(CREW_SPACE, FAYE)
+                .unwrap()
+                .unwrap()
+                .rev,
+            FIRST_REV
+        );
+    }
+
+    #[test]
+    fn replacing_a_verified_repo_invalidates_only_the_reads_of_its_boundary() {
+        let (mut reader, target) = reader_with_member();
+        reader.establish_session();
+        let (token, page) = reader.prepare(read_request(CREW)).unwrap().unwrap();
+        let (other_token, other_page) = reader.prepare(read_request("other")).unwrap().unwrap();
+
+        reader
+            .replace_verified_space_repo(&target, &empty_repo_commit(), &[], RETAINED, OBSERVED)
+            .unwrap();
+
+        assert!(reader.release(token, page, 2).is_none());
+        assert!(reader.release(other_token, other_page, 2).is_some());
+    }
+
+    #[test]
+    fn a_refused_verified_write_leaves_the_reads_of_its_boundary_valid() {
+        let (mut reader, target) = reader_with_member();
+        reader.establish_session();
+        let (token, page) = reader.prepare(read_request(CREW)).unwrap().unwrap();
+        let wrong_digest =
+            crate::space_mac::MacVerifiedCommit::for_tests(FAYE, CREW_SPACE, FIRST_REV, [9; 32]);
+
+        let outcome =
+            reader.replace_verified_space_repo(&target, &wrong_digest, &[], RETAINED, OBSERVED);
+
+        assert!(outcome.is_err());
+        assert!(reader.release(token, page, 2).is_some());
     }
 }

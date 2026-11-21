@@ -233,3 +233,27 @@ fn structured_fields_keep_two_member_dictionary_order() {
     assert_eq!(members, ["zeta", "alpha"]);
     assert_eq!(dictionary.serialize().as_deref(), Some(text));
 }
+
+#[test]
+fn blake3_hash_of_empty_input_matches_published_value() {
+    let digest = blake3::hash(b"");
+
+    assert_eq!(
+        digest.as_bytes().as_slice(),
+        hex_bytes("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262").as_slice()
+    );
+}
+
+#[test]
+fn blake3_extended_output_begins_with_the_default_hash() {
+    let input = b"Spike meets Faye aboard the Bebop";
+    let mut extended = [0_u8; 2048];
+
+    blake3::Hasher::new()
+        .update(input)
+        .finalize_xof()
+        .fill(&mut extended);
+
+    assert_eq!(&extended[..32], blake3::hash(input).as_bytes().as_slice());
+    assert!(extended[32..].iter().any(|byte| *byte != 0));
+}

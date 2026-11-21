@@ -3,14 +3,18 @@
 // usage: node generate-oracle-vectors.mjs <oracle-directory> [--tokens]
 //                                          [--stratos-produced]
 //                                          [--commit-mac] [--kem-keys]
+//                                          [--record-cid] [--op-pages]
 //
 // Without a flag every file but token-audiences.json, stratos-produced.json,
-// commit-mac.json and kem-keys.json is written, and the output is the same on
-// every run. token-audiences.json holds tokens the oracle stamps with the clock
+// commit-mac.json, kem-keys.json, record-cid.json and op-pages.json is written,
+// and the output is the same on every run. token-audiences.json holds tokens the oracle stamps with the clock
 // and a random jti, so it is written only with --tokens and then kept.
 // stratos-produced.json takes its inputs from constants copied out of Stratos
 // tests (named beside each one) and is written only with --stratos-produced.
-// commit-mac.json and kem-keys.json are reproducible and each has its own flag.
+// commit-mac.json, kem-keys.json, record-cid.json and op-pages.json are
+// reproducible and each has its own flag. The last two also need
+// @atproto/lex-json at the oracle version, installed beside @atproto/space in
+// the oracle directory: the JSON-to-data-model step is that package's.
 //
 // Every file's header pins this generator's hash. Changing this file means
 // running again, and a file that is not rewritten has to have that one header
@@ -70,11 +74,15 @@ const writeTokens = flags.includes('--tokens')
 const writeStratosProduced = flags.includes('--stratos-produced')
 const writeCommitMac = flags.includes('--commit-mac')
 const writeKemKeys = flags.includes('--kem-keys')
+const writeRecordCid = flags.includes('--record-cid')
+const writeOpPages = flags.includes('--op-pages')
 const KNOWN_FLAGS = [
   '--tokens',
   '--stratos-produced',
   '--commit-mac',
   '--kem-keys',
+  '--record-cid',
+  '--op-pages',
 ]
 if (!oracleDirectory || flags.some((flag) => !KNOWN_FLAGS.includes(flag))) {
   console.error(
@@ -988,6 +996,39 @@ if (writeTokens) {
   )
 }
 
+const LEX_JSON_PACKAGE = '@atproto/lex-json'
+const LEX_JSON_INTEGRITY =
+  'sha512-rF7Ogq8ZSLjmO82l9ZMjlO7zcKTm/079pQPTdMx92bIdRuWRk3TT3bF+iNkkwE1KNfKpKGACGxpvTXosb4ircg=='
+const withLexJson = (oracleHeader) => ({
+  ...oracleHeader,
+  additionalPackages: [
+    {
+      package: LEX_JSON_PACKAGE,
+      version: ORACLE_VERSION,
+      integrity: LEX_JSON_INTEGRITY,
+    },
+  ],
+})
+const loadLexJson = async (neededBy) => {
+  const lexJsonEntry = resolve(
+    oracleDirectory,
+    'node_modules/@atproto/lex-json/dist/index.js',
+  )
+  try {
+    const lexJsonVersion = JSON.parse(
+      readFileSync(resolve(dirname(dirname(lexJsonEntry)), 'package.json')),
+    ).version
+    if (lexJsonVersion !== ORACLE_VERSION)
+      throw new Error(`it is ${lexJsonVersion}, expected ${ORACLE_VERSION}`)
+    return await import(pathToFileURL(realpathSync(lexJsonEntry)).href)
+  } catch (error) {
+    console.error(
+      `${neededBy} need ${LEX_JSON_PACKAGE}@${ORACLE_VERSION} installed beside @atproto/space in ${oracleDirectory}: ${error.message}`,
+    )
+    process.exit(1)
+  }
+}
+
 if (writeStratosProduced) {
   const { Secp256k1Keypair } = await importFrom('@atproto/crypto')
   const accepted = 'accepted'
@@ -1096,6 +1137,82 @@ if (writeStratosProduced) {
         })
       : { headers: undefined }
 
+  // Copied from the Rust tests `the_cids_of_three_fixed_records_are_the_pinned_constants`
+  // (space_record.rs, module cross_check_inputs) and
+  // `the_state_and_digest_after_the_fixed_operations_are_the_pinned_constants`
+  // (space_ops.rs).
+  const RUST_RECORD_CIDS = {
+    source: 'stratos-feedgen-ng/src/space_record.rs',
+    records: [
+      {
+        name: 'a post',
+        constant: 'POST',
+        json: '{"$type":"zone.stratos.feed.post","text":"Whatever happens, happens"}',
+        rustCid: 'bafyreicy76sh4fkqtlr7dmtiakbzpfqhvcsx36lf26eifaplxgl5abq2fq',
+      },
+      {
+        name: 'a follow',
+        constant: 'FOLLOW',
+        json: '{"$type":"app.bsky.graph.follow","subject":"did:plc:spikespiegel","createdAt":"2026-09-22T00:00:00.000Z"}',
+        rustCid: 'bafyreigoyb4wgujzkp5jj6l4fiduaefr5hkjfcjwc7tgwbrrfkol4ur22m',
+      },
+      {
+        name: 'a post with a link and bytes',
+        constant: 'LINKED',
+        json: '{"$type":"zone.stratos.feed.post","text":"Ein","embed":{"image":{"$type":"blob","ref":{"$link":"bafkreicmhqydaeykjinrosvewdw2dkzg6gwayo4i3d5tbyav4mls6nlica"},"mimeType":"image/png","size":3},"thumb":{"$bytes":"AQID"}}}',
+        rustCid: 'bafyreiamr44qnmy5gt77wtssi7svuhexyfxffcqhn2mgzrfdqb7fi4lrgi',
+      },
+    ],
+  }
+  const RUST_SET_HASH = {
+    source: 'stratos-feedgen-ng/src/space_ops.rs',
+    // [revision index, collection, rkey, record constant written, constant it replaced]
+    steps: [
+      [0, POST, 'swordfish', 'POST', null],
+      [0, 'app.bsky.graph.follow', 'spike', 'FOLLOW', null],
+      [1, POST, 'ein', 'LINKED', null],
+      [2, POST, 'swordfish', 'LINKED', 'POST'],
+      [2, 'app.bsky.graph.follow', 'spike', null, 'FOLLOW'],
+    ],
+    rustStateBase64:
+      '2XO4rvh6d7V4ZV4CtsHfVcg6/kIzVMnH7bhxDYhWIMcRTGeXScVudsEkxLtUQklzOMC/w4AVKuQBCsKicSg4ENJB77oFrCJUadTybOxPqz4hOADcwq0tcAF7VY16DjnEfHJEUiPZJT6H5EMJYkXZhuDzHN9+BNC9luedqdIBFgaquXTxWHBj/9i+VFx0rOevL0+YXvqux8jrQ+asE2fFJdwLeJtiO9b9bLFQyz3iXuyB++pgQ6mAO3rAV4T7pP5vf8SMslDDTRkevenEcIQtTBOSGvJ6bWY9aQfQlX+fsYz8PXuQUcaJxkqhFdpLe5q5zOBh8DJSGELZLZzw7DQUqf4XFicp8vLbwDp6StsD0dycWa6bN1yCFQrA52D+8PK3zvhvn2aHxWUSSQi9taHkXpp2cQqhhQMrWA4651gz+eIdHM5koI1YY6aYiVQl6ry6tsJSLKy/0xhqdiwFdPnAOFPHX0cdXxoPIfjrrgvcclJzrbRL0pgq9U5MyrsrcjleTu7vkI/gtiXeysw0ghqhW8hCNnK7poSSMUpZCcN9nQmTt3PTNJ2597LhqINNVbH6s6hJR5b9YQ/1ciT92eI6FSaXetlBicYVS84qxCE/DJqEwgYtPM641j3WuwzgwHUwR3RDzCTW8X+kR2dLXtHnhUc9SIjJEiSv1sEy17CIMefsaIbjoArtyTelbl6mG1swj5tjpeREY/+uGvxFnwRBn8WyHOaXRyzfh6fgQKg9WCfWAmcWEqFv+QecDClJ3YrSDl6UxGZA3uawVYhKUieLOhzkGeDjySOn8fV44lyRjRHUtoVf46wqWZEgEZdWsPJ2AUBtSS41D3YP+tjyZ7dbDzlUHUrU8J6yiRh42jzHKnJOeW7VJEloIos58egU7YQYBesUdIX+Thax6S512kQ0OKBy7oUUCi27aUbkZg+HDRcMmM5Hgaf+1xHddk+EBn4AgPFt2Y2A3W2RG4mwmVvT3+RtE2rozbdLhEsfm2vMo6Gv9XwIQoc7PGAeQyTNn1lO+ZpnoIzNUcrWbwd4K0FgDlf2w+5wt3mlZ3Nvw5uqP+jJzcB35/xS26XK372ZrphS5FUYCNR0Tzd8efXRzx404RV7VItr02KOkWqZE4YtDXiX1arTHOcJREtsinV+UCAZzEstlva9ILSM1jP5wCZAKWWM1G9bQwDc+7j0boPmO65R8iaWmVPADE3DVh3ctn7XDTJGqNLbs5sn6ZWGPeXpOFBDHNuLSz307HlfyjRAqjHjLUtIucIl2w59JDCpPvID+7MhKl2fSR6AVJnrzk702yBgHKy51kVLf3e87Qs2dBDFvxAEAC9vGKc87mYdS8vF0Pnt7MWe93XX/8g/p/X/BiZhqmgX4L99OdD1+HNo+n5h+3JkamMYcxBpU4BmSRMCErhtzGishm2Jox5bPuAD84eZHi49y2H+y9lCRwdVXuYKLsuVvqDTz74gCSZP/9bndEaIo4p/gu3C0zLL1lvDA523J1YabiGtuiPjZJvlCC6VoEHk0n21yutSIpsUPnYWiE81Zd/BvVGDjeeefvMJmp26iz7IYADXbFzrW707wsYNfYbizedwAVQWktpNODHJyZX9u+4dM7kHJ0OgO/7etZ+IAAogpz3Q5IVZjCJf+4ckXhn9drofWBmN4sEoPwSIUbP5Qb8ABLaBSB+hVUVWuK+J2Iv0UsYVmO2CNsb/rDWydmcfI9VtVC70s3E5DtgqP/NqjwnhkNSd9/Xt3wpv9L24q32sCU1NllMDTT7hkwWqLvBjNeH9r08qe15IcCI6LmcuvOKVputLEaqcC8qOX+skmktVOKCqFV1vx7IT4aBLlczY/uFSPh25mkoRnyEs1TqpAcKxeQvPxdRRNY0KSfHOt/0+vkfit7Ggt2AVdeDqf1o3kT60B5ulndVybsszo4dM7Deg0W/udOeMJsYRfzHAFMLzUqA4EGHXnTb8cXVDphNNvcPsiqRIQ9nUBD1uwOdFrci+3MiFU/DLaCv6CKN+NuWTiMYE2o3CBHdBDH+yDJSuthRhgaifk+dbBgrWfEcm214txiEj0mSgMI/PbMqKmMA1cgWvgO0EnjJAisGaxz6d1cvV7c/dwr45rLQBHUBJNXOx2FsCQ55OAQphICHU5Vp+/+I0/P4Ny3v828af2oenIHd/+X2YeUrt9Di4r3L/EX5CQFgj4c5hkwdFeDIiI+FnlLZ+mUGzkuuBedNNX4Go/GZJFWOBHgA1b1uvrtFuGPcKawADN68nDEDFupI//ez00UIRpeyHEVL7aPIp5HeG38KWHlWyakXA4IuF3wH4yodKBzDvXnm1sAu0JRQKm6xaeJnRrr0GhQC0anCej8k52DRBXSB383Vm2l6tobOfkNJDiWWms2JKv1WgtwJ5sw6hSYtineAoJs2tL+BIxpTHN64OOgTr4uuZ7rmsikkdyBoSwMuXRG+XmDAlrBJMnUyS+uGweEWctgWeQ1rccPXFlbHUGQ19B5xhXyJvoeT84TuBk4H8Yl/CLtfYKGni79yhmOo6eNyOTJIdlkZfiSVOcwvvaj8EyhZMUfLiCkOREzYfwEGWXOgU02vsla0sC3fIt8WMC8f3Hd3W7PYgaXHWMPBxMAhBqu2AieLk9WfTKl+FVrPvV5DMb72Mw6jlvTtZSL/mtY4OrT//Qj8D75buG0rogJFLT+lN4vmb+t5RkaOJbmpgXGgNLS8gp/B8Lybwh1uBkO1x1tolizY=',
+    rustDigestHex:
+      'd6104e12dc24c5dff84fdd4a7eee2f789b50a7b51820695ec7ed9c00147015fa',
+  }
+  const { lexParse: crossLexParse, lexToJson: crossLexToJson } =
+    await loadLexJson('--stratos-produced')
+  const crossRecords = {}
+  for (const record of RUST_RECORD_CIDS.records)
+    crossRecords[record.constant] = await space.serializeRecord(
+      POST,
+      'k',
+      crossLexParse(record.json),
+    )
+  const crossJson = Object.fromEntries(
+    RUST_RECORD_CIDS.records.map((record) => [
+      record.constant,
+      crossLexToJson(crossLexParse(record.json)),
+    ]),
+  )
+  const crossRepo = new space.RepoCommit()
+  crossRepo.applyOps(
+    RUST_SET_HASH.steps.map(
+      ([revision, collection, rkey, written, replaced]) => ({
+        rev: REVISIONS[revision],
+        collection,
+        rkey,
+        cid: written === null ? null : crossRecords[written].cid,
+        prev: replaced === null ? null : crossRecords[replaced].cid,
+        ...(written === null ? {} : { value: crossJson[written] }),
+      }),
+    ),
+  )
+  const crossCommit = crossRepo.toCommit({
+    space: 'at:space/did:web:nerv.example/zone.stratos.space.feed/tokyo3',
+    repo: REPO,
+    rev: REVISIONS[2],
+  })
+
   const presentationKey = await P256Keypair.import(
     new Uint8Array(32).fill(RUST_PRESENTATION.signingKeyFill),
   )
@@ -1110,7 +1227,7 @@ if (writeStratosProduced) {
     'stratos-produced.json',
     {
       classification: 'upstream-signed-target-uri',
-      oracle,
+      oracle: withLexJson(oracle),
       generator,
       upstreamVerified: true,
       reproducible: true,
@@ -1165,6 +1282,26 @@ if (writeStratosProduced) {
           createCommitMacHeaders: crossCheckHeaders ? 'made' : 'not-made',
         },
         responseHeaders: crossCheckHeaders ?? null,
+      },
+      rustRecordCids: {
+        source: RUST_RECORD_CIDS.source,
+        records: RUST_RECORD_CIDS.records.map((record) => ({
+          name: record.name,
+          constant: record.constant,
+          json: record.json,
+          rustCid: record.rustCid,
+          oracleCid: crossRecords[record.constant].cid.toString(),
+        })),
+      },
+      rustSetHash: {
+        source: RUST_SET_HASH.source,
+        steps: RUST_SET_HASH.steps,
+        rustStateBase64: RUST_SET_HASH.rustStateBase64,
+        rustDigestHex: RUST_SET_HASH.rustDigestHex,
+        oracleStateBase64: Buffer.from(crossRepo.setHash.state()).toString(
+          'base64',
+        ),
+        oracleDigestHex: Buffer.from(crossCommit.data).toString('hex'),
       },
       serviceCredential: {
         source: SERVICE_CREDENTIAL.source,
@@ -1596,4 +1733,366 @@ if (writeKemKeys) {
       cases,
     },
   )
+}
+
+if (writeRecordCid || writeOpPages) {
+  const lexJson = await loadLexJson('--record-cid and --op-pages')
+  const { lexParse, lexToJson } = lexJson
+  const { cidForRawBytes, parseCidSafe } = await importFrom('@atproto/lex-data')
+  // multiformats is a dependency of lex-data only and exports no base58 entry
+  // for require, so the file is imported by path.
+  const { base58btc } = await import(
+    pathToFileURL(
+      resolve(
+        dirname(realpathSync(spaceRequire.resolve('@atproto/lex-data'))),
+        '../../../multiformats/dist/src/bases/base58.js',
+      ),
+    ).href
+  )
+  const recordOracle = withLexJson(oracle)
+
+  const hex = (bytes) => Buffer.from(bytes).toString('hex')
+  const FEED_POST = 'zone.stratos.feed.post'
+  const POST_CUSTODY_URI = `at://${REPO}/${FEED_POST}/swordfish`
+  const SUBJECT_CID =
+    'bafyreihypg3uvx3sc754r22emkw6ujpiqjozie6puum4ie4egt2jqxz6wa'
+  const BLOB_CID = (
+    await cidForRawBytes(new TextEncoder().encode('ein'))
+  ).toString()
+  const postJson = (text) => JSON.stringify({ $type: FEED_POST, text })
+  const strongRefJson = (type) =>
+    JSON.stringify({
+      $type: type,
+      subject: { uri: POST_CUSTODY_URI, cid: SUBJECT_CID },
+    })
+
+  const RECORD_TEXTS = [
+    ['a post', postJson('See you space cowboy')],
+    ['a post, edited', postJson('See you space cowboy, edited')],
+    ['a post, edited again', postJson('See you space cowboy, again')],
+    ['a post by Ein', postJson('Bark')],
+    ['a like with a strong reference', strongRefJson(LIKE)],
+    ['a repost', strongRefJson(REPOST)],
+    [
+      'a follow',
+      JSON.stringify({
+        $type: 'app.bsky.graph.follow',
+        subject: 'did:plc:jetblack',
+      }),
+    ],
+    [
+      'a post with a blob reference',
+      JSON.stringify({
+        $type: FEED_POST,
+        text: 'Ein',
+        embed: {
+          $type: 'app.bsky.embed.images',
+          images: [
+            {
+              alt: 'a corgi',
+              image: {
+                $type: 'blob',
+                ref: { $link: BLOB_CID },
+                mimeType: 'image/png',
+                size: 3,
+              },
+            },
+          ],
+        },
+      }),
+    ],
+    [
+      'a record with bytes',
+      JSON.stringify({
+        $type: FEED_POST,
+        text: 'bytes',
+        raw: { $bytes: 'AQID' },
+      }),
+    ],
+    [
+      'nested maps and arrays',
+      JSON.stringify({
+        a: { b: { c: [1, [2, [3, {}]], { d: [] }] } },
+        list: [{ x: 1 }, { y: [true, null] }],
+      }),
+    ],
+    [
+      'keys that sort by length then bytes',
+      JSON.stringify({ b: 1, aa: 2, a: 3, B: 4, ab: 5, 10: 6, 9: 7, '': 8 }),
+    ],
+    [
+      'non-ASCII keys and values',
+      JSON.stringify({
+        é: 'café',
+        日本: '東京',
+        z: 'Tokyo-3',
+        ab: 'ünïcode',
+        long: 'a'.repeat(24),
+        '🛸': 'Bebop',
+      }),
+    ],
+    [
+      'integers across every width',
+      JSON.stringify({
+        n: [
+          0, -1, 23, 24, 255, 256, 65535, 65536, 4294967295, 4294967296,
+          9007199254740991, -9007199254740991, -24, -25, -256, -257,
+        ],
+      }),
+    ],
+    [
+      'empty containers, null and booleans',
+      '{"empty":{},"list":[],"nothing":null,"yes":true,"no":false}',
+    ],
+  ]
+
+  // One line per outcome keeps the file small: `accepted <bytes hex> <cid>`, or
+  // `refused: <error name>: <message>`.
+  const outcomeOf = async (text, strict) => {
+    try {
+      const encoded = await space.serializeRecord(
+        FEED_POST,
+        'k',
+        lexParse(text, { strict }),
+      )
+      return `accepted ${hex(encoded.bytes)} ${encoded.cid.toString()}`
+    } catch (error) {
+      return `refused: ${error.name}: ${error.message}`
+    }
+  }
+  const withStrict = async (text) => {
+    const loose = await outcomeOf(text, false)
+    const strict = await outcomeOf(text, true)
+    return loose === strict
+      ? { oracle: loose }
+      : { oracle: loose, oracleStrict: strict }
+  }
+  const nested = (levels) => `${'['.repeat(levels)}${']'.repeat(levels)}`
+  // The record map is the first container, so `depth` containers deep is the
+  // map holding depth - 1 arrays inside one another.
+  const deep = (depth) => `{"a":${nested(depth - 1)}}`
+
+  const edgeInputs = [
+    ['a number with a fraction', '{"a":1.5}'],
+    ['the integer 2^53', '{"a":9007199254740992}'],
+    ['an exponent beyond the double range', '{"a":1e400}'],
+    ['a $link beside another key', `{"$link":"${SUBJECT_CID}","x":1}`],
+    ['a $link holding a number', '{"$link":5}'],
+    [
+      'a $link in base58 version 0',
+      '{"$link":"QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"}',
+    ],
+    ['a $bytes unpadded', '{"$bytes":"AQ"}'],
+    ['a $bytes padded', '{"$bytes":"AQ=="}'],
+    ['a $bytes beside another key', '{"$bytes":"AQ","x":1}'],
+    ['a key written twice', '{"a":1,"a":2}'],
+    ['a string of 256 bytes', JSON.stringify({ s: 'a'.repeat(256) })],
+    [
+      'a combining character beside its precomposed form',
+      JSON.stringify({ s: ['é', 'é'] }),
+    ],
+    ['a top level array', '[1,"a",null]'],
+    ['nesting 32 deep', deep(32)],
+  ]
+  const STRICTER_REASONS = {
+    number: 'Stratos refuses any number written with a fraction or exponent.',
+    depth: 'Stratos refuses nesting deeper than 32; the oracle has no limit.',
+    link: 'Stratos refuses a $link whose text is not a canonical CID; the oracle reads a plain map or the CID.',
+    bytes:
+      'Stratos refuses a $bytes that is not standard base64 without trailing bits; the oracle is lenient.',
+    text: 'The Rust JSON reader refuses a lone surrogate escape; the oracle writes U+FFFD.',
+  }
+  const stricterInputs = [
+    ['the number 1.0', '{"a":1.0}', 'number'],
+    ['the number 1e2', '{"a":1e2}', 'number'],
+    ['the number -0', '{"a":-0}', 'number'],
+    ['nesting 33 deep', deep(33), 'depth'],
+    ['a $link that is not a CID', '{"$link":"not a cid"}', 'link'],
+    [
+      'a $link in uppercase',
+      `{"$link":"${SUBJECT_CID.toUpperCase()}"}`,
+      'link',
+    ],
+    [
+      'a $link in base58 version 1',
+      '{"$link":"zdj7WWeQ43G6JJvLWQWZpyHuAMq6uYWRjkBXFad11vE2LHhQ7"}',
+      'link',
+    ],
+    ['a $bytes that is not base64', '{"$bytes":"!"}', 'bytes'],
+    ['a $bytes in the URL-safe alphabet', '{"$bytes":"-_8"}', 'bytes'],
+    ['a $bytes with trailing bits', '{"$bytes":"AR"}', 'bytes'],
+    ['a lone surrogate escape', '{"a":"\\ud800"}', 'text'],
+  ]
+
+  const records = []
+  for (const [name, json] of RECORD_TEXTS) {
+    const encoded = await space.serializeRecord(FEED_POST, 'k', lexParse(json))
+    records.push({
+      name,
+      json,
+      oracle: await outcomeOf(json, false),
+      parsed: encoded,
+    })
+  }
+
+  if (writeRecordCid) {
+    const edge = []
+    for (const [name, json] of edgeInputs)
+      edge.push({
+        name,
+        json: inlineIfShort(json),
+        ...(await withStrict(json)),
+      })
+    const stricter = []
+    for (const [name, json, reason] of stricterInputs) {
+      const verdict = await withStrict(json)
+      if (!verdict.oracle.startsWith('accepted'))
+        throw new Error(`${name}: the oracle refuses it, so it is not stricter`)
+      stricter.push({
+        name,
+        json,
+        ...verdict,
+        expectedStratos: 'refused',
+        reason,
+      })
+    }
+
+    const canonical = records[0].parsed.cid.toString()
+    const cidStrings = []
+    const cidText = (name, text) => {
+      const parsed = parseCidSafe(text, { flavor: 'cbor' })
+      cidStrings.push({
+        name,
+        text,
+        parsesAsCborCid: parsed !== null,
+        canonicalText: parseCidSafe(text)?.toString() === text,
+      })
+    }
+    cidText('the canonical text', canonical)
+    cidText(
+      'the same cid in base58 version 1',
+      parseCidSafe(canonical).toString(base58btc),
+    )
+    cidText('the same cid in uppercase', canonical.toUpperCase())
+    cidText('a version 0 cid', 'QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG')
+    cidText('a raw-codec cid', BLOB_CID)
+
+    writeFixture(
+      'record-cid.json',
+      {
+        classification: 'upstream-uri-free',
+        oracle: recordOracle,
+        generator,
+        upstreamVerified: true,
+        reproducible: true,
+      },
+      {
+        note: 'json is the text a host sends. An oracle outcome is `accepted <bytes hex> <cid>` or `refused: <error>: <message>`: lexParse (strict false), then the lex-cbor encoder serializeRecord uses, then the CID. oracleStrict appears only where lexParse with strict true differs. A stricter row is one the oracle accepts and Stratos refuses; its reason is named in reasons. cidStrings holds the oracle CBOR-flavour parse and whether the text is the canonical text of the CID it parses to.',
+        records: records.map(({ name, json, oracle }) => ({
+          name,
+          json: inlineIfShort(json),
+          oracle,
+        })),
+        edge,
+        reasons: STRICTER_REASONS,
+        stricter,
+        cidStrings,
+      },
+    )
+  }
+
+  if (writeOpPages) {
+    const OP_SPACE =
+      'at:space/did:web:bebop.example/zone.stratos.space.feed/crew'
+    const FOLLOW = 'app.bsky.graph.follow'
+    const record = (name) => {
+      const found = records.find((entry) => entry.name === name)
+      if (!found) throw new Error(`no record named ${name}`)
+      return found
+    }
+    const write = (rev, collection, rkey, name, previous = null) => {
+      const current = record(name)
+      return {
+        rev,
+        collection,
+        rkey,
+        cid: current.parsed.cid,
+        prev: previous === null ? null : record(previous).parsed.cid,
+        value: lexToJson(lexParse(current.json)),
+      }
+    }
+    const remove = (rev, collection, rkey, previous) => ({
+      rev,
+      collection,
+      rkey,
+      cid: null,
+      prev: record(previous).parsed.cid,
+    })
+    const [revA, revB, revC, revD] = REVISIONS
+    const pagesOfOps = [
+      [
+        write(revA, FEED_POST, 'swordfish', 'a post'),
+        write(revB, FEED_POST, 'swordfish', 'a post, edited', 'a post'),
+        write(revB, LIKE, 'ed', 'a like with a strong reference'),
+        write(revB, REPOST, 'jet', 'a repost'),
+        write(revB, FOLLOW, 'faye', 'a follow'),
+      ],
+      [
+        write(revC, FEED_POST, 'ein', 'a post by Ein'),
+        remove(revD, LIKE, 'ed', 'a like with a strong reference'),
+        write(
+          revD,
+          FEED_POST,
+          'swordfish',
+          'a post, edited again',
+          'a post, edited',
+        ),
+      ],
+      [],
+    ]
+
+    const repoState = new space.RepoCommit()
+    const wireOp = (op) => ({
+      ...op,
+      cid: op.cid === null ? null : op.cid.toString(),
+      prev: op.prev === null ? null : op.prev.toString(),
+    })
+    const pages = []
+    let rev = revA
+    for (const pageOps of pagesOfOps) {
+      repoState.applyOps(pageOps)
+      if (pageOps.length > 0) rev = pageOps.at(-1).rev
+      const commit = repoState.toCommit({ space: OP_SPACE, repo: REPO, rev })
+      pages.push({
+        ops: pageOps.map(wireOp),
+        commit: {
+          ver: commit.ver,
+          repo: commit.repo,
+          space: commit.space,
+          rev: commit.rev,
+          data: {
+            $bytes: Buffer.from(commit.data)
+              .toString('base64')
+              .replace(/=+$/, ''),
+          },
+        },
+      })
+    }
+
+    writeFixture(
+      'op-pages.json',
+      {
+        classification: 'upstream-signed-target-uri',
+        oracle: recordOracle,
+        generator,
+        upstreamVerified: true,
+        reproducible: true,
+      },
+      {
+        note: 'Three pages in the wire shape of listRepoOps over a hand-written new-form space string. Each commit is made by the oracle RepoCommit after that page, so its data is the set hash digest of the repo then. Values and cids are those of record-cid.json.',
+        pages,
+        stateAfterLastPage: bytesField(repoState.setHash.state()),
+      },
+    )
+  }
 }

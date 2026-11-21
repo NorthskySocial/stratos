@@ -285,11 +285,70 @@ const MIGRATIONS: &[Migration] = &[
         END;
     "#,
     },
+    // The space URI spelling changed, so rows keyed by an earlier spelling can
+    // never match again. Everything purged is derived and a verified sync
+    // rebuilds it, which is why this deletes instead of rewriting URIs.
+    Migration {
+        version: 10,
+        sql: r#"
+        DELETE FROM interaction
+          WHERE NOT (substr(uri, 1, 5) = 'at://' AND length(uri) - length(replace(uri, '/', '')) = 4)
+             OR NOT (substr(subject_uri, 1, 5) = 'at://' AND length(subject_uri) - length(replace(subject_uri, '/', '')) = 4);
+
+        DELETE FROM post_boundary
+          WHERE NOT (substr(uri, 1, 5) = 'at://' AND length(uri) - length(replace(uri, '/', '')) = 4);
+        DELETE FROM post
+          WHERE NOT (substr(uri, 1, 5) = 'at://' AND length(uri) - length(replace(uri, '/', '')) = 4);
+
+        DELETE FROM suppression_marker
+          WHERE NOT (substr(uri, 1, 5) = 'at://' AND length(uri) - length(replace(uri, '/', '')) = 4);
+
+        DELETE FROM space_sync_stage;
+        DELETE FROM space_sync_stage_cursor;
+        DELETE FROM space_sync_pending_verification;
+        DELETE FROM space_sync_stage_lifetime;
+        DELETE FROM space_cursor;
+
+        DELETE FROM label_subject
+          WHERE subject_kind = 'record'
+            AND NOT (substr(subject_key, 1, 5) = 'at://' AND length(subject_key) - length(replace(subject_key, '/', '')) = 4);
+        DELETE FROM label_cursor;
+
+        CREATE TABLE space_repo_state (
+          space_uri TEXT NOT NULL,
+          did TEXT NOT NULL,
+          boundary TEXT NOT NULL,
+          host TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK (generation >= 0),
+          rev TEXT NOT NULL,
+          set_hash BLOB NOT NULL CHECK (length(set_hash) = 2048),
+          record_count INTEGER NOT NULL CHECK (record_count >= 0),
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (space_uri, did)
+        );
+        CREATE INDEX space_repo_state_boundary_idx ON space_repo_state(boundary, did);
+
+        CREATE TABLE space_repo_record (
+          space_uri TEXT NOT NULL,
+          did TEXT NOT NULL,
+          collection TEXT NOT NULL,
+          rkey TEXT NOT NULL,
+          boundary TEXT NOT NULL,
+          cid TEXT NOT NULL,
+          PRIMARY KEY (space_uri, did, collection, rkey)
+        ) WITHOUT ROWID;
+        CREATE INDEX space_repo_record_boundary_idx ON space_repo_record(boundary, did);
+    "#,
+    },
 ];
 
 pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
-    let latest_version = MIGRATIONS.last().map_or(0, |migration| migration.version);
-    for migration in MIGRATIONS {
+    apply_migrations(connection, MIGRATIONS)
+}
+
+fn apply_migrations(connection: &mut Connection, migrations: &[Migration]) -> rusqlite::Result<()> {
+    let latest_version = migrations.last().map_or(0, |migration| migration.version);
+    for migration in migrations {
         let current_version: u32 =
             connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
         if current_version > latest_version {
@@ -314,7 +373,9 @@ pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
 mod tests {
     use rusqlite::Connection;
 
-    use super::{MIGRATIONS, Migration, apply};
+    use super::{MIGRATIONS, Migration, apply, apply_migrations};
+
+    const LAST_VERSION_BEFORE_PURGE: usize = 9;
 
     #[test]
     fn initializes_the_versioned_projection_schema() {
@@ -324,13 +385,13 @@ mod tests {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
         let migration_count: u32 = connection
             .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(migration_count, 9);
+        assert_eq!(migration_count, 10);
         let post_boundary_sql: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_boundary'",
@@ -431,7 +492,7 @@ mod tests {
             )
             .unwrap();
 
-        apply(&mut connection).unwrap();
+        apply_migrations(&mut connection, &MIGRATIONS[..LAST_VERSION_BEFORE_PURGE]).unwrap();
         assert_eq!(
             connection
                 .query_row("SELECT boundary FROM space_cursor", [], |row| row
@@ -493,7 +554,7 @@ mod tests {
             )
             .unwrap();
 
-        apply(&mut connection).unwrap();
+        apply_migrations(&mut connection, &MIGRATIONS[..LAST_VERSION_BEFORE_PURGE]).unwrap();
 
         let committed: String = connection
             .query_row("SELECT cursor FROM space_cursor", [], |row| row.get(0))
@@ -510,8 +571,761 @@ mod tests {
     #[test]
     fn rejects_a_database_from_a_newer_store_format() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection.pragma_update(None, "user_version", 10).unwrap();
+        connection.pragma_update(None, "user_version", 11).unwrap();
 
         assert!(apply(&mut connection).is_err());
+    }
+
+    // Migration 10: databases an older build wrote, brought to version 9 by the
+    // real earlier migrations.
+
+    use std::{collections::BTreeMap, fs, path::PathBuf};
+
+    use rusqlite::{OpenFlags, params, types::Value};
+
+    use crate::store::{
+        EncryptedStore, PdsSpaceMember, SpaceStageMutation, SpaceStagePage, StorageKey,
+    };
+
+    const BOUNDARY: &str = "did:web:stratos.example/bebop";
+    const SPACE: &str = "at:space/did:web:stratos.example/zone.stratos.space.feed/bebop";
+    const LEGACY_SPACE: &str = "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop";
+    const AUTHORITY: &str = "did:web:stratos.example";
+    const SPIKE: &str = "did:plc:spikespiegel";
+    const FAYE: &str = "did:plc:fayevalentine";
+    const JET: &str = "did:plc:jetblack";
+    const EDWARD: &str = "did:plc:edward";
+    const SPIKE_POST: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+    const FAYE_POST: &str = "at://did:plc:fayevalentine/zone.stratos.feed.post/bebop";
+    const JET_POST: &str = "at:space/did:web:stratos.example/zone.stratos.space.feed/bebop/did:plc:jetblack/zone.stratos.feed.post/see-you";
+    const LEGACY_JET_POST: &str = "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:jetblack/zone.stratos.feed.post/see-you";
+    const EIN_LIKE: &str = "at://did:plc:edward/app.bsky.feed.like/ein";
+    const EIN_REPOST: &str = "at://did:plc:edward/app.bsky.feed.repost/ein";
+    const SPACE_LIKE: &str = "at:space/did:web:stratos.example/zone.stratos.space.feed/bebop/did:plc:edward/app.bsky.feed.like/ein";
+    const LEGACY_SPACE_LIKE: &str = "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:edward/app.bsky.feed.like/ein";
+    const SOURCE: &str = "did:web:stratos.example#service";
+    const THEN: &str = "1998-04-03T00:00:00.000Z";
+    const LATER: &str = "1998-04-04T00:00:00.000Z";
+    const SURVIVING_TABLES: [&str; 8] = [
+        "actor_cursor",
+        "actor_enrollment",
+        "membership_baseline",
+        "pds_boundary_generation",
+        "pds_member_generation",
+        "retention_metadata",
+        "source_coverage",
+        "projection_epoch",
+    ];
+    const PURGED_URI_COLUMNS: [(&str, &str); 8] = [
+        ("post", "uri"),
+        ("post_boundary", "uri"),
+        ("interaction", "uri"),
+        ("interaction", "subject_uri"),
+        ("suppression_marker", "uri"),
+        ("space_sync_stage", "uri"),
+        ("space_cursor", "space_uri"),
+        ("label_subject", "subject_key"),
+    ];
+    const SPACE_STATE_TABLES: [&str; 2] = ["space_repo_state", "space_repo_record"];
+
+    fn key() -> StorageKey {
+        StorageKey::from_bytes([9; 32])
+    }
+
+    fn bring_to_version_nine(connection: &mut Connection) {
+        apply_migrations(connection, &MIGRATIONS[..LAST_VERSION_BEFORE_PURGE]).unwrap();
+    }
+
+    fn insert_post(connection: &Connection, uri: &str, author: &str, boundaries: &[&str]) {
+        connection
+            .execute(
+                "INSERT INTO post (uri, author_did, cid, sort_at, indexed_at, retained_at, projection_bytes, record_json, blob_refs_json, row_version)
+                 VALUES (?1, ?2, 'bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', ?3, ?3, ?4, 64, CAST('{\"text\":\"Bang\"}' AS BLOB), CAST('[]' AS BLOB), 2)",
+                params![uri, author, THEN, LATER],
+            )
+            .unwrap();
+        for boundary in boundaries {
+            connection
+                .execute(
+                    "INSERT INTO post_boundary (uri, boundary, sort_at) VALUES (?1, ?2, ?3)",
+                    params![uri, boundary, THEN],
+                )
+                .unwrap();
+        }
+    }
+
+    fn insert_interaction(connection: &Connection, uri: &str, kind: &str, subject_uri: &str) {
+        connection
+            .execute(
+                "INSERT INTO interaction (uri, actor_did, kind, subject_uri, boundary, indexed_at, retained_at, projection_bytes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 48)",
+                params![uri, EDWARD, kind, subject_uri, BOUNDARY, THEN, LATER],
+            )
+            .unwrap();
+    }
+
+    /// The rows an older build leaves behind: custody and space posts,
+    /// interactions of every uri and subject combination, an unfinished stage,
+    /// label state, and the tables the migration must not touch.
+    fn populate_as_an_older_build(connection: &Connection) {
+        insert_post(
+            connection,
+            SPIKE_POST,
+            SPIKE,
+            &[BOUNDARY, "did:web:stratos.example/swordfish"],
+        );
+        insert_post(connection, FAYE_POST, FAYE, &[BOUNDARY]);
+        insert_post(connection, JET_POST, JET, &[BOUNDARY]);
+        insert_post(connection, LEGACY_JET_POST, JET, &[BOUNDARY]);
+
+        insert_interaction(connection, EIN_LIKE, "like", FAYE_POST);
+        insert_interaction(connection, EIN_REPOST, "repost", SPIKE_POST);
+        insert_interaction(
+            connection,
+            "at://did:plc:edward/app.bsky.feed.like/ein-two",
+            "like",
+            JET_POST,
+        );
+        insert_interaction(
+            connection,
+            "at://did:plc:edward/app.bsky.feed.like/ein-three",
+            "like",
+            LEGACY_JET_POST,
+        );
+        insert_interaction(connection, SPACE_LIKE, "like", FAYE_POST);
+        insert_interaction(connection, LEGACY_SPACE_LIKE, "like", FAYE_POST);
+        insert_interaction(
+            connection,
+            "at:space/did:web:stratos.example/zone.stratos.space.feed/bebop/did:plc:edward/app.bsky.feed.repost/ein",
+            "repost",
+            JET_POST,
+        );
+
+        for uri in [SPIKE_POST, JET_POST, LEGACY_JET_POST] {
+            connection
+                .execute(
+                    "INSERT INTO suppression_marker (authority_did, source_id, uri, sequence) VALUES (?1, ?2, ?3, 7)",
+                    params![AUTHORITY, SOURCE, uri],
+                )
+                .unwrap();
+        }
+
+        for space in [SPACE, LEGACY_SPACE] {
+            connection
+                .execute(
+                    "INSERT INTO space_cursor (space_uri, did, boundary, cursor, updated_at) VALUES (?1, ?2, ?3, 'firehose:8', ?4)",
+                    params![space, JET, BOUNDARY, THEN],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO space_sync_stage (space_uri, did, uri, boundary, deleted, updated_at) VALUES (?1, ?2, ?3, ?4, 1, ?5)",
+                    params![space, JET, format!("{space}/{JET}/zone.stratos.feed.post/see-you"), BOUNDARY, THEN],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO space_sync_stage_cursor (space_uri, did, boundary, cursor, updated_at) VALUES (?1, ?2, ?3, 'unverified', ?4)",
+                    params![space, FAYE, BOUNDARY, THEN],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO space_sync_pending_verification (space_uri, did, boundary, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                    params![space, JET, BOUNDARY, THEN],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO space_sync_stage_lifetime (space_uri, did, boundary, created_at, last_progress_at) VALUES (?1, ?2, ?3, ?4, ?4)",
+                    params![space, JET, BOUNDARY, THEN],
+                )
+                .unwrap();
+        }
+
+        for (subject_key, kind, author) in [
+            (SPIKE, "account", SPIKE),
+            (SPIKE_POST, "record", SPIKE),
+            (JET_POST, "record", JET),
+            (LEGACY_JET_POST, "record", JET),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO label_subject (authority_did, subject_key, subject_kind, author_did, label_sequence, state, attempts)
+                     VALUES (?1, ?2, ?3, ?4, 12, 'takedown', 1)",
+                    params![AUTHORITY, subject_key, kind, author],
+                )
+                .unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO label_cursor (authority_did, sequence, updated_at) VALUES (?1, 412, ?2)",
+                params![AUTHORITY, THEN],
+            )
+            .unwrap();
+
+        connection
+            .execute_batch(&format!(
+                "INSERT INTO actor_cursor (authority_did, did, sequence, updated_at) VALUES ('{AUTHORITY}', '{SPIKE}', 9, '{THEN}');
+                 INSERT INTO actor_enrollment (did, boundaries_json, observed_at, enrolled)
+                   VALUES ('{SPIKE}', CAST('[\"bebop\"]' AS BLOB), '{THEN}', 1);
+                 INSERT INTO membership_baseline (boundary, did, custody, repo_host, reconciled_at)
+                   VALUES ('{BOUNDARY}', '{JET}', 'pds', 'https://pds.example.test/', '{THEN}'),
+                          ('{BOUNDARY}', '{SPIKE}', 'stratos', NULL, '{THEN}');
+                 INSERT INTO pds_boundary_generation (boundary, generation) VALUES ('{BOUNDARY}', 3);
+                 INSERT INTO pds_member_generation (boundary, did, generation) VALUES ('{BOUNDARY}', '{JET}', 2);
+                 INSERT INTO retention_metadata (key, value) VALUES ('retention_epoch', 5);
+                 INSERT INTO source_coverage (authority_did, source_id, boundary, start_sequence, end_sequence, verified_at)
+                   VALUES ('{AUTHORITY}', '{SOURCE}', '{BOUNDARY}', 1, 9, '{THEN}');
+                 INSERT INTO projection_epoch (scope, epoch, updated_at) VALUES ('global', 4, '{THEN}');"
+            ))
+            .unwrap();
+    }
+
+    fn old_build_memory_database() -> Connection {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        bring_to_version_nine(&mut connection);
+        populate_as_an_older_build(&connection);
+        connection
+    }
+
+    type Rows = Vec<Vec<Value>>;
+
+    fn table_rows(connection: &Connection, query: &str) -> Rows {
+        let mut statement = connection.prepare(query).unwrap();
+        let columns = statement.column_count();
+        statement
+            .query_map([], |row| {
+                (0..columns)
+                    .map(|index| row.get::<_, Value>(index))
+                    .collect()
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn ordered_columns(connection: &Connection, table: &str) -> String {
+        let columns = connection
+            .prepare(&format!("SELECT * FROM {table}"))
+            .unwrap()
+            .column_count();
+        (1..=columns)
+            .map(|index| index.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    fn every_table(connection: &Connection) -> Vec<String> {
+        table_rows(
+            connection,
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .into_iter()
+        .map(|row| match &row[0] {
+            Value::Text(name) => name.clone(),
+            other => panic!("table name is not text: {other:?}"),
+        })
+        .collect()
+    }
+
+    fn whole_database(connection: &Connection) -> BTreeMap<String, Rows> {
+        every_table(connection)
+            .into_iter()
+            .map(|table| {
+                let order = ordered_columns(connection, &table);
+                let rows = table_rows(
+                    connection,
+                    &format!("SELECT * FROM {table} ORDER BY {order}"),
+                );
+                (table, rows)
+            })
+            .collect()
+    }
+
+    /// Everything the migration must leave byte for byte: the tables it does
+    /// not touch, and the custody rows of the tables it purges.
+    fn survivors(connection: &Connection) -> BTreeMap<String, Rows> {
+        let mut kept: BTreeMap<String, Rows> = SURVIVING_TABLES
+            .iter()
+            .map(|table| {
+                let order = ordered_columns(connection, table);
+                (
+                    (*table).to_owned(),
+                    table_rows(
+                        connection,
+                        &format!("SELECT * FROM {table} ORDER BY {order}"),
+                    ),
+                )
+            })
+            .collect();
+        let custody_posts = format!("('{SPIKE_POST}', '{FAYE_POST}')");
+        let custody_likes = format!("('{EIN_LIKE}', '{EIN_REPOST}')");
+        for (name, query) in [
+            (
+                "post",
+                format!("SELECT * FROM post WHERE uri IN {custody_posts} ORDER BY uri"),
+            ),
+            (
+                "post_boundary",
+                format!(
+                    "SELECT * FROM post_boundary WHERE uri IN {custody_posts} ORDER BY uri, boundary"
+                ),
+            ),
+            (
+                "interaction",
+                format!("SELECT * FROM interaction WHERE uri IN {custody_likes} ORDER BY uri"),
+            ),
+            (
+                "suppression_marker",
+                format!("SELECT * FROM suppression_marker WHERE uri = '{SPIKE_POST}'"),
+            ),
+            (
+                "label_subject",
+                format!(
+                    "SELECT * FROM label_subject WHERE subject_key IN ('{SPIKE}', '{SPIKE_POST}') ORDER BY subject_key"
+                ),
+            ),
+        ] {
+            kept.insert(name.to_owned(), table_rows(connection, &query));
+        }
+        kept
+    }
+
+    fn count(connection: &Connection, table: &str) -> i64 {
+        connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    }
+
+    fn version_of(connection: &Connection) -> u32 {
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap()
+    }
+
+    fn assert_purged_and_kept(connection: &Connection, survivors_before: &BTreeMap<String, Rows>) {
+        assert_eq!(version_of(connection), 10);
+        assert_eq!(count(connection, "schema_migration"), 10);
+        assert_eq!(&survivors(connection), survivors_before);
+        for (table, expected) in [
+            ("post", 2),
+            ("post_boundary", 3),
+            ("interaction", 2),
+            ("suppression_marker", 1),
+            ("space_sync_stage", 0),
+            ("space_sync_stage_cursor", 0),
+            ("space_sync_pending_verification", 0),
+            ("space_sync_stage_lifetime", 0),
+            ("space_cursor", 0),
+            ("label_subject", 2),
+            ("label_cursor", 0),
+            ("space_repo_state", 0),
+            ("space_repo_record", 0),
+        ] {
+            assert_eq!(count(connection, table), expected, "{table}");
+        }
+        for (table, column) in PURGED_URI_COLUMNS {
+            let remaining: i64 = connection
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM {table} WHERE {column} LIKE 'at:space/%' OR {column} LIKE '%/space/%'"
+                    ),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(remaining, 0, "{table}.{column} still names a space");
+        }
+        let account_labels = count(connection, "label_subject WHERE subject_kind = 'account'");
+        assert_eq!(account_labels, 1);
+    }
+
+    #[test]
+    fn purges_every_space_row_and_keeps_everything_else_byte_for_byte() {
+        let mut connection = old_build_memory_database();
+        let survivors_before = survivors(&connection);
+        assert_eq!(count(&connection, "post"), 4);
+        assert_eq!(count(&connection, "interaction"), 7);
+
+        apply(&mut connection).unwrap();
+
+        assert_purged_and_kept(&connection, &survivors_before);
+    }
+
+    #[test]
+    fn purges_the_same_rows_when_foreign_keys_are_not_enforced() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", false)
+            .unwrap();
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "foreign_keys", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        bring_to_version_nine(&mut connection);
+        populate_as_an_older_build(&connection);
+        let survivors_before = survivors(&connection);
+
+        apply(&mut connection).unwrap();
+
+        assert_purged_and_kept(&connection, &survivors_before);
+        let orphans: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM post_boundary WHERE uri NOT IN (SELECT uri FROM post)",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphans, 0);
+    }
+
+    #[test]
+    fn the_two_space_state_tables_exist_and_are_empty() {
+        let mut connection = old_build_memory_database();
+        apply(&mut connection).unwrap();
+
+        let table_sql = |name: &str| -> String {
+            connection
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [name],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        let state_sql = table_sql("space_repo_state");
+        assert!(state_sql.contains("PRIMARY KEY (space_uri, did)"));
+        assert!(state_sql.contains("length(set_hash) = 2048"));
+        let record_sql = table_sql("space_repo_record");
+        assert!(record_sql.contains("PRIMARY KEY (space_uri, did, collection, rkey)"));
+        assert!(record_sql.contains("WITHOUT ROWID"));
+        for table in SPACE_STATE_TABLES {
+            assert_eq!(count(&connection, table), 0);
+            let indexed_columns: Vec<String> = table_rows(
+                &connection,
+                &format!(
+                    "SELECT name FROM pragma_index_info('{table}_boundary_idx') ORDER BY seqno"
+                ),
+            )
+            .into_iter()
+            .map(|row| match &row[0] {
+                Value::Text(name) => name.clone(),
+                other => panic!("column name is not text: {other:?}"),
+            })
+            .collect();
+            assert_eq!(indexed_columns, ["boundary", "did"], "{table}");
+        }
+        let wrong_length = connection.execute(
+            "INSERT INTO space_repo_state (space_uri, did, boundary, host, generation, rev, set_hash, record_count, updated_at)
+             VALUES (?1, ?2, ?3, 'https://pds.example.test', 0, '3jzfcijpj2z2a', zeroblob(2047), 0, ?4)",
+            params![SPACE, JET, BOUNDARY, THEN],
+        );
+        assert!(
+            wrong_length.is_err(),
+            "a state that is not 2048 bytes is refused"
+        );
+        connection
+            .execute(
+                "INSERT INTO space_repo_state (space_uri, did, boundary, host, generation, rev, set_hash, record_count, updated_at)
+                 VALUES (?1, ?2, ?3, 'https://pds.example.test', 0, '3jzfcijpj2z2a', zeroblob(2048), 0, ?4)",
+                params![SPACE, JET, BOUNDARY, THEN],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_second_apply_changes_nothing() {
+        let mut connection = old_build_memory_database();
+        apply(&mut connection).unwrap();
+        let after_first = whole_database(&connection);
+
+        apply(&mut connection).unwrap();
+
+        assert_eq!(whole_database(&connection), after_first);
+        assert_eq!(version_of(&connection), 10);
+    }
+
+    #[test]
+    fn an_empty_database_reaches_version_ten() {
+        let mut connection = Connection::open_in_memory().unwrap();
+
+        apply(&mut connection).unwrap();
+
+        assert_eq!(version_of(&connection), 10);
+        assert_eq!(count(&connection, "schema_migration"), 10);
+        for table in SPACE_STATE_TABLES {
+            assert_eq!(count(&connection, table), 0);
+        }
+    }
+
+    #[test]
+    fn the_purge_is_all_or_nothing() {
+        let mut connection = old_build_memory_database();
+        let before = whole_database(&connection);
+        let purge = &MIGRATIONS[LAST_VERSION_BEFORE_PURGE];
+        assert_eq!(purge.version, 10);
+
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let failure = transaction.execute_batch(&format!("{} INVALID SQL;", purge.sql));
+        assert!(failure.is_err());
+        let mid_flight: i64 = transaction
+            .query_row("SELECT COUNT(*) FROM post", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mid_flight, 2, "the purge ran before the failure");
+        transaction.rollback().unwrap();
+
+        assert_eq!(whole_database(&connection), before);
+        assert_eq!(version_of(&connection), 9);
+        assert_eq!(count(&connection, "schema_migration"), 9);
+    }
+
+    const PURGED_TABLES: [&str; 11] = [
+        "interaction",
+        "post_boundary",
+        "post",
+        "suppression_marker",
+        "space_sync_stage",
+        "space_sync_stage_cursor",
+        "space_sync_pending_verification",
+        "space_sync_stage_lifetime",
+        "space_cursor",
+        "label_subject",
+        "label_cursor",
+    ];
+
+    #[test]
+    fn a_purge_that_fails_after_its_deletes_leaves_version_nine_and_every_row() {
+        let mut connection = old_build_memory_database();
+        let before = whole_database(&connection);
+        for table in PURGED_TABLES {
+            assert!(!before[table].is_empty(), "{table} holds rows to purge");
+        }
+        let purge = &MIGRATIONS[LAST_VERSION_BEFORE_PURGE];
+        assert_eq!(purge.version, 10);
+        // A duplicate version fails only when it runs, after every delete of the
+        // purge has run in the same batch.
+        let failing_purge = format!(
+            "{} INSERT INTO schema_migration (version, applied_at) VALUES (1, 0);",
+            purge.sql
+        );
+        let migrations: Vec<Migration> = MIGRATIONS[..LAST_VERSION_BEFORE_PURGE]
+            .iter()
+            .map(|migration| Migration {
+                version: migration.version,
+                sql: migration.sql,
+            })
+            .chain(std::iter::once(Migration {
+                version: purge.version,
+                sql: failing_purge.leak(),
+            }))
+            .collect();
+
+        let outcome = apply_migrations(&mut connection, &migrations);
+
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert_eq!(version_of(&connection), 9);
+        let after = whole_database(&connection);
+        assert_eq!(after["schema_migration"], before["schema_migration"]);
+        for table in PURGED_TABLES {
+            assert_eq!(after[table], before[table], "{table}");
+        }
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn a_database_at_version_eleven_is_refused_and_left_alone() {
+        let mut connection = old_build_memory_database();
+        apply(&mut connection).unwrap();
+        connection.pragma_update(None, "user_version", 11).unwrap();
+        let before = whole_database(&connection);
+
+        assert!(apply(&mut connection).is_err());
+
+        assert_eq!(whole_database(&connection), before);
+    }
+
+    fn database_path(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "stratos-feedgen-ng-migration-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        path
+    }
+
+    /// An encrypted file at version 9 with an older build's rows, made the way
+    /// the store opens a database: key first, foreign keys on.
+    fn old_build_encrypted_file(name: &str) -> PathBuf {
+        let path = database_path(name);
+        let mut connection = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_READ_WRITE,
+        )
+        .unwrap();
+        connection
+            .execute_batch(&format!(
+                "PRAGMA key = \"x'{}'\"; PRAGMA foreign_keys = ON;",
+                key().as_hex()
+            ))
+            .unwrap();
+        bring_to_version_nine(&mut connection);
+        populate_as_an_older_build(&connection);
+        drop(connection);
+        path
+    }
+
+    fn survivors_of_file(path: &PathBuf) -> BTreeMap<String, Rows> {
+        let connection = Connection::open(path).unwrap();
+        connection
+            .execute_batch(&format!("PRAGMA key = \"x'{}'\";", key().as_hex()))
+            .unwrap();
+        assert_eq!(version_of(&connection), 9);
+        survivors(&connection)
+    }
+
+    #[test]
+    fn an_encrypted_file_migrates_once_and_stays_migrated_across_reopens() {
+        let path = old_build_encrypted_file("purge");
+        let survivors_before = survivors_of_file(&path);
+
+        let migrated = EncryptedStore::open(&path, key()).unwrap();
+        assert_purged_and_kept(&migrated.connection, &survivors_before);
+        let foreign_keys: i64 = migrated
+            .connection
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            foreign_keys, 1,
+            "the migration connection enforces foreign keys"
+        );
+        let after_first_open = whole_database(&migrated.connection);
+        drop(migrated);
+
+        let reopened = EncryptedStore::open(&path, key()).unwrap();
+        assert_purged_and_kept(&reopened.connection, &survivors_before);
+        assert_eq!(whole_database(&reopened.connection), after_first_open);
+        drop(reopened);
+        fs::remove_file(path).unwrap();
+    }
+
+    fn feed_post_page() -> (SpaceStagePage, Vec<SpaceStageMutation>) {
+        (
+            SpaceStagePage {
+                space_uri: SPACE.to_owned(),
+                actor_did: JET.to_owned(),
+                boundary: BOUNDARY.to_owned(),
+                next_cursor: None,
+                updated_at: THEN.to_owned(),
+            },
+            vec![SpaceStageMutation::Upsert {
+                uri: JET_POST.to_owned(),
+                cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+                sort_at: THEN.to_owned(),
+                indexed_at: THEN.to_owned(),
+                record_json: br#"{"text":"See you space cowboy"}"#.to_vec(),
+                blob_refs_json: b"[]".to_vec(),
+            }],
+        )
+    }
+
+    #[test]
+    fn the_old_path_still_stages_and_promotes_on_a_migrated_database_and_leaves_the_new_tables_empty()
+     {
+        let path = old_build_encrypted_file("old-path");
+        let mut store = EncryptedStore::open(&path, key()).unwrap();
+        assert_eq!(store.space_sync_cursor(BOUNDARY, SPACE, JET).unwrap(), None);
+        store
+            .replace_pds_space_members(
+                BOUNDARY,
+                vec![PdsSpaceMember {
+                    did: JET.to_owned(),
+                }],
+                THEN,
+            )
+            .unwrap();
+        let (mut first_page, mutations) = feed_post_page();
+        first_page.next_cursor = Some("firehose:9".to_owned());
+        store
+            .stage_authorized_space_page(first_page, mutations)
+            .unwrap();
+        let (terminal_page, _) = feed_post_page();
+        store
+            .stage_authorized_space_page(terminal_page, Vec::new())
+            .unwrap();
+
+        store
+            .promote_authorized_space_stage(BOUNDARY, SPACE, JET, "1998-04-05T00:00:00.000Z")
+            .unwrap();
+
+        let served = store
+            .list_posts_by_boundary(BOUNDARY, None, 10, "1998-04-03T12:00:00.000Z")
+            .unwrap();
+        let uris: Vec<&str> = served.posts.iter().map(|post| post.uri.as_str()).collect();
+        assert!(
+            uris.contains(&JET_POST),
+            "the promoted space post is served: {uris:?}"
+        );
+        assert!(
+            uris.contains(&FAYE_POST),
+            "the kept custody post is still served"
+        );
+        assert!(!uris.contains(&LEGACY_JET_POST), "the purged post is not");
+        assert_eq!(
+            store.space_sync_cursor(BOUNDARY, SPACE, JET).unwrap(),
+            Some("firehose:9".to_owned())
+        );
+        for table in SPACE_STATE_TABLES {
+            assert_eq!(count(&store.connection, table), 0, "{table}");
+        }
+        drop(store);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn the_label_cursor_reads_zero_after_the_migration() {
+        let path = old_build_encrypted_file("labels");
+        let store = EncryptedStore::open(&path, key()).unwrap();
+
+        assert_eq!(store.label_cursor(AUTHORITY).unwrap(), 0);
+        assert_eq!(count(&store.connection, "label_cursor"), 0);
+        drop(store);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn foreign_keys_cascade_and_post_deletes_remove_interactions_on_the_migration_connection() {
+        let store = EncryptedStore::open_memory(key()).unwrap();
+        let connection = &store.connection;
+        let enforced: i64 = connection
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert_eq!(enforced, 1);
+        insert_post(connection, FAYE_POST, FAYE, &[BOUNDARY]);
+        insert_interaction(connection, EIN_LIKE, "like", FAYE_POST);
+
+        connection
+            .execute("DELETE FROM post WHERE uri = ?1", [FAYE_POST])
+            .unwrap();
+
+        assert_eq!(
+            count(connection, "post_boundary"),
+            0,
+            "ON DELETE CASCADE is active"
+        );
+        assert_eq!(
+            count(connection, "interaction"),
+            0,
+            "the post-delete trigger fires"
+        );
     }
 }

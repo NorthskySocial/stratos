@@ -735,6 +735,137 @@ mod tests {
         assert!(synchronizer.target_locks.lock().unwrap().is_empty());
     }
 
+    struct CursorRecordingPages {
+        pages: Arc<Mutex<VecDeque<SpaceHostPage>>>,
+        cursors: Arc<Mutex<Vec<Option<String>>>>,
+    }
+
+    #[async_trait]
+    impl SpacePageSource for CursorRecordingPages {
+        async fn connect(
+            &self,
+            _: &PdsPollTarget,
+            _: Arc<crate::space_credential::HeldSpaceCredential>,
+        ) -> Result<Arc<dyn SpacePageReader>, SpaceHostError> {
+            Ok(Arc::new(Self {
+                pages: Arc::clone(&self.pages),
+                cursors: Arc::clone(&self.cursors),
+            }))
+        }
+    }
+
+    #[async_trait]
+    impl SpacePageReader for CursorRecordingPages {
+        async fn list_page(
+            &self,
+            _: &PdsPollTarget,
+            cursor: Option<&str>,
+            _: usize,
+        ) -> Result<SpaceHostPage, SpaceHostError> {
+            self.cursors.lock().unwrap().push(cursor.map(str::to_owned));
+            self.pages
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or(SpaceHostError::Unreachable)
+        }
+    }
+
+    fn raw_connection(path: &std::path::Path) -> rusqlite::Connection {
+        let connection = rusqlite::Connection::open(path).unwrap();
+        connection
+            .execute_batch(&format!("PRAGMA key = \"x'{}'\";", "07".repeat(32)))
+            .unwrap();
+        connection
+    }
+
+    #[tokio::test]
+    async fn the_old_path_stages_and_promotes_on_a_migrated_database_and_writes_no_verified_state()
+    {
+        let path = std::env::temp_dir().join(format!(
+            "stratos-feedgen-ng-pds-sync-migrated-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        drop(EncryptedStore::open(&path, StorageKey::from_bytes([7; 32])).unwrap());
+        // An older build's file: the two verified-state tables do not exist yet
+        // and a cursor for this very target is on record.
+        let older_build = raw_connection(&path);
+        older_build
+            .execute_batch(&format!(
+                "DROP TABLE space_repo_record; DROP TABLE space_repo_state;
+                 DELETE FROM schema_migration WHERE version = 10;
+                 PRAGMA user_version = 9;
+                 INSERT INTO space_cursor (space_uri, did, boundary, cursor, updated_at)
+                   VALUES ('{SPACE}', '{DID}', '{BOUNDARY}', 'stale-cursor', '{NOW}');"
+            ))
+            .unwrap();
+        drop(older_build);
+
+        let mut store = EncryptedStore::open(&path, StorageKey::from_bytes([7; 32])).unwrap();
+        store
+            .replace_pds_space_members(
+                BOUNDARY,
+                vec![PdsSpaceMember {
+                    did: DID.to_owned(),
+                }],
+                NOW,
+            )
+            .unwrap();
+        let lifecycle = ControlLifecycle::new(
+            ProjectionReader::new(store),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+        );
+        let cursors = Arc::new(Mutex::new(Vec::new()));
+        let source = CursorRecordingPages {
+            pages: Arc::new(Mutex::new(vec![page(Some("next")), page(None)].into())),
+            cursors: Arc::clone(&cursors),
+        };
+        let synchronizer = synchronizer_with(
+            Arc::new(source),
+            Arc::new(Decision(CommitVerification::Verified)),
+        );
+
+        let outcome = synchronizer
+            .sync_target(&lifecycle, &target(), NOW, "2026-09-23T00:00:00.000Z")
+            .await
+            .unwrap();
+
+        assert_eq!(outcome, PdsSpaceSyncOutcome::Promoted);
+        assert_eq!(
+            *cursors.lock().unwrap(),
+            vec![None, Some("next".to_owned())],
+            "the purged cursor reads the member from the first page"
+        );
+        drop(synchronizer);
+        drop(lifecycle);
+        let reopened = EncryptedStore::open(&path, StorageKey::from_bytes([7; 32])).unwrap();
+        let served = reopened
+            .list_posts_by_boundary(BOUNDARY, None, 10, "2026-09-22T12:00:00.000Z")
+            .unwrap();
+        let expected_uri = format!("{SPACE}/{DID}/zone.stratos.feed.post/see-you");
+        assert_eq!(
+            served
+                .posts
+                .iter()
+                .map(|post| post.uri.as_str())
+                .collect::<Vec<_>>(),
+            vec![expected_uri.as_str()]
+        );
+        drop(reopened);
+        let inspected = raw_connection(&path);
+        for table in ["space_repo_state", "space_repo_record"] {
+            let rows: i64 = inspected
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(rows, 0, "{table}");
+        }
+        drop(inspected);
+        std::fs::remove_file(path).unwrap();
+    }
+
     #[tokio::test]
     async fn delayed_verification_expires_stage_at_fresh_promotion_time() {
         let lifecycle = lifecycle_with_one_second_retention();

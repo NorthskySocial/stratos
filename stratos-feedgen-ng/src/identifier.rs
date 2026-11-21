@@ -251,7 +251,7 @@ fn validated_nsid(value: &str) -> Result<String, IdentifierError> {
     Ok(value.to_owned())
 }
 
-fn is_valid_nsid(value: &str) -> bool {
+pub(crate) fn is_valid_nsid(value: &str) -> bool {
     if value.len() > 317 {
         return false;
     }
@@ -292,7 +292,7 @@ fn validated_record_key(value: &str) -> Result<String, IdentifierError> {
     Ok(value.to_owned())
 }
 
-fn is_valid_record_key(value: &str) -> bool {
+pub(crate) fn is_valid_record_key(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 512
         && value != "."

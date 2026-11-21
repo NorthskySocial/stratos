@@ -14,10 +14,10 @@ use crate::{
 pub const POST_COLLECTION: &str = "zone.stratos.feed.post";
 pub const MAX_SPACE_PAGE_OPS: usize = 1_000;
 pub const MAX_SPACE_RECORD_BYTES: usize = 64 * 1024;
-const MAX_CURSOR_BYTES: usize = 4 * 1024;
+pub(crate) const MAX_CURSOR_BYTES: usize = 4 * 1024;
 const MAX_COLLECTION_BYTES: usize = 317;
 const MAX_RKEY_BYTES: usize = 512;
-const MAX_CID_BYTES: usize = 256;
+pub(crate) const MAX_CID_BYTES: usize = 256;
 const MAX_SPACE_URI_BYTES: usize = 2_048;
 const MAX_DID_BYTES: usize = 2_048;
 
@@ -283,7 +283,7 @@ fn has_record_type(value: &Value, collection: &str) -> bool {
         == Some(collection)
 }
 
-fn is_admitted_record(collection: &str, value: &Value) -> bool {
+pub(crate) fn is_admitted_record(collection: &str, value: &Value) -> bool {
     if collection == POST_COLLECTION {
         return has_record_type(value, POST_COLLECTION);
     }
@@ -297,7 +297,7 @@ fn is_admitted_record(collection: &str, value: &Value) -> bool {
             })
 }
 
-fn serialize_bounded(value: &Value) -> Result<Vec<u8>, serde_json::Error> {
+pub(crate) fn serialize_bounded(value: &Value) -> Result<Vec<u8>, serde_json::Error> {
     struct LimitedBuffer {
         bytes: Vec<u8>,
     }

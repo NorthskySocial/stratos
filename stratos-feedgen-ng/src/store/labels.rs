@@ -825,7 +825,9 @@ mod tests {
         store
             .connection
             .execute_batch(
-                "DROP TRIGGER interaction_after_post_delete; DROP TABLE interaction;
+                "DROP TABLE space_repo_record; DROP TABLE space_repo_state;
+                 DELETE FROM schema_migration WHERE version = 10;
+                 DROP TRIGGER interaction_after_post_delete; DROP TABLE interaction;
                  DELETE FROM schema_migration WHERE version = 9;
                  DROP TABLE label_subject; DROP TABLE label_cursor;
                  DELETE FROM schema_migration WHERE version = 8;

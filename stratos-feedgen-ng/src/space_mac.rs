@@ -99,6 +99,18 @@ impl MacVerifiedCommit {
     pub fn data(&self) -> &[u8; DATA_LENGTH] {
         &self.data
     }
+
+    /// Lets tests in other modules hold a commit without running a response
+    /// through the verifier.
+    #[cfg(test)]
+    pub(crate) fn for_tests(repo: &str, space: &str, rev: &str, data: [u8; DATA_LENGTH]) -> Self {
+        Self {
+            repo: repo.to_owned(),
+            space: space.to_owned(),
+            rev: rev.to_owned(),
+            data,
+        }
+    }
 }
 
 /// `MacMismatch` is the one failure a stale KEM key can cause; everything else
@@ -328,7 +340,7 @@ fn body_commit_fields(body: &Value) -> Option<CommitFields> {
     })
 }
 
-fn is_tid(text: &str) -> bool {
+pub(crate) fn is_tid(text: &str) -> bool {
     let mut characters = text.chars();
     text.len() == TID_LENGTH
         && characters

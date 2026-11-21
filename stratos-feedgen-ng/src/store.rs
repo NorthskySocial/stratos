@@ -21,10 +21,12 @@ mod migrations;
 mod read;
 mod retention;
 mod space;
+mod space_verification;
 
 pub(crate) use interactions::MAX_SUBJECT_URI_BYTES;
 pub use interactions::{InteractionChanges, InteractionKind, ProjectionInteraction};
 pub use labels::LabelPageEffects;
+pub use space_verification::{VerifiedSpaceBase, VerifiedSpaceRecord, VerifiedSpaceTarget};
 
 const STORAGE_KEY_BYTES: usize = 32;
 const MAX_ENCODED_KEY_BYTES: usize = STORAGE_KEY_BYTES * 2 + 1;
@@ -99,6 +101,12 @@ pub enum StoreError {
     SpacePromotionLimit,
     ExpiredSpaceStage,
     UnauthorizedSpaceMember,
+    SpaceRepoFenced,
+    SpaceRepoBaseMoved,
+    SpaceRepoPreviousMismatch,
+    SpaceRepoDigestMismatch,
+    SpaceRepoOverBudget,
+    SpaceRepoInvalid,
 }
 
 impl fmt::Debug for StoreError {
@@ -117,6 +125,12 @@ impl fmt::Debug for StoreError {
             Self::SpacePromotionLimit => "SpacePromotionLimit",
             Self::ExpiredSpaceStage => "ExpiredSpaceStage",
             Self::UnauthorizedSpaceMember => "UnauthorizedSpaceMember",
+            Self::SpaceRepoFenced => "SpaceRepoFenced",
+            Self::SpaceRepoBaseMoved => "SpaceRepoBaseMoved",
+            Self::SpaceRepoPreviousMismatch => "SpaceRepoPreviousMismatch",
+            Self::SpaceRepoDigestMismatch => "SpaceRepoDigestMismatch",
+            Self::SpaceRepoOverBudget => "SpaceRepoOverBudget",
+            Self::SpaceRepoInvalid => "SpaceRepoInvalid",
         };
         formatter.write_str(name)
     }
@@ -149,6 +163,24 @@ impl fmt::Display for StoreError {
             Self::ExpiredSpaceStage => formatter.write_str("space stage has expired"),
             Self::UnauthorizedSpaceMember => {
                 formatter.write_str("space member is no longer authorized")
+            }
+            Self::SpaceRepoFenced => {
+                formatter.write_str("verified space state belongs to another host")
+            }
+            Self::SpaceRepoBaseMoved => {
+                formatter.write_str("verified space state moved since it was read")
+            }
+            Self::SpaceRepoPreviousMismatch => {
+                formatter.write_str("a change does not follow the stored record")
+            }
+            Self::SpaceRepoDigestMismatch => {
+                formatter.write_str("the resulting state is not the one the commit covers")
+            }
+            Self::SpaceRepoOverBudget => {
+                formatter.write_str("verified space state exceeds its record budget")
+            }
+            Self::SpaceRepoInvalid => {
+                formatter.write_str("verified space promotion is not valid for its target")
             }
         }
     }

@@ -660,6 +660,81 @@ describe('values Stratos produced, judged by the upstream package', () => {
       )
     })
   })
+
+  describe('the Rust record CIDs and set hash', () => {
+    const { rustRecordCids, rustSetHash } = fixture as unknown as {
+      rustRecordCids: {
+        source: string
+        records: {
+          name: string
+          constant: string
+          json: string
+          rustCid: string
+          oracleCid: string
+        }[]
+      }
+      rustSetHash: {
+        source: string
+        steps: unknown[][]
+        rustStateBase64: string
+        rustDigestHex: string
+        oracleStateBase64: string
+        oracleDigestHex: string
+      }
+    }
+    // The value of `const NAME: &str = r#"..."#;`, a Rust raw string.
+    const rawConstantIn = (path: string, name: string): string => {
+      const match = new RegExp(
+        `const ${name}: &str =\\s*r#"(.*?)"#;`,
+        's',
+      ).exec(sourceText(path))
+      if (!match) throw new Error(`no raw constant ${name} in ${path}`)
+      return match[1]
+    }
+
+    it('names the upstream lex-json package in the header', () => {
+      expect(fixture.header.oracle['additionalPackages']).toEqual([
+        expect.objectContaining({ package: '@atproto/lex-json' }),
+      ])
+    })
+
+    it('has the oracle compute the CID Stratos pinned for each fixed record', () => {
+      expect(rustRecordCids.records).toHaveLength(3)
+      for (const record of rustRecordCids.records)
+        expect(record.oracleCid, record.name).toBe(record.rustCid)
+    })
+
+    it('judges the record texts and CIDs exactly as the Rust test pins them', () => {
+      const { source, records } = rustRecordCids
+      for (const record of records) {
+        expect(record.json, record.name).toBe(
+          rawConstantIn(source, `${record.constant}_JSON`),
+        )
+        expect(record.rustCid, record.name).toBe(
+          constantIn(source, `${record.constant}_CID`),
+        )
+      }
+      expect(records.some((r) => r.json.includes('"$link"'))).toBe(true)
+      expect(records.some((r) => r.json.includes('"$bytes"'))).toBe(true)
+    })
+
+    it('has the oracle reach the state and digest Stratos pinned after the fixed operations', () => {
+      expect(rustSetHash.oracleStateBase64).toBe(rustSetHash.rustStateBase64)
+      expect(rustSetHash.oracleDigestHex).toBe(rustSetHash.rustDigestHex)
+      expect(Buffer.from(rustSetHash.rustStateBase64, 'base64')).toHaveLength(
+        2048,
+      )
+      expect(rustSetHash.rustDigestHex).toMatch(/^[0-9a-f]{64}$/)
+    })
+
+    it('judges the state and digest exactly as the Rust test pins them', () => {
+      const { source, rustStateBase64, rustDigestHex } = rustSetHash
+      expect(rustStateBase64).toBe(
+        constantIn(source, 'CROSS_CHECK_STATE_BASE64'),
+      )
+      expect(rustDigestHex).toBe(constantIn(source, 'CROSS_CHECK_DIGEST_HEX'))
+    })
+  })
 })
 
 describe('commit mac vectors', () => {
@@ -944,6 +1019,333 @@ describe('kem key vectors', () => {
     expect(verificationMethod.every((m) => m.id.endsWith('#atproto_kem'))).toBe(
       true,
     )
+  })
+})
+
+describe('record byte and cid vectors', () => {
+  const FILE = 'record-cid.json'
+  const HEX = /^[0-9a-f]+$/
+  const ACCEPTED_OUTCOME = /^accepted ([0-9a-f]*) (bafyrei[a-z2-7]+)$/
+  const REFUSED_OUTCOME = /^refused: \w+: \S/
+  const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567'
+
+  interface RecordVector {
+    name: string
+    json: string
+    oracle: string
+  }
+  interface EdgeVector {
+    name: string
+    json: string
+    oracle: string
+    oracleStrict?: string
+  }
+  interface StricterVector extends EdgeVector {
+    expectedStratos: string
+    reason: string
+  }
+  interface CidString {
+    name: string
+    text: string
+    parsesAsCborCid: boolean
+    canonicalText: boolean
+  }
+  const fixture = loadFixture(FILE) as FixtureFile & {
+    records: RecordVector[]
+    edge: EdgeVector[]
+    reasons: Record<string, string>
+    stricter: StricterVector[]
+    cidStrings: CidString[]
+  }
+
+  const EXPECTED_RECORDS = [
+    'a post',
+    'a post, edited',
+    'a post, edited again',
+    'a post by Ein',
+    'a like with a strong reference',
+    'a repost',
+    'a follow',
+    'a post with a blob reference',
+    'a record with bytes',
+    'nested maps and arrays',
+    'keys that sort by length then bytes',
+    'non-ASCII keys and values',
+    'integers across every width',
+    'empty containers, null and booleans',
+  ]
+  const EXPECTED_EDGE: Array<[string, boolean]> = [
+    ['a number with a fraction', false],
+    ['the integer 2^53', false],
+    ['an exponent beyond the double range', false],
+    ['a $link beside another key', true],
+    ['a $link holding a number', true],
+    ['a $link in base58 version 0', true],
+    ['a $bytes unpadded', true],
+    ['a $bytes padded', true],
+    ['a $bytes beside another key', true],
+    ['a key written twice', true],
+    ['a string of 256 bytes', true],
+    ['a combining character beside its precomposed form', true],
+    ['a top level array', true],
+    ['nesting 32 deep', true],
+  ]
+  const EXPECTED_STRICTER = [
+    'the number 1.0',
+    'the number 1e2',
+    'the number -0',
+    'nesting 33 deep',
+    'a $link that is not a CID',
+    'a $link in uppercase',
+    'a $link in base58 version 1',
+    'a $bytes that is not base64',
+    'a $bytes in the URL-safe alphabet',
+    'a $bytes with trailing bits',
+    'a lone surrogate escape',
+  ]
+  const EXPECTED_CID_STRINGS: Array<[string, boolean, boolean]> = [
+    ['the canonical text', true, true],
+    ['the same cid in base58 version 1', true, false],
+    ['the same cid in uppercase', false, false],
+    ['a version 0 cid', false, true],
+    ['a raw-codec cid', false, true],
+  ]
+
+  const base32 = (bytes: Buffer): string => {
+    let bits = 0
+    let acc = 0
+    let out = ''
+    for (const byte of bytes) {
+      acc = (acc << 8) | byte
+      bits += 8
+      while (bits >= 5) {
+        out += BASE32[(acc >> (bits - 5)) & 31]
+        bits -= 5
+      }
+      acc &= (1 << bits) - 1
+    }
+    return bits > 0 ? out + BASE32[(acc << (5 - bits)) & 31] : out
+  }
+  const cidOfDagCbor = (bytesHex: string): string =>
+    `b${base32(
+      Buffer.concat([
+        Buffer.from([0x01, 0x71, 0x12, 0x20]),
+        createHash('sha256').update(Buffer.from(bytesHex, 'hex')).digest(),
+      ]),
+    )}`
+  const outcomesOf = (row: EdgeVector): string[] =>
+    row.oracleStrict ? [row.oracle, row.oracleStrict] : [row.oracle]
+
+  it('is uri free, judged by the oracle and names the package that read the json', () => {
+    expect(fixture.header.classification).toBe('upstream-uri-free')
+    expect(fixture.header.upstreamVerified).toBe(true)
+    expect(fixture.header.reproducible).toBe(true)
+    expect(fixture.header.oracle['additionalPackages']).toEqual([
+      expect.objectContaining({
+        package: '@atproto/lex-json',
+        version: fixture.header.oracle['version'],
+        integrity: expect.stringMatching(/^sha512-/),
+      }),
+    ])
+  })
+
+  it('holds one vector for each record, in order', () => {
+    expect(fixture.records.map((entry) => entry.name)).toEqual(EXPECTED_RECORDS)
+  })
+
+  it('gives each record the sha-256 dag-cbor cid of its bytes', () => {
+    for (const entry of fixture.records) {
+      const [, bytesHex, cid] = ACCEPTED_OUTCOME.exec(entry.oracle) ?? []
+      expect(bytesHex, entry.name).toMatch(HEX)
+      expect(cidOfDagCbor(bytesHex as string), entry.name).toBe(cid)
+    }
+  })
+
+  it('writes every record as json that parses to a map', () => {
+    for (const entry of fixture.records)
+      expect(JSON.parse(entry.json), entry.name).toEqual(expect.any(Object))
+  })
+
+  it('holds one oracle verdict for each edge input, with the expected outcome', () => {
+    expect(
+      fixture.edge.map((entry) => [
+        entry.name,
+        ACCEPTED_OUTCOME.test(entry.oracle),
+      ]),
+    ).toEqual(EXPECTED_EDGE)
+  })
+
+  it('gives the bytes and cid for an accepted input and the message for a refused one', () => {
+    for (const row of [...fixture.edge, ...fixture.stricter]) {
+      for (const outcome of outcomesOf(row)) {
+        const [, bytesHex, cid] = ACCEPTED_OUTCOME.exec(outcome) ?? []
+        if (cid) expect(cidOfDagCbor(bytesHex as string), row.name).toBe(cid)
+        else expect(outcome, row.name).toMatch(REFUSED_OUTCOME)
+      }
+    }
+  })
+
+  it('names the stricter cases, which the oracle accepts and Stratos refuses', () => {
+    expect(fixture.stricter.map((entry) => entry.name)).toEqual(
+      EXPECTED_STRICTER,
+    )
+    for (const entry of fixture.stricter) {
+      expect(entry.oracle, entry.name).toMatch(ACCEPTED_OUTCOME)
+      expect(entry.expectedStratos, entry.name).toBe('refused')
+      expect(fixture.reasons[entry.reason], entry.name).toEqual(
+        expect.any(String),
+      )
+    }
+  })
+
+  it('names each edge and stricter input once', () => {
+    const names = [...fixture.edge, ...fixture.stricter].map(
+      (entry) => entry.name,
+    )
+    expect(new Set(names).size).toBe(names.length)
+  })
+
+  it('classifies each received cid string by the oracle parse and its canonical form', () => {
+    expect(
+      fixture.cidStrings.map((entry) => [
+        entry.name,
+        entry.parsesAsCborCid,
+        entry.canonicalText,
+      ]),
+    ).toEqual(EXPECTED_CID_STRINGS)
+    expect(fixture.cidStrings[0]?.text).toBe(
+      ACCEPTED_OUTCOME.exec(fixture.records[0]?.oracle ?? '')?.[2],
+    )
+  })
+})
+
+describe('op page vectors', () => {
+  const FILE = 'op-pages.json'
+  const SPACE = 'at:space/did:web:bebop.example/zone.stratos.space.feed/crew'
+  const REPO = 'did:plc:fayevalentine'
+
+  interface PageOp {
+    rev: string
+    collection: string
+    rkey: string
+    cid: string | null
+    prev: string | null
+    value?: unknown
+  }
+  interface Page {
+    ops: PageOp[]
+    commit: {
+      ver: number
+      repo: string
+      space: string
+      rev: string
+      data: { $bytes: string }
+    }
+  }
+  const fixture = loadFixture(FILE) as FixtureFile & {
+    pages: Page[]
+    stateAfterLastPage: ByteField
+  }
+  const recordFixture = loadFixture('record-cid.json') as FixtureFile & {
+    records: Array<{ json: string; oracle: string }>
+  }
+  const allOps = (): PageOp[] => fixture.pages.flatMap((page) => page.ops)
+  const kinds = (): string[] =>
+    allOps().map((op) =>
+      op.cid === null ? 'delete' : op.prev === null ? 'create' : 'update',
+    )
+  const digestOf = (page: Page): string =>
+    Buffer.from(page.commit.data.$bytes, 'base64').toString('hex')
+
+  it('is made by the oracle over a new-form space uri and reproducible', () => {
+    expect(fixture.header.classification).toBe('upstream-signed-target-uri')
+    expect(fixture.header.upstreamVerified).toBe(true)
+    expect(fixture.header.reproducible).toBe(true)
+    expect(fixture.header.oracle['additionalPackages']).toEqual([
+      expect.objectContaining({ package: '@atproto/lex-json' }),
+    ])
+  })
+
+  it('holds three pages for one repo in one space, the last without ops', () => {
+    expect(fixture.pages).toHaveLength(3)
+    for (const page of fixture.pages) {
+      expect(page.commit.ver).toBe(1)
+      expect(page.commit.repo).toBe(REPO)
+      expect(page.commit.space).toBe(SPACE)
+    }
+    expect(fixture.pages[2]?.ops).toEqual([])
+  })
+
+  it('has a create, an update and a delete, and two ops on one path in one page', () => {
+    expect(new Set(kinds())).toEqual(new Set(['create', 'update', 'delete']))
+    const twice = fixture.pages.some((page) => {
+      const paths = page.ops.map((op) => `${op.collection}/${op.rkey}`)
+      return new Set(paths).size < paths.length
+    })
+    expect(twice).toBe(true)
+  })
+
+  it('has a like, a repost and a record of a collection the feed does not admit', () => {
+    expect(new Set(allOps().map((op) => op.collection))).toEqual(
+      new Set([
+        'zone.stratos.feed.post',
+        'app.bsky.feed.like',
+        'app.bsky.feed.repost',
+        'app.bsky.graph.follow',
+      ]),
+    )
+  })
+
+  it('takes every value and cid from the record vectors', () => {
+    const jsonByCid = new Map(
+      recordFixture.records.map((entry) => [
+        / (bafyrei[a-z2-7]+)$/.exec(entry.oracle)?.[1],
+        entry.json,
+      ]),
+    )
+    for (const op of allOps()) {
+      if (op.cid === null) {
+        expect(op.value).toBeUndefined()
+        continue
+      }
+      const json = jsonByCid.get(op.cid)
+      expect(json, `${op.collection}/${op.rkey}`).toBeDefined()
+      expect(op.value).toEqual(JSON.parse(json as string))
+    }
+  })
+
+  it('gives each op the cid the path held before it as prev', () => {
+    const live = new Map<string, string>()
+    for (const op of allOps()) {
+      const path = `${op.collection}/${op.rkey}`
+      expect(live.get(path) ?? null, path).toBe(op.prev)
+      if (op.cid === null) live.delete(path)
+      else live.set(path, op.cid)
+    }
+  })
+
+  it('moves the commit revision to the last op of each page and keeps it on an empty page', () => {
+    let previous = ''
+    for (const page of fixture.pages) {
+      const last = page.ops.at(-1)
+      expect(page.commit.rev).toBe(last ? last.rev : previous)
+      expect(page.commit.rev >= previous).toBe(true)
+      previous = page.commit.rev
+    }
+  })
+
+  it('ends on a 2048 byte state whose sha-256 is the last commit digest', () => {
+    const state = Buffer.from(fixture.stateAfterLastPage.value, 'base64')
+    expect(state.length).toBe(2048)
+    expect(createHash('sha256').update(state).digest('hex')).toBe(
+      digestOf(fixture.pages[2] as Page),
+    )
+  })
+
+  it('changes the digest on a page with ops and keeps it on an empty page', () => {
+    const [first, second, empty] = fixture.pages as [Page, Page, Page]
+    expect(digestOf(first)).not.toBe(digestOf(second))
+    expect(digestOf(empty)).toBe(digestOf(second))
   })
 })
 
