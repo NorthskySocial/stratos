@@ -1,7 +1,8 @@
-import type {
-  EnrollmentStoreWriter,
-  Logger,
-  ServiceEnrollment,
+import {
+  computeEnrollmentActive,
+  type EnrollmentStoreWriter,
+  type Logger,
+  type ServiceEnrollment,
 } from '@northskysocial/stratos-core'
 
 /**
@@ -20,8 +21,9 @@ export interface ReconcileServiceEnrollmentsDeps {
  * Reconcile config-declared service enrollments into the enrollment store.
  *
  * Configuration declares identities, each upserted with `isService = true`.
- * The boundary resolver preserves persistent admin grants after initial creation;
- * without a resolver, the standalone function uses the configured boundaries.
+ * An existing identity under an operator hold stays inactive. The boundary
+ * resolver preserves persistent admin grants after initial creation; without
+ * a resolver, the standalone function uses the configured boundaries.
  * Service rows that are no longer present in the configuration are pruned. The
  * operation is idempotent and safe to run on every startup.
  *
@@ -46,7 +48,12 @@ export async function reconcileServiceEnrollments(
 
     if (existing) {
       await store.updateEnrollment(enrollment.did, {
-        active: true,
+        // Account takedowns refuse service subjects, so a service could
+        // never have one lifted; only the operator hold applies.
+        active: computeEnrollmentActive({
+          operatorHold: existing.operatorHold ?? false,
+          takedownHold: false,
+        }),
         isService: true,
         signingKeyDid,
       })

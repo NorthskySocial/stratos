@@ -19,6 +19,7 @@ import { SPACE_TYPE } from '../../oauth'
 import { INACTIVE_ENROLLMENT_DENIED_BODY } from '../../oauth/enrollment-denied.js'
 import { createRepoHostResolverDeps } from '../space-read/index.js'
 import { applyEnrollmentHolds, isAccountTakenDown } from './holds.js'
+import { republishEnrollmentRecord } from './republish.js'
 import { verifyEnrolled } from './internal/auth.js'
 import type { PdsSyncPageKey } from './internal/pds-sync-store.js'
 
@@ -279,18 +280,23 @@ function registerEnrollmentUnenroll(
         // 3. Perform hard delete: local enrollment record and actor data. A
         // hold can land during steps 1 and 2. Hold changes take the same lock,
         // so the check and the delete cannot straddle one.
+        let refused: boolean
         const release = await ctx.repoWriteLocks.acquire(did!)
         try {
           const enrollment = await ctx.enrollmentStore.getEnrollment(did!)
-          if (enrollment?.active === false) {
-            throw new ForbiddenError(
-              INACTIVE_ENROLLMENT_DENIED_BODY.message,
-              INACTIVE_ENROLLMENT_DENIED_BODY.error,
-            )
-          }
-          await ctx.enrollmentService.unenroll(did!)
+          refused = enrollment?.active === false
+          if (!refused) await ctx.enrollmentService.unenroll(did!)
         } finally {
           release()
+        }
+        if (refused) {
+          // Steps 1 and 2 already cancelled the queued sync and deleted the
+          // PDS record, and the member stays enrolled.
+          await republishEnrollmentRecord(ctx, did!)
+          throw new ForbiddenError(
+            INACTIVE_ENROLLMENT_DENIED_BODY.message,
+            INACTIVE_ENROLLMENT_DENIED_BODY.error,
+          )
         }
         resolveCache.invalidate(did!)
 

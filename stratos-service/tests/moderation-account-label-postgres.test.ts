@@ -19,6 +19,7 @@ import { ActiveBoundaryEnrollmentStore } from '../src/features/boundary/enrollme
 import { migratePgBoundaries } from '../src/features/boundary/migrate.js'
 import { createPgBoundaryStore } from '../src/features/boundary/store.js'
 import { PgLabelStore } from '../src/features/moderation/index.js'
+import { PgPdsSyncQueueStore } from '../src/features/enrollment/index.js'
 import {
   startPostgresContainer,
   stopPostgresContainer,
@@ -52,6 +53,7 @@ describe('account subjects in createLabel on Postgres', () => {
         catalog,
       ),
       labelStore: new PgLabelStore(db),
+      pdsSyncQueue: new PgPdsSyncQueueStore(db),
     }
   }, 120_000)
 

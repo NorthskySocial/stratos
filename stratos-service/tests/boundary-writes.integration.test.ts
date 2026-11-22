@@ -808,12 +808,14 @@ function defineBoundaryWriteScenarios(
           record: post('Berserk'),
         })
 
+        // The write starts after the snapshot, so its refusal is never
+        // without a handler and the snapshot is of the state before it.
         async function expectRefusedUnchanged(
-          work: Promise<unknown>,
+          work: () => Promise<unknown>,
           error: string,
         ) {
           const before = await snapshot(['eva00'])
-          expect((await refusalOf(work)).error).toBe(error)
+          expect((await refusalOf(work())).error).toBe(error)
           await expectNothingChanged(before, ['eva00'])
           const after = await harness.recordRows(uriOf('eva00'))
           expect(after.record).not.toBeNull()
@@ -823,7 +825,7 @@ function defineBoundaryWriteScenarios(
         it('refuses a put with RecordAlreadyExists', async () => {
           await seedRows('eva00', rows)
           await expectRefusedUnchanged(
-            writeEngineering([single('put')]),
+            () => writeEngineering([single('put')]),
             'RecordAlreadyExists',
           )
         })
@@ -831,7 +833,7 @@ function defineBoundaryWriteScenarios(
         it('refuses an update with RecordNotFound', async () => {
           await seedRows('eva00', rows)
           await expectRefusedUnchanged(
-            writeEngineering([single('update')]),
+            () => writeEngineering([single('update')]),
             'RecordNotFound',
           )
         })
@@ -839,9 +841,10 @@ function defineBoundaryWriteScenarios(
         it('refuses a delete inside a batch with RecordNotFound', async () => {
           await seedRows('eva00', rows)
           await expectRefusedUnchanged(
-            writeEngineering([
-              { kind: 'delete', collection: COLLECTION, rkey: 'eva00' },
-            ]),
+            () =>
+              writeEngineering([
+                { kind: 'delete', collection: COLLECTION, rkey: 'eva00' },
+              ]),
             'RecordNotFound',
           )
         })

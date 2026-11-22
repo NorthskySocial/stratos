@@ -27,6 +27,7 @@ import { ActiveBoundaryEnrollmentStore } from '../src/features/boundary/enrollme
 import { migrateSqliteBoundaries } from '../src/features/boundary/migrate.js'
 import { createSqliteBoundaryStore } from '../src/features/boundary/store.js'
 import { SqliteLabelStore } from '../src/features/moderation/index.js'
+import { SqlitePdsSyncQueueStore } from '../src/features/enrollment/index.js'
 import { ReservedDomainEnrollmentStore } from '../src/infra/storage/reserved-domain-enrollment-store.js'
 import { SqliteEnrollmentStore } from '../src/storage/sqlite/enrollment-store.js'
 import { createMockBlobStore } from './utils'
@@ -81,6 +82,7 @@ describe('account subjects in createLabel on SQLite', () => {
         catalog,
       ),
       labelStore: new SqliteLabelStore(db, dbPath),
+      pdsSyncQueue: new SqlitePdsSyncQueueStore(db),
     }
     harness = await buildAccountLabelHarness(backend)
   })

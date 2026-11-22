@@ -73,7 +73,7 @@ enrollment.
 | Message                                   | Cause                                                                           |
 | ----------------------------------------- | ------------------------------------------------------------------------------- |
 | `Service auth required`                   | The token is missing or is not a service-auth token                             |
-| `Enrollment is missing or deactivated`    | The caller has no active service enrollment. An operator hold can deactivate it |
+| `Enrollment is missing or deactivated`    | No active service enrollment. An operator hold keeps it deactivated on restarts |
 | `Service is not enrolled in any boundary` | Grant the service identity a boundary in **Enrollments**                        |
 | `Subscription authorization changed`      | The caller's membership changed. Reconnect                                      |
 

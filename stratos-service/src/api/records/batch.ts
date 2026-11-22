@@ -65,7 +65,6 @@ export interface PrecomputedWriteOp extends PrecomputedBatchOpBase {
   writeInput: RecordWriteInput
   recordBytes: Uint8Array
   cid: CID
-  tempRev: string
 }
 
 export type PrecomputedBatchOp = PrecomputedDeleteOp | PrecomputedWriteOp
@@ -106,7 +105,6 @@ async function calculatePrecomputed(
       )
       const recordBytes = encodeRecord(op.record)
       const cid = await computeCid(op.record)
-      const tempRev = TID.nextStr()
       return {
         op,
         rkey,
@@ -122,7 +120,6 @@ async function calculatePrecomputed(
         },
         recordBytes,
         cid,
-        tempRev,
       }
     }),
   )
@@ -240,7 +237,7 @@ async function buildCommitWithRetry(
           writes: mstOps,
         })
 
-        await persistBatchBlocks(store, precomputed)
+        await persistBatchBlocks(store, precomputed, unsigned.rev)
 
         const commitResult = await signAndPersistCommit(
           store.repo,
@@ -283,11 +280,13 @@ async function buildCommitWithRetry(
  * Persist batch blocks to the Stratos block store
  * @param store - Actor transactor
  * @param precomputed - Precomputed batch operations
+ * @param rev - The revision of the commit the record blocks belong to
  * @throws InvalidRequestError if a record is not found during deletion
  */
 async function persistBatchBlocks(
   store: ActorTransactor,
   precomputed: PrecomputedBatchOp[],
+  rev: string,
 ): Promise<void> {
   for (const pre of precomputed) {
     if (pre.action === 'delete') {
@@ -314,7 +313,7 @@ async function persistBatchBlocks(
           new AtUriSyntax(pre.uri),
         )
       }
-      await store.repo.putBlock(pre.cid, pre.recordBytes, pre.tempRev)
+      await store.repo.putBlock(pre.cid, pre.recordBytes, rev)
     }
   }
 }

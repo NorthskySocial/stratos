@@ -35,9 +35,11 @@ export function assertWritableEnrollment(
 }
 
 /**
- * Re-reads the writer's standing once the repo lock is held. A hold or a
- * boundary removal that lands after the up-front checks serializes on this
- * lock, so it must still stop a write that already passed them.
+ * Re-reads the writer's standing once the repo lock is held, so a change that
+ * lands after the up-front checks still stops the write. The lock is held per
+ * instance. The enrollment is read live, so a hold from any instance is seen.
+ * Boundaries come from the write cache: a removal on this instance clears it,
+ * but a removal on another instance can take up to the cache's 60 seconds.
  */
 export async function assertWriterStillAuthorized(
   ctx: AppContext,

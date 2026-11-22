@@ -1201,7 +1201,8 @@ An inactive member who completes OAuth gets 403 `EnrollmentDenied` with the
 message "Your enrollment on this Stratos service is not active". Nothing
 changes. An inactive member also cannot unenroll. `POST /oauth/revoke` and
 `zone.stratos.enrollment.unenroll` both refuse. The member can leave once the
-hold lifts.
+hold lifts. If a hold lands while an unenrollment is under way, the request is
+refused and Stratos writes the member's enrollment record back to their PDS.
 
 #### Reading labels with `queryLabels`
 

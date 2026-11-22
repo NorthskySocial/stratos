@@ -211,7 +211,7 @@ export async function validateRecordInBoundary(
   // its outcome.
   const parentBoundaries = subjectRule
     ? undefined
-    : await resolveParentBoundaries(ctx, rec)
+    : await judgeParentBoundaries(ctx, rec, boundary)
   const subject = subjectRule
     ? await judgeSubject(ctx, subjectRule, rec, boundary)
     : undefined
@@ -261,6 +261,34 @@ async function judgeSubject(
       cid: typeof claimedCid === 'string' ? claimedCid : undefined,
     }),
   }
+}
+
+/**
+ * The boundaries a reply inherits from its parent on a boundary write. A
+ * space-form parent names its boundary in a URI that anyone can write, so it
+ * counts only as a post by an active pds-custody member of this boundary in the
+ * hosted space type. Any other space-form parent holds no boundary, and the
+ * reply rules refuse the reply as they refuse a parent in another boundary.
+ */
+async function judgeParentBoundaries(
+  ctx: AppContext,
+  record: Record<string, unknown>,
+  boundary: string,
+): Promise<string[] | undefined> {
+  const parentBoundaries = await resolveParentBoundaries(ctx, record)
+  const parent = asObject(asObject(record.reply)?.parent)
+  if (typeof parent?.uri !== 'string' || !parseRecordUri(parent.uri).ok) {
+    return parentBoundaries
+  }
+  const facts = await resolveReferencedRecord(ctx, parent)
+  const eligible = isEligibleSubject(facts, {
+    boundary,
+    serviceDid: ctx.serviceDid,
+    spaceType: HOSTED_SPACE_TYPE,
+    collections: [POST_COLLECTION],
+    cid: typeof parent.cid === 'string' ? parent.cid : undefined,
+  })
+  return eligible ? parentBoundaries : []
 }
 
 /**

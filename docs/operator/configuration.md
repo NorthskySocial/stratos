@@ -128,6 +128,8 @@ bare name or a qualified identifier.
 Configuration decides which service identities exist. On every start Stratos
 creates the declared identities, marks them `isService = true`, and removes
 service identities you no longer declare. User enrollments are never affected.
+A restart does not reactivate a declared identity that an operator deactivated.
+It stays inactive until `zone.stratos.admin.setActive` with `active: true`.
 
 Configuration does not keep deciding their boundaries. The `boundaries` list
 applies when Stratos first creates the identity. After that, admins manage its
@@ -253,7 +255,9 @@ sets it. `active: true` clears it. The two holds do not lift each other.
   changes.
 - An inactive member cannot unenroll. `POST /oauth/revoke` and the XRPC
   `zone.stratos.enrollment.unenroll` both refuse. Stratos keeps the row until
-  the hold lifts.
+  the hold lifts. When a hold lands during an unenrollment that already deleted
+  the member's enrollment record from their PDS, Stratos refuses and writes the
+  record back through the PDS sync queue.
 - An inactive member cannot write. `createRecord`, `deleteRecord`,
   `applyWrites` and `uploadBlob` are all refused with `NotEnrolled` before the
   handler runs. Updates go through `applyWrites`.

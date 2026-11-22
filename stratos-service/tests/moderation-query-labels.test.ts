@@ -49,6 +49,7 @@ import { migrateSqliteBoundaries } from '../src/features/boundary/migrate.js'
 import { createSqliteBoundaryStore } from '../src/features/boundary/store.js'
 import { ReservedDomainEnrollmentStore } from '../src/infra/storage/reserved-domain-enrollment-store.js'
 import { SqliteEnrollmentStore } from '../src/storage/sqlite/enrollment-store.js'
+import { reconcileServiceEnrollments } from '../src/features/enrollment/index.js'
 import { mintSpaceCredential } from '../src/features/space-credential/minter.js'
 import { createAuthVerifiers } from '../src/infra/auth/verifiers.js'
 import { ADMIN_SESSION_COOKIE } from '../src/oauth/admin-routes.js'
@@ -540,6 +541,24 @@ describe('zone.stratos.moderation.queryLabels', () => {
     })
 
     it('rejects a deactivated service', async () => {
+      await expectUnauthorized(await bearer(deactivated))
+    })
+
+    it('rejects an operator-held service after a restart reconciles the configuration', async () => {
+      await members.updateEnrollment(deactivated.did(), { operatorHold: true })
+
+      await reconcileServiceEnrollments(
+        [
+          { did: nerv.did(), boundaries: [TOKYO3] },
+          { did: deactivated.did(), boundaries: [TOKYO3] },
+        ],
+        { store: members, signingKeyDid: signingKey.did() },
+      )
+
+      expect((await members.getEnrollment(deactivated.did()))?.active).toBe(
+        false,
+      )
+      expect((await query(await bearer(nerv))).status).toBe(200)
       await expectUnauthorized(await bearer(deactivated))
     })
 

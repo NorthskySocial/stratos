@@ -269,16 +269,13 @@ Feed lexicons live in `lexicons/zone/stratos/feedgen/`. See
 
 ### Storage Architecture
 
-Storage interfaces are defined in `stratos-core/src/storage/*.ts` with SQLite adapters in
-`stratos-service/src/storage/sqlite/` and Postgres adapters in
-`stratos-service/src/infra/storage/postgres/`. Each store has a Reader (read-only) and
-Writer (extends Reader) variant. Read the interface files directly for method signatures.
-
-Composite interfaces group stores per scope:
-
-- `ActorStoreReaders` / `ActorStoreWriters` — per-actor stores: `record`, `blobMetadata`,
-  `blobContent`, `repo`, `sequence`
-- `ServiceStores` — service-level stores: `enrollment`
+`stratos-core/src/storage/` holds the enrollment store port (`EnrollmentStoreReader` /
+`EnrollmentStoreWriter`, plus `StoredEnrollment`), the `BlobContentStore` blob-content port and the
+`Cache` interfaces. The per-actor store contract (`ActorStore` and its record, repo, blob and
+sequence interfaces) lives in `stratos-service/src/actor-store-types.ts`, with two implementations:
+SQLite in `stratos-service/src/storage/sqlite/` and Postgres in
+`stratos-service/src/infra/storage/postgres/`. Enrollment has a SQLite and a Postgres store in the
+same directories. Read the interface files directly for method signatures.
 
 **Enrollment** uses a dual-type pattern: `Enrollment` (domain, with `Date`) vs `StoredEnrollment` (
 storage, with string dates).

@@ -4,6 +4,7 @@ import type { StoredEnrollment } from '@northskysocial/stratos-core'
 import type { OAuthRoutesConfig } from '../routes.js'
 import { INACTIVE_ENROLLMENT_DENIED_BODY } from '../enrollment-denied.js'
 import { serviceDIDToRkey } from '../routes.js'
+import { republishEnrollmentRecord } from '../../features/enrollment/republish.js'
 
 type Revocable =
   | { enrollment: StoredEnrollment }
@@ -95,9 +96,11 @@ export const handleRevoke = (
       }
       await deletePdsEnrollmentRecord(config, did, revocable.enrollment)
 
-      // A hold can land while the PDS call runs, so the check runs again.
+      // A hold can land while the PDS call runs, so the check runs again. A
+      // refusal then puts back the record that call deleted.
       const final = await unenrollIfRevocable(config, did)
       if ('refusal' in final) {
+        await republishEnrollmentRecord(config, did)
         return res.status(final.refusal.status).json(final.refusal.body)
       }
 
