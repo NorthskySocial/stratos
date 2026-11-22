@@ -14,6 +14,7 @@ import {
   ServiceDb,
 } from '../src/db'
 import { deleteRecord, getRecord } from '../src/api/records'
+import { EnrollmentBoundaryResolver } from '../src/features/enrollment/index.js'
 import { createMockBlobStore, createTestConfig } from './utils'
 
 describe('Record Delete Handler', () => {
@@ -50,10 +51,22 @@ describe('Record Delete Handler', () => {
       cborToRecord: (content) => JSON.parse(new TextDecoder().decode(content)),
     })
 
+    // The delete checks the member's standing and boundaries under the lock.
+    await enrollmentStore.enroll({
+      did: testDid,
+      enrolledAt: new Date().toISOString(),
+      active: true,
+      signingKeyDid: testDid,
+    })
+    await enrollmentStore.setBoundaries(testDid, [
+      'did:web:nerv.tokyo.jp/engineering',
+    ])
+
     ctx = {
       cfg,
       actorStore,
       enrollmentStore,
+      boundaryResolver: new EnrollmentBoundaryResolver(enrollmentStore),
       serviceDid,
       writeRateLimiter: {
         assertWriteAllowed: vi.fn(),

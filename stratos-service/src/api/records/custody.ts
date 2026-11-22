@@ -47,8 +47,24 @@ export async function assertWriterStillAuthorized(
   callerDid: string,
   boundary: string,
 ): Promise<void> {
+  await assertWriterStillHoldsBoundaries(ctx, callerDid, [boundary])
+}
+
+/**
+ * The check of {@link assertWriterStillAuthorized} for a write that touches
+ * several boundaries, or none: a delete names no boundary, so it is judged
+ * against every boundary the record is stored in. The standing is checked even
+ * when there is no boundary to hold.
+ */
+export async function assertWriterStillHoldsBoundaries(
+  ctx: AppContext,
+  callerDid: string,
+  boundaries: readonly string[],
+): Promise<void> {
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
   assertWritableEnrollment(enrollment)
   assertStratosCustody(enrollment)
-  await assertBoundaryStillHeld(ctx, callerDid, boundary)
+  for (const boundary of boundaries) {
+    await assertBoundaryStillHeld(ctx, callerDid, boundary)
+  }
 }

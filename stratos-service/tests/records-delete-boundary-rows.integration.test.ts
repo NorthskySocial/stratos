@@ -368,6 +368,8 @@ function describeDeleteBoundaryRows(
           bodyClaiming('Israfel', [DESIGN, ENGINEERING]),
         )
         expect(await storedBoundaries('israfel')).toEqual([DESIGN, ENGINEERING])
+        // A delete is judged against every boundary the record is stored in.
+        await enrollmentStore.setBoundaries(OWNER_DID, [ENGINEERING, DESIGN])
 
         await remove('israfel')
 

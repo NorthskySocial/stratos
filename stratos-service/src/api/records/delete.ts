@@ -2,7 +2,10 @@ import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context.js'
 import { createRepoManager } from './util.js'
-import { assertStratosCustody } from './custody.js'
+import {
+  assertStratosCustody,
+  assertWriterStillHoldsBoundaries,
+} from './custody.js'
 import {
   sequenceChange,
   type RecordHandlerWrite,
@@ -89,6 +92,10 @@ export async function deleteRecord(
         // carries no boundary and is dropped by the fail-closed scope gate for
         // every subscriber, so without this the deletion would never propagate.
         // The stored rows are the boundary; the body only claims one.
+        const deletedDomains = await store.record.getRecordBoundaries(uri)
+        // Under the repo lock and before anything is written, so a hold or a
+        // boundary removal that landed after the request began stops it.
+        await assertWriterStillHoldsBoundaries(ctx, callerDid, deletedDomains)
         // true keeps the taken-down record readable for the swap check and the delete.
         const existing = await store.record.getRecord(uri, null, true)
         if (
@@ -100,7 +107,6 @@ export async function deleteRecord(
             'InvalidSwap',
           )
         }
-        const deletedDomains = await store.record.getRecordBoundaries(uri)
 
         const repoWrites: RecordHandlerWrite[] = [
           { action: 'delete', collection, rkey },
