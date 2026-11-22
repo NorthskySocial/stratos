@@ -20,6 +20,7 @@ import {
   type RequestHeaders,
 } from '../infra/auth/index.js'
 import type { RepoWriteLocks } from '../shared/repo-write-lock.js'
+import type { RepublishEnrollmentRecordDeps } from '../features/enrollment/republish.js'
 
 /** Verification method id fragment for a user's own atproto repo-signing key. */
 const ATPROTO_KID = '#atproto'
@@ -110,6 +111,8 @@ export interface OAuthRoutesConfig {
   profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter
   /** Serializes per-actor enrollment publication with record writes. */
   repoWriteLocks: RepoWriteLocks
+  /** Republishes the PDS enrollment record when a hold refuses a revoke. */
+  pdsSyncWorker: RepublishEnrollmentRecordDeps['pdsSyncWorker']
   initRepo: (did: string) => Promise<void>
   createSigningKey: (did: string) => Promise<string>
   createAttestation: (

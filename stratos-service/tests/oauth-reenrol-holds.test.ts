@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { SqliteEnrollmentStore } from '../src/storage/sqlite/enrollment-store.js'
 import { ReservedDomainEnrollmentStore } from '../src/infra/storage/reserved-domain-enrollment-store.js'
 import { SqliteLabelStore } from '../src/features/moderation/index.js'
+import { SqlitePdsSyncQueueStore } from '../src/features/enrollment/index.js'
 import { EnrollmentServiceImpl } from '../src/features/enrollment/adapter.js'
 import {
   closeServiceDb,
@@ -45,6 +46,7 @@ describe('re-enrolment never lifts a hold on SQLite', () => {
         RESERVED_BOUNDARY,
       ),
       labelStore: new SqliteLabelStore(db, dbPath),
+      pdsSyncQueue: new SqlitePdsSyncQueueStore(db),
     }
   })
 

@@ -24,6 +24,7 @@ import { handleRevoke } from '../../src/oauth/handlers/revoke.js'
 import { RepoWriteLocks } from '../../src/shared/repo-write-lock.js'
 import {
   ACCOUNT_SUBJECT_TYPE,
+  computeCid,
   stratosLexicons,
   type BoundaryCatalogStore,
   type BoundaryDefinition,
@@ -33,7 +34,13 @@ import {
 } from '@northskysocial/stratos-core'
 import { createRecord } from '../../src/api/records/create.js'
 import { registerModerationHandlers } from '../../src/features/moderation/index.js'
-import { verifyEnrolled } from '../../src/features/enrollment/index.js'
+import {
+  PdsEnrollmentSyncWorker,
+  syncEnrollmentRecordToPds,
+  verifyEnrolled,
+  type PdsSyncQueueStore,
+} from '../../src/features/enrollment/index.js'
+import { ProfileRecordWriterImpl } from '../../src/features/enrollment/internal/profile-record-writer.js'
 import { createAuthVerifiers } from '../../src/infra/auth/verifiers.js'
 import { WriteRateLimiter } from '../../src/shared/rate-limiter.js'
 import { EnrollmentServiceImpl } from '../../src/features/enrollment/adapter.js'
@@ -66,6 +73,116 @@ const MODERATOR_DID = 'did:plc:vicious'
 export interface HoldsBackend {
   enrollmentStore: EnrollmentStore & EnrollmentStoreReader
   labelStore: LabelStore
+  pdsSyncQueue: PdsSyncQueueStore
+}
+
+const ENROLLMENT_COLLECTION = 'zone.stratos.actor.enrollment'
+const SERVICE_URL = 'http://localhost:3100'
+
+function xrpcError(status: number, error: string): Response {
+  return Response.json({ error, message: error }, { status })
+}
+
+/**
+ * A member's PDS, reduced to the enrollment records Stratos puts and deletes.
+ * Both the OAuth agent and the profile record writer reach it through the
+ * fetch handler, so the real write paths run against it.
+ */
+export class FakePds {
+  private readonly records = new Map<string, Record<string, unknown>>()
+
+  enrollmentRecord(did: string): Record<string, unknown> | undefined {
+    return this.records.get(`${did}/${SERVICE_DID}`)
+  }
+
+  readonly fetchHandler = async (
+    url: string,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const method = new URL(url, SERVICE_URL).pathname.replace('/xrpc/', '')
+    const input = (await new Response(init?.body).json()) as {
+      repo: string
+      collection: string
+      rkey: string
+      record?: Record<string, unknown>
+    }
+    if (input.collection !== ENROLLMENT_COLLECTION) {
+      return xrpcError(400, 'InvalidRequest')
+    }
+    const uri = `at://${input.repo}/${input.collection}/${input.rkey}`
+    switch (method) {
+      case 'com.atproto.repo.putRecord': {
+        this.records.set(`${input.repo}/${input.rkey}`, input.record ?? {})
+        const cid = (await computeCid({ uri })).toString()
+        return Response.json({ uri, cid })
+      }
+      case 'com.atproto.repo.deleteRecord':
+        this.records.delete(`${input.repo}/${input.rkey}`)
+        return Response.json({})
+      default:
+        return xrpcError(501, 'MethodNotImplemented')
+    }
+  }
+
+  session(did: string) {
+    return { did, fetchHandler: this.fetchHandler }
+  }
+}
+
+/** Marks the member's enrollment record as published, on the row and the PDS. */
+export async function publishEnrollmentRecord(
+  backend: HoldsBackend,
+  pds: FakePds,
+  did: string,
+): Promise<void> {
+  await backend.enrollmentStore.updateEnrollment(did, {
+    enrollmentRkey: SERVICE_DID,
+  })
+  const res = await pds.fetchHandler('/xrpc/com.atproto.repo.putRecord', {
+    method: 'POST',
+    body: JSON.stringify({
+      repo: did,
+      collection: ENROLLMENT_COLLECTION,
+      rkey: SERVICE_DID,
+      record: { service: SERVICE_URL },
+    }),
+  })
+  expect(res.ok).toBe(true)
+}
+
+/** The real sync worker over the backend's queue, writing through `oauthClient`. */
+function buildPdsSyncWorker(
+  backend: HoldsBackend,
+  oauthClient: { restore: Mock },
+): PdsEnrollmentSyncWorker {
+  return new PdsEnrollmentSyncWorker(
+    {
+      queue: backend.pdsSyncQueue,
+      sync: (did, signal) =>
+        syncEnrollmentRecordToPds(
+          {
+            enrollmentStore: backend.enrollmentStore,
+            createAttestation: async () => ({
+              sig: new Uint8Array([1, 9, 9, 8]),
+              signingKey: 'did:key:zDnaeBebop',
+            }),
+            oauthClient: oauthClient as never,
+            serviceDid: SERVICE_DID,
+            publicUrl: SERVICE_URL,
+          },
+          did,
+          signal,
+        ),
+    },
+    {
+      tickMs: 60_000,
+      backoffBaseMs: 60_000,
+      backoffCapMs: 60_000,
+      maxAttempts: 3,
+      claimLimit: 10,
+      attemptTimeoutMs: 10_000,
+    },
+  )
 }
 
 interface MockResponse {
@@ -341,10 +458,11 @@ export function defineSetActiveScenarios(getBackend: () => HoldsBackend) {
 }
 
 export interface CallbackHarness {
+  pds: FakePds
   oauthClient: {
     callback: ReturnType<typeof vi.fn>
     revoke: ReturnType<typeof vi.fn>
-    restore: ReturnType<typeof vi.fn>
+    restore: Mock
   }
   profileRecordWriter: {
     putEnrollmentRecord: ReturnType<typeof vi.fn>
@@ -371,17 +489,19 @@ function mockHttpResponse(): MockHttpResponse {
 }
 
 /**
- * The real callback and revoke handlers over real stores. The OAuth client,
- * the PDS record writer and key provisioning are external collaborators.
+ * The real callback and revoke handlers and PDS sync worker over real stores.
+ * The OAuth client, the member's PDS, the callback's PDS record writer and key
+ * provisioning are external collaborators.
  */
 export function buildCallbackHarness(
   backend: HoldsBackend,
   repoWriteLocks: RepoWriteLocks = new RepoWriteLocks(),
 ): CallbackHarness {
+  const pds = new FakePds()
   const oauthClient = {
     callback: vi.fn(),
     revoke: vi.fn().mockResolvedValue(undefined),
-    restore: vi.fn().mockResolvedValue({}),
+    restore: vi.fn(async (did: string) => pds.session(did)),
   }
   const profileRecordWriter = {
     putEnrollmentRecord: vi.fn().mockResolvedValue(undefined),
@@ -415,9 +535,11 @@ export function buildCallbackHarness(
       signingKey: 'did:key:zDnaeNewKey',
     }),
     repoWriteLocks,
+    pdsSyncWorker: buildPdsSyncWorker(backend, oauthClient),
   }
 
   return {
+    pds,
     oauthClient,
     profileRecordWriter,
     initRepo,
@@ -963,16 +1085,19 @@ export interface UnenrollResult {
 }
 
 export interface UnenrollHarness {
+  pds: FakePds
   pdsSyncWorker: { cancel: Mock }
   oauthClient: { revoke: Mock }
+  logger: { warn: Mock }
   unenrollAs: (did: string) => Promise<UnenrollResult>
   close: () => void
 }
 
 /**
- * The real XRPC unenroll handler and enrollment service over real stores. The
- * PDS sync worker, the PDS record writer and the OAuth client are external
- * collaborators. The enrollment check the standard verifier makes runs first.
+ * The real XRPC unenroll handler, enrollment service, PDS sync worker and PDS
+ * record writer over real stores. The member's PDS and the OAuth client are
+ * external collaborators. The enrollment check the standard verifier makes
+ * runs first.
  */
 export function buildUnenrollHarness(
   backend: HoldsBackend,
@@ -989,8 +1114,22 @@ export function buildUnenrollHarness(
     string,
     { handler: (ctx: unknown) => Promise<{ body: unknown }> }
   >()
-  const pdsSyncWorker = { cancel: vi.fn().mockResolvedValue(undefined) }
-  const oauthClient = { revoke: vi.fn().mockResolvedValue(undefined) }
+  const pds = new FakePds()
+  const oauthClient = {
+    revoke: vi.fn().mockResolvedValue(undefined),
+    restore: vi.fn(async (did: string) => pds.session(did)),
+  }
+  const pdsSyncWorker = buildPdsSyncWorker(backend, oauthClient)
+  const forwardCancel = pdsSyncWorker.cancel.bind(pdsSyncWorker)
+  const cancel = vi
+    .spyOn(pdsSyncWorker, 'cancel')
+    .mockImplementation(forwardCancel) as unknown as Mock
+  const logger = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }
   const cfg = createTestConfig(actorDir)
   const ctx = {
     app: express(),
@@ -1008,9 +1147,9 @@ export function buildUnenrollHarness(
       enrollmentEvents,
     ),
     pdsSyncWorker,
-    profileRecordWriter: {
-      deleteEnrollmentRecord: vi.fn().mockResolvedValue(undefined),
-    },
+    profileRecordWriter: new ProfileRecordWriterImpl(async () => ({
+      handler: pds.fetchHandler,
+    })),
     oauthClient,
     boundaryResolver: {
       getBoundaries: (did: string) =>
@@ -1018,7 +1157,7 @@ export function buildUnenrollHarness(
     },
     authVerifier: { standard: vi.fn(), admin: vi.fn() },
     serviceDid: SERVICE_DID,
-    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    logger,
   } as unknown as AppContext
   registerEnrollmentHandlers(
     {
@@ -1028,8 +1167,10 @@ export function buildUnenrollHarness(
   )
 
   return {
-    pdsSyncWorker,
+    pds,
+    pdsSyncWorker: { cancel },
     oauthClient,
+    logger,
     unenrollAs: async (did) => {
       await verifyEnrolled(did, {
         idResolver: {} as IdResolver,
@@ -1096,6 +1237,7 @@ export function defineInFlightUnenrollScenarios(
     const backend = getBackend()
     const callback = buildCallbackHarness(backend)
     await seedMember(backend, { did: SPIKE_DID })
+    await publishEnrollmentRecord(backend, callback.pds, SPIKE_DID)
     const atPds = pauseNextCall(callback.oauthClient.restore)
     const revoking = callback.revokeAs(SPIKE_DID)
     await atPds.reached
@@ -1110,6 +1252,7 @@ export function defineInFlightUnenrollScenarios(
     expect(res.status).toHaveBeenCalledWith(403)
     expect(res.json).toHaveBeenCalledWith(ENROLLMENT_DENIED_BODY)
     expect(callback.oauthClient.revoke).not.toHaveBeenCalled()
+    expect(callback.pds.enrollmentRecord(SPIKE_DID)).toBeDefined()
     await expectHeldAndUnableToEnroll(backend, SPIKE_DID, {
       operatorHold: true,
     })
@@ -1120,6 +1263,7 @@ export function defineInFlightUnenrollScenarios(
     const callback = buildCallbackHarness(backend)
     const moderation = await accountLabelHarness(backend)
     await seedAccount(backend, { did: FAYE_DID })
+    await publishEnrollmentRecord(backend, callback.pds, FAYE_DID)
     const atPds = pauseNextCall(callback.oauthClient.restore)
     const revoking = callback.revokeAs(FAYE_DID)
     await atPds.reached
@@ -1131,6 +1275,7 @@ export function defineInFlightUnenrollScenarios(
     expect(res.status).toHaveBeenCalledWith(403)
     expect(res.json).toHaveBeenCalledWith(ENROLLMENT_DENIED_BODY)
     expect(callback.oauthClient.revoke).not.toHaveBeenCalled()
+    expect(callback.pds.enrollmentRecord(FAYE_DID)).toBeDefined()
     expect(await moderation.labels()).toHaveLength(1)
     await expectHeldAndUnableToEnroll(backend, FAYE_DID, {
       operatorHold: false,
@@ -1143,6 +1288,7 @@ export function defineInFlightUnenrollScenarios(
     const callback = buildCallbackHarness(backend, locks)
     const { setActive } = buildSetActiveHarness(backend, locks)
     await seedMember(backend, { did: JET_DID })
+    await publishEnrollmentRecord(backend, callback.pds, JET_DID)
     const atPds = pauseNextCall(callback.oauthClient.restore)
     const revoking = callback.revokeAs(JET_DID)
     await atPds.reached
@@ -1158,6 +1304,7 @@ export function defineInFlightUnenrollScenarios(
     expect(held.statusCode).toBe(200)
     expect(res.status).toHaveBeenCalledWith(403)
     expect(res.json).toHaveBeenCalledWith(ENROLLMENT_DENIED_BODY)
+    expect(callback.pds.enrollmentRecord(JET_DID)).toBeDefined()
     await expectHeldAndUnableToEnroll(backend, JET_DID, { operatorHold: true })
   })
 
@@ -1165,6 +1312,7 @@ export function defineInFlightUnenrollScenarios(
     const backend = getBackend()
     const harness = unenrollHarness(backend)
     await seedMember(backend, { did: SPIKE_DID })
+    await publishEnrollmentRecord(backend, harness.pds, SPIKE_DID)
     const atSyncQueue = pauseNextCall(harness.pdsSyncWorker.cancel)
     const unenrolling = harness.unenrollAs(SPIKE_DID)
     await atSyncQueue.reached
@@ -1178,6 +1326,7 @@ export function defineInFlightUnenrollScenarios(
 
     expect(res).toEqual({ status: 403, body: ENROLLMENT_DENIED_BODY })
     expect(harness.oauthClient.revoke).not.toHaveBeenCalled()
+    expect(harness.pds.enrollmentRecord(SPIKE_DID)).toBeDefined()
     await expectHeldAndUnableToEnroll(backend, SPIKE_DID, {
       operatorHold: true,
     })
@@ -1188,6 +1337,7 @@ export function defineInFlightUnenrollScenarios(
     const harness = unenrollHarness(backend)
     const moderation = await accountLabelHarness(backend)
     await seedAccount(backend, { did: FAYE_DID })
+    await publishEnrollmentRecord(backend, harness.pds, FAYE_DID)
     const atSyncQueue = pauseNextCall(harness.pdsSyncWorker.cancel)
     const unenrolling = harness.unenrollAs(FAYE_DID)
     await atSyncQueue.reached
@@ -1197,9 +1347,40 @@ export function defineInFlightUnenrollScenarios(
     const res = await unenrolling
 
     expect(res).toEqual({ status: 403, body: ENROLLMENT_DENIED_BODY })
+    expect(harness.pds.enrollmentRecord(FAYE_DID)).toBeDefined()
     expect(await moderation.labels()).toHaveLength(1)
     await expectHeldAndUnableToEnroll(backend, FAYE_DID, {
       operatorHold: false,
+    })
+  })
+
+  it('an XRPC unenroll still refuses and warns when the record cannot be republished', async () => {
+    const backend = getBackend()
+    const harness = unenrollHarness(backend)
+    await seedMember(backend, { did: SPIKE_DID })
+    await publishEnrollmentRecord(backend, harness.pds, SPIKE_DID)
+    const atSyncQueue = pauseNextCall(harness.pdsSyncWorker.cancel)
+    const unenrolling = harness.unenrollAs(SPIKE_DID)
+    await atSyncQueue.reached
+
+    expect(
+      (await buildSetActiveHarness(backend).setActive(SPIKE_DID, false))
+        .statusCode,
+    ).toBe(200)
+    vi.spyOn(backend.pdsSyncQueue, 'upsertPending').mockRejectedValueOnce(
+      new Error('Gate of Babylon closed'),
+    )
+    atSyncQueue.resume()
+    const res = await unenrolling
+
+    expect(res).toEqual({ status: 403, body: ENROLLMENT_DENIED_BODY })
+    expect(harness.pds.enrollmentRecord(SPIKE_DID)).toBeUndefined()
+    expect(harness.logger.warn).toHaveBeenCalledWith(
+      { err: 'Gate of Babylon closed', did: SPIKE_DID },
+      'failed to republish PDS enrollment record after a refused unenrollment',
+    )
+    await expectHeldAndUnableToEnroll(backend, SPIKE_DID, {
+      operatorHold: true,
     })
   })
 
@@ -1209,6 +1390,7 @@ export function defineInFlightUnenrollScenarios(
     const harness = unenrollHarness(backend, locks)
     const { setActive } = buildSetActiveHarness(backend, locks)
     await seedMember(backend, { did: JET_DID })
+    await publishEnrollmentRecord(backend, harness.pds, JET_DID)
     const atSyncQueue = pauseNextCall(harness.pdsSyncWorker.cancel)
     const unenrolling = harness.unenrollAs(JET_DID)
     await atSyncQueue.reached
@@ -1223,6 +1405,7 @@ export function defineInFlightUnenrollScenarios(
 
     expect(held.statusCode).toBe(200)
     expect(res).toEqual({ status: 403, body: ENROLLMENT_DENIED_BODY })
+    expect(harness.pds.enrollmentRecord(JET_DID)).toBeDefined()
     await expectHeldAndUnableToEnroll(backend, JET_DID, { operatorHold: true })
   })
 
@@ -1230,11 +1413,13 @@ export function defineInFlightUnenrollScenarios(
     const backend = getBackend()
     const harness = unenrollHarness(backend)
     await seedMember(backend, { did: ED_DID })
+    await publishEnrollmentRecord(backend, harness.pds, ED_DID)
 
     const res = await harness.unenrollAs(ED_DID)
 
     expect(res).toEqual({ status: 200, body: { success: true } })
     expect(await rowOf(backend, ED_DID)).toBeNull()
+    expect(harness.pds.enrollmentRecord(ED_DID)).toBeUndefined()
     expect(harness.oauthClient.revoke).toHaveBeenCalledWith(ED_DID)
   })
 
@@ -1242,6 +1427,7 @@ export function defineInFlightUnenrollScenarios(
     const backend = getBackend()
     const callback = buildCallbackHarness(backend)
     await seedMember(backend, { did: ED_DID })
+    await publishEnrollmentRecord(backend, callback.pds, ED_DID)
 
     const res = await callback.revokeAs(ED_DID)
 
@@ -1249,5 +1435,6 @@ export function defineInFlightUnenrollScenarios(
       expect.objectContaining({ did: ED_DID, revoked: true }),
     )
     expect(await rowOf(backend, ED_DID)).toBeNull()
+    expect(callback.pds.enrollmentRecord(ED_DID)).toBeUndefined()
   })
 }
