@@ -745,6 +745,19 @@ impl ControlLifecycle {
     ) -> Result<(), AuthorizationError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         let mut projection = self.projection.lock().expect("projection lock poisoned");
+        // An answer resolved before the takedown, or by a Stratos process whose
+        // cache is still stale, must not grant access while the takedown stands.
+        let takedown_refusal = match projection.is_account_taken_down(&authorization.did) {
+            Ok(false) => None,
+            Ok(true) => Some(AuthorizationError::AccountTakenDown),
+            Err(_) => Some(AuthorizationError::TakedownStateUnavailable),
+        };
+        if let Some(refusal) = takedown_refusal {
+            if self.revoke_viewer_authorization_locked(&authorization.did) {
+                projection.invalidate_viewer(&authorization.did);
+            }
+            return Err(refusal);
+        }
         let result = self
             .authorizations
             .lock()
@@ -1689,6 +1702,85 @@ mod tests {
             .unwrap();
 
         assert!(!blob_route_serves(&lifecycle));
+    }
+
+    fn viewer_account_label_page(cursor: u64, negated: bool) -> crate::moderation_label::LabelPage {
+        crate::moderation_label::LabelPage {
+            cursor,
+            labels: vec![crate::moderation_label::ModerationLabel {
+                seq: cursor,
+                subject: crate::moderation_label::LabelSubject::Account {
+                    did: FAYE.to_owned(),
+                },
+                neg: negated,
+            }],
+            skipped_subjects: 0,
+        }
+    }
+
+    fn enrolled_answer_for_faye(lifecycle: &ControlLifecycle) -> Result<(), AuthorizationError> {
+        lifecycle.apply_viewer_authorization(
+            ViewerAuthorization {
+                did: FAYE.to_owned(),
+                boundaries: vec!["bebop".to_owned()],
+                expires_at: 100,
+            },
+            1,
+        )
+    }
+
+    fn faye_feed(
+        lifecycle: &ControlLifecycle,
+    ) -> Result<(), crate::feed_service::FeedServiceError> {
+        lifecycle
+            .serve_viewer_feed(
+                FAYE,
+                &bebop_feeds(),
+                crate::feed_service::FeedQuery {
+                    feed_id: "bebop",
+                    cursor: None,
+                    limit: 50,
+                    now: 1,
+                    as_of: BEFORE_RETENTION_ENDS,
+                    blob_base_url: "https://feedgen.example.test",
+                },
+            )
+            .map(|_| ())
+    }
+
+    #[test]
+    fn an_enrolled_answer_for_a_viewer_under_account_takedown_installs_no_access() {
+        let lifecycle = lifecycle_serving_a_member_with_a_blob_post();
+        lifecycle
+            .apply_label_page(&viewer_account_label_page(1, false), TAKEDOWN_RECORDED_AT)
+            .unwrap();
+
+        let late_answer = enrolled_answer_for_faye(&lifecycle);
+
+        assert!(late_answer.is_err());
+        assert!(!lifecycle.has_current_viewer_authorization(FAYE, 1));
+        assert!(matches!(
+            faye_feed(&lifecycle),
+            Err(crate::feed_service::FeedServiceError::AuthorizationUnavailable)
+        ));
+        assert!(matches!(
+            lifecycle.prepare_viewer_blob(
+                FAYE,
+                &bebop_feeds(),
+                SPIKE_BLOB_POST,
+                1,
+                BEFORE_RETENTION_ENDS
+            ),
+            Err(crate::feed_service::FeedServiceError::AuthorizationUnavailable)
+        ));
+
+        lifecycle
+            .apply_label_page(&viewer_account_label_page(2, true), TAKEDOWN_RECORDED_AT)
+            .unwrap();
+
+        assert_eq!(enrolled_answer_for_faye(&lifecycle), Ok(()));
+        assert!(faye_feed(&lifecycle).is_ok());
+        assert!(blob_route_serves(&lifecycle));
     }
 
     #[test]

@@ -481,4 +481,25 @@ mod tests {
         );
         assert_eq!(parse_label_page(&body, 0, 100).unwrap().skipped_subjects, 0);
     }
+
+    #[test]
+    fn reads_a_takedown_in_a_collection_whose_middle_segment_starts_with_a_digit() {
+        const DIGIT_SEGMENT_URI: &str = "at://did:plc:x/com.123.post/r";
+        let body = page("1", &[record_label(1, DIGIT_SEGMENT_URI)]);
+
+        let parsed = parse_label_page(&body, 0, 100).unwrap();
+
+        assert_eq!(parsed.skipped_subjects, 0);
+        assert_eq!(
+            parsed
+                .labels
+                .into_iter()
+                .map(|label| label.subject)
+                .collect::<Vec<_>>(),
+            [LabelSubject::Record {
+                uri: DIGIT_SEGMENT_URI.to_owned(),
+                author_did: "did:plc:x".to_owned(),
+            }]
+        );
+    }
 }

@@ -155,6 +155,9 @@ impl EncryptedStore {
         }
         // A later label on the same subject supersedes an earlier one on this page.
         let mut final_states: BTreeMap<&str, (&LabelSubject, bool)> = BTreeMap::new();
+        // A negation later on the same page must not spare the removal, or a held
+        // member would stay in feeds whenever the log puts both labels on one page.
+        let mut removed_accounts: BTreeMap<&str, &LabelSubject> = BTreeMap::new();
         for label in &page.labels {
             let sequence =
                 i64::try_from(label.seq).map_err(|_| StoreError::InvalidProjectionMutation)?;
@@ -189,16 +192,13 @@ impl EncryptedStore {
                     )
                     .map_err(StoreError::Open)?;
                 final_states.insert(key, (&label.subject, true));
+                if let LabelSubject::Account { did } = &label.subject {
+                    removed_accounts.insert(did, &label.subject);
+                }
             }
         }
         let mut unenrolled_boundaries = BTreeSet::new();
-        for (subject, taken_down) in final_states.values() {
-            let LabelSubject::Account { did } = subject else {
-                continue;
-            };
-            if !*taken_down {
-                continue;
-            }
+        for did in removed_accounts.keys().copied() {
             if !is_utc_timestamp(updated_at) {
                 return Err(StoreError::InvalidProjectionMutation);
             }
@@ -244,12 +244,15 @@ impl EncryptedStore {
             ..LabelPageEffects::default()
         };
         for (subject, taken_down) in final_states.into_values() {
-            if taken_down {
-                effects.taken_down.push(subject.clone());
-            } else {
-                effects.reinstating.push(subject.clone());
+            match (subject, taken_down) {
+                (LabelSubject::Record { .. }, true) => effects.taken_down.push(subject.clone()),
+                (LabelSubject::Account { .. }, true) => {}
+                (_, false) => effects.reinstating.push(subject.clone()),
             }
         }
+        effects
+            .taken_down
+            .extend(removed_accounts.into_values().cloned());
         Ok(effects)
     }
 
@@ -709,6 +712,27 @@ mod tests {
     }
 
     #[test]
+    fn a_takedown_in_a_collection_whose_middle_segment_starts_with_a_digit_is_recorded() {
+        const DIGIT_SEGMENT_URI: &str = "at://did:plc:x/com.123.post/r";
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        let subject = LabelSubject::Record {
+            uri: DIGIT_SEGMENT_URI.to_owned(),
+            author_did: "did:plc:x".to_owned(),
+        };
+
+        let effects = store
+            .apply_label_page(
+                AUTHORITY,
+                &page(1, vec![label(1, subject.clone(), false)]),
+                UPDATED_AT,
+            )
+            .unwrap();
+
+        assert!(store.is_taken_down(AUTHORITY, DIGIT_SEGMENT_URI).unwrap());
+        assert_eq!(effects.taken_down, [subject]);
+    }
+
+    #[test]
     fn a_space_record_subject_stores_the_author_segment() {
         let mut store = EncryptedStore::open_memory(key()).unwrap();
         let subject = LabelSubject::Record {
@@ -859,6 +883,103 @@ mod tests {
             )
             .unwrap();
         assert_eq!(boundary_rows, 0);
+    }
+
+    fn spike_account() -> LabelSubject {
+        LabelSubject::Account {
+            did: SPIKE_DID.to_owned(),
+        }
+    }
+
+    fn enrolled_spike_with_a_post() -> EncryptedStore {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .reconcile_actor_enrollment(
+                SPIKE_DID,
+                "1998-04-03T00:00:00.000Z",
+                Some(ActorEnrollment {
+                    did: SPIKE_DID.to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        store
+            .apply_actor_page(spike_page(1, vec![spike_blob_post()], Vec::new()))
+            .unwrap();
+        store
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct AccountState {
+        posts: i64,
+        enrolled: bool,
+        actor_cursors: i64,
+        reinstating: Vec<(LabelSubject, u32)>,
+        taken_down: bool,
+        label_cursor: u64,
+    }
+
+    fn spike_account_state(store: &EncryptedStore) -> AccountState {
+        AccountState {
+            posts: stored_posts(store, SPIKE_POST),
+            enrolled: store
+                .actor_sync_state(AUTHORITY, SPIKE_DID)
+                .unwrap()
+                .is_some(),
+            actor_cursors: store
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM actor_cursor WHERE did = ?1",
+                    [SPIKE_DID],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            reinstating: store.reinstating_subjects(AUTHORITY, 10).unwrap(),
+            taken_down: store.is_account_taken_down(SPIKE_DID).unwrap(),
+            label_cursor: store.label_cursor(AUTHORITY).unwrap(),
+        }
+    }
+
+    #[test]
+    fn an_account_takedown_negated_on_the_same_page_still_removes_the_member() {
+        let mut one_page = enrolled_spike_with_a_post();
+        let effects = one_page
+            .apply_label_page(
+                AUTHORITY,
+                &page(
+                    3,
+                    vec![
+                        label(2, spike_account(), false),
+                        label(3, spike_account(), true),
+                    ],
+                ),
+                UPDATED_AT,
+            )
+            .unwrap();
+        let mut two_pages = enrolled_spike_with_a_post();
+        two_pages
+            .apply_label_page(
+                AUTHORITY,
+                &page(2, vec![label(2, spike_account(), false)]),
+                UPDATED_AT,
+            )
+            .unwrap();
+        two_pages
+            .apply_label_page(
+                AUTHORITY,
+                &page(3, vec![label(3, spike_account(), true)]),
+                UPDATED_AT,
+            )
+            .unwrap();
+
+        let state = spike_account_state(&one_page);
+        assert_eq!(state.posts, 0);
+        assert!(!state.enrolled);
+        assert_eq!(state.reinstating, [(spike_account(), 0)]);
+        assert_eq!(state, spike_account_state(&two_pages));
+        assert_eq!(effects.taken_down, [spike_account()]);
+        assert_eq!(effects.reinstating, [spike_account()]);
     }
 
     #[test]

@@ -138,13 +138,19 @@ gives no error. The authority returns only the labels of the covered
 boundaries, so takedowns in the other boundaries are never applied.
 
 An account takedown removes the member's posts, sync position and viewer
-authorization. It also stops the member's worker. A replayed `enroll` event or a
-space poll already in flight does not re-admit the member while the takedown
-stands.
+authorization. It also stops the member's worker. This happens even when the
+negation of the takedown is on the same page of the log. A replayed `enroll`
+event or a space poll already in flight does not re-admit the member while the
+takedown stands. An enrollment answer for the member as a viewer grants no
+feed or blob reads while the takedown stands, including an answer that was
+already in flight when the takedown was applied.
 
 When an account takedown is lifted, the feed generator asks the authority
 whether the member is enrolled again. It asks on up to 6 polls. If another hold
-remains, the member returns to feeds only after a new enrollment event.
+remains, the member returns to feeds only after a new enrollment event. If the
+member's worker cannot start because the actor pool is at its limit of 4,096
+tracked actors, the reinstatement stays pending. The next poll asks again and
+costs no attempt.
 
 A record takedown removes the post and evicts its cached blobs. Later updates
 and replays of that post are refused while the takedown stands.
@@ -174,7 +180,12 @@ A post returns only if the stream or the host still carries it. Other taken-down
 posts of the same author stay refused.
 
 With several Stratos processes, another process can report a member as enrolled
-for up to 60 seconds after a takedown. It answers from its own cache.
+for up to 60 seconds after a takedown. It answers from its own cache. The feed
+generator refuses that answer while the takedown stands.
+
+A label subject URI is read with the `@atproto/syntax` rules. A collection such
+as `com.123.post` is valid, because only the first segment and the last
+segment of an NSID must start with a letter.
 
 The TypeScript feed generator does not apply labels. Label logs and metrics
 carry fixed event names only. They never carry a DID, record URI or CID.

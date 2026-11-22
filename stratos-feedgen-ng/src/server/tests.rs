@@ -164,6 +164,82 @@ async fn resolves_viewer_boundaries_once_and_reuses_the_authoritative_cache() {
     assert!(lifecycle.has_current_viewer_authorization("did:plc:faye", 2));
 }
 
+fn faye_account_label_page(cursor: u64, negated: bool) -> crate::moderation_label::LabelPage {
+    crate::moderation_label::LabelPage {
+        cursor,
+        labels: vec![crate::moderation_label::ModerationLabel {
+            seq: cursor,
+            subject: crate::moderation_label::LabelSubject::Account {
+                did: "did:plc:faye".to_owned(),
+            },
+            neg: negated,
+        }],
+        skipped_subjects: 0,
+    }
+}
+
+#[tokio::test]
+async fn an_enrolled_answer_for_a_viewer_under_account_takedown_is_refused_like_an_unenrolled_one()
+{
+    let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+    let lifecycle = Arc::new(
+        ControlLifecycle::for_authority(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::clone(&readiness),
+            "did:web:stratos.example.test",
+        )
+        .unwrap(),
+    );
+    let key = SigningKey::from_bytes(&[11; 32].into()).unwrap();
+    let resolver: Arc<dyn IdentityKeyResolver> = Arc::new(StaticResolver(did_key(&key)));
+    let authority = Arc::new(StaticAuthority(AtomicUsize::new(0)));
+    let state = FeedServerState {
+        server: Arc::new(ServerState {
+            config: config(),
+            feeds: feeds(),
+            readiness,
+            pds_space_sync: None,
+        }),
+        lifecycle: Arc::clone(&lifecycle),
+        verifier: FeedRequestVerifier::new(
+            "did:web:feedgen.example.test",
+            ["zone.stratos.feedgen.getFeed".to_owned()],
+            resolver,
+        ),
+        request_permits: Arc::new(tokio::sync::Semaphore::new(4)),
+        blobs: None,
+        authority: Some(authority.clone()),
+        telemetry: Arc::new(FeedTelemetry::disabled()),
+    };
+    lifecycle
+        .apply_label_page(
+            &faye_account_label_page(1, false),
+            "2026-11-01T00:00:00.000Z",
+        )
+        .unwrap();
+
+    let refused = ensure_viewer_authorization(&state, "did:plc:faye", 1).await;
+
+    assert!(matches!(
+        refused,
+        Err(crate::feed_service::FeedServiceError::AuthorizationUnavailable)
+    ));
+    assert!(!lifecycle.has_current_viewer_authorization("did:plc:faye", 2));
+
+    lifecycle
+        .apply_label_page(
+            &faye_account_label_page(2, true),
+            "2026-11-01T00:00:00.000Z",
+        )
+        .unwrap();
+    ensure_viewer_authorization(&state, "did:plc:faye", 3)
+        .await
+        .unwrap();
+    assert!(lifecycle.has_current_viewer_authorization("did:plc:faye", 4));
+}
+
 struct StaticResolver(String);
 
 #[async_trait]

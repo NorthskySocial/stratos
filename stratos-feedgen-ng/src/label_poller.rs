@@ -339,12 +339,14 @@ async fn readmit_account(
             .reset_pds_member_space_state(&boundary, did)
             .map_err(|_| "store")?;
     }
-    lifecycle.finish_reinstatement(did).map_err(|_| "store")?;
+    // A worker that cannot start leaves the reinstatement pending, so the next
+    // cycle tries again once a slot is free.
     accounts
         .actors
         .sync_actor(did)
         .await
         .map_err(|_| "worker_start")?;
+    lifecycle.finish_reinstatement(did).map_err(|_| "store")?;
     Ok(())
 }
 
@@ -1318,6 +1320,34 @@ mod tests {
             false
         }
 
+        fn grant_spike_viewer_access(&self) {
+            self.lifecycle
+                .apply_viewer_authorization(
+                    crate::authorization::ViewerAuthorization {
+                        did: SPIKE.to_owned(),
+                        boundaries: vec!["bebop".to_owned()],
+                        expires_at: u64::MAX,
+                    },
+                    1,
+                )
+                .unwrap();
+        }
+
+        async fn spike_account_state(&self) -> SpikeAccountState {
+            SpikeAccountState {
+                visible_posts: self.visible_posts(),
+                enrolled: self.is_enrolled(),
+                reinstating: self.lifecycle.reinstating_accounts(10).unwrap(),
+                viewer_access: self.lifecycle.has_current_viewer_authorization(SPIKE, 2),
+                worker_stopped: self.pool_runs_the_actor(false).await,
+            }
+        }
+
+        async fn tracked_actors(&self) -> usize {
+            let stats = self.accounts.actors.stats().await.unwrap();
+            stats.active + stats.waiting
+        }
+
         fn replayed_enroll(&self, observed_at: &str) -> Result<bool, crate::store::StoreError> {
             self.lifecycle
                 .apply_enrollment_event(EnrollmentEvent {
@@ -1348,6 +1378,47 @@ mod tests {
             None
         );
         assert!(scene.pool_runs_the_actor(false).await);
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct SpikeAccountState {
+        visible_posts: usize,
+        enrolled: bool,
+        reinstating: Vec<(String, u32)>,
+        viewer_access: bool,
+        worker_stopped: bool,
+    }
+
+    #[tokio::test]
+    async fn an_account_takedown_and_its_negation_on_one_page_end_as_on_two_pages() {
+        let one_page = Scene::enrolled_with_two_posts().await;
+        one_page.grant_spike_viewer_access();
+        assert!(one_page.pool_runs_the_actor(true).await);
+        one_page.responder.set_routes([
+            (0, account_page(2, &[(1, SPIKE, false), (2, SPIKE, true)])),
+            (2, account_page(2, &[])),
+        ]);
+        assert_eq!(one_page.cycle().await, LabelCycle::CaughtUp);
+
+        let two_pages = Scene::enrolled_with_two_posts().await;
+        two_pages.grant_spike_viewer_access();
+        assert!(two_pages.pool_runs_the_actor(true).await);
+        two_pages.takedown().await;
+        two_pages.announce_negation();
+        assert_eq!(two_pages.cycle().await, LabelCycle::CaughtUp);
+
+        let state = one_page.spike_account_state().await;
+        assert_eq!(
+            state,
+            SpikeAccountState {
+                visible_posts: 0,
+                enrolled: false,
+                reinstating: vec![(SPIKE.to_owned(), 0)],
+                viewer_access: false,
+                worker_stopped: true,
+            }
+        );
+        assert_eq!(state, two_pages.spike_account_state().await);
     }
 
     #[tokio::test]
@@ -1489,6 +1560,71 @@ mod tests {
         scene.responder.set_enrolled(SPIKE, true);
         scene.cycle().await;
         assert!(scene.is_enrolled());
+    }
+
+    const VICIOUS: &str = "did:plc:vicious";
+
+    fn enroll_in_bebop(store: &mut EncryptedStore, did: &str) {
+        store
+            .reconcile_actor_enrollment(
+                did,
+                "1998-04-03T00:00:00.000Z",
+                Some(ActorEnrollment {
+                    did: did.to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_reinstatement_whose_worker_cannot_start_stays_pending_until_a_slot_frees() {
+        let mut store = memory_store_with_spike_posts();
+        for crew in 1..crate::actor_stream::MAX_TRACKED_ACTORS {
+            enroll_in_bebop(&mut store, &format!("did:plc:redtail{crew}"));
+        }
+        let scene = Scene::with_store(store).await;
+        let capacity = crate::actor_stream::MAX_TRACKED_ACTORS;
+        assert_eq!(scene.tracked_actors().await, capacity);
+        scene.takedown().await;
+        scene
+            .lifecycle
+            .reconcile_actor_enrollment(
+                VICIOUS,
+                AFTER_TAKEDOWN,
+                Some(ActorEnrollment {
+                    did: VICIOUS.to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    observed_at: AFTER_TAKEDOWN.to_owned(),
+                }),
+            )
+            .unwrap();
+        scene.accounts.actors.sync_actor(VICIOUS).await.unwrap();
+        assert_eq!(scene.tracked_actors().await, capacity);
+        scene.responder.set_enrolled(SPIKE, true);
+        scene.announce_negation();
+        scene.cycle().await;
+
+        scene.cycle().await;
+
+        assert_eq!(
+            scene.lifecycle.reinstating_accounts(10).unwrap(),
+            [(SPIKE.to_owned(), 0)]
+        );
+
+        scene
+            .lifecycle
+            .reconcile_actor_enrollment(VICIOUS, "2100-01-02T00:00:00.000Z", None)
+            .unwrap();
+        scene.accounts.actors.sync_actor(VICIOUS).await.unwrap();
+        assert_eq!(scene.tracked_actors().await, capacity - 1);
+
+        scene.cycle().await;
+
+        assert!(scene.lifecycle.reinstating_accounts(10).unwrap().is_empty());
+        assert!(scene.is_enrolled());
+        assert_eq!(scene.tracked_actors().await, capacity);
     }
 
     #[tokio::test]
@@ -1757,6 +1893,36 @@ mod tests {
 
         assert!(!scene.feed_lists(SPIKE_POST));
         assert!(scene.feed_lists(SPIKE_SECOND_POST));
+    }
+
+    #[tokio::test]
+    async fn a_takedown_in_a_collection_whose_middle_segment_starts_with_a_digit_is_applied() {
+        const EDWARD: &str = "did:plc:x";
+        const DIGIT_SEGMENT_URI: &str = "at://did:plc:x/com.123.post/r";
+        let mut store = store_with_spike_blob_post();
+        store
+            .apply_actor_page(ActorPage {
+                authority_did: AUTHORITY_DID.to_owned(),
+                actor_did: EDWARD.to_owned(),
+                sequence: 1,
+                upserts: vec![ProjectionPost {
+                    uri: DIGIT_SEGMENT_URI.to_owned(),
+                    author_did: EDWARD.to_owned(),
+                    ..spike_post("radical")
+                }],
+                deletes: Vec::new(),
+                updated_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                interactions: crate::store::InteractionChanges::default(),
+            })
+            .unwrap();
+        let scene = RecordScene::new(store, "bebop").await;
+        scene.catch_up_on_an_empty_log().await;
+        assert!(scene.feed_lists(DIGIT_SEGMENT_URI));
+
+        scene.take_down(DIGIT_SEGMENT_URI).await;
+
+        assert!(!scene.feed_lists(DIGIT_SEGMENT_URI));
+        assert!(scene.feed_lists(SPIKE_POST));
     }
 
     #[tokio::test]
