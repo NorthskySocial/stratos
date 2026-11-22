@@ -42,6 +42,7 @@
     "src/infra/storage/cached-enrollment-store.ts",
     "src/infra/storage/reserved-domain-enrollment-store.ts",
     "src/api/handlers/repo-read-handlers.ts",
+    "src/api/handlers/repo-boundary-write-handlers.ts",
     "src/api/records/**/*.ts",
     "src/features/space-read/**/*.ts",
     "!src/**/index.ts",
