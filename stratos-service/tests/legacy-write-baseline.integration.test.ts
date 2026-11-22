@@ -532,16 +532,16 @@ function defineLegacyWriteBaseline(getHarness: () => WriteHarness) {
       })
     })
 
-    it('answers 500 InternalServerError to a held member authenticated with the development bearer', async () => {
+    it('answers 400 NotEnrolled to a held member authenticated with the development bearer', async () => {
       await harness.enrollMember(RITSUKO, [HARNESS_ENGINEERING])
       await harness.holdMember(RITSUKO)
 
       const refused = await createViaHttp(RITSUKO, 'unit-03', 'Sortie')
 
-      expect(refused.status).toBe(500)
+      expect(refused.status).toBe(400)
       expect(refused.body).toEqual({
-        error: 'InternalServerError',
-        message: 'Internal Server Error',
+        error: 'NotEnrolled',
+        message: 'User is not enrolled in this Stratos service',
       })
       expect(await harness.sequencedOps(RITSUKO)).toEqual([])
     })

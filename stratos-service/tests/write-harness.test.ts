@@ -77,10 +77,10 @@ function defineSmokeScenarios(getHarness: () => WriteHarness) {
     await harness.holdMember(PILOT)
     const refused = await write('eva02')
 
-    expect(refused.status).toBe(500)
+    expect(refused.status).toBe(400)
     expect(refused.body).toEqual({
-      error: 'InternalServerError',
-      message: 'Internal Server Error',
+      error: 'NotEnrolled',
+      message: 'User is not enrolled in this Stratos service',
     })
     expect(await harness.sequencedOps(PILOT)).toHaveLength(1)
   })

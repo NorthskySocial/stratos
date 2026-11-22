@@ -280,13 +280,18 @@ async function handleDevModeAuth(
 ): Promise<{ credentials: { type: string; did: string } }> {
   const did = authHeader.slice(7).trim()
   if (did.startsWith('did:')) {
-    await verifyEnrolled(did, {
-      idResolver: deps.idResolver,
-      enrollmentStore: deps.enrollmentStore,
-      config: deps.cfg.enrollment,
-      allowListProvider: deps.allowListProvider,
-      logger: deps.logger,
-    })
+    try {
+      await verifyEnrolled(did, {
+        idResolver: deps.idResolver,
+        enrollmentStore: deps.enrollmentStore,
+        config: deps.cfg.enrollment,
+        allowListProvider: deps.allowListProvider,
+        logger: deps.logger,
+      })
+    } catch (err) {
+      if (err instanceof EnrollmentDeniedError) throw notEnrolledError()
+      throw err
+    }
     return { credentials: { type: 'user', did } }
   }
   deps.logger?.info('auth rejected: dev bearer token is not a DID')
@@ -1004,6 +1009,14 @@ function routeByModerationIssuer(
   }
 }
 
+/** The dev bearer and DPoP refuse a member without an active enrollment alike. */
+function notEnrolledError(): InvalidRequestError {
+  return new InvalidRequestError(
+    'User is not enrolled in this Stratos service',
+    'NotEnrolled',
+  )
+}
+
 /**
  * Shared logic to handle DPoP errors in standard auth
  * @param ctx - XRPC context
@@ -1041,10 +1054,7 @@ function handleDpopError(
     (err instanceof DpopVerificationError && err.code === 'not_enrolled') ||
     err instanceof EnrollmentDeniedError
   ) {
-    throw new InvalidRequestError(
-      'User is not enrolled in this Stratos service',
-      'NotEnrolled',
-    )
+    throw notEnrolledError()
   }
 
   const message =
