@@ -9,6 +9,7 @@ import {
 import { AppContext } from '../src'
 import * as records from '../src/api/records/index.js'
 import { Readable } from 'node:stream'
+import { BlobRef, lexToJson } from '@atproto/lexicon'
 
 vi.mock('../src/api/records/index.js', () => ({
   createRecord: vi.fn(),
@@ -178,7 +179,8 @@ describe('repo-write-handlers', () => {
         req: {} as any,
       })
 
-      expect(result.body).toEqual({
+      expect((result.body as { blob: unknown }).blob).toBeInstanceOf(BlobRef)
+      expect(lexToJson(result.body)).toEqual({
         blob: {
           $type: 'blob',
           ref: { $link: expect.any(String) },

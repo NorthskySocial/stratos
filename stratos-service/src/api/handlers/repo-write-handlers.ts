@@ -2,6 +2,7 @@ import { Readable } from 'node:stream'
 import { type Cid } from '@atproto/lex-data'
 import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
+import { BlobRef } from '@atproto/lexicon'
 import { InvalidRequestError } from '@atproto/xrpc-server'
 import { Did } from '@atproto/api'
 import { AppContext } from '../../context-types.js'
@@ -256,7 +257,8 @@ export const stratosUploadBlobHandler = (ctx: AppContext) =>
 
       // Blob CIDs use raw codec (0x55) + SHA-256
       const hash = await sha256.digest(bytes)
-      const cid = CID.createV1(0x55, hash) as unknown as Cid
+      const blobCid = CID.createV1(0x55, hash)
+      const cid = blobCid as unknown as Cid
 
       ctx.logger?.debug(
         {
@@ -296,13 +298,10 @@ export const stratosUploadBlobHandler = (ctx: AppContext) =>
         'blob uploaded (stratos endpoint)',
       )
 
+      // This lexicon types the output as a blob, and the output check accepts
+      // only a BlobRef. The XRPC server writes it as the usual JSON blob ref.
       return {
-        blob: {
-          $type: 'blob',
-          ref: { $link: cid.toString() },
-          mimeType: contentType,
-          size: bytes.length,
-        },
+        blob: new BlobRef(blobCid, contentType, bytes.length),
       }
     },
   })
