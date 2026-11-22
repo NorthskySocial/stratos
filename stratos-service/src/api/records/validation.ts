@@ -8,6 +8,7 @@ import {
   findRecordRule,
   isEligibleSubject,
   isValidSkey,
+  parseCanonicalRepoUri,
   parseRecordUri,
   parseQualifiedBoundary,
   qualifyBoundary,
@@ -116,17 +117,36 @@ export async function authorizeBoundary(
   const callerDomains = await (
     ctx.writeBoundaryResolver ?? ctx.boundaryResolver
   ).getBoundaries(callerDid)
-
-  if (!callerDomains.includes(boundary)) {
-    const availableDomains =
-      callerDomains.length > 0 ? callerDomains.join(', ') : '(none)'
-    throw new InvalidRequestError(
-      `You do not have access to boundary domain(s): ${boundary}. Your enrolled domains: ${availableDomains}`,
-      'ForbiddenBoundary',
-    )
-  }
+  assertBoundaryHeld(callerDomains, boundary)
 
   return boundary
+}
+
+/**
+ * Refuses a boundary the caller does not hold in the store now. It bypasses
+ * the write cache, so a removal made on any instance is seen. Run it under the
+ * repo lock, after {@link authorizeBoundary} has checked the boundary's form.
+ * @throws InvalidRequestError `ForbiddenBoundary` when the caller does not hold the boundary
+ */
+export async function assertBoundaryStillHeld(
+  ctx: AppContext,
+  callerDid: string,
+  boundary: string,
+): Promise<void> {
+  assertBoundaryHeld(
+    await ctx.boundaryResolver.getBoundaries(callerDid),
+    boundary,
+  )
+}
+
+function assertBoundaryHeld(callerDomains: string[], boundary: string): void {
+  if (callerDomains.includes(boundary)) return
+  const availableDomains =
+    callerDomains.length > 0 ? callerDomains.join(', ') : '(none)'
+  throw new InvalidRequestError(
+    `You do not have access to boundary domain(s): ${boundary}. Your enrolled domains: ${availableDomains}`,
+    'ForbiddenBoundary',
+  )
 }
 
 /**
@@ -267,17 +287,19 @@ async function judgeSubject(
  * counts only as a post by an active pds-custody member of this boundary in the
  * hosted space type. Any other space-form parent holds no boundary, and the
  * reply rules refuse the reply as they refuse a parent in another boundary.
+ * Any other parent is judged by {@link readStoredParentBoundaries}.
  */
 async function judgeParentBoundaries(
   ctx: AppContext,
   record: Record<string, unknown>,
   boundary: string,
 ): Promise<string[] | undefined> {
-  const parentBoundaries = await resolveParentBoundaries(ctx, record)
   const parent = asObject(asObject(record.reply)?.parent)
-  if (typeof parent?.uri !== 'string' || !parseRecordUri(parent.uri).ok) {
-    return parentBoundaries
+  if (typeof parent?.uri !== 'string') return undefined
+  if (!parseRecordUri(parent.uri).ok) {
+    return readStoredParentBoundaries(ctx, parent.uri)
   }
+  const parentBoundaries = await resolveParentBoundaries(ctx, record)
   const facts = await resolveReferencedRecord(ctx, parent)
   const eligible = isEligibleSubject(facts, {
     boundary,
@@ -287,6 +309,30 @@ async function judgeParentBoundaries(
     cid: typeof parent.cid === 'string' ? parent.cid : undefined,
   })
   return eligible ? parentBoundaries : []
+}
+
+/**
+ * The boundaries a hosted parent is stored in, read from the store at this
+ * moment and never from the parent cache, so a parent that has moved is judged
+ * where it is now. A parent that is missing, taken down, or not a canonical
+ * record URI holds no boundary. The reply rules then refuse the reply as they
+ * refuse a parent in another boundary, so the answer does not tell the writer
+ * whether a record they cannot see exists.
+ */
+async function readStoredParentBoundaries(
+  ctx: AppContext,
+  parentUri: string,
+): Promise<string[] | undefined> {
+  // An empty uri names no parent, as resolveParentBoundaries treats it.
+  if (!parentUri) return undefined
+  const parts = parseCanonicalRepoUri(parentUri)
+  // A read of a store that does not exist fails on sqlite and is unverified on
+  // postgres, so the store is looked for first.
+  if (!parts || !(await ctx.actorStore.exists(parts.author))) return []
+  const found = await ctx.actorStore.read(parts.author, (store) =>
+    store.record.getVisibleRecordWithBoundaries(parentUri),
+  )
+  return found?.boundaries ?? []
 }
 
 /**

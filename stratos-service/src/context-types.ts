@@ -117,8 +117,9 @@ export interface BlobContext {
 export interface RepoContext extends MstContext {
   actorStore: ActorStore
   /**
-   * Boundary lookup for write authorization, behind a short-lived cache. A
-   * hand-built context may omit it and fall back to `boundaryResolver`.
+   * Boundary lookup for the write authorization check before the repo lock,
+   * behind a short-lived cache. A hand-built context may omit it and fall
+   * back to `boundaryResolver`.
    */
   writeBoundaryResolver?: BoundaryResolver
   repoWriteLocks: RepoWriteLocks

@@ -178,6 +178,7 @@ describe('Legacy writes with validate: false still authorize the boundary', () =
       ...postWith([heldDomain]),
       createdAt: 'not-a-datetime',
     }
+    const liveGetBoundaries = vi.spyOn(ctx.boundaryResolver, 'getBoundaries')
 
     const result = (await createWithoutValidation(
       lexiconInvalidPost,
@@ -185,8 +186,11 @@ describe('Legacy writes with validate: false still authorize the boundary', () =
     )) as { uri: string }
 
     expect(result.uri).toContain('lenient-post')
-    // Read once before the write lock and once under it, so a boundary removed in between refuses the write.
-    expect(getBoundaries).toHaveBeenCalledTimes(2)
+    // Read from the cache before the write lock and from the store under it,
+    // so a boundary removed in between on any instance refuses the write.
+    expect(getBoundaries).toHaveBeenCalledTimes(1)
+    expect(liveGetBoundaries).toHaveBeenCalledTimes(1)
+    expect(liveGetBoundaries).toHaveBeenCalledWith(testDid)
   })
 
   it('still runs record validation when validate is true', async () => {

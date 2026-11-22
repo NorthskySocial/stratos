@@ -154,14 +154,16 @@ describe('Write authorization reads boundaries through a cache', () => {
     expect(ctx.writeBoundaryResolver).not.toBe(ctx.boundaryResolver)
   })
 
-  it('reads the store once for two writes by the same caller', async () => {
+  it('fills the cache once for two writes and reads the store once under the lock for each', async () => {
     await enrollPilot([ENGINEERING])
+    const getBoundariesLive = vi.spyOn(ctx.boundaryResolver, 'getBoundaries')
     getBoundariesFromStore.mockClear()
 
     await writePost('sortie-one', ENGINEERING)
     await writePost('sortie-two', ENGINEERING)
 
-    expect(getBoundariesFromStore).toHaveBeenCalledTimes(1)
+    expect(getBoundariesLive).toHaveBeenCalledTimes(2)
+    expect(getBoundariesFromStore).toHaveBeenCalledTimes(3)
   })
 
   it('reads the store again once the cache lifetime has passed', async () => {

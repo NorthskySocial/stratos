@@ -256,9 +256,9 @@ async function initCoreServices(
 
   const boundaryResolver = createBoundaryResolver(cfg, enrollmentStore, logger)
 
-  // Only write authorization reads through this cache. Every other read stays
-  // live, so mutations keep going through `enrollmentStore` and reach the
-  // cache by event.
+  // Only the write authorization check before the repo lock reads through this
+  // cache; the check under the lock and every other read stay live. Mutations
+  // keep going through `enrollmentStore` and reach the cache by event.
   const writeBoundaryCache = new CachedEnrollmentStore(enrollmentStore)
   enrollmentEvents.on('enrollment', ({ did }) => {
     writeBoundaryCache.invalidate(did)

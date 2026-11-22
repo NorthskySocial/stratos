@@ -76,6 +76,16 @@ collections and answers `InvalidCollection` for a like or repost.
 | `RecordNotFound`       | 400    | An update or delete in `applyWrites` named a record that is not there | Refresh the record list, then send the batch again                    |
 | `ScopeUpgradeRequired` | 400    | The member's grant predates the collection of a like or repost        | Send the member through OAuth authorization again. Do not retry first |
 | `InvalidRecord`        | 400    | For a like or repost: `The subject must be a post in this boundary`   | Use the `uri` and `cid` of a post in the same boundary, as served     |
+| `InvalidRecord`        | 400    | For a reply: the parent cannot be read in this boundary               | Reply in the boundary of a parent that the member can read            |
+
+The reply message starts with `Reply boundaries must be a subset of the
+parent's boundaries` and names the reply's boundary. It is the same for every
+parent the reply cannot have. A parent in another boundary, a parent that
+Stratos holds but cannot find, and a parent that is taken down all return it,
+byte for byte. The error does not tell them apart. Stratos reads the parent's
+boundary from its store at the time of the write, so a reply to a parent that
+has just moved is refused at once. The older `com.atproto.repo` methods do not
+check a parent that is missing or taken down.
 
 The subject message is the same for every wrong subject, whatever the
 `validate` value. A subject that is not a `{ uri, cid }` reference, a post that

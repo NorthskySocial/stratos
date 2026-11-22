@@ -296,6 +296,14 @@ async function createReply(
 A reply stays in the parent's boundary. Use the same boundary value. A reply to a
 public `app.bsky.feed.post` is rejected.
 
+On the [boundary procedures](#boundary-procedures), a parent that Stratos
+holds must exist and must not be taken down. Stratos reads it at the time of
+the write, so a reply to a parent that has moved to another boundary is refused
+at once. A missing or taken-down parent fails with `InvalidRecord`, the same
+error, byte for byte, that a parent in another boundary returns. The older
+`com.atproto.repo` methods skip the boundary check for a missing or taken-down
+parent.
+
 A parent by a member who hosts their own repo has a space record URI. Stratos
 does not hold that record and does not fetch it. On the
 [boundary procedures](#boundary-procedures), such a parent must be a post by an
