@@ -30,10 +30,20 @@ The root `docker-compose.yml` brings up four services:
   and reads it through `STRATOS_VALKEY_URL`. Space credentials need it.
 - **`indexer`** (port `3002`): the deprecated standalone indexer. It writes
   into the Postgres `bsky` database (`BSKY_DB_POSTGRES_URL`).
-- **`postgres`** (port `5432`): Postgres 18, backing the indexer's database.
+- **`postgres`** (port `5432`): Postgres 19, backing the indexer's database.
 
 An optional MinIO service for S3-compatible blob storage is included, commented
 out.
+
+The compose files run Valkey 9. Any Redis-protocol server that the client
+supports works in its place. `STRATOS_VALKEY_URL` keeps the `redis://` URL
+scheme.
+
+The compose files run Postgres 19. An existing data volume from an older major
+version does not start under Postgres 19. Migrate that database with
+`pg_upgrade` or with a dump and restore. Local and test volumes hold no data
+worth keeping, so remove them with `docker compose down -v` and let Postgres
+create a fresh database.
 
 Copy the environment template, fill in the required values, then start the
 stack:
