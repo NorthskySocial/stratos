@@ -48,9 +48,9 @@ describe('exportRepoCarStream', () => {
   })
 
   it('streams the root commit and every block as a valid CAR', async () => {
-    const rootCid = await createCid('motoko')
-    const blockA = await createCid('kusanagi')
-    const blockB = await createCid('batou')
+    const rootCid = await createCid('commit')
+    const blockA = await createCid('node-a')
+    const blockB = await createCid('node-b')
 
     const blocks: CarBlock[] = [
       { cid: rootCid, bytes: new TextEncoder().encode('commit') },

@@ -1,7 +1,4 @@
 import { vi } from 'vitest'
-import { mkdir, rm } from 'node:fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
@@ -10,23 +7,15 @@ import type {
   BlobStore,
   BlobStoreCreator,
 } from '@northskysocial/stratos-core'
-import { StratosActorStore } from '../../src/context.js'
-import { PostgresStorageFactory as PostgresActorStore } from '../../src/infra/storage/postgres/factory.js'
-import type { ActorStore } from '../../src/actor-store-types.js'
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql'
 
-export const POSTGRES_URL = process.env.STRATOS_POSTGRES_URL
-export const IS_POSTGRES =
-  process.env.STRATOS_TEST_BACKEND === 'postgres' || !!POSTGRES_URL
-export const HAS_POSTGRES = !!POSTGRES_URL
-
 let pgContainer: StartedPostgreSqlContainer | null = null
 
 export async function startPostgresContainer(): Promise<string> {
-  pgContainer = await new PostgreSqlContainer('postgres:18-alpine')
+  pgContainer = await new PostgreSqlContainer('postgres:19-alpine')
     .withDatabase('stratos_test')
     .withUsername('stratos')
     .withPassword('stratos')
@@ -51,7 +40,7 @@ export async function createCid(data: string | Uint8Array): Promise<Cid> {
   return CID.createV1(0x55, hash)
 }
 
-export function createMockBlobStore(): BlobStore & BlobContentStore {
+function createMockBlobStore(): BlobStore & BlobContentStore {
   const storage = new Map<string, Uint8Array>()
   return {
     putTemp: vi.fn().mockImplementation(async (bytes: Uint8Array) => {
@@ -144,58 +133,5 @@ export function createMockBlobStoreCreator(): BlobStoreCreator {
       stores.set(did, createMockBlobStore())
     }
     return stores.get(did)!
-  }
-}
-
-export interface TestBackend {
-  actorStore: ActorStore
-  cleanup: () => Promise<void>
-}
-
-export async function createTestBackend(): Promise<TestBackend> {
-  if (IS_POSTGRES && POSTGRES_URL) {
-    return createPostgresBackend(POSTGRES_URL)
-  }
-  return createSqliteBackend()
-}
-
-async function createSqliteBackend(): Promise<TestBackend> {
-  const testDir = join(
-    tmpdir(),
-    `stratos-test-${randomBytes(8).toString('hex')}`,
-  )
-  await mkdir(testDir, { recursive: true })
-
-  const blobstore = createMockBlobStoreCreator()
-  const actorStore = new StratosActorStore({
-    dataDir: join(testDir, 'actors'),
-    blobstore,
-    cborToRecord,
-  })
-
-  return {
-    actorStore,
-    cleanup: async () => {
-      await rm(testDir, { recursive: true, force: true })
-    },
-  }
-}
-
-async function createPostgresBackend(
-  postgresUrl: string,
-): Promise<TestBackend> {
-  const blobstore = createMockBlobStoreCreator() as any
-  const actorStore = new PostgresActorStore({
-    connectionString: postgresUrl,
-    serviceDb: {} as any,
-    blobContentStoreCreator: blobstore,
-    cborToRecord,
-  }) as any
-
-  return {
-    actorStore,
-    cleanup: async () => {
-      // PG schemas are cleaned up per-actor in tests via actorStore.destroy()
-    },
   }
 }

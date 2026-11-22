@@ -20,8 +20,8 @@
 //      user's PDS (no stubs), a did:key signingKey on the enrollment, and a
 //      durable signed-commit proof for the record.
 
-import { fromUint8Array } from 'npm:@atcute/car@^6.0.2'
-import { decode, toCidLink } from 'npm:@atcute/cbor@^2.3.6'
+import { fromUint8Array } from 'npm:@atcute/car@^6.1.1'
+import { decode, toCidLink } from 'npm:@atcute/cbor@^2.3.8'
 
 import {
   createRecord,

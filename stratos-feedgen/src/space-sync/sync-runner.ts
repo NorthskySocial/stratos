@@ -12,9 +12,7 @@ import type {
 } from './space-syncer.js'
 
 export type SpaceSyncRunFailureReason =
-  | SpaceSyncFailure['reason']
-  | 'commit-verify-failed'
-  | 'halted'
+  SpaceSyncFailure['reason'] | 'commit-verify-failed' | 'halted'
 
 export interface SpaceSyncRunFailure {
   readonly target: PollTarget

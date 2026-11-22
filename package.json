@@ -31,26 +31,26 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/deno": "^2.5.0",
-    "@types/node": "^25.2.1",
-    "@stryker-mutator/core": "^9.6.1",
-    "@stryker-mutator/vitest-runner": "^9.6.1",
-    "@typescript-eslint/eslint-plugin": "^8.58.0",
-    "@typescript-eslint/parser": "^8.58.0",
-    "concurrently": "^9.2.1",
-    "eslint": "^10.0.0",
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/vitest-runner": "^10.1.1",
+    "@types/deno": "^2.7.0",
+    "@types/node": "^26.6.6",
+    "@typescript-eslint/eslint-plugin": "^8.73.0",
+    "@typescript-eslint/parser": "^8.73.0",
+    "concurrently": "^10.0.7",
+    "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.8",
-    "globals": "^17.3.0",
-    "jsdom": "^29.0.2",
-    "prettier": "^3.8.1",
-    "tsx": "^4.21.0",
+    "globals": "^17.14.0",
+    "jsdom": "^31.0.1",
+    "prettier": "^3.10.1",
+    "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@~6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "typescript-eslint": "^8.58.0",
-    "vitest": "^4.0.18"
+    "typescript-eslint": "^8.73.0",
+    "vitest": "^5.1.1"
   },
   "dependencies": {
-    "@vitest/coverage-v8": "^4.0.18",
-    "dotenv": "^17.4.0"
+    "@vitest/coverage-v8": "^5.1.1",
+    "dotenv": "^18.0.10"
   }
 }

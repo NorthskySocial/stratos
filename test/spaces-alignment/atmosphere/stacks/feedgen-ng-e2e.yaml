@@ -26,7 +26,7 @@ services:
       - feedgen-e2e-runtime:/runtime
 
   feedgen-e2e-valkey:
-    image: valkey/valkey:8-alpine
+    image: valkey/valkey:9-alpine
     user: '999:1000'
     working_dir: /data
     command: ['valkey-server', '--save', '', '--appendonly', 'no']

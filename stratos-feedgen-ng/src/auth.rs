@@ -340,10 +340,7 @@ mod tests {
     }
 
     fn p256_did_key(key: &P256SigningKey) -> String {
-        did_key(
-            0x1200,
-            key.verifying_key().to_encoded_point(true).as_bytes(),
-        )
+        did_key(0x1200, key.verifying_key().to_sec1_point(true).as_bytes())
     }
 
     fn secp256k1_key() -> Secp256k1SigningKey {
@@ -351,7 +348,7 @@ mod tests {
     }
 
     fn secp256k1_did_key(key: &Secp256k1SigningKey) -> String {
-        did_key(0xe7, key.verifying_key().to_encoded_point(true).as_bytes())
+        did_key(0xe7, key.verifying_key().to_sec1_point(true).as_bytes())
     }
 
     fn p256_token(

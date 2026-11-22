@@ -650,8 +650,7 @@ export function decodeEvent(event: SeqEvent): DecodedEvent {
       const record = op.record as Record<string, unknown> | undefined
       const opBoundary = op.boundary as Record<string, unknown> | undefined
       const recordBoundary = record?.boundary as
-        | Record<string, unknown>
-        | undefined
+        Record<string, unknown> | undefined
       const boundary = opBoundary ?? recordBoundary
       const values = boundary?.values as Array<{ value: string }> | undefined
       if (values) {
@@ -661,11 +660,9 @@ export function decodeEvent(event: SeqEvent): DecodedEvent {
       // subscriber that shares one of those still sees the record and must be
       // excluded from this removal.
       const excludeBoundary = op.excludeBoundary as
-        | Record<string, unknown>
-        | undefined
+        Record<string, unknown> | undefined
       const excludeValues = excludeBoundary?.values as
-        | Array<{ value: string }>
-        | undefined
+        Array<{ value: string }> | undefined
       if (excludeValues) {
         for (const v of excludeValues) excludeBoundaries.add(v.value)
       }

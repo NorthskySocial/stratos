@@ -1,7 +1,6 @@
 import { parseDidKey, verifySignature } from '@atproto/crypto'
 import { StratosError } from '@northskysocial/stratos-core'
 import {
-  isByteSequence,
   isInnerList,
   parseDictionary,
   serializeInnerList,
@@ -59,7 +58,7 @@ async function verifySpaceSignature(
       !isInnerList(input) ||
       !signature ||
       isInnerList(signature) ||
-      !isByteSequence(signature[0]) ||
+      !(signature[0] instanceof ArrayBuffer) ||
       signature[1].size !== 0
     ) {
       throw new SpaceHttpSignatureError('Malformed atproto-space signature')
@@ -70,7 +69,7 @@ async function verifySpaceSignature(
       (name) => `"${name}": ${requireHeader(headers, name)}`,
     )
     lines.push(`"@signature-params": ${serializeInnerList(input)}`)
-    const bytes = Buffer.from(signature[0].toBase64(), 'base64')
+    const bytes = Buffer.from(signature[0])
     if (
       bytes.length !== 64 ||
       !(await verifySignature(

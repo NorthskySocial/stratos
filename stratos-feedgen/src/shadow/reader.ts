@@ -22,10 +22,7 @@ export interface ShadowFeedMetrics {
 }
 
 export type ShadowFeedOutcome =
-  | 'matched'
-  | 'unavailable'
-  | 'dropped'
-  | `mismatch_${ShadowMismatchReason}`
+  'matched' | 'unavailable' | 'dropped' | `mismatch_${ShadowMismatchReason}`
 
 export interface ShadowFeedReader {
   observe: (input: ShadowFeedRead) => void

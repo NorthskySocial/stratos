@@ -188,7 +188,10 @@ fn cache_key(did: &str, cid: &str) -> String {
     hash.update(did);
     hash.update([0]);
     hash.update(cid);
-    format!("{:x}", hash.finalize())
+    hash.finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 pub fn verify_blob_cid(bytes: &[u8], cid: &str) -> Result<(), BlobCacheError> {
     let cid = cid::Cid::try_from(cid).map_err(|_| BlobCacheError::InvalidCid)?;
