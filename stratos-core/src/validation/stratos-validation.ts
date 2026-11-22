@@ -111,8 +111,7 @@ export class StratosValidator {
    */
   static extractBoundaryDomains(record: RepoRecord): string[] {
     const boundary = record.boundary as
-      | { $type?: string; values?: Array<{ value: string }> }
-      | undefined
+      { $type?: string; values?: Array<{ value: string }> } | undefined
     return boundary?.values?.map((d) => d.value) ?? []
   }
 
@@ -291,8 +290,7 @@ export class StratosValidator {
     parentBoundaries?: string[],
   ): void {
     const rawBoundary = record.boundary as
-      | { $type?: string; values?: Array<{ value: string }> }
-      | undefined
+      { $type?: string; values?: Array<{ value: string }> } | undefined
     const boundary = rawBoundary
       ? {
           $type: 'zone.stratos.boundary.defs#Domains',

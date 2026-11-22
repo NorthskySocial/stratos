@@ -2,7 +2,7 @@ use base64::{
     Engine,
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE_NO_PAD},
 };
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde_json::Value;
 use sha2::Sha256;
 
@@ -269,7 +269,7 @@ mod tests {
 
     use async_trait::async_trait;
     use base64::Engine;
-    use hmac::Mac;
+    use hmac::{KeyInit, Mac};
     use k256::ecdsa::{SigningKey, signature::Signer};
     use serde_json::json;
 
@@ -341,13 +341,13 @@ mod tests {
 
     fn did_key(key: &SigningKey) -> String {
         let mut bytes = vec![0xe7, 0x01];
-        bytes.extend_from_slice(key.verifying_key().to_encoded_point(true).as_bytes());
+        bytes.extend_from_slice(key.verifying_key().to_sec1_point(true).as_bytes());
         format!("did:key:z{}", bs58::encode(bytes).into_string())
     }
 
     fn p256_did_key(key: &p256::ecdsa::SigningKey) -> String {
         let mut bytes = vec![0x80, 0x24];
-        bytes.extend_from_slice(key.verifying_key().to_encoded_point(true).as_bytes());
+        bytes.extend_from_slice(key.verifying_key().to_sec1_point(true).as_bytes());
         format!("did:key:z{}", bs58::encode(bytes).into_string())
     }
 

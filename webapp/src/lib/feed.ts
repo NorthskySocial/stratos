@@ -27,11 +27,7 @@ interface StratosTimelineResponse {
 }
 
 export type FeedgenFailureCategory =
-  | 'not-ready'
-  | 'authorization'
-  | 'network'
-  | 'malformed'
-  | 'unavailable'
+  'not-ready' | 'authorization' | 'network' | 'malformed' | 'unavailable'
 
 export type FeedgenResult =
   | { ok: true; posts: FeedPost[]; cursor?: string }
@@ -271,8 +267,7 @@ function parseReplyRef(record: Record<string, unknown>): ReplyRef | null {
  */
 function boundariesFromRecord(record: Record<string, unknown>): string[] {
   const boundary = record.boundary as
-    | { values?: Array<{ value?: string }> }
-    | undefined
+    { values?: Array<{ value?: string }> } | undefined
   if (!boundary?.values || !Array.isArray(boundary.values)) return []
   return boundary.values
     .map((v) => v.value)

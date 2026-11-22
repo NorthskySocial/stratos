@@ -27,7 +27,7 @@ pnpm exec vitest run
 
 ## PostgreSQL integration tests
 
-`postgres-integration.test.ts` exercises the Postgres storage backend against a real database. The test starts its own throwaway `postgres:18-alpine` container through Testcontainers (`startPostgresContainer()` in `helpers/test-env.ts`), so it needs no database URL or compose file. It does need a container runtime that Testcontainers can reach, such as Docker or Podman, and it fails in `beforeAll` when none is available. The other Postgres tests (`boundary-audit-postgres.test.ts`, `boundary-catalog/postgres.test.ts`, `service-boundary-admission.test.ts`) start containers the same way.
+`postgres-integration.test.ts` exercises the Postgres storage backend against a real database. The test starts its own throwaway `postgres:19-alpine` container through Testcontainers (`startPostgresContainer()` in `helpers/test-env.ts`), so it needs no database URL or compose file. It does need a container runtime that Testcontainers can reach, such as Docker or Podman, and it fails in `beforeAll` when none is available. The other Postgres tests (`boundary-audit-postgres.test.ts`, `boundary-catalog/postgres.test.ts`, `service-boundary-admission.test.ts`) start containers the same way.
 
 ### Running
 

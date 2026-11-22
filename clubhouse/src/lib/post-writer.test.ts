@@ -39,8 +39,7 @@ describe('custody-aware room posting', () => {
       },
     })
     const requestInit = fetchHandler.mock.calls[0]?.[1] as
-      | RequestInit
-      | undefined
+      RequestInit | undefined
     const body = JSON.parse(requestInit?.body as string) as {
       record: Record<string, unknown>
       space: string

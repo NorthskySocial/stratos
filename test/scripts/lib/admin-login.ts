@@ -1,7 +1,7 @@
 // Admin OAuth login via a headless browser. Split from admin.ts so phases
 // that only reuse a stored session cookie do not load Playwright.
 
-import type { Browser, Page } from 'npm:playwright@1.58.2'
+import type { Browser, Page } from 'npm:playwright@1.65.1'
 import { STRATOS_URL } from './config.ts'
 import { dim, fail, info } from './log.ts'
 import { ADMIN_SESSION_COOKIE } from './admin.ts'

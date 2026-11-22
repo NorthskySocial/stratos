@@ -35,7 +35,7 @@ The indexer is configured primarily through environment variables.
 - `BSKY_DB_POSTGRES_SCHEMA`: Database schema (default: `bsky`).
 - `BSKY_DB_POOL_SIZE`: Database connection pool size (default: `20`).
 
-Use an AppView schema compatible with the installed `@atproto/bsky` SDK (currently 0.0.280).
+Use an AppView schema compatible with the installed `@atproto/bsky` SDK (currently `^0.5.17`).
 Apply AppView migrations through the AppView deployment before upgrading this indexer.
 The indexer initializes its Stratos tables but does not run upstream AppView migrations.
 See the [security review](../docs/security/ssrf-review.md#compatibility-and-deployment) for this upgrade's requirements.
@@ -70,7 +70,7 @@ See the [security review](../docs/security/ssrf-review.md#compatibility-and-depl
 
 ### Prerequisites
 
-- Node.js 24 for workspace development; Deno 2 for the indexer runtime
+- Node.js 26 for workspace development; Deno 2 for the indexer runtime
 - Pnpm
 - Postgres database
 

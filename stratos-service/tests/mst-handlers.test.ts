@@ -215,7 +215,10 @@ describe('MST inclusion proof CAR', () => {
     const nodeStore = new NodeStore(overlay)
     const wrangler = new NodeWrangler(nodeStore)
 
-    const recordCid = await makeCidStr('proof-record')
+    const recordData = AtcuteCbor.encode({ text: 'hello proof' })
+    const recordCid = AtcuteCid.toString(
+      await AtcuteCid.create(0x71, recordData),
+    )
 
     // Insert a record into the MST
     const root = await wrangler.putRecord(
@@ -260,7 +263,6 @@ describe('MST inclusion proof CAR', () => {
     }
 
     // Add the record block
-    const recordData = AtcuteCbor.encode({ text: 'hello proof' })
     blockStore.set(recordCid, recordData)
 
     // Build CAR

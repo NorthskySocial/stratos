@@ -180,7 +180,7 @@ impl IdentityKeyResolver for StaticResolver {
 
 fn did_key(key: &SigningKey) -> String {
     let mut bytes = vec![0x80, 0x24];
-    bytes.extend_from_slice(key.verifying_key().to_encoded_point(true).as_bytes());
+    bytes.extend_from_slice(key.verifying_key().to_sec1_point(true).as_bytes());
     format!("did:key:z{}", bs58::encode(bytes).into_string())
 }
 
