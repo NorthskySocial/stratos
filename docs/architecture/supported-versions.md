@@ -43,9 +43,12 @@ declaration. A PDS built between those two was not examined.
 | `zone.stratos.repo.hydrateRecord`, `hydrateRecords`           | Boundary-filtered reads                                                      |
 | Space URI grammar                                             | `at:space/` URIs, and the mapping between a boundary and a space URI         |
 | Credential, delegation and attestation verification           | The signed presentation, the DPoP form, and the audience `<did>#atproto_pds` |
+| `com.atproto.space.notifyRepoUpdate`                          | Accepts a member PDS's notice of a write to a space repo; stores nothing     |
 
-Each of these is a Stratos method. None is a mirror of an upstream method. The
-lexicons say so. All of it is proven at package level and pending a host that
+Each of these but `notifyRepoUpdate` is a Stratos method. None of those is a
+mirror of an upstream method, and the lexicons say so. `notifyRepoUpdate` is
+the upstream method itself, served without a lexicon file because no pinned
+package ships one. All of it is proven at package level and pending a host that
 accepts the new spelling where a host is involved.
 
 ## What Stratos consumes from a member's PDS
@@ -67,12 +70,14 @@ and Clubhouse use these interfaces.
 
 ## What Stratos does not implement
 
-- Handlers for upstream `com.atproto.space.*` methods. Stratos is the authority
-  for its boundaries but does not serve the upstream space-host methods,
-  including `authorizeSpaceSync`, `listWriters` and `notifyRepoUpdate`. It
-  answers each as an unknown method.
-- A `#atproto_pds` service entry in the Stratos DID document. A generic spaces
-  client cannot discover Stratos as an authority.
+- Most upstream `com.atproto.space.*` space-host methods. Stratos accepts
+  `notifyRepoUpdate` from a member's PDS: it checks the notice, answers 200 and
+  stores nothing, and the feed generator still polls the member's PDS. Its DID
+  document offers `#atproto_pds` at the Stratos origin so the PDS can find that
+  route. The other space-host methods, including `authorizeSpaceSync`,
+  `listWriters` and `notifyCredentialsRevoked`, are answered as an unknown
+  method (501), so an upstream client that takes Stratos for a complete space
+  host gets 501 from them.
 - Writer discovery. Membership comes from enrollment.
 - Revocation of a credential on a foreign PDS. Stratos does not send
   `com.atproto.space.notifyCredentialsRevoked`, the notice a space host sends a

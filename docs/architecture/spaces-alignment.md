@@ -18,18 +18,18 @@ a host that accepts the `at:space/` spelling. See
 
 ## Status at a glance
 
-| Area                                                                 | Status                                      | Today                                                                                                                                       |
-| -------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Custody](#custody)                                                  | <Badge type="tip" text="shipped" />         | Stratos is the authority for both custody classes. The repo host is Stratos or the member's spaces PDS.                                     |
-| [Record addresses](#record-addresses-and-boundary-claims)            | <Badge type="tip" text="shipped" />         | Space record URIs are `at:space/` plus six parts and start with the authority. The feed generator re-derives each boundary from enrollment. |
-| [Authority endpoints](#endpoints)                                    | <Badge type="tip" text="shipped" />         | `zone.stratos.space.*` are Stratos methods. Delegations and attestations name `<authority did>#atproto_pds`.                                |
-| [Membership listing](#membership-listing)                            | <Badge type="info" text="custom" />         | A Stratos `listRepos` snapshot of active enrollments. Stratos serves no upstream writer route.                                              |
-| [Standard credentials](#credential-transport)                        | <Badge type="tip" text="shipped" />         | `cnf.kid`, 600 seconds by default, 3,600 seconds at most, presented as `Atproto-Space-Credential`. `cnf.jkt` is kept.                       |
-| [Remote revocation](#credential-transport)                           | <Badge type="danger" text="not included" /> | A credential stays valid on a foreign PDS until it expires.                                                                                 |
-| [Verified sync of PDS members](#verified-sync-at-the-feed-generator) | <Badge type="tip" text="shipped" />         | Each response carries a MAC and each state is promoted only when its set hash equals the commit's `data`. Nothing is staged.                |
-| [Full-content proof](#what-a-signature-proves)                       | <Badge type="danger" text="not included" /> | A signature or MAC covers the served view, not every permitted record.                                                                      |
-| [`space-ref` validation](#lexicon-validation)                        | <Badge type="warning" text="workaround" />  | The installed validator accepts bad values. Runtime `parseSpaceUri` rejects them.                                                           |
-| [Upstream pins](#pinned-upstream-revisions)                          | <Badge type="info" text="pinned" />         | Tests target fixed upstream revisions. A pin is not a deployed version.                                                                     |
+| Area                                                                 | Status                                      | Today                                                                                                                                                         |
+| -------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Custody](#custody)                                                  | <Badge type="tip" text="shipped" />         | Stratos is the authority for both custody classes. The repo host is Stratos or the member's spaces PDS.                                                       |
+| [Record addresses](#record-addresses-and-boundary-claims)            | <Badge type="tip" text="shipped" />         | Space record URIs are `at:space/` plus six parts and start with the authority. The feed generator re-derives each boundary from enrollment.                   |
+| [Authority endpoints](#endpoints)                                    | <Badge type="tip" text="shipped" />         | `zone.stratos.space.*` are Stratos methods. Delegations and attestations name `<authority did>#atproto_pds`. `notifyRepoUpdate` is accepted and acknowledged. |
+| [Membership listing](#membership-listing)                            | <Badge type="info" text="custom" />         | A Stratos `listRepos` snapshot of active enrollments. Stratos serves no upstream writer route.                                                                |
+| [Standard credentials](#credential-transport)                        | <Badge type="tip" text="shipped" />         | `cnf.kid`, 600 seconds by default, 3,600 seconds at most, presented as `Atproto-Space-Credential`. `cnf.jkt` is kept.                                         |
+| [Remote revocation](#credential-transport)                           | <Badge type="danger" text="not included" /> | A credential stays valid on a foreign PDS until it expires.                                                                                                   |
+| [Verified sync of PDS members](#verified-sync-at-the-feed-generator) | <Badge type="tip" text="shipped" />         | Each response carries a MAC and each state is promoted only when its set hash equals the commit's `data`. Nothing is staged.                                  |
+| [Full-content proof](#what-a-signature-proves)                       | <Badge type="danger" text="not included" /> | A signature or MAC covers the served view, not every permitted record.                                                                                        |
+| [`space-ref` validation](#lexicon-validation)                        | <Badge type="warning" text="workaround" />  | The installed validator accepts bad values. Runtime `parseSpaceUri` rejects them.                                                                             |
+| [Upstream pins](#pinned-upstream-revisions)                          | <Badge type="info" text="pinned" />         | Tests target fixed upstream revisions. A pin is not a deployed version.                                                                                       |
 
 Each row has its detail below.
 
@@ -71,18 +71,25 @@ Stratos exposes `zone.stratos.space.*` authority endpoints, including
 `zone.stratos.sync.*` pull reads. They are Stratos methods. None of them
 mirrors an upstream `com.atproto.space.*` method, and each lexicon says so.
 A spaces PDS hosts member repositories using upstream `com.atproto.space.*`
-methods. Stratos registers no handler for any `com.atproto.space.*` method,
-including `listWriters`, `notifyRepoUpdate`, `notifyCredentialsRevoked` and
-`authorizeSpaceSync`.
+methods.
+
+Stratos serves one upstream method, `com.atproto.space.notifyRepoUpdate`, which
+a member's PDS sends the space host after a write. Stratos checks the token,
+the space and the writer's membership, answers 200 and stores nothing; the
+feed generator still polls the member's PDS. The other upstream space-host
+methods, including `listWriters`, `notifyCredentialsRevoked` and
+`authorizeSpaceSync`, are answered as an unknown method (501).
 
 Stratos's credential mint accepts a PDS-issued delegation as
 `Authorization: Bearer` with a standalone DPoP proof and a JSON `space` body;
 the internal body-delegation transport remains supported.
 
 A delegation and a client attestation carry the audience
-`<authority did>#atproto_pds`. The Stratos DID document offers no
-`#atproto_pds` service entry and Stratos does not claim complete upstream
-authority discovery.
+`<authority did>#atproto_pds`. The Stratos DID document offers a
+`#atproto_pds` service at the Stratos origin, so a member's PDS can deliver
+`notifyRepoUpdate`. Stratos does not claim complete upstream authority
+discovery: an upstream client that takes Stratos for a complete space host
+gets 501 from every other space-host method.
 
 :::
 

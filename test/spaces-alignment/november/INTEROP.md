@@ -784,3 +784,8 @@ they ran against.
   `authors-on-separate-hosts`)?
 - What record URI does a host return for a created record (journeys
   `canonical-uri-at-each-boundary` and `post-uri-and-text-in-real-feed-response`)?
+- Does a host deliver `com.atproto.space.notifyRepoUpdate` to Stratos after a
+  member writes? Stratos's DID document offers `#atproto_pds` at the Stratos
+  origin, and the in-process service accepts the notice with either audience
+  the reference PDS may use. No journey drives a real host's notice yet, and
+  Stratos depends on none: the feed generator polls the member's PDS.

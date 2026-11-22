@@ -15,7 +15,7 @@ authentication each accepts, and the errors each returns.
 | ---------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | DPoP             | `Authorization: DPoP <access_token>` and `DPoP: <proof>`                                              | A user's AT Protocol OAuth session                                   |
 | Optional DPoP    | The same, or no `Authorization` header                                                                | Anonymous callers are allowed, and see no private data               |
-| Service JWT      | `Authorization: Bearer <service-jwt>`                                                                 | Another service, such as the feed generator                          |
+| Service JWT      | `Authorization: Bearer <service-jwt>`                                                                 | Another service, such as the feed generator, or a member's PDS       |
 | Space credential | `Authorization: Atproto-Space-Credential <credential>` with HTTP signature, or the legacy `DPoP` form | A syncing service or app with a credential from `getSpaceCredential` |
 | Admin            | A server-side session cookie                                                                          | Operators                                                            |
 
@@ -80,6 +80,7 @@ These serve `stratos` custody. Stratos hosts the repo.
 | `zone.stratos.space.getRecord`          | query     | DPoP (space member), or space credential                |
 | `zone.stratos.space.listBlobs`          | query     | DPoP (space member), or space credential                |
 | `zone.stratos.space.listRepos`          | query     | Service JWT, or space credential. Never a user session. |
+| `com.atproto.space.notifyRepoUpdate`    | procedure | Service JWT from the member's PDS, bound to this method |
 
 ### Enrollment, identity, and server methods
 
@@ -97,13 +98,13 @@ These serve `stratos` custody. Stratos hosts the repo.
 
 ### Not served by Stratos
 
-| Method                         | Note                                                                                 |
-| ------------------------------ | ------------------------------------------------------------------------------------ |
-| `com.atproto.repo.putRecord`   | Use `zone.stratos.repo.putRecord`, or an `update` action in `applyWrites`.           |
-| `com.atproto.sync.getRecord`   | Removed. Stratos serves no single-record proof.                                      |
-| `zone.stratos.repo.importRepo` | A lexicon exists. No handler is registered.                                          |
-| `zone.stratos.feedgen.*`       | Served by the feed generator. See [Private Feed Attachments](/client/feedgen-blobs). |
-| `com.atproto.space.*`          | Served by a spaces-capable PDS, for `pds` custody.                                   |
+| Method                                              | Note                                                                                                                                                                                  |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `com.atproto.repo.putRecord`                        | Use `zone.stratos.repo.putRecord`, or an `update` action in `applyWrites`.                                                                                                            |
+| `com.atproto.sync.getRecord`                        | Removed. Stratos serves no single-record proof.                                                                                                                                       |
+| `zone.stratos.repo.importRepo`                      | A lexicon exists. No handler is registered.                                                                                                                                           |
+| `zone.stratos.feedgen.*`                            | Served by the feed generator. See [Private Feed Attachments](/client/feedgen-blobs).                                                                                                  |
+| `com.atproto.space.*` other than `notifyRepoUpdate` | Served by a spaces-capable PDS, for `pds` custody. Stratos answers each with 501 `MethodNotImplemented`, `listWriters`, `notifyCredentialsRevoked` and `authorizeSpaceSync` included. |
 
 ## Records
 
@@ -508,6 +509,46 @@ This does not add an upstream `com.atproto.space.*` authority endpoint.
 Member removal prevents renewal but does not automatically revoke credentials
 already accepted by a foreign PDS. See the
 [known gaps](/architecture/supported-versions#known-gaps).
+
+### Notify Repo Update
+
+```http
+POST /xrpc/com.atproto.space.notifyRepoUpdate
+Authorization: Bearer <service-jwt>
+Content-Type: application/json
+Body: { "space": "at:space/<service-did>/<type>/<skey>", "repo": "<did>", "repoRev": "<tid>", "data": { "$bytes": "<base64>" } }
+Response: 200, empty body
+```
+
+A member whose repo is on their own PDS writes there, and the PDS sends this
+notice to the space host. The PDS finds this route through the `#atproto_pds`
+service of the Stratos DID document. This is the upstream method, served as
+upstream declares it.
+
+Stratos checks the notice and acknowledges it. It stores nothing and forwards
+nothing; the feed generator still polls the member's PDS on its own schedule.
+
+The token is a service JWT signed by the `#atproto` key of the writing
+account. Its `iss` must equal `repo`, its `lxm` must be
+`com.atproto.space.notifyRepoUpdate`, and its `aud` must be the Stratos DID or
+`<Stratos DID>#atproto_pds`. A missing or refused token answers
+`401 AuthenticationRequired`, as other service JWT routes do.
+
+The checks, in order:
+
+| Check                                                                                                    | Answer                       |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| The token verifies                                                                                       | `401 AuthenticationRequired` |
+| The writing issuer is under 1,500 notices an hour                                                        | `429 RateLimitExceeded`      |
+| The body has a string `space`, a DID `repo`, a TID `repoRev` and bytes `data`                            | `400 InvalidRequest`         |
+| `iss` equals `repo`                                                                                      | `403 Forbidden`              |
+| `space` is an `at:space/` URI of this service, of type `zone.stratos.space.feed`, for an active boundary | `400 SpaceNotFound`          |
+| `repoRev` is at most five minutes ahead of the clock                                                     | `400 FutureRev`              |
+| `repo` is an active member with `pds` custody who holds the space's boundary                             | `403 Forbidden`              |
+
+A body that is not JSON answers `400 InvalidRequest` before the token is
+checked. A space URI in the earlier `at://` spelling is `SpaceNotFound`. A member whose
+records Stratos hosts is refused with 403, because their repo is not on a PDS.
 
 ## Export
 

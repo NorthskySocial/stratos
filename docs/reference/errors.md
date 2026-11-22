@@ -138,6 +138,24 @@ is not admitted to the space.
 
 See [Permissioned Spaces](/architecture/permissioned-spaces#credential).
 
+## Repo update notices
+
+A member's PDS sends `com.atproto.space.notifyRepoUpdate` after a write to a
+space repo. Stratos acknowledges a valid notice with an empty 200 and stores
+nothing.
+
+| Error                    | Status | Meaning                                                                                                                                                                  |
+| ------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AuthenticationRequired` | 401    | No service JWT, or one with another `lxm`, another audience, an expired `exp`, or a signature not made by the issuer's `#atproto` key                                    |
+| `RateLimitExceeded`      | 429    | The issuer sent more than 1,500 notices in an hour. Back off, then retry.                                                                                                |
+| `InvalidRequest`         | 400    | The body is not JSON, or `repo` is not a DID, `repoRev` is not a TID, or `data` is not bytes                                                                             |
+| `Forbidden`              | 403    | The token's `iss` is not `repo`, or `repo` is not an active `pds`-custody member who holds the space's boundary                                                          |
+| `SpaceNotFound`          | 400    | The space is malformed, belongs to another authority, has another type, or names a boundary this service does not host. A space URI in the earlier spelling is malformed |
+| `FutureRev`              | 400    | `repoRev` is more than five minutes ahead of the service clock                                                                                                           |
+
+Every other upstream `com.atproto.space.*` method, such as `listWriters`,
+answers `501 MethodNotImplemented`.
+
 ## Enrollment
 
 Enrollment happens in the browser, through `/oauth/authorize` and

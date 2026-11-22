@@ -6,7 +6,8 @@ import {
   parseReqNsid,
   type StreamAuthVerifier,
 } from '@atproto/xrpc-server'
-import { verifyServiceAuth } from './verifier.js'
+import { verifyMethodBoundServiceAuth, verifyServiceAuth } from './verifier.js'
+import { SPACE_HOST_FRAGMENT } from './delegation-verifier.js'
 import { DpopVerificationError, DpopVerifier } from './index.js'
 import {
   SPACE_CREDENTIAL_TYP,
@@ -884,6 +885,46 @@ export function createSubscribeAuthVerifier(
       return {
         credentials: { type: 'service', did: result.iss, iss: result.iss },
       }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Service authorization failed'
+      throw new AuthRequiredError(message)
+    }
+  }
+}
+
+/**
+ * Creates the verifier for a notice a member's host sends this service as
+ * space host. Narrower than the `service` verifier: the token's `lxm` must be
+ * present and equal `lxm`, its `aud` is the service DID or the host role
+ * `<serviceDid>#atproto_pds`, and only the issuer's `#atproto` key verifies
+ * it.
+ *
+ * @param deps - Our service DID, the identity resolver and the bound method
+ * @returns A verifier yielding the token's issuer
+ * @throws AuthRequiredError if the token is missing or does not verify
+ */
+export function createRepoHostNoticeVerifier(deps: {
+  serviceDid: string
+  idResolver: IdResolver
+  lxm: string
+}): (req: import('node:http').IncomingMessage) => Promise<{ iss: string }> {
+  const binding = {
+    audiences: [deps.serviceDid, `${deps.serviceDid}${SPACE_HOST_FRAGMENT}`],
+    lxm: deps.lxm,
+  }
+  return async (req) => {
+    const authHeader = req.headers.authorization
+    if (!authHeader) {
+      throw new AuthRequiredError('Service authorization required')
+    }
+    try {
+      const result = await verifyMethodBoundServiceAuth(
+        authHeader,
+        binding,
+        deps.idResolver,
+      )
+      return { iss: result.iss }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Service authorization failed'

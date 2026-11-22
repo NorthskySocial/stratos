@@ -387,7 +387,7 @@ describe('assertion manifest', () => {
     const carriedByNothing = manifest.entries.filter((entry) =>
       entry.carriedBy.every((carrier) => carrier.kind === 'none'),
     )
-    expect(carriedByNothing).toHaveLength(19)
+    expect(carriedByNothing).toHaveLength(15)
     expect(new Set(carriedByNothing.map((entry) => entry.suite))).toEqual(
       new Set(['credential-revocation-contract', 'writer-sync-contract']),
     )

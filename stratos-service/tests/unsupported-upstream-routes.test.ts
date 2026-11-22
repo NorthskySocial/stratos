@@ -1,10 +1,11 @@
 /**
- * Stratos does not serve the upstream writer-set and revocation routes. A
- * request for `com.atproto.space.listWriters`, `notifyRepoUpdate`,
- * `notifyCredentialsRevoked` or `authorizeSpaceSync` is answered as an unknown
- * method, the same as a name nobody ever defined, and the DID document offers
- * no `#atproto_pds` service that would advertise them. The routes run in the
- * in-process service with its real handlers and stores.
+ * Stratos serves `com.atproto.space.notifyRepoUpdate`, so a member's PDS can
+ * deliver its notice, and its DID document offers the `#atproto_pds` service
+ * that tells the PDS where to send it. The other upstream space-host routes,
+ * `com.atproto.space.listWriters`, `notifyCredentialsRevoked` and
+ * `authorizeSpaceSync`, are answered as an unknown method, the same as a name
+ * nobody ever defined. The routes run in the in-process service with its real
+ * handlers and stores.
  */
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -19,7 +20,6 @@ import {
 
 const UPSTREAM_ROUTES = [
   { nsid: 'com.atproto.space.listWriters', method: 'GET' },
-  { nsid: 'com.atproto.space.notifyRepoUpdate', method: 'POST' },
   { nsid: 'com.atproto.space.notifyCredentialsRevoked', method: 'POST' },
   { nsid: 'com.atproto.space.authorizeSpaceSync', method: 'POST' },
 ] as const
@@ -136,15 +136,22 @@ describe('upstream space routes Stratos does not serve', () => {
     )
   })
 
-  it('offers no #atproto_pds service in the DID document', async () => {
+  it('offers #atproto_pds at the service origin in the DID document', async () => {
     const response = await fetch(`${await serve()}/.well-known/did.json`)
     expect(response.status).toBe(200)
     const document = (await response.json()) as {
-      service: Array<{ id: string }>
+      service: Array<{ id: string; type: string; serviceEndpoint: string }>
     }
-    expect(document.service.length).toBeGreaterThan(0)
+    const stratos = document.service.find((entry) => entry.id === '#stratos')
     expect(
-      document.service.some((entry) => entry.id.endsWith('#atproto_pds')),
-    ).toBe(false)
+      document.service.filter((entry) => entry.id.endsWith('#atproto_pds')),
+    ).toEqual([
+      {
+        id: '#atproto_pds',
+        type: 'AtprotoPersonalDataServer',
+        serviceEndpoint: stratos?.serviceEndpoint,
+      },
+    ])
+    expect(stratos?.serviceEndpoint).toBe(harness.ctx.cfg.service.publicUrl)
   })
 })

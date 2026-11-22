@@ -65,14 +65,27 @@ The document has this shape:
       "id": "#stratos",
       "type": "StratosService",
       "serviceEndpoint": "https://stratos.example.com"
+    },
+    {
+      "id": "#atproto_pds",
+      "type": "AtprotoPersonalDataServer",
+      "serviceEndpoint": "https://stratos.example.com"
     }
   ]
 }
 ```
 
-Both entries carry the same key. The first uses `STRATOS_SERVICE_FRAGMENT`.
+The two verification methods carry the same key. The first uses
+`STRATOS_SERVICE_FRAGMENT`.
 The `#atproto` entry lets a member's PDS verify the space credentials Stratos
 issues.
+
+Both services point at the service origin. A member whose repo is on their
+own PDS writes there, and that PDS reads `#atproto_pds` to find where to send
+`com.atproto.space.notifyRepoUpdate`. If your service DID is not a `did:web`
+whose document Stratos serves, publish a `#atproto_pds` entry of type
+`AtprotoPersonalDataServer` at the Stratos origin in that DID's document
+yourself.
 
 ## Step 3: Configure the environment
 

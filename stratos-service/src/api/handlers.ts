@@ -7,6 +7,7 @@ import {
   registerEnrollmentHandlers,
   registerHydrationHandlers,
   registerModerationHandlers,
+  registerRepoUpdateNoticeHandler,
   registerSpaceCredentialHandlers,
   registerSpaceReadHandlers,
   registerSyncHandlers,
@@ -150,4 +151,5 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
   registerSpaceCredentialHandlers(server, ctx)
   registerSpaceReadHandlers(server, ctx)
   registerModerationHandlers(server, ctx)
+  registerRepoUpdateNoticeHandler(ctx)
 }

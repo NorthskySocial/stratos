@@ -1553,7 +1553,7 @@
           "kind": "test",
           "file": "stratos-service/tests/unsupported-upstream-routes.test.ts",
           "title": "answers $nsid as an unknown method",
-          "proves": "Each upstream writer-set and revocation route, notifyCredentialsRevoked among them, gets 501 MethodNotImplemented from the in-process service."
+          "proves": "Each upstream route Stratos does not serve, listWriters, notifyCredentialsRevoked and authorizeSpaceSync, gets 501 MethodNotImplemented from the in-process service."
         }
       ],
       "reason": "The in-process service test answers each upstream revocation route as an unknown method, under its November name notifyCredentialsRevoked where the October probe sent notifyCredentialRevoked; the October probe needed a receiver that no longer exists."
@@ -1566,11 +1566,11 @@
         {
           "kind": "test",
           "file": "stratos-service/tests/unsupported-upstream-routes.test.ts",
-          "title": "offers no #atproto_pds service in the DID document",
-          "proves": "The service DID document lists at least one service and none whose id ends in #atproto_pds."
+          "title": "offers #atproto_pds at the service origin in the DID document",
+          "proves": "The service DID document lists exactly one service whose id ends in #atproto_pds: #atproto_pds, of type AtprotoPersonalDataServer, at the endpoint of #stratos, which is the configured public URL."
         }
       ],
-      "reason": "The in-process service test reads the DID document and finds no host service; the host role the October probe looked for as #atproto_space_host is #atproto_pds in the November contract, and the October probe needed a receiver that no longer exists."
+      "reason": "The in-process service test reads the DID document and finds the host service #atproto_pds at the Stratos origin, so a member's PDS can deliver notifyRepoUpdate. The host role the October probe looked for as #atproto_space_host is #atproto_pds in the November contract; the October probe needed a revocation receiver, which Stratos still does not serve."
     },
     {
       "suite": "writer-sync-contract",
@@ -1581,7 +1581,7 @@
           "kind": "none"
         }
       ],
-      "reason": "It checked the shape of a write's latest commit read back with getLatestCommit. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
+      "reason": "It checked the shape of a write's latest commit read back with getLatestCommit. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos. It answers listWriters as an unknown method and keeps no writer list: it acknowledges notifyRepoUpdate and stores nothing, and the feed generator reads membership from Stratos, never from a writer list. Nothing Stratos owns keeps that list, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1592,7 +1592,7 @@
           "kind": "none"
         }
       ],
-      "reason": "It checked that a short page of the writer list ended with a cursor equal to its last space revision. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
+      "reason": "It checked that a short page of the writer list ended with a cursor equal to its last space revision. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos. It answers listWriters as an unknown method and keeps no writer list: it acknowledges notifyRepoUpdate and stores nothing, and the feed generator reads membership from Stratos, never from a writer list. Nothing Stratos owns keeps that list, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1603,7 +1603,7 @@
           "kind": "none"
         }
       ],
-      "reason": "It checked that a writer list read from the last cursor was empty and kept that cursor. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
+      "reason": "It checked that a writer list read from the last cursor was empty and kept that cursor. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos. It answers listWriters as an unknown method and keeps no writer list: it acknowledges notifyRepoUpdate and stores nothing, and the feed generator reads membership from Stratos, never from a writer list. Nothing Stratos owns keeps that list, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1614,7 +1614,7 @@
           "kind": "none"
         }
       ],
-      "reason": "It checked that a second write by the same writer moved that writer to a new state in the list. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
+      "reason": "It checked that a second write by the same writer moved that writer to a new state in the list. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos. It answers listWriters as an unknown method and keeps no writer list: it acknowledges notifyRepoUpdate and stores nothing, and the feed generator reads membership from Stratos, never from a writer list. Nothing Stratos owns keeps that list, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1625,7 +1625,7 @@
           "kind": "none"
         }
       ],
-      "reason": "It checked that an equal or older write notice left the writer list unchanged. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
+      "reason": "It checked that an equal or older write notice left the writer list unchanged. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos. It answers listWriters as an unknown method and keeps no writer list: it acknowledges notifyRepoUpdate and stores nothing, and the feed generator reads membership from Stratos, never from a writer list. Nothing Stratos owns keeps that list, so it is superseded, nothing to port to."
     },
     {
       "suite": "writer-sync-contract",
@@ -1633,10 +1633,13 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "test",
+          "file": "stratos-service/tests/notify-repo-update.integration.test.ts",
+          "title": "refuses a notice signed by one account for another",
+          "proves": "A notice whose token is signed by one enrolled member for another member's repo is refused with 403 Forbidden."
         }
       ],
-      "reason": "It checked that a write notice signed by another account was refused with 403. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
+      "reason": "It checked that a write notice signed by another account was refused with 403. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers listWriters as an unknown method and accepts notifyRepoUpdate. The in-process service test refuses a notice whose token iss is not its repo with 403, as the probe expected."
     },
     {
       "suite": "writer-sync-contract",
@@ -1644,10 +1647,13 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "test",
+          "file": "stratos-service/tests/notify-repo-update.integration.test.ts",
+          "title": "refuses a token bound to %s",
+          "proves": "A token addressed to another authority, to another fragment of the Stratos DID, or bound to another method or none is refused with 401 AuthenticationRequired."
         }
       ],
-      "reason": "It checked that a write notice addressed to the writer was refused with 403. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
+      "reason": "It checked that a write notice addressed to the writer was refused with 403. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers listWriters as an unknown method and accepts notifyRepoUpdate. The in-process service test refuses a token with another audience before it reads the body, with 401 AuthenticationRequired as Stratos's other service-auth routes answer, where the probe's PDS answered 403."
     },
     {
       "suite": "writer-sync-contract",
@@ -1655,10 +1661,13 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "test",
+          "file": "stratos-service/tests/notify-repo-update.integration.test.ts",
+          "title": "answers FutureRev a microsecond past five minutes ahead",
+          "proves": "With the clock frozen, a revision one microsecond more than five minutes ahead is refused with 400 FutureRev; the test beside it accepts exactly five minutes ahead."
         }
       ],
-      "reason": "It checked that a write notice with a revision too far ahead was refused with 400 FutureRev. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
+      "reason": "It checked that a write notice with a revision too far ahead was refused with 400 FutureRev. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers listWriters as an unknown method and accepts notifyRepoUpdate. The in-process service test refuses a revision more than five minutes ahead with 400 FutureRev, as the probe expected."
     },
     {
       "suite": "writer-sync-contract",
@@ -1666,10 +1675,13 @@
       "disposition": "superseded",
       "carriedBy": [
         {
-          "kind": "none"
+          "kind": "test",
+          "file": "stratos-service/tests/notify-repo-update.integration.test.ts",
+          "title": "refuses %s with 403",
+          "proves": "A notice for an account that is not enrolled, a member without the space boundary, an inactive member, or a member whose repo Stratos hosts is refused with 403 Forbidden."
         }
       ],
-      "reason": "It checked that a write notice from a writer removed from the member list was refused with 403. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers both as unknown methods, and the feed generator reads membership from Stratos, never from a writer list, so Stratos depends on none of it. Nothing Stratos owns acts as that host, so it is superseded, nothing to port to."
+      "reason": "It checked that a write notice from a writer removed from the member list was refused with 403. The October probe made a PDS account the authority of its own space and tested that PDS as the space host, through com.atproto.space.listRepos and notifyWrite. At the November reference these are renamed com.atproto.space.listWriters and notifyRepoUpdate, and the PDS serves both. For a Stratos space the space host is Stratos, which answers listWriters as an unknown method and accepts notifyRepoUpdate. Membership comes from enrollment, so the in-process service test refuses a notice from an account that is not an active pds-custody member holding the space's boundary with 403, as the probe expected of a removed writer."
     },
     {
       "suite": "writer-sync-contract",
@@ -1680,7 +1692,7 @@
           "kind": "test",
           "file": "stratos-service/tests/unsupported-upstream-routes.test.ts",
           "title": "answers them as unknown whoever asks",
-          "proves": "Each upstream writer-set and revocation route gets 501 when the request carries a bearer authorization header."
+          "proves": "Each upstream route Stratos does not serve, listWriters, notifyCredentialsRevoked and authorizeSpaceSync, gets 501 when the request carries a bearer authorization header."
         },
         {
           "kind": "test",
@@ -1689,7 +1701,7 @@
           "proves": "With a listWriters handler placed before the service router, the unknown-method check fails and names that route."
         }
       ],
-      "reason": "The in-process service test answers the upstream writer routes, under their November names listWriters and notifyRepoUpdate where the October probe sent listRepos and notifyWrite, as unknown methods; the October probe needed a PDS that speaks them."
+      "reason": "The in-process service test answers listWriters, the November name of the listRepos the October probe sent, as an unknown method. Stratos accepts notifyRepoUpdate, the November name of notifyWrite, and stores nothing; the October probe needed a PDS that keeps a writer list, which Stratos does not."
     },
     {
       "suite": "pds-revocation",

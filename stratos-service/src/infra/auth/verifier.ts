@@ -2,6 +2,7 @@ import { InvalidRequestError } from '@atproto/xrpc-server'
 import {
   type DidDocument,
   getDidKeyFromMultibase,
+  getKey,
   IdResolver,
 } from '@atproto/identity'
 import * as crypto from '@atproto/crypto'
@@ -238,6 +239,62 @@ export async function verifyServiceAuth(
   validateServiceClaims(payload, ourDid, expectedLxm)
 
   await verifyJwtSignature(parts, payload.iss, idResolver)
+
+  return {
+    iss: payload.iss,
+    aud: payload.aud,
+    lxm: payload.lxm,
+    exp: payload.exp,
+  }
+}
+
+/** The audiences and method a method-bound service token must name. */
+export interface MethodBinding {
+  audiences: readonly string[]
+  lxm: string
+}
+
+/**
+ * Verify a service-auth JWT bound to one method, as an account's host sends
+ * it on the account's behalf.
+ *
+ * Narrower than {@link verifyServiceAuth}: `lxm` must be present and equal
+ * the bound method, `aud` must be one of the bound audiences, and only the
+ * issuer's `#atproto` signing key verifies the signature.
+ *
+ * @throws InvalidRequestError if any claim or the signature does not verify
+ */
+export async function verifyMethodBoundServiceAuth(
+  authHeader: string,
+  binding: MethodBinding,
+  idResolver: IdResolver,
+): Promise<ServiceAuthResult> {
+  const { parts, payload } = parseAuthToken(authHeader)
+
+  if (!payload.iss) {
+    throw new InvalidRequestError('Missing iss claim')
+  }
+  if (!binding.audiences.includes(payload.aud)) {
+    throw new InvalidRequestError('Invalid aud claim')
+  }
+  if (!payload.exp || Date.now() / 1000 > payload.exp) {
+    throw new InvalidRequestError('Token expired')
+  }
+  if (payload.lxm !== binding.lxm) {
+    throw new InvalidRequestError('Invalid lxm claim')
+  }
+
+  const didDoc = await resolveIssuerDid(payload.iss, idResolver)
+  const signingKey = getKey(didDoc)
+  const { signingInputBytes, signatureBytes } = prepareVerificationData(parts)
+  const verified =
+    signingKey !== undefined &&
+    (await crypto
+      .verifySignature(signingKey, signingInputBytes, signatureBytes)
+      .catch(() => false))
+  if (!verified) {
+    throw new InvalidRequestError('Invalid signature')
+  }
 
   return {
     iss: payload.iss,

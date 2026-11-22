@@ -331,7 +331,7 @@ The caller's identity reaches the mint in one of two ways.
   usable once. Its `aud` is the authority DID with the fragment
   `#atproto_pds`, for example `did:web:stratos.example.com#atproto_pds`. A
   client attestation names the same audience. The Stratos DID document offers
-  no such service entry. The caller sends it as `Authorization: Bearer` (or, on the
+  that service at the Stratos origin. The caller sends it as `Authorization: Bearer` (or, on the
   older internal transport, in the request body; never both) together with a
   DPoP proof or an HTTP signature made by the key the credential will bind
   to.
@@ -397,15 +397,16 @@ the public firehose. Treat them as public metadata when you choose them.
 
 Reads reach the data over these paths. All of them are boundary-gated.
 
-| Path                                              | Consumer           | Auth                                                 |
-| ------------------------------------------------- | ------------------ | ---------------------------------------------------- |
-| Record CRUD (`com.atproto.repo.*`)                | The owning user    | OAuth and DPoP; Stratos custody only                 |
-| Hydration (`zone.stratos.repo.hydrateRecord(s)`)  | Clients            | OAuth session, space credential, or anonymous        |
-| Space read (`space.getRecord`, `space.listBlobs`) | Clients, services  | OAuth session or space credential                    |
-| Membership (`space.listRepos`)                    | Services           | Service JWT or space credential                      |
-| Pull sync (`sync.listRepoOps`, `listRecordPaths`) | Feedgens, services | Service JWT or space credential                      |
-| Stream (`sync.subscribeRecords`)                  | Feedgens           | Service JWT                                          |
-| A member's PDS (`com.atproto.space.*`)            | Feedgens, clients  | Space credential minted by Stratos; PDS custody only |
+| Path                                                      | Consumer           | Auth                                                                |
+| --------------------------------------------------------- | ------------------ | ------------------------------------------------------------------- |
+| Record CRUD (`com.atproto.repo.*`)                        | The owning user    | OAuth and DPoP; Stratos custody only                                |
+| Hydration (`zone.stratos.repo.hydrateRecord(s)`)          | Clients            | OAuth session, space credential, or anonymous                       |
+| Space read (`space.getRecord`, `space.listBlobs`)         | Clients, services  | OAuth session or space credential                                   |
+| Membership (`space.listRepos`)                            | Services           | Service JWT or space credential                                     |
+| Pull sync (`sync.listRepoOps`, `listRecordPaths`)         | Feedgens, services | Service JWT or space credential                                     |
+| Stream (`sync.subscribeRecords`)                          | Feedgens           | Service JWT                                                         |
+| A member's PDS (`com.atproto.space.*`)                    | Feedgens, clients  | Space credential minted by Stratos; PDS custody only                |
+| Repo update notice (`com.atproto.space.notifyRepoUpdate`) | A member's PDS     | Service JWT signed by the member's `#atproto` key; PDS custody only |
 
 An anonymous hydration request gets only what an anonymous viewer may see,
 which for a boundary-gated record is nothing.
@@ -449,7 +450,7 @@ Some caveats, stated plainly:
 | Caveat                                         | What it means                                                                                                                                                                                                                                                                                                                    |
 | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | The proposal is not final                      | Stratos pins the upstream revisions it tests against in [Spaces alignment](./spaces-alignment.md). The credential, delegation and URI shapes follow upstream. The methods do not, so an upstream change to a method does not break a deployed client.                                                                            |
-| Stratos is not a complete upstream authority   | It does not advertise a `#atproto_pds` service entry and does not claim upstream authority discovery. A generic spaces client cannot walk up to a Stratos service and read.                                                                                                                                                      |
+| Stratos is not a complete upstream authority   | Its DID document offers `#atproto_pds` so a member's PDS can deliver `com.atproto.space.notifyRepoUpdate`, which Stratos acknowledges and does not store. Every other upstream space-host method answers 501, so a generic spaces client cannot walk up to a Stratos service and read.                                           |
 | `listRepos` answers a different question       | The Stratos method lists the active members of a boundary. Upstream has no such method at the pinned reference. Never use a writer list from a host to revoke a member.                                                                                                                                                          |
 | Pull sync diverges on recovery                 | Stratos reports a cursor it can no longer serve as `OplogTruncated`, and recovery goes through `listRecordPaths`.                                                                                                                                                                                                                |
 | Commit verification depends on custody         | A Stratos-custody commit verifies against the per-actor key in the enrollment record. The feed generator does not check the signature of a PDS-custody commit. It authenticates each response with a MAC and promotes state only when the set hash equals the commit's `data`. See [Feed generator design](./feed-generator.md). |

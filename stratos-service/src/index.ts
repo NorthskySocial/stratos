@@ -377,12 +377,17 @@ export class StratosServer {
         ],
         id: serviceDid,
         verificationMethod,
-        // Tokens name this authority as `#atproto_pds`, but that entry would
-        // advertise upstream authority APIs this service does not implement.
         service: [
           {
             id: '#stratos',
             type: 'StratosService',
+            serviceEndpoint,
+          },
+          // A member's PDS reads this entry of the space DID's document to
+          // find where to send `com.atproto.space.notifyRepoUpdate`.
+          {
+            id: '#atproto_pds',
+            type: 'AtprotoPersonalDataServer',
             serviceEndpoint,
           },
         ],

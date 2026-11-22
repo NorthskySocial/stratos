@@ -3,8 +3,8 @@
  *
  * Both token types must name `<authority did>#atproto_pds`. The retired
  * `#atproto_space_host`, any other fragment, a bare DID and another
- * authority's DID are refused, and the DID document offers no `#atproto_pds`
- * service entry. Tokens made by the upstream package (stored in the shared
+ * authority's DID are refused, and the DID document offers a `#atproto_pds`
+ * service entry at the service origin. Tokens made by the upstream package (stored in the shared
  * fixture) are judged by the real verifiers with the clock frozen to the
  * value the fixture records.
  */
@@ -430,7 +430,7 @@ describe('the service DID document', () => {
     await new Promise((done) => listener.close(done))
   })
 
-  it('offers #stratos and the #atproto key, and no #atproto_pds service', async () => {
+  it('offers #stratos, #atproto_pds at the same origin, and the #atproto key', async () => {
     const app = express()
     const signing = await P256Keypair.create()
     const ctx = { serviceDid: SERVICE_DID, signingDidKey: signing.did() }
@@ -448,12 +448,20 @@ describe('the service DID document', () => {
     )
     const document = (await response.json()) as {
       verificationMethod: Array<{ id: string }>
-      service: Array<{ id: string }>
+      service: Array<{ id: string; type: string; serviceEndpoint: string }>
     }
-    expect(document.service.map((entry) => entry.id)).toEqual(['#stratos'])
-    expect(
-      document.service.some((entry) => entry.id.endsWith('#atproto_pds')),
-    ).toBe(false)
+    expect(document.service).toEqual([
+      {
+        id: '#stratos',
+        type: 'StratosService',
+        serviceEndpoint: 'https://stratos.test',
+      },
+      {
+        id: '#atproto_pds',
+        type: 'AtprotoPersonalDataServer',
+        serviceEndpoint: 'https://stratos.test',
+      },
+    ])
     expect(document.verificationMethod.map((method) => method.id)).toContain(
       `${SERVICE_DID}#atproto`,
     )

@@ -43,8 +43,9 @@ export const ATPROTO_KID = '#atproto'
 /**
  * Service fragment naming the authority's host as the audience of delegations
  * and client attestations. The authority's PDS plays this role in the upstream
- * spaces contract, so the fragment is `#atproto_pds`; the service DID document
- * deliberately offers no such service entry.
+ * spaces contract, so the fragment is `#atproto_pds`. The service DID document
+ * offers that entry so a member's PDS can find where to send its repo update
+ * notices.
  */
 export const SPACE_HOST_FRAGMENT = '#atproto_pds'
 /** Replay-store namespace for delegation nonces. */

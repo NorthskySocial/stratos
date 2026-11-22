@@ -65,6 +65,18 @@ what did run.
    older than the November release refuses a declaration without `name`.
 10. Clubhouse reads room spaces in the new spelling. A room with a value in
     another form shows an error to members whose records are on their own PDS.
+11. The service DID document offers a `#atproto_pds` service at the Stratos
+    origin, and the service accepts `com.atproto.space.notifyRepoUpdate`. A
+    member's PDS reads that entry to find where to send the notice after a
+    write. Stratos checks the notice and answers 200; it stores nothing, and
+    the feed generator still polls each member's PDS on its own schedule. The
+    other upstream space-host routes, such as `listWriters`,
+    `notifyCredentialsRevoked` and `authorizeSpaceSync`, still answer 501
+    `MethodNotImplemented`, so an upstream client that takes Stratos for a
+    complete space host gets 501 from them. Stratos serves the document only
+    for a `did:web` service DID. If your service DID is any other kind, add a
+    `#atproto_pds` entry of type `AtprotoPersonalDataServer`, with the Stratos
+    origin as its endpoint, to that DID's document yourself.
 
 ## Order
 
@@ -473,15 +485,16 @@ who completes enrollment. That needs a spaces PDS.
 
 These checks need no spaces PDS.
 
-| Check                                                   | Command or place                                                                                                                        | Mark  |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| The service answers                                     | `curl -s -o /dev/null -w '%{http_code}\n' "<stratos origin>/health"` answers `200`                                                      | READY |
-| The service DID document offers no `#atproto_pds` entry | `curl -s "<stratos origin>/.well-known/did.json" \| jq '.service[].id'` answers `"#stratos"`                                            | READY |
-| The feed generator is open                              | `curl -s -o /dev/null -w '%{http_code}\n' "<feed generator origin>/health"` answers `200`                                               | READY |
-| The new pass output is in use                           | `curl -s "<feed generator origin>/health" \| jq '.pdsSpaceSyncLastPass'` shows `unchanged`, `replaced` and `cleared`, and no `rejected` | READY |
-| A Stratos-custody post reaches the feed                 | An authenticated `getFeed` request as an enrolled test viewer. See [Run the feed generator](/operator/feedgen-ng)                       | READY |
-| The migrations pass their tests                         | `cargo test --locked -p stratos-feedgen-ng --lib store::migrations`, from a checkout of the deployed commit                             | READY |
-| The spaces contract tests pass                          | `pnpm exec vitest run --config test/spaces-alignment/vitest.config.ts`, from a checkout of the deployed commit                          | READY |
+| Check                                          | Command or place                                                                                                                        | Mark  |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| The service answers                            | `curl -s -o /dev/null -w '%{http_code}\n' "<stratos origin>/health"` answers `200`                                                      | READY |
+| The service DID document offers `#atproto_pds` | `curl -s "<stratos origin>/.well-known/did.json" \| jq '.service[].id'` answers `"#stratos"` and `"#atproto_pds"`                       | READY |
+| The service accepts repo update notices        | `curl -s -o /dev/null -w '%{http_code}\n' -X POST "<stratos origin>/xrpc/com.atproto.space.notifyRepoUpdate"` answers `401`, not `501`  | READY |
+| The feed generator is open                     | `curl -s -o /dev/null -w '%{http_code}\n' "<feed generator origin>/health"` answers `200`                                               | READY |
+| The new pass output is in use                  | `curl -s "<feed generator origin>/health" \| jq '.pdsSpaceSyncLastPass'` shows `unchanged`, `replaced` and `cleared`, and no `rejected` | READY |
+| A Stratos-custody post reaches the feed        | An authenticated `getFeed` request as an enrolled test viewer. See [Run the feed generator](/operator/feedgen-ng)                       | READY |
+| The migrations pass their tests                | `cargo test --locked -p stratos-feedgen-ng --lib store::migrations`, from a checkout of the deployed commit                             | READY |
+| The spaces contract tests pass                 | `pnpm exec vitest run --config test/spaces-alignment/vitest.config.ts`, from a checkout of the deployed commit                          | READY |
 
 `pdsSpaceSyncLastPass` is absent before the first pass. A new pass starts 30
 seconds after the last one ends.
@@ -698,6 +711,13 @@ cost of the loss below. Mark: **READY**, except step 6.
 7. Start the service, then the feed generator. You know it worked when both
    `/health` routes answer `200`. The feed generator's answers `200` only once
    it is ready.
+8. If you added a `#atproto_pds` entry to the service DID document yourself,
+   remove it. The pre-upgrade service answers
+   `com.atproto.space.notifyRepoUpdate` with 501, so a member's PDS that finds
+   the entry has its notices refused. You know it worked when the `jq` command
+   in [step 13](#after-the-upgrade) answers only `"#stratos"`. A `did:web`
+   document that Stratos serves needs nothing: the older build serves it
+   without the entry.
 
 **What is lost.**
 
