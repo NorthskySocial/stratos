@@ -1901,6 +1901,10 @@ export const stratosLexicons: LexiconDoc[] = [
         {
           "name": "SubjectNotFound",
           "description": "The subject record or account does not exist on this service."
+        },
+        {
+          "name": "SubjectCidNotSupported",
+          "description": "The record subject carries a cid. A takedown applies to every version of a record, so send the subject without one."
         }
       ]
     }
@@ -1959,7 +1963,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "cid": {
           "type": "string",
           "format": "cid",
-          "description": "Optional CID pinning a specific version of the record."
+          "description": "Not accepted yet. A takedown applies to every version of a record, so createLabel refuses a subject with a cid as SubjectCidNotSupported. A label returned by queryLabels can still carry one."
         }
       }
     },

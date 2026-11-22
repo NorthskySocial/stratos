@@ -958,6 +958,10 @@ be `!takedown`. Set `neg: true` to lift a takedown.
   `SubjectNotFound` means the DID has no enrollment. Stratos rejects a service
   enrollment as an account subject. This works for both custody classes.
 
+Send a record subject without a `cid`. A takedown applies to every version of a
+record. Stratos refuses a record subject with a `cid` as
+`SubjectCidNotSupported`, and it stores nothing.
+
 Stratos rejects a space-form subject when:
 
 - its authority is another service;
@@ -969,6 +973,9 @@ A negation of a takedown in force skips the membership check. It does not skip t
 
 The response `label` is absent when the request changed nothing and the subject
 has no label. A repeat of the label in force returns that label.
+
+Stratos does not write the subject, a CID or the `ref` to its logs. Its log
+names each label by `seq`, so keep your own record of what each case covers.
 
 To read labels back, see `queryLabels` below.
 
@@ -1030,6 +1037,10 @@ record label with no boundaries is visible only to moderation services.
 
 An account label comes back with an `accountSubject` that carries the member's
 DID.
+
+A record label can carry a `cid` in its subject if Stratos stored it before it
+refused subject CIDs. Apply such a label to every version of the record, as
+Stratos does.
 
 A service that holds a service enrollment reads an account label if it shares a
 boundary with the member's enrollment. The enrollment can be active or not. It

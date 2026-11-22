@@ -738,6 +738,8 @@ export interface AccountLabelHarness {
   moderatorDid: string
   /** The DID of the key that signs service-auth as an enrolled service. */
   serviceDid: string
+  /** Sends a raw createLabel body as the moderation service. */
+  createLabel: (body: Record<string, unknown>) => Promise<AxiosResponse>
   takedown: (did: string, extra?: { ref?: string }) => Promise<AxiosResponse>
   negate: (did: string, extra?: { ref?: string }) => Promise<AxiosResponse>
   queryAsModerator: () => Promise<AxiosResponse>
@@ -840,6 +842,7 @@ export async function buildAccountLabelHarness(
     signals,
     moderatorDid: moderator.did(),
     serviceDid: service.did(),
+    createLabel,
     takedown: (did, extra) => accountLabel(did, false, extra?.ref),
     negate: (did, extra) => accountLabel(did, true, extra?.ref),
     queryAsModerator: () => query(moderator),

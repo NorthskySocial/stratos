@@ -116,6 +116,18 @@ responds on the Stratos origin with a JSON error:
 A successful enrollment redirects back to your app with
 `?stratos_enrolled=true`.
 
+## Moderation labels
+
+`zone.stratos.moderation.createLabel` returns these errors to a moderation
+service:
+
+| Error                    | Status | Meaning                                                                                                   |
+| ------------------------ | ------ | --------------------------------------------------------------------------------------------------------- |
+| `SubjectNotFound`        | 400    | The subject record or account does not exist on this service                                              |
+| `SubjectCidNotSupported` | 400    | The record subject carries a `cid`. A takedown applies to every version of a record. Send it without one. |
+
+A malformed subject, value or space returns `InvalidRequest`.
+
 ## Sync
 
 | Error            | Status | Meaning                                                                                   |

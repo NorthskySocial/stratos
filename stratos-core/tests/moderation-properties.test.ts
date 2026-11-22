@@ -110,6 +110,31 @@ describe('moderation subject properties', () => {
     )
   })
 
+  it('refuses every valid record subject that carries a cid, without echoing it', () => {
+    const cidArb = fc
+      .array(fc.constantFrom(...BASE32), { minLength: 20, maxLength: 59 })
+      .map((chars) => `bafy${chars.join('')}`)
+    fc.assert(
+      fc.property(
+        didArb,
+        nsidArb,
+        rkeyArb,
+        cidArb,
+        (did, collection, rkey, cid) => {
+          const result = parseLabelSubject({
+            $type: RECORD_SUBJECT_TYPE,
+            uri: `at://${did}/${collection}/${rkey}`,
+            cid,
+          })
+          expect(result.ok).toBe(false)
+          if (result.ok) return
+          expect(result.error.code).toBe('unsupported-cid')
+          expect(result.error.message).not.toContain(cid)
+        },
+      ),
+    )
+  })
+
   it('rejects every URI whose component count is outside the grammar', () => {
     const componentArb = fc.oneof(
       fc.constant('x'),
