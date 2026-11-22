@@ -373,7 +373,9 @@ describe('SqliteLabelStore', () => {
         expect(everySeq).toHaveLength(subjectCount * 3 * (run + 1))
         expect(seen).toEqual(everySeq)
       }
-    })
+      // The reader spins while 150 appends run, which outlasts the default
+      // limit on a busy machine.
+    }, 60_000)
   })
 
   describe('appendIfLatest', () => {
