@@ -947,6 +947,68 @@ describe('zone.stratos.moderation.createLabel', () => {
     })
   })
 
+  describe('reconcile cap with a changing label direction', () => {
+    /**
+     * After the next append, every read of the latest label reports a newer
+     * label whose direction comes from `negatedOnRead` (1 is the first read).
+     */
+    function driftAfterNextAppend(negatedOnRead: (read: number) => boolean) {
+      const real: LabelStore = labelStore
+      let appended = false
+      let reads = 0
+      ctx.labelStore = {
+        latestForSubject: async (key) => {
+          const latest = await real.latestForSubject(key)
+          if (!appended || !latest) return latest
+          reads++
+          return {
+            ...latest,
+            seq: latest.seq + reads,
+            neg: negatedOnRead(reads),
+          }
+        },
+        listFrom: (opts) => real.listFrom(opts),
+        headSeq: () => real.headSeq(),
+        latestTakedowns: (keys) => real.latestTakedowns(keys),
+        appendIfLatest: async (expected, label) => {
+          const result = await real.appendIfLatest(expected, label)
+          appended = true
+          return result
+        },
+      } satisfies LabelStore
+    }
+
+    it.each([
+      { first: 'a negation', negatedOnRead: (read: number) => read % 2 === 1 },
+      { first: 'a takedown', negatedOnRead: (read: number) => read % 2 === 0 },
+    ])(
+      'ends hidden when the direction flips on every round, starting with $first',
+      async ({ negatedOnRead }) => {
+        await seedRecord('flip', { stored: [ENGINEERING] })
+        driftAfterNextAppend(negatedOnRead)
+
+        const res = await takedown('flip', { ref: 'case-0102' })
+
+        expect(res.status).toBe(200)
+        expect((await marker('flip'))?.applied).toBe(true)
+        expect(logger.warn).toHaveBeenCalledTimes(1)
+      },
+    )
+
+    it('ends clear when every round sees a newer negation', async () => {
+      await seedRecord('lifted', { stored: [ENGINEERING] })
+      expect((await takedown('lifted', { ref: 'case-0103' })).status).toBe(200)
+      driftAfterNextAppend(() => true)
+
+      const res = await takedown('lifted', { neg: true })
+
+      expect(res.status).toBe(200)
+      expect(res.data.label.neg).toBe(true)
+      expect(await marker('lifted')).toEqual({ applied: false })
+      expect(logger.warn).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe('space-form record subjects', () => {
     const SPACE_TYPE = 'zone.stratos.space.feed'
     const ASUKA_DID = 'did:plc:asuka'

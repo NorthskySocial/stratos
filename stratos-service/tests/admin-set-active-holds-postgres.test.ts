@@ -15,6 +15,7 @@ import {
 import { PgEnrollmentStoreWriter } from '../src/infra/storage/postgres/index.js'
 import { ReservedDomainEnrollmentStore } from '../src/infra/storage/reserved-domain-enrollment-store.js'
 import { PgLabelStore } from '../src/features/moderation/index.js'
+import { PgPdsSyncQueueStore } from '../src/features/enrollment/index.js'
 import {
   startPostgresContainer,
   stopPostgresContainer,
@@ -43,6 +44,7 @@ describe('admin setActive and callback holds on Postgres', () => {
         RESERVED_BOUNDARY,
       ),
       labelStore: new PgLabelStore(db),
+      pdsSyncQueue: new PgPdsSyncQueueStore(db),
     }
   }, 120_000)
 

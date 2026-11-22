@@ -45,6 +45,7 @@
     "src/api/handlers/repo-boundary-write-handlers.ts",
     "src/api/records/**/*.ts",
     "src/features/space-read/**/*.ts",
+    "src/features/moderation/**/*.ts",
     "!src/**/index.ts",
     "!src/**/*.d.ts"
   ],

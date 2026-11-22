@@ -131,6 +131,49 @@ describe('reconcileServiceEnrollments', () => {
     expect(stored?.enrolledAt).toBe('2024-01-01T00:00:00.000Z')
   })
 
+  it('keeps an operator-held service inactive and its hold in place', async () => {
+    await store.enroll({
+      did: 'did:web:vash.appview',
+      enrolledAt: '2024-01-01T00:00:00.000Z',
+      boundaries: ['did:web:host/eng'],
+      signingKeyDid: SIGNING_KEY_DID,
+      active: false,
+      operatorHold: true,
+      isService: true,
+    })
+
+    await reconcileServiceEnrollments(
+      [{ did: 'did:web:vash.appview', boundaries: ['did:web:host/eng'] }],
+      { store, signingKeyDid: SIGNING_KEY_DID },
+    )
+
+    const stored = await store.getEnrollment('did:web:vash.appview')
+    expect(stored?.active).toBe(false)
+    expect(stored?.operatorHold).toBe(true)
+    expect(stored?.isService).toBe(true)
+  })
+
+  it('reactivates a service whose operator hold was cleared', async () => {
+    await store.enroll({
+      did: 'did:web:vash.appview',
+      enrolledAt: '2024-01-01T00:00:00.000Z',
+      boundaries: ['did:web:host/eng'],
+      signingKeyDid: SIGNING_KEY_DID,
+      active: false,
+      operatorHold: false,
+      isService: true,
+    })
+
+    await reconcileServiceEnrollments(
+      [{ did: 'did:web:vash.appview', boundaries: ['did:web:host/eng'] }],
+      { store, signingKeyDid: SIGNING_KEY_DID },
+    )
+
+    expect((await store.getEnrollment('did:web:vash.appview'))?.active).toBe(
+      true,
+    )
+  })
+
   it('replaces boundaries with exactly those declared in config', async () => {
     await store.enroll({
       did: 'did:web:knives.appview',
