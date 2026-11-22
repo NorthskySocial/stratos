@@ -468,6 +468,7 @@ export interface CallbackHarness {
     putEnrollmentRecord: ReturnType<typeof vi.fn>
     deleteEnrollmentRecord: ReturnType<typeof vi.fn>
   }
+  pdsSyncWorker: PdsEnrollmentSyncWorker
   initRepo: ReturnType<typeof vi.fn>
   createSigningKey: ReturnType<typeof vi.fn>
   complete: (did: string) => Promise<MockHttpResponse>
@@ -509,6 +510,7 @@ export function buildCallbackHarness(
   }
   const initRepo = vi.fn().mockResolvedValue(undefined)
   const createSigningKey = vi.fn().mockResolvedValue('did:key:zDnaeNewKey')
+  const pdsSyncWorker = buildPdsSyncWorker(backend, oauthClient)
   const config = {
     oauthClient,
     enrollmentStore: backend.enrollmentStore,
@@ -535,13 +537,14 @@ export function buildCallbackHarness(
       signingKey: 'did:key:zDnaeNewKey',
     }),
     repoWriteLocks,
-    pdsSyncWorker: buildPdsSyncWorker(backend, oauthClient),
+    pdsSyncWorker,
   }
 
   return {
     pds,
     oauthClient,
     profileRecordWriter,
+    pdsSyncWorker,
     initRepo,
     createSigningKey,
     complete: async (did) => {
@@ -1424,6 +1427,28 @@ export function defineInFlightUnenrollScenarios(
     expect(await rowOf(backend, ED_DID)).toBeNull()
     expect(harness.pds.enrollmentRecord(ED_DID)).toBeUndefined()
     expect(harness.oauthClient.revoke).toHaveBeenCalledWith(ED_DID)
+  })
+
+  it('a sync queued before a successful revoke cannot put the record back on the PDS', async () => {
+    const backend = getBackend()
+    const callback = buildCallbackHarness(backend)
+    await seedMember(backend, { did: ED_DID })
+    await publishEnrollmentRecord(backend, callback.pds, ED_DID)
+    const generation = await callback.pdsSyncWorker.enqueue(ED_DID)
+    const atPds = pauseNextCall(callback.oauthClient.restore)
+    const syncing = callback.pdsSyncWorker.kick(ED_DID, generation)
+    await atPds.reached
+
+    const revoking = callback.revokeAs(ED_DID)
+    await settleBriefly()
+    atPds.resume()
+    const [res] = await Promise.all([revoking, syncing])
+
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ did: ED_DID, revoked: true }),
+    )
+    expect(await rowOf(backend, ED_DID)).toBeNull()
+    expect(callback.pds.enrollmentRecord(ED_DID)).toBeUndefined()
   })
 
   it('a revoke of an active member still deletes the row', async () => {
