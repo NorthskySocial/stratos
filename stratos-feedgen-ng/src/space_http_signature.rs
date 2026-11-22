@@ -1,6 +1,6 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use p256::ecdsa::{Signature, SigningKey, signature::Signer};
-use p256::elliptic_curve::rand_core::OsRng;
+use p256::elliptic_curve::Generate;
 
 use crate::identifier::Did;
 
@@ -38,11 +38,11 @@ impl std::error::Error for SpaceHttpSignatureError {}
 
 impl SpaceHttpSignatureKey {
     pub fn generate() -> Self {
-        Self::from_signing_key(SigningKey::random(&mut OsRng))
+        Self::from_signing_key(SigningKey::generate())
     }
 
     fn from_signing_key(signing_key: SigningKey) -> Self {
-        let point = signing_key.verifying_key().to_encoded_point(true);
+        let point = signing_key.verifying_key().to_sec1_point(true);
         let mut multikey = vec![0x80, 0x24];
         multikey.extend_from_slice(point.as_bytes());
         Self {
@@ -91,7 +91,7 @@ impl SpaceHttpSignatureKey {
     ) -> SpaceHttpSignatureHeaders {
         let base = signature_base(&authorization, audience.as_ref(), &parameters);
         let signed: Signature = self.signing_key.sign(base.as_bytes());
-        let signature = signed.normalize_s().unwrap_or(signed);
+        let signature = signed.normalize_s();
         SpaceHttpSignatureHeaders {
             authorization,
             audience,
@@ -218,7 +218,7 @@ mod tests {
             .verifying_key()
             .verify(base.as_bytes(), &signature)
             .unwrap();
-        let low = signature.normalize_s().unwrap_or(signature);
+        let low = signature.normalize_s();
         let high = Signature::from_scalars(low.r().to_bytes(), (-low.s()).to_bytes()).unwrap();
         let verifier = DidVerificationKey::parse(key.key_id()).unwrap();
         for signature in [low, high] {
@@ -233,7 +233,7 @@ mod tests {
         }
         let generated =
             Signature::from_slice(&signature_bytes(headers.signature(), "atproto-space")).unwrap();
-        assert_eq!(generated.normalize_s().unwrap_or(generated), low);
+        assert_eq!(generated.normalize_s(), low);
         for altered in [
             format!("{base}\n"),
             base.replace("authorization", "Authorization"),
@@ -341,7 +341,7 @@ mod tests {
     const SEEDED_KEYS: u8 = 96;
 
     fn is_low_s(signature: &Signature) -> bool {
-        signature.normalize_s().is_none()
+        signature.normalize_s() == *signature
     }
 
     #[test]
@@ -350,7 +350,7 @@ mod tests {
         let headers = key.exchange_headers("rei-delegation").unwrap();
         let signed =
             Signature::from_slice(&signature_bytes(headers.signature(), "atproto-space")).unwrap();
-        let low = signed.normalize_s().unwrap_or(signed);
+        let low = signed.normalize_s();
         let high = Signature::from_scalars(low.r().to_bytes(), (-low.s()).to_bytes()).unwrap();
         assert!(is_low_s(&low));
         assert!(!is_low_s(&high));

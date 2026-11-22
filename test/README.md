@@ -9,11 +9,14 @@ and boundary-based access control against a real PDS and a Dockerized Stratos in
 - Docker Compose
 - Playwright Chromium (for OAuth browser automation)
 
-Install Playwright's Chromium browser (one-time):
+Install Playwright's Chromium browser:
 
 ```bash
 npx playwright install chromium
 ```
+
+Run it again whenever the `playwright` version in the scripts changes. Each
+Playwright release needs its own browser build.
 
 ## Test Users
 
@@ -189,7 +192,7 @@ deno run -A scripts/run-all.ts --postgres
 
 This mode:
 
-1. Starts a `postgres:18-alpine` container alongside Stratos via `docker-compose.postgres.yml`
+1. Starts a `postgres:19-alpine` container alongside Stratos via `docker-compose.postgres.yml`
    overlay
 2. Configures the Stratos container with `STORAGE_BACKEND=postgres` and `STRATOS_POSTGRES_URL`
 

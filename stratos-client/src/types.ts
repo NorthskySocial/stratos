@@ -35,9 +35,7 @@ export interface ServiceAttestation {
  * - 'cid-integrity': Cid integrity and MST path validation only (no signature check)
  */
 export type VerificationLevel =
-  | 'user-signature'
-  | 'service-signature'
-  | 'cid-integrity'
+  'user-signature' | 'service-signature' | 'cid-integrity'
 
 /**
  * result of record verification via inclusion proof.

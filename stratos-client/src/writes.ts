@@ -13,8 +13,7 @@ export type UnresolvedReason = Extract<
 export type BoundaryWriteRefusal = UnresolvedReason | 'invalid-boundary'
 
 export type BoundaryWriteResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; reason: BoundaryWriteRefusal }
+  { ok: true; value: T } | { ok: false; reason: BoundaryWriteRefusal }
 
 /** What a write helper needs: an authenticated handler and where to send. */
 export interface BoundaryWriteClient {

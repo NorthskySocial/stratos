@@ -54,8 +54,7 @@ interface BoundaryApplyWritesInput {
 }
 
 type ApplyWritesResult =
-  | ({ $type: string } & RecordWriteOutput)
-  | { $type: string }
+  ({ $type: string } & RecordWriteOutput) | { $type: string }
 
 export const createBoundaryRecordHandler = (ctx: AppContext) =>
   createXrpcHandler<BoundaryRecordInput>(
@@ -159,9 +158,8 @@ export const applyBoundaryWritesHandler = (ctx: AppContext) =>
           'records applied',
         )
         return {
-          results: results.map(
-            (result, index): ApplyWritesResult =>
-              toTypedResult(writes[index], result),
+          results: results.map((result, index): ApplyWritesResult =>
+            toTypedResult(writes[index], result),
           ),
         }
       },

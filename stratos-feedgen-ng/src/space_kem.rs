@@ -7,8 +7,8 @@
 use std::fmt;
 
 use hkdf::Hkdf;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
-use p256::{PublicKey, SecretKey, ecdh::diffie_hellman, elliptic_curve::rand_core::OsRng};
+use p256::elliptic_curve::{Generate, sec1::ToSec1Point};
+use p256::{PublicKey, SecretKey, ecdh::diffie_hellman};
 use sha2::Sha256;
 use zeroize::Zeroizing;
 
@@ -86,7 +86,7 @@ impl AuthorKemKey {
     /// The compressed `did:key` form, which is also the key share on the wire.
     pub fn did_key(&self) -> String {
         let mut multikey = P256_MULTICODEC_PREFIX.to_vec();
-        multikey.extend_from_slice(self.public_key.to_encoded_point(true).as_bytes());
+        multikey.extend_from_slice(self.public_key.to_sec1_point(true).as_bytes());
         format!(
             "{DID_KEY_PREFIX}{MULTIBASE_BASE58_PREFIX}{}",
             bs58::encode(multikey).into_string()
@@ -130,7 +130,7 @@ impl fmt::Debug for RequestSecret {
 
 /// Makes a fresh ephemeral key and derives the secret shared with the author.
 pub fn encapsulate(author: &AuthorKemKey) -> Result<RequestSecret, SpaceKemError> {
-    encapsulate_with(author, &SecretKey::random(&mut OsRng))
+    encapsulate_with(author, &SecretKey::generate())
 }
 
 #[cfg(test)]
@@ -191,7 +191,7 @@ fn request_secret(key_share: String, exported: &[u8]) -> RequestSecret {
 }
 
 fn uncompressed(key: &PublicKey) -> Vec<u8> {
-    key.to_encoded_point(false).as_bytes().to_vec()
+    key.to_sec1_point(false).as_bytes().to_vec()
 }
 
 fn kem_suite_id() -> Vec<u8> {
@@ -308,7 +308,7 @@ mod tests {
         Engine,
         engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD},
     };
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use serde_json::Value;
     use sha2::Sha256;
 
@@ -540,7 +540,7 @@ mod tests {
         let private = secret_key(text(&export["authorKemPrivateKey"], "value"));
         let point = private.public_key();
 
-        let compressed = AuthorKemKey::from_sec1_bytes(point.to_encoded_point(true).as_bytes())
+        let compressed = AuthorKemKey::from_sec1_bytes(point.to_sec1_point(true).as_bytes())
             .expect("compressed");
         let full = AuthorKemKey::from_sec1_bytes(&uncompressed(&point)).expect("uncompressed");
 

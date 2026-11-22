@@ -17,7 +17,7 @@
 
 import { Secp256k1Keypair } from 'npm:@atproto/crypto'
 import { createServiceJwt } from 'npm:@atproto/xrpc-server'
-import { chromium } from 'npm:playwright@1.58.2'
+import { chromium } from 'npm:playwright@1.65.1'
 import {
   DOMAINS,
   SERVICE_DID,

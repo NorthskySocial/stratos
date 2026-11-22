@@ -150,8 +150,7 @@ function assertStratosPostValidation(
   input: RecordRuleInput,
 ): void {
   const rawBoundary = input.boundaryClaim as
-    | { $type?: string; values?: Array<{ value: string }> }
-    | undefined
+    { $type?: string; values?: Array<{ value: string }> } | undefined
   const boundary = rawBoundary
     ? {
         $type: DOMAINS_TYPE,

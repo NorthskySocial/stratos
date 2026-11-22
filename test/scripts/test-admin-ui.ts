@@ -8,7 +8,7 @@
 //   4. a boundary toggled via the UI (add + remove) is reflected on screen
 //   5. logout returns to the Login screen and the session stays dead on reload
 
-import { type Browser, chromium, type Page } from 'npm:playwright@1.58.2'
+import { type Browser, chromium, type Page } from 'npm:playwright@1.65.1'
 import {
   ADMIN_OPERATOR_KEY,
   ADMIN_TARGET_KEY,

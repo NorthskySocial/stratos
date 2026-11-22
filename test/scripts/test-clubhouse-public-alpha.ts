@@ -8,7 +8,7 @@
  * member, writes a selected-room enrollment plus a disposable topic/reply.
  * Set CLUBHOUSE_PUBLIC_E2E_MUTATE=true to authorize those writes.
  */
-import { chromium, type Locator, type Page } from 'npm:playwright@1.58.2'
+import { chromium, type Locator, type Page } from 'npm:playwright@1.65.1'
 
 import { parseRecordAddress } from '../../stratos-client/src/space-uri.ts'
 
@@ -271,8 +271,7 @@ function assertPdsRecord(
     return
   }
   const actual = record.reply as
-    | { root?: StrongRef; parent?: StrongRef }
-    | undefined
+    { root?: StrongRef; parent?: StrongRef } | undefined
   assert(
     actual?.root?.uri === reply.root.uri &&
       actual.root.cid === reply.root.cid &&

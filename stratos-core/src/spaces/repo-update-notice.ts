@@ -25,8 +25,7 @@ export interface RepoUpdateNotice {
 }
 
 export type RepoUpdateNoticeResult =
-  | { ok: true; value: RepoUpdateNotice }
-  | { ok: false; message: string }
+  { ok: true; value: RepoUpdateNotice } | { ok: false; message: string }
 
 const BYTES_KEY = '$bytes'
 

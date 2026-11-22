@@ -6,7 +6,7 @@
 // The devMode bypass only catches the `Bearer` scheme, so these requests
 // exercise the real DPoP verifier: proof check, jkt binding, enrollment.
 
-import { type Browser, chromium } from 'npm:playwright@1.58.2'
+import { type Browser, chromium } from 'npm:playwright@1.65.1'
 import {
   atprotoLoopbackClientMetadata,
   buildAtprotoLoopbackClientId,
@@ -15,7 +15,7 @@ import {
   type NodeSavedState,
   type OAuthSession,
   requestLocalLock,
-} from 'npm:@atproto/oauth-client-node@0.5.3'
+} from 'npm:@atproto/oauth-client-node@0.5.19'
 import { DOMAINS, PDS_URL, STRATOS_URL } from './lib/config.ts'
 import { loadState } from './lib/state.ts'
 import {

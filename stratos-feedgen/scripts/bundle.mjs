@@ -7,7 +7,7 @@ await build({
   outfile: 'dist-bundle/main.mjs',
   bundle: true,
   platform: 'node',
-  target: 'node24',
+  target: 'node26',
   format: 'esm',
   sourcemap: 'linked',
   minify: false,

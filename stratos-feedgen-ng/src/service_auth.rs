@@ -438,7 +438,7 @@ mod tests {
             let signature =
                 Signature::from_slice(&URL_SAFE_NO_PAD.decode(encoded_signature).unwrap()).unwrap();
             assert!(!bool::from(signature.s().is_high()));
-            assert!(signature.normalize_s().is_none());
+            assert_eq!(signature.normalize_s(), signature);
         }
     }
 
@@ -451,7 +451,7 @@ mod tests {
             Signature::from_slice(&URL_SAFE_NO_PAD.decode(encoded_signature).unwrap()).unwrap();
         let flipped = Signature::from_scalars(*signature.r(), -*signature.s()).unwrap();
         assert!(bool::from(flipped.s().is_high()));
-        assert!(flipped.normalize_s().is_some());
+        assert_ne!(flipped.normalize_s(), flipped);
     }
 
     fn hex_bytes(value: &str) -> [u8; 32] {

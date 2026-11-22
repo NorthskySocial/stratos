@@ -1,7 +1,7 @@
 ---
 audience: Operators
 type: How-to
-prerequisites: Linux with flock, Node.js 24, a domain with HTTPS, a did:web identifier, and your own DID
+prerequisites: Linux with flock, Node.js 26, a domain with HTTPS, a did:web identifier, and your own DID
 status: current
 ---
 
@@ -13,7 +13,7 @@ give it an identity, configure it, and make yourself the first admin.
 ## Prerequisites
 
 - **Linux with `flock` installed** (`apk add flock` on Alpine, or `apt install util-linux` on Debian/Ubuntu). The Docker image includes it. The service identity directory must use a local filesystem supporting file locks, atomic rename, and directory fsync; see [service signing key history](/architecture/service-key-history).
-- **Node.js 24** and **pnpm**. The Docker image builds and runs on Node.js 24.
+- **Node.js 26** and **pnpm**. The Docker image builds and runs on Node.js 26.
 - **A domain with HTTPS.** OAuth callbacks need it.
 - **A `did:web` identifier** for the service, on that domain.
 - **Your own DID.** You need it to become the first admin.

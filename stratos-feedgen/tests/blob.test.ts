@@ -48,13 +48,11 @@ function makeService(
   options: { maxBlobBytes?: number; maxConcurrentDownloads?: number } = {},
 ) {
   const upstream = {
-    getBlob: vi.fn(
-      async (): Promise<GetBlobResult> => ({
-        stream: Readable.from([Buffer.from('Sp'), Buffer.from('ike')]),
-        contentType: 'image/png',
-        contentLength: 5,
-      }),
-    ),
+    getBlob: vi.fn(async (): Promise<GetBlobResult> => ({
+      stream: Readable.from([Buffer.from('Sp'), Buffer.from('ike')]),
+      contentType: 'image/png',
+      contentLength: 5,
+    })),
   }
   return {
     upstream,

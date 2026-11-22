@@ -138,8 +138,7 @@ async function handleGetSpaceCredential(
   ctx: AppContext,
   input: GetSpaceCredentialInput | undefined,
   credentials:
-    | { did?: string; jkt?: string; delegationToken?: string }
-    | undefined,
+    { did?: string; jkt?: string; delegationToken?: string } | undefined,
   req: MintRequest | undefined,
   proofChecker: SpaceDpopProofChecker,
 ): Promise<{ credential: string; expiresAt: string }> {

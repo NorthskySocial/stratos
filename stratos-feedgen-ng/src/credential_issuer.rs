@@ -252,9 +252,8 @@ async fn response_bytes(mut response: reqwest::Response) -> Result<Vec<u8>, Cred
 }
 
 fn new_jti() -> String {
-    use p256::elliptic_curve::rand_core::{OsRng, RngCore};
-    let mut bytes = [0_u8; 16];
-    OsRng.fill_bytes(&mut bytes);
+    use p256::elliptic_curve::Generate;
+    let bytes = <[u8; 16]>::generate();
     URL_SAFE_NO_PAD.encode(bytes)
 }
 

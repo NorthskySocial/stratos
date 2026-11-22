@@ -9,7 +9,7 @@
 //      the user's PDS enrollment record was rewritten
 //   4. a negative case: the same mutation without the cookie → 401
 
-import { chromium } from 'npm:playwright@1.58.2'
+import { chromium } from 'npm:playwright@1.65.1'
 import {
   ADMIN_OPERATOR_KEY,
   ADMIN_TARGET_KEY,

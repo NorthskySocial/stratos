@@ -69,8 +69,7 @@ function postKeptElsewhere(): Error {
 
 /** What an own room post's address says about where it lives. */
 export type OwnRoomPost =
-  | { kind: 'custody' }
-  | { kind: 'space'; space: string; rkey: string }
+  { kind: 'custody' } | { kind: 'space'; space: string; rkey: string }
 
 /**
  * Check that a feed post reference names a post of the signed-in account.

@@ -60,12 +60,10 @@ export interface CustodyRecordAddress {
 export type RecordAddress = SpaceRecordAddress | CustodyRecordAddress
 
 export type SpaceUriParseResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; reason: string }
+  { ok: true; value: T } | { ok: false; reason: string }
 
 export type BoundarySpaceUriResult =
-  | { ok: true; value: string }
-  | { ok: false; reason: string }
+  { ok: true; value: string } | { ok: false; reason: string }
 
 const isUriDid = (value: string): boolean =>
   value.length <= MAX_DID_LENGTH &&

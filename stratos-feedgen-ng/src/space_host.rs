@@ -1346,8 +1346,8 @@ mod authenticated_read_tests {
     };
 
     use base64::{Engine, engine::general_purpose::STANDARD};
-    use hmac::{Hmac, Mac};
-    use p256::{SecretKey, elliptic_curve::sec1::ToEncodedPoint};
+    use hmac::{Hmac, KeyInit, Mac};
+    use p256::{SecretKey, elliptic_curve::sec1::ToSec1Point};
     use serde_json::json;
     use sha2::Sha256;
     use tokio::time::Instant;
@@ -1382,7 +1382,7 @@ mod authenticated_read_tests {
     }
 
     fn public_key(private: &SecretKey) -> AuthorKemKey {
-        AuthorKemKey::from_sec1_bytes(private.public_key().to_encoded_point(false).as_bytes())
+        AuthorKemKey::from_sec1_bytes(private.public_key().to_sec1_point(false).as_bytes())
             .expect("public key")
     }
 

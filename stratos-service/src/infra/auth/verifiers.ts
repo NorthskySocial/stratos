@@ -763,8 +763,7 @@ async function verifyDpop(
   dpopVerifier: DpopVerifier,
 ): Promise<{
   credentials:
-    | { type: 'user'; did: string; jkt?: string }
-    | { type: 'anonymous' }
+    { type: 'user'; did: string; jkt?: string } | { type: 'anonymous' }
 }> {
   try {
     const result = await dpopVerifier.verify(

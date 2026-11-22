@@ -8,15 +8,10 @@ export interface ShadowFeedDecision {
 
 /** Bounded comparison outcomes suitable for a low-cardinality metric. */
 export type ShadowMismatchReason =
-  | 'status'
-  | 'error'
-  | 'cursor'
-  | 'post-count'
-  | 'post-order'
+  'status' | 'error' | 'cursor' | 'post-count' | 'post-order'
 
 export type ShadowComparison =
-  | { matched: true }
-  | { matched: false; reason: ShadowMismatchReason }
+  { matched: true } | { matched: false; reason: ShadowMismatchReason }
 
 /**
  * Compares two already-authorized feed decisions without returning any private

@@ -166,7 +166,7 @@ into one large module.
 | `atproto`     | Utility           | CBOR record encoding, CID computation/parsing, CAR block reading, commit-op decoding, and boundary extraction (`index.ts`)                                             |
 | `config`      | Infrastructure    | Zod schemas for storage backend, logging, and Redis env config, plus comma-list helpers (`parseCommaList`, `commaListSchema`) (`index.ts`)                             |
 | `lexicons`    | Infrastructure    | `DefaultLexiconProvider` bundling Stratos + embedded `com.atproto.*` lexicons, plus vendored `app.bsky.feed.like` and `app.bsky.feed.repost` (`index.ts`, `vendored/`) |
-| `storage`     | Ports             | Storage interface definitions (Reader/Writer ports for all stores)                                                                                                     |
+| `storage`     | Ports             | Enrollment store port, blob-content port and cache interfaces; the actor store contract is in stratos-service                                                          |
 | `db`          | Infrastructure    | Database schema (Drizzle), SQLite + Postgres support, migrations                                                                                                       |
 | `shared`      | Infrastructure    | Shared error types and domain-specific exceptions                                                                                                                      |
 

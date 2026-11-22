@@ -2,7 +2,6 @@ import { parseDidKey, verifySignature } from '@atproto/crypto'
 import { StratosError } from '@northskysocial/stratos-core'
 import {
   type InnerList,
-  isByteSequence,
   isInnerList,
   parseDictionary,
   serializeInnerList,
@@ -50,7 +49,7 @@ export async function verifySpaceExchangeSignature(
       input[1].get('tag') === SPACE_CREDENTIAL_SIGNATURE_TAG ||
       !signature ||
       isInnerList(signature) ||
-      !isByteSequence(signature[0]) ||
+      !(signature[0] instanceof ArrayBuffer) ||
       signature[1].size !== 0
     ) {
       throw new SpaceHttpSignatureError('Malformed atproto-space signature')
@@ -66,7 +65,7 @@ export async function verifySpaceExchangeSignature(
       headers,
       EXCHANGE_COMPONENTS,
       input,
-      signature[0].toBase64(),
+      signature[0],
       keyId,
     )
     return keyId
@@ -103,7 +102,7 @@ export async function verifySpacePresentationSignature(
       !isInnerList(input) ||
       !signature ||
       isInnerList(signature) ||
-      !isByteSequence(signature[0]) ||
+      !(signature[0] instanceof ArrayBuffer) ||
       signature[1].size !== 0
     ) {
       throw new SpaceHttpSignatureError(
@@ -131,7 +130,7 @@ export async function verifySpacePresentationSignature(
       headers,
       PRESENTATION_COMPONENTS,
       input,
-      signature[0].toBase64(),
+      signature[0],
       binding.keyId,
     )
     return binding.keyId
@@ -160,14 +159,14 @@ async function verifyOverBase(
   headers: Map<string, string>,
   components: string[],
   input: InnerList,
-  signatureBase64: string,
+  signature: ArrayBuffer,
   keyId: string,
 ): Promise<void> {
   const lines = components.map(
     (name) => `"${name}": ${requireHeader(headers, name)}`,
   )
   lines.push(`"@signature-params": ${serializeInnerList(input)}`)
-  const bytes = Buffer.from(signatureBase64, 'base64')
+  const bytes = Buffer.from(signature)
   if (
     bytes.length !== 64 ||
     !(await verifySignature(

@@ -162,10 +162,7 @@ export async function inspectRecord(
 
 /** Where the inspector gets a record from, chosen by who wrote it and where it lives. */
 export type InspectorSource =
-  | 'custody'
-  | 'own-space'
-  | 'feed-snapshot'
-  | 'invalid'
+  'custody' | 'own-space' | 'feed-snapshot' | 'invalid'
 
 /** What the inspector knows about a post the feed already served. */
 export interface InspectorEntry {

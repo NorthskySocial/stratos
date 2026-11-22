@@ -109,9 +109,8 @@ function fakeMembership(outcomes: BoundaryPassOutcome[] = []) {
 function fakeRunner() {
   return {
     completeMembershipPass: vi.fn(),
-    runTarget: vi.fn(
-      async (target: PollTarget): Promise<SpaceSyncRunResult> =>
-        runSuccess(target),
+    runTarget: vi.fn(async (target: PollTarget): Promise<SpaceSyncRunResult> =>
+      runSuccess(target),
     ),
   }
 }

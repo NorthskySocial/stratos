@@ -277,15 +277,13 @@ function describeDeleteBoundaryRows(
         OWNER_DID,
         async (store: any) => {
           const rows = await store.sequence.getEventsSince(0, 1000)
-          return rows.map(
-            (row: any): SeqEvent => ({
-              seq: row.seq,
-              did: row.did,
-              time: row.sequencedAt,
-              rev: row.rev ?? '',
-              event: row.event,
-            }),
-          )
+          return rows.map((row: any): SeqEvent => ({
+            seq: row.seq,
+            did: row.did,
+            time: row.sequencedAt,
+            rev: row.rev ?? '',
+            event: row.event,
+          }))
         },
       )
       return events.flatMap(

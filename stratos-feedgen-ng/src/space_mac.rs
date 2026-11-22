@@ -8,7 +8,7 @@
 use std::fmt;
 
 use base64::{Engine, engine::general_purpose::STANDARD, engine::general_purpose::STANDARD_NO_PAD};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde_json::Value;
 use sfv::{BareItem, Dictionary, ListEntry};
 use sha2::Sha256;
@@ -355,7 +355,7 @@ mod tests {
     use crate::space_kem::{AuthorKemKey, encapsulate_with_ephemeral_key};
     use crate::space_signature_fields::{MAX_DICTIONARY_MEMBERS, MAX_FIELD_BYTES};
     use base64::{Engine, engine::general_purpose::STANDARD};
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use serde_json::{Value, json};
     use sha2::Sha256;
     use std::collections::BTreeMap;

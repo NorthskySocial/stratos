@@ -5,7 +5,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use hkdf::Hkdf;
 use p256::SecretKey;
 use p256::ecdh::diffie_hellman;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use serde_json::Value;
 use sfv::{BareItem, Dictionary, FieldType, ListEntry, Parser};
 use sha2::Sha256;
@@ -36,7 +36,7 @@ fn private_key(export: &Value, field: &str) -> SecretKey {
 
 fn did_key_for(public_key: &p256::PublicKey) -> String {
     let mut bytes = P256_PUBLIC_MULTICODEC_PREFIX.to_vec();
-    bytes.extend_from_slice(public_key.to_encoded_point(true).as_bytes());
+    bytes.extend_from_slice(public_key.to_sec1_point(true).as_bytes());
     format!("did:key:z{}", bs58::encode(bytes).into_string())
 }
 
@@ -96,7 +96,7 @@ fn public_points_encode_to_the_fixture_did_keys() {
         ("ephemeralPrivateKey", "keyShareDid"),
     ] {
         let public_key = private_key(export, private_field).public_key();
-        let uncompressed = public_key.to_encoded_point(false);
+        let uncompressed = public_key.to_sec1_point(false);
         assert_eq!(uncompressed.len(), 65);
         assert_eq!(uncompressed.as_bytes()[0], 0x04);
 

@@ -18,8 +18,8 @@ use base64::{
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
 };
 use cid::Cid;
-use hmac::{Hmac, Mac};
-use p256::{SecretKey, elliptic_curve::sec1::ToEncodedPoint};
+use hmac::{Hmac, KeyInit, Mac};
+use p256::{SecretKey, elliptic_curve::sec1::ToSec1Point};
 use serde_json::{Value, json};
 use sha2::Sha256;
 use tokio::{sync::Notify, time::Instant};
@@ -302,7 +302,7 @@ pub(crate) fn host_kem_key() -> AuthorKemKey {
     AuthorKemKey::from_sec1_bytes(
         host_secret_key()
             .public_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes(),
     )
     .expect("public key")

@@ -317,8 +317,6 @@ const KNOWN_URI_CONSUMERS: Record<string, string> = {
     'uri-reply-and-embed-strings',
   'stratos-service/src/infra/storage/postgres/actor-store.ts':
     'uri-backlink-keys',
-  'stratos-service/src/infra/storage/postgres/record-store.ts':
-    'uri-backlink-keys',
   'stratos-service/src/storage/sqlite/actor-store.ts': 'uri-backlink-keys',
   'stratos-service/src/api/records/boundary-writes.ts': 'uri-backlink-keys',
   'stratos-service/src/features/moderation/wire-label.ts':

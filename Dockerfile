@@ -5,9 +5,9 @@
 # Target 2 (indexer): Deno-based standalone indexer.
 
 # --- Build stage ---
-FROM node:24-alpine AS builder
+FROM node:26-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN npm install --global pnpm@12.21.0
 
 WORKDIR /app
 
@@ -52,11 +52,11 @@ RUN node -e " \
 "
 
 # --- Production stage for Stratos Service ---
-FROM node:24-alpine AS stratos
+FROM node:26-alpine AS stratos
 
 RUN apk add --no-cache flock
 
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN npm install --global pnpm@12.21.0
 
 WORKDIR /app
 
