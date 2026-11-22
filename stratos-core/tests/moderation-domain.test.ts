@@ -479,7 +479,7 @@ describe('legacy space URIs as label subjects', () => {
   })
 
   it('chooses the space parse by the at:space/ prefix and keeps the submitted string as the key', () => {
-    const result = record(SPACE_URI, CID)
+    const result = record(SPACE_URI)
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.value.kind).toBe('space-record')
