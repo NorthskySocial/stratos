@@ -9,7 +9,10 @@ use time::OffsetDateTime;
 use tokio::{sync::watch, task::JoinSet};
 
 use crate::{
-    config::ProjectionRetention,
+    config::{
+        ProjectionRetention, SPACE_REPLACEMENT_COOLDOWN, SPACE_REPO_NOT_FOUND_MAX_GAP,
+        SPACE_TARGET_DEADLINE,
+    },
     lifecycle::ControlLifecycle,
     membership_reconciler::{MembershipReconciler, MembershipReconciliationError},
     pds_space_sync::{FailureReason, PdsSpaceSynchronizer, VerifiedSyncOutcome},
@@ -17,6 +20,15 @@ use crate::{
 };
 
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(30);
+// On the whole-repo path a member's `RepoNotFound` answers are a cooldown
+// apart plus the wait for the next pass; the longest gap the synchronizer
+// allows must leave room for that wait, or those answers never last the period.
+const _: () = assert!(
+    SPACE_REPLACEMENT_COOLDOWN.as_secs()
+        + SPACE_TARGET_DEADLINE.as_secs()
+        + DEFAULT_INTERVAL.as_secs()
+        < SPACE_REPO_NOT_FOUND_MAX_GAP.as_secs()
+);
 const MAX_STATUS_AGE: Duration = Duration::from_secs(90);
 const MAX_TARGET_CONCURRENCY: usize = 4;
 

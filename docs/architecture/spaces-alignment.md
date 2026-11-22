@@ -172,9 +172,10 @@ The feed generator does not verify the account signature of a PDS-custody
 commit. The MAC authenticates the host's answer, and the set hash proves the
 state. A `RepoNotFound` answer at status 400 carries no MAC. Only the pinned
 TLS connection to the host that the authority named protects it, so the feed
-generator clears a member only after the host has given that answer for one
-hour without another end of the member's cycle between. The hour is kept in
-memory. The steps, limits and reason words are in
+generator clears a member only after one host has given that answer for one
+hour without another end of the member's cycle between and with no more than
+20 minutes between two answers. An answer from another host or to a new
+membership generation starts the hour again. The hour is kept in memory. The steps, limits and reason words are in
 [Run the feed generator](/operator/feedgen-ng#verified-sync-of-pds-members).
 
 :::

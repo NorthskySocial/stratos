@@ -25,7 +25,10 @@ use super::{
     },
 };
 use crate::{
-    config::{MAX_SPACE_CYCLE_VALUES, SPACE_REPLACEMENT_COOLDOWN, SPACE_TARGET_DEADLINE},
+    config::{
+        MAX_SPACE_CYCLE_VALUES, SPACE_REPLACEMENT_COOLDOWN, SPACE_REPO_NOT_FOUND_MAX_GAP,
+        SPACE_TARGET_DEADLINE,
+    },
     credential_issuer::{
         CredentialExpiry, CredentialMintError, IssuedSpaceCredential, SpaceCredentialIssuer,
     },
@@ -1333,6 +1336,156 @@ async fn answer_not_found(scene: &Scene, did: &str) -> VerifiedSyncOutcome {
     scene.cycle(did).await
 }
 
+/// How far apart the scheduler cycles one member: its 30-second wait and a
+/// pass of a minute.
+const PASS_CADENCE: Duration = Duration::from_secs(90);
+
+// The host answers `RepoNotFound` to a poll at each pass for `span`, the last
+// answer at its end. None of these answers clears.
+async fn keep_answering_not_found(scene: &Scene, did: &str, span: Duration) {
+    let mut elapsed = Duration::ZERO;
+    while elapsed < span {
+        let step = PASS_CADENCE.min(span - elapsed);
+        scene.clock.advance(step);
+        elapsed += step;
+        assert_eq!(
+            answer_not_found(scene, did).await,
+            NOT_FOUND,
+            "{elapsed:?} into the answers"
+        );
+    }
+}
+
+// The member is moved to another host, or leaves and joins again, a minute
+// before the first host's answers have lasted the hour. Neither change leaves
+// a verified state to build on, so each answer after it is the reply to an
+// archive request, one cooldown apart.
+#[tokio::test]
+async fn repo_not_found_answers_from_another_host_or_generation_do_not_count_toward_the_hour() {
+    for case in ["another host", "another generation"] {
+        let scene = with_faye_and_jet_served().await;
+        assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND, "{case}");
+        keep_answering_not_found(&scene, FAYE, Duration::from_secs(59 * 60)).await;
+        let (host, target) = match case {
+            "another host" => moved_to_a_mirror(&scene, HostRepo::new(1)),
+            _ => {
+                rejoin(&scene, FAYE);
+                (Arc::clone(&scene.host), scene.target(FAYE))
+            }
+        };
+        host.script_archives(FAYE, (0..7).map(|_| not_found_archive()).collect());
+        let before = scene.snapshot();
+
+        scene.clock.advance(PASS_CADENCE);
+        assert_eq!(
+            scene.cycle_target(&target).await,
+            NOT_FOUND,
+            "{case}: the first answer after the change, past the hour of the earlier ones"
+        );
+        assert_eq!(scene.snapshot(), before, "{case}");
+
+        for _ in 0..5 {
+            scene.clock.advance(SPACE_REPLACEMENT_COOLDOWN);
+            assert_eq!(scene.cycle_target(&target).await, NOT_FOUND, "{case}");
+        }
+        assert_eq!(scene.snapshot(), before, "{case}");
+        scene.clock.advance(SPACE_REPLACEMENT_COOLDOWN);
+        assert_eq!(
+            scene.cycle_target(&target).await,
+            VerifiedSyncOutcome::Cleared,
+            "{case}: an hour of answers since the change"
+        );
+        assert_eq!(scene.base(FAYE), None, "{case}");
+    }
+}
+
+// The member leaves the space and is listed again, so that it holds a new
+// generation and no state.
+fn rejoin(scene: &Scene, did: &str) {
+    let others: Vec<PdsSpaceMember> = [FAYE, JET]
+        .into_iter()
+        .filter(|member| *member != did)
+        .map(|member| PdsSpaceMember {
+            did: member.to_owned(),
+        })
+        .collect();
+    let mut all = others.clone();
+    all.push(PdsSpaceMember {
+        did: did.to_owned(),
+    });
+    for members in [others, all] {
+        scene
+            .lifecycle
+            .replace_pds_space_members(BOUNDARY, members, OBSERVED)
+            .unwrap();
+    }
+}
+
+// Membership discovery that fails for hours runs no cycle, so nothing is
+// asked and nothing interrupts the remembered answer.
+#[tokio::test]
+async fn one_repo_not_found_answer_after_a_long_silence_starts_the_hour_again() {
+    let scene = with_faye_and_jet_served().await;
+    let before = scene.snapshot();
+    assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND);
+
+    scene.clock.advance(3 * SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        NOT_FOUND,
+        "the one answer after three silent hours"
+    );
+    assert_eq!(scene.snapshot(), before);
+
+    keep_answering_not_found(
+        &scene,
+        FAYE,
+        SPACE_REPO_NOT_FOUND_CONFIRMATION - Duration::from_secs(1),
+    )
+    .await;
+    assert_eq!(scene.snapshot(), before);
+    scene.clock.advance(Duration::from_secs(1));
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        VerifiedSyncOutcome::Cleared,
+        "an hour of answers after the silence"
+    );
+}
+
+#[tokio::test]
+async fn repo_not_found_answers_at_the_longest_gap_clear_and_answers_a_second_further_apart_never_do()
+ {
+    for (gap, clears) in [
+        (SPACE_REPO_NOT_FOUND_MAX_GAP, true),
+        (SPACE_REPO_NOT_FOUND_MAX_GAP + Duration::from_secs(1), false),
+    ] {
+        let scene = with_faye_and_jet_served().await;
+        assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND, "{gap:?}");
+        let mut elapsed = Duration::ZERO;
+        let mut outcomes = Vec::new();
+        while elapsed < 2 * SPACE_REPO_NOT_FOUND_CONFIRMATION {
+            scene.clock.advance(gap);
+            elapsed += gap;
+            outcomes.push(answer_not_found(&scene, FAYE).await);
+            if outcomes.last() == Some(&VerifiedSyncOutcome::Cleared) {
+                break;
+            }
+        }
+        let cleared_after = outcomes
+            .iter()
+            .position(|outcome| *outcome == VerifiedSyncOutcome::Cleared);
+        let answers_in_an_hour = SPACE_REPO_NOT_FOUND_CONFIRMATION
+            .as_secs()
+            .div_ceil(gap.as_secs()) as usize;
+        assert_eq!(
+            cleared_after,
+            clears.then(|| answers_in_an_hour - 1),
+            "{gap:?}: {outcomes:?}"
+        );
+        assert_eq!(scene.base(FAYE).is_none(), clears, "{gap:?}");
+    }
+}
+
 #[tokio::test]
 async fn a_first_repo_not_found_with_status_400_fails_the_member_and_changes_nothing() {
     let scene = with_faye_and_jet_served().await;
@@ -1352,9 +1505,13 @@ async fn repo_not_found_with_status_400_clears_the_members_state_only_once_it_ha
     let before = scene.snapshot();
 
     assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND);
-    scene
-        .clock
-        .advance(SPACE_REPO_NOT_FOUND_CONFIRMATION - Duration::from_secs(1));
+    keep_answering_not_found(
+        &scene,
+        FAYE,
+        SPACE_REPO_NOT_FOUND_CONFIRMATION - PASS_CADENCE - Duration::from_secs(1),
+    )
+    .await;
+    scene.clock.advance(PASS_CADENCE);
     assert_eq!(
         answer_not_found(&scene, FAYE).await,
         NOT_FOUND,
@@ -1385,7 +1542,13 @@ async fn a_good_poll_between_two_repo_not_found_answers_starts_the_hour_again() 
     assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND);
     scene.clock.advance(Duration::from_secs(60));
     assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Unchanged);
-    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    keep_answering_not_found(
+        &scene,
+        FAYE,
+        SPACE_REPO_NOT_FOUND_CONFIRMATION - Duration::from_secs(60) - PASS_CADENCE,
+    )
+    .await;
+    scene.clock.advance(PASS_CADENCE);
     assert_eq!(
         answer_not_found(&scene, FAYE).await,
         NOT_FOUND,
@@ -1393,7 +1556,8 @@ async fn a_good_poll_between_two_repo_not_found_answers_starts_the_hour_again() 
     );
     assert_eq!(scene.snapshot(), before);
 
-    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    // The first answer after the good poll came a pass after it.
+    scene.clock.advance(Duration::from_secs(60) + PASS_CADENCE);
     assert_eq!(
         answer_not_found(&scene, FAYE).await,
         VerifiedSyncOutcome::Cleared,
@@ -1448,7 +1612,13 @@ async fn any_other_end_of_a_cycle_between_two_repo_not_found_answers_starts_the_
         assert_eq!(scene.cycle(FAYE).await, between, "{name}");
 
         scene.kem_keys.restore();
-        scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+        keep_answering_not_found(
+            &scene,
+            FAYE,
+            SPACE_REPO_NOT_FOUND_CONFIRMATION - Duration::from_secs(60) - PASS_CADENCE,
+        )
+        .await;
+        scene.clock.advance(PASS_CADENCE);
         assert_eq!(
             answer_not_found(&scene, FAYE).await,
             NOT_FOUND,
@@ -1488,7 +1658,13 @@ async fn a_poll_that_reads_a_page_and_is_then_turned_away_by_the_cooldown_starts
         VerifiedSyncOutcome::Failed(FailureReason::ReplacementCooldown)
     );
 
-    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    keep_answering_not_found(
+        &scene,
+        FAYE,
+        SPACE_REPO_NOT_FOUND_CONFIRMATION - PASS_CADENCE,
+    )
+    .await;
+    scene.clock.advance(PASS_CADENCE);
     assert_eq!(
         answer_not_found(&scene, FAYE).await,
         NOT_FOUND,
@@ -1520,7 +1696,13 @@ async fn a_full_map_of_remembered_answers_remembers_no_new_one_and_clears_nothin
     );
     assert_eq!(scene.snapshot(), before);
 
-    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    keep_answering_not_found(
+        &scene,
+        JET,
+        SPACE_REPO_NOT_FOUND_CONFIRMATION - PASS_CADENCE,
+    )
+    .await;
+    scene.clock.advance(PASS_CADENCE);
     assert_eq!(
         answer_not_found(&scene, JET).await,
         VerifiedSyncOutcome::Cleared,
@@ -1534,7 +1716,13 @@ async fn a_full_map_of_remembered_answers_remembers_no_new_one_and_clears_nothin
     assert_eq!(scene.base_rev(FAYE), Some(tid(3)));
     assert_eq!(scene.served_uris().len(), 2, "Faye's two posts");
 
-    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    keep_answering_not_found(
+        &scene,
+        FAYE,
+        SPACE_REPO_NOT_FOUND_CONFIRMATION - PASS_CADENCE,
+    )
+    .await;
+    scene.clock.advance(PASS_CADENCE);
     assert_eq!(
         answer_not_found(&scene, FAYE).await,
         VerifiedSyncOutcome::Cleared,
@@ -1569,7 +1757,13 @@ async fn a_remembered_answer_no_cycle_has_repeated_for_an_hour_makes_room_for_an
     );
     assert_eq!(scene.base_rev(FAYE), Some(tid(3)));
 
-    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    keep_answering_not_found(
+        &scene,
+        FAYE,
+        SPACE_REPO_NOT_FOUND_CONFIRMATION - PASS_CADENCE,
+    )
+    .await;
+    scene.clock.advance(PASS_CADENCE);
     assert_eq!(
         answer_not_found(&scene, FAYE).await,
         VerifiedSyncOutcome::Cleared,
@@ -1644,7 +1838,7 @@ async fn repo_not_found_from_an_archive_request_clears_the_members_rows_in_that_
     // there, so the cycle goes to a replacement and the archive request is
     // refused with that name.
     let (mirror, moved) = moved_to_a_mirror(&scene, HostRepo::new(1));
-    mirror.script_archives(FAYE, (0..3).map(|_| not_found_archive()).collect());
+    mirror.script_archives(FAYE, (0..7).map(|_| not_found_archive()).collect());
     let before = scene.snapshot();
 
     assert_eq!(scene.cycle_target(&moved).await, NOT_FOUND);
@@ -1654,24 +1848,33 @@ async fn repo_not_found_from_an_archive_request_clears_the_members_rows_in_that_
         scene.cycle_target(&moved).await,
         VerifiedSyncOutcome::Failed(FailureReason::ReplacementCooldown)
     );
-    scene.clock.advance(SPACE_REPLACEMENT_COOLDOWN);
+    // Every pass cycles the member, and the cooldown turns each away until it
+    // has ended, so the host is asked once every seven passes.
+    let mut asked_at = Vec::new();
+    let mut elapsed = Duration::ZERO;
+    let mut last = None;
+    while elapsed < 2 * SPACE_REPO_NOT_FOUND_CONFIRMATION {
+        scene.clock.advance(PASS_CADENCE);
+        elapsed += PASS_CADENCE;
+        let outcome = scene.cycle_target(&moved).await;
+        if outcome == VerifiedSyncOutcome::Failed(FailureReason::ReplacementCooldown) {
+            continue;
+        }
+        asked_at.push(elapsed);
+        if outcome != NOT_FOUND {
+            last = Some(outcome);
+            break;
+        }
+        assert_eq!(scene.snapshot(), before, "nothing changed within the hour");
+    }
+    assert_eq!(last, Some(VerifiedSyncOutcome::Cleared));
     assert_eq!(
-        scene.cycle_target(&moved).await,
-        NOT_FOUND,
-        "ten minutes after the first answer"
-    );
-    assert_eq!(mirror.archives_requested(), 2);
-    assert_eq!(scene.snapshot(), before, "nothing changed within the hour");
-
-    scene
-        .clock
-        .advance(SPACE_REPO_NOT_FOUND_CONFIRMATION - SPACE_REPLACEMENT_COOLDOWN);
-    assert_eq!(
-        scene.cycle_target(&moved).await,
-        VerifiedSyncOutcome::Cleared
+        asked_at,
+        (1..=6).map(|n| PASS_CADENCE * 7 * n).collect::<Vec<_>>(),
+        "asked every ten and a half minutes, and cleared at the first answer past the hour"
     );
 
-    assert_eq!(mirror.archives_requested(), 3);
+    assert_eq!(mirror.archives_requested(), 7);
     assert!(mirror.pages_requested(FAYE).is_empty());
     assert_eq!(scene.base(FAYE), None);
     assert_eq!(
@@ -1794,10 +1997,20 @@ async fn only_repo_not_found_with_status_400_clears_and_only_invalid_cursor_repl
             other => panic!("{name}: {other:?} is in no row"),
         }
 
-        // The same refusal an hour later.
-        scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
-        refuse();
-        let again = scene.cycle(FAYE).await;
+        // The same refusal at every pass for an hour.
+        let mut later = Vec::new();
+        let mut elapsed = Duration::ZERO;
+        while elapsed < SPACE_REPO_NOT_FOUND_CONFIRMATION {
+            scene.clock.advance(PASS_CADENCE);
+            elapsed += PASS_CADENCE;
+            refuse();
+            later.push(scene.cycle(FAYE).await);
+        }
+        let again = later.pop().expect("a pass");
+        assert!(
+            !later.contains(&VerifiedSyncOutcome::Cleared),
+            "{name}: cleared within the hour"
+        );
         assert_eq!(
             again == VerifiedSyncOutcome::Cleared,
             name == "RepoNotFound",
@@ -2897,6 +3110,7 @@ fn the_configured_limits_are_the_ones_the_synchronizer_starts_with() {
     assert_eq!(limits.deadline, SPACE_TARGET_DEADLINE);
     assert_eq!(limits.cooldown, SPACE_REPLACEMENT_COOLDOWN);
     assert_eq!(limits.repo_not_found_confirmation.as_secs(), 3_600);
+    assert_eq!(limits.repo_not_found_max_gap.as_secs(), 1_200);
     assert_eq!(limits.repo_not_found_capacity, limits.cooldown_capacity);
     assert_eq!(limits.ops, 1_000);
     assert_eq!(limits.body_bytes, 16 * 1024 * 1024);
@@ -3108,7 +3322,13 @@ async fn a_write_whose_deadline_has_passed_is_not_started_and_nothing_changes() 
         };
         if case == "a clear" {
             assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND);
-            scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+            keep_answering_not_found(
+                &scene,
+                FAYE,
+                SPACE_REPO_NOT_FOUND_CONFIRMATION - PASS_CADENCE,
+            )
+            .await;
+            scene.clock.advance(PASS_CADENCE);
             host.script_pages(FAYE, vec![not_found_page()]);
         }
         let clock = Arc::clone(&scene.clock);

@@ -19,7 +19,7 @@ use tokio::{sync::Semaphore, time::Instant};
 use crate::{
     config::{
         MAX_SPACE_CYCLE_VALUES, MAX_SPACE_POLL_BODY_BYTES, SPACE_REPLACEMENT_COOLDOWN,
-        SPACE_REPO_NOT_FOUND_CONFIRMATION, SPACE_TARGET_DEADLINE,
+        SPACE_REPO_NOT_FOUND_CONFIRMATION, SPACE_REPO_NOT_FOUND_MAX_GAP, SPACE_TARGET_DEADLINE,
     },
     credential_manager::SpaceCredentialManager,
     lifecycle::ControlLifecycle,
@@ -313,6 +313,7 @@ struct SyncLimits {
     deadline: Duration,
     cooldown: Duration,
     repo_not_found_confirmation: Duration,
+    repo_not_found_max_gap: Duration,
     cooldown_capacity: usize,
     repo_not_found_capacity: usize,
 }
@@ -327,6 +328,7 @@ impl Default for SyncLimits {
             deadline: SPACE_TARGET_DEADLINE,
             cooldown: SPACE_REPLACEMENT_COOLDOWN,
             repo_not_found_confirmation: SPACE_REPO_NOT_FOUND_CONFIRMATION,
+            repo_not_found_max_gap: SPACE_REPO_NOT_FOUND_MAX_GAP,
             cooldown_capacity: MAX_TARGET_LOCKS,
             repo_not_found_capacity: MAX_TARGET_LOCKS,
         }
@@ -345,15 +347,40 @@ pub struct PdsSpaceSynchronizer {
 }
 
 /// When a target's host first gave the `RepoNotFound` answer that has not been
-/// interrupted since, and when it last gave it.
+/// interrupted since, when it last gave it, and which host gave it to which
+/// membership generation.
 struct RepoNotFoundAnswers {
     first: Instant,
     latest: Instant,
+    host: String,
+    generation: u64,
+}
+
+impl RepoNotFoundAnswers {
+    fn starting(target: &PdsPollTarget, now: Instant) -> Self {
+        Self {
+            first: now,
+            latest: now,
+            host: target.host.clone(),
+            generation: target.generation,
+        }
+    }
+
+    // Only the same host answering the same generation, with no longer wait
+    // than `max_gap` since its last answer, adds to the period: a host the
+    // member left says nothing about the one it moved to, and a wait with no
+    // answer is not an answer.
+    fn is_continued_by(&self, target: &PdsPollTarget, now: Instant, max_gap: Duration) -> bool {
+        self.host == target.host
+            && self.generation == target.generation
+            && now.saturating_duration_since(self.latest) <= max_gap
+    }
 }
 
 /// What a `RepoNotFound` answer comes to for a target.
 enum RepoNotFoundStanding {
-    /// The host has given it for the whole confirmation period.
+    /// One host has given it to one generation for the whole confirmation
+    /// period, never waiting longer than the longest gap between two answers.
     Confirmed,
     Remembered,
     /// No answer could be remembered, so the period does not start.
@@ -550,14 +577,19 @@ impl PdsSpaceSynchronizer {
     // Bounded like the cooldowns. An entry whose target has not given the
     // answer for a whole period is stale and makes room; with no room the
     // answer is not remembered, which delays a clear and never hastens one.
-    fn note_repo_not_found(&self, key: &str) -> RepoNotFoundStanding {
+    fn note_repo_not_found(&self, target: &PdsPollTarget) -> RepoNotFoundStanding {
         let now = self.clock.now();
         let period = self.limits.repo_not_found_confirmation;
+        let key = Self::target_key(target);
         let mut answers = self
             .repo_not_found
             .lock()
             .expect("repo-not-found answers poisoned");
-        if let Some(answer) = answers.get_mut(key) {
+        if let Some(answer) = answers.get_mut(&key) {
+            if !answer.is_continued_by(target, now, self.limits.repo_not_found_max_gap) {
+                *answer = RepoNotFoundAnswers::starting(target, now);
+                return RepoNotFoundStanding::Remembered;
+            }
             if now.saturating_duration_since(answer.first) >= period {
                 return RepoNotFoundStanding::Confirmed;
             }
@@ -568,13 +600,7 @@ impl PdsSpaceSynchronizer {
         if answers.len() >= self.limits.repo_not_found_capacity {
             return RepoNotFoundStanding::NoRoom;
         }
-        answers.insert(
-            key.to_owned(),
-            RepoNotFoundAnswers {
-                first: now,
-                latest: now,
-            },
-        );
+        answers.insert(key, RepoNotFoundAnswers::starting(target, now));
         RepoNotFoundStanding::Remembered
     }
 
@@ -869,10 +895,7 @@ impl Cycle<'_> {
     // host has given it for the whole confirmation period.
     fn clear_once_confirmed(&self) -> VerifiedSyncOutcome {
         let unconfirmed = VerifiedSyncOutcome::Failed(FailureReason::RepoNotFound);
-        match self
-            .synchronizer
-            .note_repo_not_found(&self.repo_not_found.key)
-        {
+        match self.synchronizer.note_repo_not_found(self.target) {
             RepoNotFoundStanding::Confirmed => self.clear(),
             RepoNotFoundStanding::Remembered => {
                 self.repo_not_found.keep();

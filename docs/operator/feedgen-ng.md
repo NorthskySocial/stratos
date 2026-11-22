@@ -155,8 +155,13 @@ read, the passes in the cooldown after it fail as `replacement_cooldown`
 instead. The first pass that gets the answer an hour or more after the first
 one clears the member and counts it as `cleared`. Any other end of that
 member's cycle, a good poll or another failure, starts the hour again. A pass
-that the cooldown turns away before it asks the host does not. The hour is
-kept in memory, so a restart starts it again. Any other failure leaves the
+that the cooldown turns away before it asks the host does not. The hour also
+starts again when the answer comes from another host than the one before, when
+the member left the space and joined again, or when the answer comes more than
+20 minutes (`SPACE_REPO_NOT_FOUND_MAX_GAP`) after the one before it, for
+example after passes that could not list the members. With the cooldown,
+answers to whole-repo reads come about 10 minutes and a pass apart, inside that
+wait. The hour is kept in memory, so a restart starts it again. Any other failure leaves the
 stored rows as they were.
 
 A host answer of `RepoTakendown`, `RepoSuspended` or `RepoDeactivated` fails
@@ -251,7 +256,7 @@ a log line.
 | Reason                                                                               | Meaning                                                                                                     |
 | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
 | `invalid_space_mac`, `invalid_space_uri`, `invalid_credential`, `bad_space_audience` | The host answered with that error name                                                                      |
-| `repo_not_found`                                                                     | The host answered `RepoNotFound` with a status other than 400, or with status 400 for less than an hour     |
+| `repo_not_found`                                                                     | The host answered `RepoNotFound` with a status other than 400, or with status 400 not yet for an hour       |
 | `repo_takendown`, `repo_suspended`, `repo_deactivated`                               | The host answered that account status. Nothing is deleted                                                   |
 | `invalid_cursor`                                                                     | The host answered `InvalidCursor` other than as a status 400 to a page                                      |
 | `mac`                                                                                | A response failed the MAC check, after the one retry                                                        |

@@ -295,6 +295,14 @@ pub const SPACE_REPLACEMENT_COOLDOWN: Duration = Duration::from_secs(10 * 60);
 /// member's state in the space is cleared. The answer carries no MAC, so one
 /// wrong answer must not delete the member's posts.
 pub const SPACE_REPO_NOT_FOUND_CONFIRMATION: Duration = Duration::from_secs(60 * 60);
+/// The longest wait between two `RepoNotFound` answers that still lets them
+/// count as one period; an answer after a longer wait starts the period again.
+/// A member with no verified state is asked once its replacement cooldown has
+/// ended, so its answers come a cooldown and a scheduler pass apart; twice the
+/// cooldown leaves room for slow passes and is a third of the period.
+pub const SPACE_REPO_NOT_FOUND_MAX_GAP: Duration = Duration::from_secs(20 * 60);
+const _: () =
+    assert!(SPACE_REPO_NOT_FOUND_MAX_GAP.as_secs() < SPACE_REPO_NOT_FOUND_CONFIRMATION.as_secs());
 /// Path rows across every member and space. They are not feed rows: they do not
 /// count against the retention budget and retention never deletes them, so they
 /// need a bound of their own.
@@ -812,5 +820,6 @@ mod tests {
         assert_eq!(super::SPACE_TARGET_DEADLINE.as_secs(), 60);
         assert_eq!(super::SPACE_REPLACEMENT_COOLDOWN.as_secs(), 600);
         assert_eq!(super::SPACE_REPO_NOT_FOUND_CONFIRMATION.as_secs(), 3600);
+        assert_eq!(super::SPACE_REPO_NOT_FOUND_MAX_GAP.as_secs(), 1200);
     }
 }

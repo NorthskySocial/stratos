@@ -204,8 +204,10 @@ A `RepoNotFound` answer with status 400 from the member's host clears that
 member's records in that space only after the host has given the same answer
 for `SPACE_REPO_NOT_FOUND_CONFIRMATION` (1 hour). Until then the member fails
 as `repo_not_found` and nothing is changed. Any other end of that member's
-cycle, a good poll or another failure, starts the hour again. The hour is kept
-in memory, so a restart starts it again. Every other failure leaves the stored
+cycle, a good poll or another failure, starts the hour again. So does an
+answer from another host, to a new membership generation, or more than
+`SPACE_REPO_NOT_FOUND_MAX_GAP` (20 minutes) after the answer before it. The
+hour is kept in memory, so a restart starts it again. Every other failure leaves the stored
 rows as they were. Values of records in collections the feed does not project
 (anything but posts, likes and reposts) are checked against their CID and
 dropped.
