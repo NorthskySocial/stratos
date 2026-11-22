@@ -331,7 +331,8 @@ export class UpstreamStratosClient {
 
   /**
    * List the members of a space this feedgen is syncing, via the Stratos
-   * mirror of `com.atproto.space.listRepos`. Authenticated with a space
+   * method `zone.stratos.space.listRepos`, which is not the upstream
+   * `com.atproto.space.listWriters`. Authenticated with a space
    * credential, presented the same way a foreign host later verifies it: a
    * `DPoP <credential>` authorization header plus a fresh presentation proof.
    */

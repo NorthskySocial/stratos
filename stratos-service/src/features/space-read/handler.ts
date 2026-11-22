@@ -34,8 +34,8 @@ export const LIST_SPACE_BLOBS_METHOD = 'zone.stratos.space.listBlobs'
 /**
  * XRPC method NSID for the membership oracle: which repos hold data in a
  * space, with `host` / `hostSource` per Stratos's repo-host-discovery
- * convention. It is not the upstream `com.atproto.space.listRepos` of a
- * similar name.
+ * convention. It is not the upstream `com.atproto.space.listWriters`, which
+ * lists a space's writers with their revisions.
  */
 export const LIST_SPACE_REPOS_METHOD = 'zone.stratos.space.listRepos'
 
