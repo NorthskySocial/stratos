@@ -112,6 +112,18 @@ function handleRequestError(
 }
 
 /**
+ * Parameters left out of the request log under any method. `subjects` on
+ * queryLabels names the accounts and records under moderation review.
+ */
+const UNLOGGED_PARAMS: ReadonlySet<string> = new Set(['subjects'])
+
+function loggableParams(params: HandlerParams): HandlerParams {
+  return Object.fromEntries(
+    Object.entries(params).filter(([name]) => !UNLOGGED_PARAMS.has(name)),
+  )
+}
+
+/**
  * Logs the start of an XRPC request
  *
  * @param ctx - Application context
@@ -126,7 +138,10 @@ function logRequestStart(
     params: HandlerParams
   },
 ): void {
-  ctx.logger?.debug(logInfo, 'handling request')
+  ctx.logger?.debug(
+    { ...logInfo, params: loggableParams(logInfo.params) },
+    'handling request',
+  )
 }
 
 /**

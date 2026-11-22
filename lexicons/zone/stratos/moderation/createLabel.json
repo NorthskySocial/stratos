@@ -55,6 +55,10 @@
         {
           "name": "SubjectNotFound",
           "description": "The subject record or account does not exist on this service."
+        },
+        {
+          "name": "SubjectCidNotSupported",
+          "description": "The record subject carries a cid. A takedown applies to every version of a record, so send the subject without one."
         }
       ]
     }

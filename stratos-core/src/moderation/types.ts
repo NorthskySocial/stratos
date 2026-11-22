@@ -1,7 +1,11 @@
 import type { RecordUri, SpacesErrorCode } from '../spaces/index.js'
 
 export type ModerationErrorCode =
-  'invalid-subject' | 'invalid-value' | 'foreign-authority' | 'invalid-cursor'
+  | 'invalid-subject'
+  | 'unsupported-cid'
+  | 'invalid-value'
+  | 'foreign-authority'
+  | 'invalid-cursor'
 
 export interface ModerationError {
   code: ModerationErrorCode
@@ -28,9 +32,8 @@ export type ParsedLabelSubject =
       authorDid: string
       collection: string
       rkey: string
-      cid?: string
     }
-  | { kind: 'space-record'; uri: string; record: RecordUri; cid?: string }
+  | { kind: 'space-record'; uri: string; record: RecordUri }
   | { kind: 'account'; did: string }
 
 export interface ExistingLabel {
@@ -55,6 +58,7 @@ export interface StoredLabel extends ExistingLabel {
   /** Value of `labelSubjectKey` for the subject this label applies to. */
   subjectKey: string
   subjectKind: LabelSubjectKind
+  /** Only on labels stored before createLabel refused a subject cid. */
   cid?: string
   val: string
   /** Sorted and deduplicated; empty for an account label. */
