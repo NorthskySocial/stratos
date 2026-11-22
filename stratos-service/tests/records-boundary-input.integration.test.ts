@@ -246,6 +246,10 @@ describe('authorizeRecordBoundary properties', () => {
     .filter((name) => name.length > 0)
   const boundaryArb = skeyArb.map((name) => `${SERVICE_DID}/${name}`)
 
+  // Each run enrolls a caller, so a hundred runs outlast the default limit
+  // on a busy machine.
+  const PROPERTY_TIMEOUT_MS = 60_000
+
   let harness: WriteHarness
   let callers = 0
 
@@ -280,7 +284,7 @@ describe('authorizeRecordBoundary properties', () => {
         },
       ),
     )
-  })
+  }, PROPERTY_TIMEOUT_MS)
 
   it('rejects a requested boundary the caller does not hold with ForbiddenBoundary', async () => {
     await fc.assert(
@@ -300,7 +304,7 @@ describe('authorizeRecordBoundary properties', () => {
         },
       ),
     )
-  })
+  }, PROPERTY_TIMEOUT_MS)
 
   it('rejects zero or several requested boundaries with InvalidDomainCount', async () => {
     await fc.assert(
@@ -318,5 +322,5 @@ describe('authorizeRecordBoundary properties', () => {
         },
       ),
     )
-  })
+  }, PROPERTY_TIMEOUT_MS)
 })
