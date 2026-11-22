@@ -57,8 +57,7 @@ export type BoundaryWrite =
   | { kind: 'delete'; collection: string; rkey: string }
 
 export type BoundaryDeleteOutcome =
-  | { deleted: true; commit: CommitResult['commit'] }
-  | { deleted: false }
+  { deleted: true; commit: CommitResult['commit'] } | { deleted: false }
 
 type KeyedWrite = BoundaryWrite & { rkey: string }
 

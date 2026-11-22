@@ -104,8 +104,7 @@ export function withCredential(credential: string): CallAuth {
 }
 
 type HarnessStorage =
-  | { backend: 'sqlite' }
-  | { backend: 'postgres'; connectionString: string }
+  { backend: 'sqlite' } | { backend: 'postgres'; connectionString: string }
 
 export interface WriteHarnessOptions {
   /** Replaces the silent logger, for tests that read what the service logs. */
@@ -300,15 +299,13 @@ async function startWriteHarness(
     async sequencedOps(did) {
       const events = await ctx.actorStore.read(did, async (store) => {
         const rows = await store.sequence.getEventsSince(0, READ_LIMIT)
-        return rows.map(
-          (row): SeqEvent => ({
-            seq: row.seq,
-            did: row.did,
-            time: row.sequencedAt,
-            rev: '',
-            event: row.event,
-          }),
-        )
+        return rows.map((row): SeqEvent => ({
+          seq: row.seq,
+          did: row.did,
+          time: row.sequencedAt,
+          rev: '',
+          event: row.event,
+        }))
       })
       return events.flatMap((event) =>
         decodeEvent(event).ops.map((op) => describeOp(event, op)),

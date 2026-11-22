@@ -57,9 +57,7 @@ export interface UnresolvableSubjectFacts {
 }
 
 export type SubjectFacts =
-  | RepoSubjectFacts
-  | SpaceSubjectFacts
-  | UnresolvableSubjectFacts
+  RepoSubjectFacts | SpaceSubjectFacts | UnresolvableSubjectFacts
 
 /**
  * Parses a record URI whose authority is a DID and that is spelled exactly as

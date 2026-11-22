@@ -20,12 +20,10 @@ export type UnresolvedReason = Extract<
 export type BoundaryWriteRefusal = UnresolvedReason | 'invalid-boundary'
 
 export type BoundarySpaceUriResult =
-  | { ok: true; value: string }
-  | { ok: false; reason: string }
+  { ok: true; value: string } | { ok: false; reason: string }
 
 export type BoundaryWriteResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; reason: BoundaryWriteRefusal }
+  { ok: true; value: T } | { ok: false; reason: BoundaryWriteRefusal }
 
 /**
  * Formats the space URI of a boundary, `at://{serviceDid}/space/{spaceType}/{name}`

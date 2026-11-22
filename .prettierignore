@@ -3,3 +3,4 @@ node_modules
 pnpm-lock.yaml
 deno.lock
 stratos-client/src/lexicons.gen.ts
+stratos-core/tests/fixtures/stratos-validation.0e153eae.reference.ts

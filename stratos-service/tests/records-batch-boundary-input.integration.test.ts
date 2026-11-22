@@ -67,15 +67,13 @@ describe('Batch indexes each op under its own authorized boundary', () => {
   async function readSeqEvents(): Promise<SeqEvent[]> {
     return actorStore.read(testDid, async (store: any) => {
       const rows = await store.sequence.getEventsSince(0, 1000)
-      return rows.map(
-        (row: any): SeqEvent => ({
-          seq: row.seq,
-          did: row.did,
-          time: row.sequencedAt,
-          rev: '',
-          event: row.event,
-        }),
-      )
+      return rows.map((row: any): SeqEvent => ({
+        seq: row.seq,
+        did: row.did,
+        time: row.sequencedAt,
+        rev: '',
+        event: row.event,
+      }))
     })
   }
 
