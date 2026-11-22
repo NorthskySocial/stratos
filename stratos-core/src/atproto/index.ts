@@ -173,8 +173,7 @@ function toIpld(val: unknown): unknown {
  */
 export function extractBoundaries(record: Record<string, unknown>): string[] {
   const boundary = record.boundary as
-    | { values?: Array<{ value?: string }> }
-    | undefined
+    { values?: Array<{ value?: string }> } | undefined
   if (!boundary?.values || !Array.isArray(boundary.values)) return []
   return boundary.values
     .map((d) => d.value)

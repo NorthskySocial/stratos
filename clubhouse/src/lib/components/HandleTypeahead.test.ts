@@ -23,8 +23,7 @@ describe('HandleTypeahead', () => {
     async (action) => {
       vi.useFakeTimers()
       let resolveSearch:
-        | ((actors: Array<{ did: string; handle: string }>) => void)
-        | undefined
+        ((actors: Array<{ did: string; handle: string }>) => void) | undefined
       mocks.searchActors.mockReturnValue(
         new Promise((resolve) => {
           resolveSearch = resolve

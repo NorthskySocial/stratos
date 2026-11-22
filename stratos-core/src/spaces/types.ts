@@ -66,5 +66,4 @@ export interface SpacesError {
  * for why this convention is used.
  */
 export type SpacesResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: SpacesError }
+  { ok: true; value: T } | { ok: false; error: SpacesError }

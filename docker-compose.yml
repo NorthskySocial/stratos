@@ -144,7 +144,7 @@ services:
   # Also set STORAGE_BACKEND=postgres and configure STRATOS_POSTGRES_URL
   # or STRATOS_PG_* vars above.
   postgres:
-    image: postgres:18-alpine
+    image: postgres:19-alpine
     container_name: postgres
     environment:
       POSTGRES_USER: stratos
@@ -161,7 +161,7 @@ services:
       retries: 5
 
   valkey:
-    image: valkey/valkey:8-alpine
+    image: valkey/valkey:9-alpine
     container_name: stratos-valkey
     volumes:
       - valkey-data:/data

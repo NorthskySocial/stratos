@@ -115,8 +115,7 @@ export interface RedirectTargetGates {
  * host the caller cannot otherwise see, so it belongs in the service log only.
  */
 export type RedirectTargetVerdict =
-  | { allowed: true }
-  | { allowed: false; message: string; logDetail?: string }
+  { allowed: true } | { allowed: false; message: string; logDetail?: string }
 
 const PROOF_REQUIRED_MESSAGE =
   'redirect_uri is not declared by a client_id metadata document and its origin is not allow-listed'

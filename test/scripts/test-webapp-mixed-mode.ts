@@ -5,7 +5,7 @@ import {
   type BrowserContext,
   chromium,
   type Page,
-} from 'npm:playwright@1.58.2'
+} from 'npm:playwright@1.65.1'
 import { adminSetBoundaries } from './lib/admin.ts'
 import {
   CLOUDFLARE_TUNNEL_URL,
@@ -267,8 +267,7 @@ function assertStratosWrite(
 ): void {
   const record = write?.body['record'] as Record<string, unknown> | undefined
   const boundary = record?.['boundary'] as
-    | { values?: Array<{ value?: string }> }
-    | undefined
+    { values?: Array<{ value?: string }> } | undefined
   assert(
     write?.url.startsWith(stratosUrl) === true &&
       write.body['boundary'] === DOMAINS.swordsmith &&
@@ -288,8 +287,7 @@ function assertReplyWrite(
 ): void {
   const record = write?.body['record'] as Record<string, unknown> | undefined
   const reply = record?.['reply'] as
-    | { root?: RecordResponse; parent?: RecordResponse }
-    | undefined
+    { root?: RecordResponse; parent?: RecordResponse } | undefined
   assert(
     reply?.root?.uri === root.uri &&
       reply?.root?.cid === root.cid &&

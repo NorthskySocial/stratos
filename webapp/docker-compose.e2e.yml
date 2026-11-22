@@ -6,7 +6,7 @@
 # and reaches this service at http://webapp:5173.
 services:
   webapp:
-    image: node:24-bookworm-slim
+    image: node:26-bookworm-slim
     working_dir: /workspace/webapp
     # Run as the host user. A root install into the bind mount leaves
     # root-owned files that break pnpm on the host.
@@ -16,18 +16,18 @@ services:
       # mounted node_modules.
       CI: 'true'
       # Arbitrary host UIDs have no passwd entry in this image, so $HOME is
-      # not writable. Give corepack a writable cache location.
+      # not writable. npm needs a writable cache location.
       HOME: /tmp
-      COREPACK_HOME: /tmp/corepack
     volumes:
       - ..:/workspace
     # Keep the pnpm version in sync with the host. A version mismatch makes
     # each side purge and rebuild the mounted node_modules.
-    # `corepack enable` needs root, so invoke pnpm through corepack instead.
+    # Node 25 and later no longer bundle corepack, and a global npm install
+    # needs root, so install pnpm under /tmp and invoke it from there.
     command: >
-      sh -c "corepack prepare pnpm@11.21.0 --activate &&
-             corepack pnpm install --frozen-lockfile &&
-             corepack pnpm run dev"
+      sh -c "npm install --prefix /tmp/pnpm pnpm@12.21.0 &&
+             /tmp/pnpm/node_modules/.bin/pnpm install --frozen-lockfile &&
+             /tmp/pnpm/node_modules/.bin/pnpm run dev"
     ports:
       - '5173:5173'
     healthcheck:

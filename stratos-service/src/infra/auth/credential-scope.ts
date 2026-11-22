@@ -91,8 +91,7 @@ export function resolveCredentialScope(
  */
 export function requireServiceCaller(auth: HandlerAuth | undefined): string {
   const creds = auth?.credentials as
-    | { type?: string; did?: string; iss?: string }
-    | undefined
+    { type?: string; did?: string; iss?: string } | undefined
   if (creds?.type !== 'service') {
     throw new AuthRequiredError('Service auth required')
   }

@@ -5,7 +5,7 @@
 // admin session cookie in state so later phases (test-spaces revocation) can
 // reuse it without a second browser login.
 
-import { chromium } from 'npm:playwright@1.58.2'
+import { chromium } from 'npm:playwright@1.65.1'
 import {
   ADMIN_OPERATOR_KEY,
   RESERVED_DOMAIN,

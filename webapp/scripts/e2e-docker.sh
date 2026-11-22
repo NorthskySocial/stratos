@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # Keep this tag in sync with the @playwright/test version in package.json.
-PLAYWRIGHT_VERSION="v1.60.0-noble"
+PLAYWRIGHT_VERSION="v1.65.1-noble"
 PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:${PLAYWRIGHT_VERSION}"
 
 WEBAPP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

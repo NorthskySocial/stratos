@@ -27,36 +27,22 @@ pnpm exec vitest run
 
 ## PostgreSQL integration tests
 
-`postgres-integration.test.ts` exercises the Postgres storage backend against a real database. Tests are **skipped by default** — they only run when `STRATOS_POSTGRES_URL` is set.
+`postgres-integration.test.ts` exercises the Postgres storage backend against a real database. The test starts its own throwaway `postgres:19-alpine` container through Testcontainers (`startPostgresContainer()` in `helpers/test-env.ts`), so it needs no database URL or compose file. It does need a container runtime that Testcontainers can reach, such as Docker or Podman, and it fails in `beforeAll` when none is available. The other Postgres tests (`boundary-audit-postgres.test.ts`, `boundary-catalog/postgres.test.ts`, `service-boundary-admission.test.ts`) start containers the same way.
 
 ### Running
 
-Start a local Postgres instance:
-
 ```bash
-docker compose -f docker-compose.postgres.yml up -d
+pnpm exec vitest run tests/postgres-integration.test.ts
 ```
 
-Then run the tests:
+The full suite (`pnpm exec vitest run`) includes these tests and starts the containers as well.
+
+With rootless Docker, point Testcontainers at the rootless daemon and disable its Ryuk cleanup container if it cannot start:
 
 ```bash
-STRATOS_POSTGRES_URL=postgres://stratos:stratos@localhost:5432/stratos \
-  pnpm exec vitest run tests/postgres-integration.test.ts
-```
-
-Or use individual connection parameters instead of a URL:
-
-```bash
-STRATOS_PG_HOST=localhost STRATOS_PG_PORT=5432 \
-  STRATOS_PG_USERNAME=stratos STRATOS_PG_PASSWORD=stratos STRATOS_PG_DBNAME=stratos \
-  pnpm exec vitest run tests/postgres-integration.test.ts
-```
-
-Or run the full suite with PG tests included:
-
-```bash
-STRATOS_POSTGRES_URL=postgres://stratos:stratos@localhost:5432/stratos \
-  pnpm exec vitest run
+export DOCKER_CONTEXT=rootless
+export DOCKER_HOST="$(docker context inspect rootless --format '{{.Endpoints.docker.Host}}')"
+export TESTCONTAINERS_RYUK_DISABLED=true
 ```
 
 ### What's tested
@@ -75,13 +61,10 @@ Each actor gets an isolated Postgres schema (`actor_{hash}`). Schemas are cleane
 
 Shared test utilities live in `helpers/test-env.ts`:
 
-| Export                         | Purpose                                                                      |
-| ------------------------------ | ---------------------------------------------------------------------------- |
-| `POSTGRES_URL`                 | Value of `STRATOS_POSTGRES_URL` env var                                      |
-| `HAS_POSTGRES`                 | `true` when `STRATOS_POSTGRES_URL` is set                                    |
-| `IS_POSTGRES`                  | `true` when `STRATOS_TEST_BACKEND=postgres` or `STRATOS_POSTGRES_URL` is set |
-| `cborToRecord()`               | Test stub for CBOR→record deserialization                                    |
-| `createCid()`                  | Generate a CID from a string or bytes                                        |
-| `createMockBlobStore()`        | In-memory blob store mock                                                    |
-| `createMockBlobStoreCreator()` | Factory returning per-DID mock blob stores                                   |
-| `createTestBackend()`          | Returns a SQLite or Postgres `ActorStore` based on env                       |
+| Export                         | Purpose                                    |
+| ------------------------------ | ------------------------------------------ |
+| `cborToRecord()`               | Test stub for CBOR→record deserialization  |
+| `createCid()`                  | Generate a CID from a string or bytes      |
+| `createMockBlobStoreCreator()` | Factory returning per-DID mock blob stores |
+| `startPostgresContainer()`     | Start a Postgres container, return its URL |
+| `stopPostgresContainer()`      | Stop the container started above           |

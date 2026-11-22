@@ -44,8 +44,7 @@ export interface VerifiedTokenClaims {
  * Result of token verification
  */
 export type TokenVerificationResult =
-  | VerifiedTokenClaims
-  | { active: false; error?: string }
+  VerifiedTokenClaims | { active: false; error?: string }
 
 /**
  * Interface for token verification

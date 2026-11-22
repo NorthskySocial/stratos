@@ -24,9 +24,7 @@ interface ReadinessCase {
 type ReadinessEvent =
   | {
       type:
-        | 'mark_unavailable'
-        | 'mark_session_established'
-        | 'begin_reconciliation'
+        'mark_unavailable' | 'mark_session_established' | 'begin_reconciliation'
     }
   | { type: 'complete_reconciliation'; errors: number; truncated: boolean }
 

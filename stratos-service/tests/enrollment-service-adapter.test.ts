@@ -4,12 +4,10 @@ import { EnrollmentServiceImpl } from '../src/features/enrollment/adapter.js'
 
 /** Only the methods this adapter calls. */
 type MockEnrollmentStore = {
-  [K in
-    | 'isEnrolled'
-    | 'enroll'
-    | 'getEnrollment'
-    | 'getBoundaries'
-    | 'unenroll']: Mock
+  [
+    K in
+      'isEnrolled' | 'enroll' | 'getEnrollment' | 'getBoundaries' | 'unenroll'
+  ]: Mock
 }
 
 describe('EnrollmentServiceImpl', () => {

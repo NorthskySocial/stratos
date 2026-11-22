@@ -203,7 +203,7 @@ fn reconciles_actor_enrollment_shrink_and_unenrollment_atomically() {
             .query_row(
                 "SELECT COUNT(*) FROM post_boundary WHERE boundary = 'crew'",
                 [],
-                |row| row.get::<_, u64>(0)
+                |row| row.get::<_, i64>(0)
             )
             .unwrap(),
         0
@@ -214,7 +214,7 @@ fn reconciles_actor_enrollment_shrink_and_unenrollment_atomically() {
             .query_row(
                 "SELECT COUNT(*) FROM source_coverage WHERE boundary = 'crew'",
                 [],
-                |row| row.get::<_, u64>(0)
+                |row| row.get::<_, i64>(0)
             )
             .unwrap(),
         0
@@ -225,7 +225,7 @@ fn reconciles_actor_enrollment_shrink_and_unenrollment_atomically() {
             .query_row(
                 "SELECT COUNT(*) FROM space_sync_pending_verification WHERE boundary = 'crew'",
                 [],
-                |row| row.get::<_, u64>(0)
+                |row| row.get::<_, i64>(0)
             )
             .unwrap(),
         0
@@ -256,7 +256,7 @@ fn reconciles_actor_enrollment_shrink_and_unenrollment_atomically() {
         store
             .connection
             .query_row("SELECT COUNT(*) FROM actor_cursor", [], |row| row
-                .get::<_, u64>(0))
+                .get::<_, i64>(0))
             .unwrap(),
         0
     );
@@ -273,7 +273,7 @@ fn reconciles_actor_enrollment_shrink_and_unenrollment_atomically() {
         "space_sync_pending_verification",
         "space_sync_stage",
     ] {
-        let count: u64 = store
+        let count: i64 = store
             .connection
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                 row.get(0)
@@ -285,7 +285,7 @@ fn reconciles_actor_enrollment_shrink_and_unenrollment_atomically() {
         store
             .connection
             .query_row("SELECT COUNT(*) FROM source_coverage", [], |row| row
-                .get::<_, u64>(0))
+                .get::<_, i64>(0))
             .unwrap(),
         0
     );
@@ -293,7 +293,7 @@ fn reconciles_actor_enrollment_shrink_and_unenrollment_atomically() {
         store
             .connection
             .query_row("SELECT COUNT(*) FROM suppression_marker", [], |row| row
-                .get::<_, u64>(0))
+                .get::<_, i64>(0))
             .unwrap(),
         0
     );
