@@ -1,4 +1,4 @@
-import { InvalidRequestError } from '@atproto/xrpc-server'
+import { InvalidRequestError, verifyJwt } from '@atproto/xrpc-server'
 import {
   type DidDocument,
   getDidKeyFromMultibase,
@@ -258,42 +258,46 @@ export interface MethodBinding {
  * Verify a service-auth JWT bound to one method, as an account's host sends
  * it on the account's behalf.
  *
- * Narrower than {@link verifyServiceAuth}: `lxm` must be present and equal
- * the bound method, `aud` must be one of the bound audiences, and only the
- * issuer's `#atproto` signing key verifies the signature.
+ * The pinned upstream verifier checks the token's shape, type, expiry, method
+ * and signature, and refetches the issuer's DID document once when the
+ * signature does not verify, as after a key rotation. Narrower than
+ * {@link verifyServiceAuth}: `aud` must be one of the bound audiences, the
+ * expiry must be a finite number, and only the `#atproto` signing key of the
+ * account itself, never a service of it, verifies the signature.
  *
- * @throws InvalidRequestError if any claim or the signature does not verify
+ * @throws Error if any claim or the signature does not verify
  */
 export async function verifyMethodBoundServiceAuth(
   authHeader: string,
   binding: MethodBinding,
   idResolver: IdResolver,
 ): Promise<ServiceAuthResult> {
-  const { parts, payload } = parseAuthToken(authHeader)
+  const { token } = parseAuthToken(authHeader)
 
-  if (!payload.iss) {
-    throw new InvalidRequestError('Missing iss claim')
-  }
+  const payload = await verifyJwt(
+    token,
+    null,
+    binding.lxm,
+    async (iss, forceRefresh) => {
+      if (iss.includes('#')) {
+        throw new InvalidRequestError('Invalid iss claim')
+      }
+      const didDoc = await idResolver.did.resolve(iss, forceRefresh)
+      const signingKey = didDoc ? getKey(didDoc) : undefined
+      if (!signingKey) {
+        throw new InvalidRequestError('Could not resolve issuer signing key')
+      }
+      return signingKey
+    },
+    verifyLowSSignature,
+  )
   if (!binding.audiences.includes(payload.aud)) {
     throw new InvalidRequestError('Invalid aud claim')
   }
-  if (!payload.exp || Date.now() / 1000 > payload.exp) {
-    throw new InvalidRequestError('Token expired')
-  }
-  if (payload.lxm !== binding.lxm) {
-    throw new InvalidRequestError('Invalid lxm claim')
-  }
-
-  const didDoc = await resolveIssuerDid(payload.iss, idResolver)
-  const signingKey = getKey(didDoc)
-  const { signingInputBytes, signatureBytes } = prepareVerificationData(parts)
-  const verified =
-    signingKey !== undefined &&
-    (await crypto
-      .verifySignature(signingKey, signingInputBytes, signatureBytes)
-      .catch(() => false))
-  if (!verified) {
-    throw new InvalidRequestError('Invalid signature')
+  // JSON reads an exponent too large for a double as Infinity, which the
+  // upstream expiry comparison never refuses.
+  if (!Number.isFinite(payload.exp)) {
+    throw new InvalidRequestError('Invalid exp claim')
   }
 
   return {
@@ -302,4 +306,15 @@ export async function verifyMethodBoundServiceAuth(
     lxm: payload.lxm,
     exp: payload.exp,
   }
+}
+
+// Upstream accepts a high-S signature on a service token; this keeps the
+// crypto package's default, which refuses one.
+async function verifyLowSSignature(
+  key: string,
+  msgBytes: Uint8Array,
+  sigBytes: Uint8Array,
+  alg: string,
+): Promise<boolean> {
+  return crypto.verifySignature(key, msgBytes, sigBytes, { jwtAlg: alg })
 }

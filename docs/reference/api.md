@@ -531,23 +531,36 @@ nothing; the feed generator still polls the member's PDS on its own schedule.
 The token is a service JWT signed by the `#atproto` key of the writing
 account. Its `iss` must equal `repo`, its `lxm` must be
 `com.atproto.space.notifyRepoUpdate`, and its `aud` must be the Stratos DID or
-`<Stratos DID>#atproto_pds`. A missing or refused token answers
-`401 AuthenticationRequired`, as other service JWT routes do.
+`<Stratos DID>#atproto_pds`. Its `exp` must be a finite number, and a token typed as an
+access token, a refresh token or a DPoP proof is refused. A missing or refused
+token answers `401 AuthenticationRequired`, as other service JWT routes do.
 
 The checks, in order:
 
-| Check                                                                                                    | Answer                       |
-| -------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| The token verifies                                                                                       | `401 AuthenticationRequired` |
-| The writing issuer is under 1,500 notices an hour                                                        | `429 RateLimitExceeded`      |
-| The body has a string `space`, a DID `repo`, a TID `repoRev` and bytes `data`                            | `400 InvalidRequest`         |
-| `iss` equals `repo`                                                                                      | `403 Forbidden`              |
-| `space` is an `at:space/` URI of this service, of type `zone.stratos.space.feed`, for an active boundary | `400 SpaceNotFound`          |
-| `repoRev` is at most five minutes ahead of the clock                                                     | `400 FutureRev`              |
-| `repo` is an active member with `pds` custody who holds the space's boundary                             | `403 Forbidden`              |
+| Check                                                                                         | Answer                       |
+| --------------------------------------------------------------------------------------------- | ---------------------------- |
+| The body is JSON in a UTF charset, in a content encoding the parser reads, and at most 100 kB | `400`, `415` or `413`        |
+| The token verifies                                                                            | `401 AuthenticationRequired` |
+| The body has a string `space`, a DID `repo`, a TID `repoRev` and bytes `data`                 | `400 InvalidRequest`         |
+| `iss` equals `repo`                                                                           | `403 Forbidden`              |
+| `space` is an `at:space/` URI of this service, of type `zone.stratos.space.feed`              | `400 SpaceNotFound`          |
+| `repo` is an active member with `pds` custody, not a service, who holds the space's boundary  | `403 Forbidden`              |
+| The writer is under 1,500 notices an hour and 10,000 a day                                    | `429 RateLimitExceeded`      |
+| The boundary is active                                                                        | `403 Forbidden`              |
+| `repoRev` is at most five minutes ahead of the clock                                          | `400 FutureRev`              |
 
-A body that is not JSON answers `400 InvalidRequest` before the token is
-checked. A space URI in the earlier `at://` spelling is `SpaceNotFound`. A member whose
+Every check after the member check answers only a writer of the space. A
+notice from anyone else for a boundary they do not hold gets the same answer,
+`403 Forbidden` with the message
+`Repo is not authorized to write to the space`, whether the boundary is
+active, deactivating or unknown and whatever the revision. So does a
+deactivating boundary its member still holds. Only a writer counts against the
+rate limits.
+
+A body that the parser refuses is answered before the token is checked: not
+JSON is `400 InvalidRequest`, another charset or content encoding is
+`415 UnsupportedMediaType`, and more than 100 kB is `413 PayloadTooLarge`. A
+space URI in the earlier `at://` spelling is `SpaceNotFound`. A member whose
 records Stratos hosts is refused with 403, because their repo is not on a PDS.
 
 ## Export

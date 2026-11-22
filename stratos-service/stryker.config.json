@@ -44,6 +44,7 @@
     "src/api/handlers/repo-read-handlers.ts",
     "src/api/records/**/*.ts",
     "src/features/space-read/**/*.ts",
+    "src/features/repo-update-notice/**/*.ts",
     "!src/**/index.ts",
     "!src/**/*.d.ts"
   ],
