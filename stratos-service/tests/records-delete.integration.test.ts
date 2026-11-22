@@ -14,7 +14,11 @@ import {
   ServiceDb,
 } from '../src/db'
 import { deleteRecord, getRecord } from '../src/api/records'
-import { createMockBlobStore, createTestConfig } from './utils'
+import {
+  createEmptyLabelLog,
+  createMockBlobStore,
+  createTestConfig,
+} from './utils'
 
 describe('Record Delete Handler', () => {
   let dataDir: string
@@ -54,6 +58,7 @@ describe('Record Delete Handler', () => {
       cfg,
       actorStore,
       enrollmentStore,
+      labelStore: createEmptyLabelLog(),
       serviceDid,
       writeRateLimiter: {
         assertWriteAllowed: vi.fn(),

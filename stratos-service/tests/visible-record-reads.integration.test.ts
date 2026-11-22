@@ -33,6 +33,7 @@ import {
   startSqliteWriteHarness,
   type WriteHarness,
 } from './helpers/write-harness.js'
+import { createEmptyLabelLog } from './utils/index.js'
 
 const COLLECTION = 'zone.stratos.feed.post'
 const OWNER_DID = 'did:plc:misato-katsuragi'
@@ -197,7 +198,10 @@ describe('visible record reads', () => {
     })
 
     it('the hydration batch read chunks its uris, with no per-record boundary read', async () => {
-      const resolver = new ActorStoreRecordResolver(actorStore)
+      const resolver = new ActorStoreRecordResolver(
+        actorStore,
+        createEmptyLabelLog(),
+      )
       let resolved = 0
       const calls = await storeCallsDuring(async () => {
         const found = await resolver.getRecords(
@@ -249,7 +253,10 @@ describe('visible record reads', () => {
     })
 
     it('the hydration single read', async () => {
-      const resolver = new ActorStoreRecordResolver(actorStore)
+      const resolver = new ActorStoreRecordResolver(
+        actorStore,
+        createEmptyLabelLog(),
+      )
 
       const calls = await storeCallsDuring(() =>
         resolver.getRecord(OWNER_DID, uriOf('rei')),

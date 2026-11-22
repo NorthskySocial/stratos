@@ -17,7 +17,11 @@ import {
   ServiceDb,
 } from '../src/db/index.js'
 import { getRecord, updateRecord } from '../src/api/records/index.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  createEmptyLabelLog,
+  createMockBlobStore,
+  createTestConfig,
+} from './utils/index.js'
 
 describe('Record Update Handler', () => {
   let dataDir: string
@@ -65,6 +69,7 @@ describe('Record Update Handler', () => {
       cfg,
       actorStore,
       enrollmentStore,
+      labelStore: createEmptyLabelLog(),
       serviceDid,
       writeRateLimiter: {
         assertWriteAllowed: vi.fn(),

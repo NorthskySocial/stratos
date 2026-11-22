@@ -1159,7 +1159,9 @@ be `!takedown`. Set `neg: true` to lift a takedown.
   the label. Stratos cannot hide a record that it does not host.
 - **Account subject:** use `{ "$type": "zone.stratos.moderation.defs#accountSubject", "did": "{did}" }`.
   A takedown deactivates the member's enrollment. A negation reactivates it only
-  when no operator hold is set. Stratos writes no record or blob marker.
+  when no operator hold is set. Stratos writes no record or blob marker. While
+  the takedown stands, every read of the member's records and blobs answers as
+  for a taken-down record, for every caller. A negation serves them again.
   `SubjectNotFound` means the DID has no enrollment. Stratos rejects a service
   enrollment as an account subject. This works for both custody classes.
 
@@ -1262,6 +1264,9 @@ it reads the frames.
 
 - `subscribeRecords` and `listRepoOps` leave out the create and update ops of a
   record that is taken down now.
+- While an account takedown stands, they leave out every create and update op
+  of the member, on a replay too. Apply the account label to drop your copies.
+  After the negation, read the member again from the start of the stream.
 - Stratos skips an event that has no ops left.
 - Delete ops always pass the takedown filter. The boundary scope rules still
   apply to them. Your copy of a taken-down record can still be removed.

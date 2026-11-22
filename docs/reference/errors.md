@@ -93,7 +93,8 @@ space grant for this service that lacks the collection. See
 [Differences from the upstream procedures](/reference/api#differences-from-the-upstream-procedures).
 
 `RecordNotFound` also appears when reading. There it also covers a record that
-the caller may not read.
+the caller may not read, a record that is taken down, and every record of a
+taken-down account.
 
 ## Reading records
 

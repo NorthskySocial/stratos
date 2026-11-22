@@ -651,15 +651,33 @@ describe('deleting a taken-down record', () => {
       ])
     })
 
-    it('(e6) account labels and space-form labels never hide a repo-form record', async () => {
+    it('(e6) a space-form label never hides a repo-form record', async () => {
       await createPost('ayanami')
       await removePost('ayanami')
-      await appendLabelOnStore(AUTHOR_DID, 'account', false)
       await appendLabelOnStore(
         `at:space/${SERVICE_DID}/zone.stratos.space.feed/${NERV_NAME}/${AUTHOR_DID}/${POST}/ayanami`,
         'record',
         false,
       )
+
+      expect((await replayedOps()).map(opSummary)).toEqual([
+        `create ${POST}/ayanami`,
+        `delete ${POST}/ayanami`,
+      ])
+      expect(await oplogSummary()).toEqual(['write ayanami', 'delete ayanami'])
+    })
+
+    it('(e6) an account takedown hides every create of the author and keeps the delete', async () => {
+      await createPost('ayanami')
+      await removePost('ayanami')
+      await appendLabelOnStore(AUTHOR_DID, 'account', false)
+
+      expect((await replayedOps()).map(opSummary)).toEqual([
+        `delete ${POST}/ayanami`,
+      ])
+      expect(await oplogSummary()).toEqual(['delete ayanami'])
+
+      await appendLabelOnStore(AUTHOR_DID, 'account', true)
 
       expect((await replayedOps()).map(opSummary)).toEqual([
         `create ${POST}/ayanami`,

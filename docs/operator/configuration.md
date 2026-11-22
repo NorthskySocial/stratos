@@ -244,6 +244,34 @@ an `accountSubject` with the member's DID.
 - This works for members with `stratos` custody and `pds` custody.
 - Stratos writes no record or blob marker for an account takedown.
 
+While an account takedown stands, Stratos serves no record or blob of the
+member to any caller. Each read answers as it does when every record of the
+member is taken down:
+
+- `com.atproto.repo.getRecord`, `zone.stratos.space.getRecord` and
+  `zone.stratos.repo.hydrateRecord` answer `RecordNotFound`.
+- `zone.stratos.repo.hydrateRecords` lists the member's URIs in `notFound`.
+- `com.atproto.repo.listRecords`, `zone.stratos.sync.listRecordPaths` and
+  `zone.stratos.space.listBlobs` leave out the member's records and blobs.
+- Both `getBlob` methods answer `BlobBlocked`.
+- `zone.stratos.space.listRepos` leaves out the member, as it does for every
+  inactive member.
+- `com.atproto.repo.describeRepo` still names the member's collections. A
+  record takedown does not change it either.
+
+A negation serves every record again at once. Stratos rewrites nothing. Each
+read asks the label log, so every Stratos process applies a takedown and its
+negation on its next read. An operator hold alone hides no record. It only
+drops the member from `listRepos`, which lists active members.
+
+A `pds`-custody member's records are on their own PDS, which Stratos does not
+serve. `listRepos` already leaves out the inactive member, so the feed
+generator stops reading that PDS.
+
+One limit applies. A takedown deactivates the member before it records the
+label. If recording fails, the member stays inactive, and Stratos serves the
+records until the moderation service repeats the call.
+
 An operator hold is separate. `zone.stratos.admin.setActive` with `active: false`
 sets it. `active: true` clears it. The two holds do not lift each other.
 
@@ -262,7 +290,8 @@ sets it. `active: true` clears it. The two holds do not lift each other.
   `applyWrites` and `uploadBlob` are all refused with `NotEnrolled` before the
   handler runs. Updates go through `applyWrites`.
 
-Consumers read account labels through `queryLabels`.
+Consumers read account labels through `queryLabels`. A consumer that keeps
+copies of a member's records must drop them itself.
 
 ### Takedown and the sync streams
 
@@ -272,6 +301,8 @@ reads the frames.
 
 - Both streams leave out the create and update ops of a record that is taken
   down now.
+- While an account takedown stands, both streams leave out every create and
+  update op of the member. A replay from any cursor does the same.
 - Stratos skips an event that has no ops left.
 - Delete ops always pass the takedown filter. The boundary scope rules still
   apply to them.
@@ -282,6 +313,12 @@ reads the frames.
 A takedown applies to sync frames that Stratos reads after it. A page that
 Stratos already read can still deliver the record once. Consumers must apply
 labels.
+
+An account takedown sends nothing to a consumer that is already caught up. It
+must apply the account label from `queryLabels` to drop its copies. After the
+negation it reads the member again from the start of the stream. The Rust feed
+generator does both. A consumer that applies no labels keeps serving its copies
+until it reads the member again.
 
 Deleting a taken-down record that carries a boundary sends a delete event.
 Subscribers in the record's boundaries receive it. This holds for a single

@@ -9,7 +9,7 @@ import { BlobAuthServiceImpl } from '../src/features'
 import type { ActorStore } from '../src/actor-store-types.js'
 import type { BoundaryResolver } from '@northskysocial/stratos-core'
 import { createCid } from './helpers/test-env.js'
-import { createMockBlobStore } from './utils/index.js'
+import { createEmptyLabelLog, createMockBlobStore } from './utils/index.js'
 
 describe('BlobAuthServiceImpl', () => {
   let mockActorStore: any
@@ -74,6 +74,7 @@ describe('BlobAuthServiceImpl', () => {
     service = new BlobAuthServiceImpl(
       mockActorStore as unknown as ActorStore,
       mockBoundaryResolver as unknown as BoundaryResolver,
+      createEmptyLabelLog(),
     )
   })
 
@@ -113,6 +114,7 @@ describe('BlobAuthServiceImpl', () => {
     service = new BlobAuthServiceImpl(
       actorStore,
       mockBoundaryResolver as unknown as BoundaryResolver,
+      createEmptyLabelLog(),
     )
     await seedRecordWithBlob(
       actorStore,
@@ -137,6 +139,7 @@ describe('BlobAuthServiceImpl', () => {
     service = new BlobAuthServiceImpl(
       actorStore,
       mockBoundaryResolver as unknown as BoundaryResolver,
+      createEmptyLabelLog(),
     )
     await seedRecordWithBlob(
       actorStore,
@@ -214,6 +217,7 @@ describe('BlobAuthServiceImpl', () => {
     service = new BlobAuthServiceImpl(
       actorStore,
       mockBoundaryResolver as unknown as BoundaryResolver,
+      createEmptyLabelLog(),
     )
     const missingUri = 'at://did:plc:shinji/zone.stratos.feed.post/missing'
     const presentUri = 'at://did:plc:shinji/zone.stratos.feed.post/present'
@@ -304,6 +308,7 @@ describe('BlobAuthServiceImpl', () => {
       service = new BlobAuthServiceImpl(
         actorStore,
         mockBoundaryResolver as unknown as BoundaryResolver,
+        createEmptyLabelLog(),
       )
       await seedRecordWithBlob(
         actorStore,

@@ -5,10 +5,15 @@ import {
   BlobAuthServiceImpl,
   initBlob,
 } from '../../../src/features/blob/index.js'
+import { createEmptyLabelLog } from '../../utils/index.js'
 
 describe('initBlob', () => {
   it('returns a blob authentication service', () => {
-    const ctx = initBlob({} as ActorStore, {} as BoundaryResolver)
+    const ctx = initBlob(
+      {} as ActorStore,
+      {} as BoundaryResolver,
+      createEmptyLabelLog(),
+    )
     expect(ctx.blobAuth).toBeInstanceOf(BlobAuthServiceImpl)
   })
 })

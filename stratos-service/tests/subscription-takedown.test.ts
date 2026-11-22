@@ -662,7 +662,7 @@ describe('subscribeRecords takedown filter', () => {
       return { calls, ctx: budgetCtx }
     }
 
-    it('makes one state call and no label call when every candidate has a row', async () => {
+    it('makes one state call and one label call, for the author only, when every candidate has a row', async () => {
       await createPost('ayanami')
       await createPost('soryu')
       const { calls, ctx: spyCtx } = budgetCtx()
@@ -671,10 +671,10 @@ describe('subscribeRecords takedown filter', () => {
 
       expect(frames).toHaveLength(2)
       expect(calls.states).toBe(1)
-      expect(calls.labels).toEqual([])
+      expect(calls.labels).toEqual([[AUTHOR_DID]])
     })
 
-    it('makes one state call and one label call, for the rowless URIs only, when a candidate has no row', async () => {
+    it('makes one state call and one label call, for the author and the rowless URIs, when a candidate has no row', async () => {
       await createPost('ayanami')
       await appendEvent([valueOp('create', 'kaworu')])
       await appendEvent([valueOp('update', 'nagisa')])
@@ -683,7 +683,9 @@ describe('subscribeRecords takedown filter', () => {
       await framesUntilIdle(spyCtx)
 
       expect(calls.states).toBe(1)
-      expect(calls.labels).toEqual([[uriOf('kaworu'), uriOf('nagisa')]])
+      expect(calls.labels).toEqual([
+        [AUTHOR_DID, uriOf('kaworu'), uriOf('nagisa')].sort(),
+      ])
     })
 
     it('makes neither call when the page has no create or update candidates', async () => {

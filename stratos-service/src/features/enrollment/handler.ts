@@ -622,7 +622,7 @@ function registerSetActiveHandler(ctx: AppContext): void {
           })
         }
 
-        if (active && (await isAccountTakenDown(ctx, did))) {
+        if (active && (await isAccountTakenDown(ctx.labelStore, did))) {
           return res.status(400).json({
             error: 'AccountTakenDown',
             message: 'An account takedown is in force for this member',

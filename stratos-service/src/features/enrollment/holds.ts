@@ -1,5 +1,9 @@
 import { computeEnrollmentActive } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
+import { isAccountTakenDown } from '../../subscription/takedown-filter.js'
+
+// The takedown hold and every read path decide from the same label-log read.
+export { isAccountTakenDown }
 
 export interface HoldChange {
   /** The new stored operator hold. Absent keeps the stored value. */
@@ -22,18 +26,6 @@ export type EnrollmentHoldsContext = Pick<
 >
 
 /**
- * Reads the takedown hold from the label log: the account's latest label is
- * a takedown. Account subject keys are the bare DID.
- */
-export async function isAccountTakenDown(
-  ctx: Pick<AppContext, 'labelStore'>,
-  did: string,
-): Promise<boolean> {
-  const takedowns = await ctx.labelStore.latestTakedowns([did])
-  return takedowns.has(did)
-}
-
-/**
  * Applies a change to a member's holds and recomputes `active`.
  *
  * An operator hold and a moderation takedown are independent, so neither
@@ -52,7 +44,7 @@ export async function applyEnrollmentHolds(
     const storedOperatorHold = enrollment.operatorHold ?? false
     const operatorHold = change.operatorHold ?? storedOperatorHold
     const takedownHold =
-      change.takedownHold ?? (await isAccountTakenDown(ctx, did))
+      change.takedownHold ?? (await isAccountTakenDown(ctx.labelStore, did))
     const active = computeEnrollmentActive({ operatorHold, takedownHold })
 
     const updates: { active?: boolean; operatorHold?: boolean } = {}

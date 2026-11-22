@@ -17,12 +17,20 @@ import {
 import type { ActorStore } from '../../actor-store-types.js'
 import { readVisibleRecordsInChunks } from '../../api/records/read.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
+import {
+  type AccountTakedownLog,
+  isAccountTakenDown,
+} from '../../subscription/takedown-filter.js'
 
 /**
- * Implementation of RecordResolver port using actor store
+ * Implementation of RecordResolver port using actor store. A record of a
+ * taken-down account resolves as missing, as a taken-down record does.
  */
 export class ActorStoreRecordResolver implements RecordResolver {
-  constructor(private actorStore: ActorStore) {}
+  constructor(
+    private actorStore: ActorStore,
+    private takedownLog: AccountTakedownLog,
+  ) {}
 
   /**
    * Retrieve a record from the actor store for a given owner DID and URI.
@@ -40,7 +48,7 @@ export class ActorStoreRecordResolver implements RecordResolver {
     boundaries: string[]
   } | null> {
     const exists = await this.actorStore.exists(ownerDid)
-    if (!exists) {
+    if (!exists || (await isAccountTakenDown(this.takedownLog, ownerDid))) {
       return null
     }
 
@@ -92,7 +100,7 @@ export class ActorStoreRecordResolver implements RecordResolver {
     >()
 
     const exists = await this.actorStore.exists(ownerDid)
-    if (!exists) {
+    if (!exists || (await isAccountTakenDown(this.takedownLog, ownerDid))) {
       return result
     }
 

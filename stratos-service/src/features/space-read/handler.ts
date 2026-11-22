@@ -17,6 +17,7 @@ import {
   isSpaceCredentialAuth,
   resolveEffectiveBoundaries,
 } from '../../infra/auth/credential-scope.js'
+import { isAccountTakenDown } from '../../subscription/takedown-filter.js'
 import { createRepoHostResolverDeps } from './host-resolution.js'
 
 /**
@@ -187,7 +188,8 @@ async function handleGetSpaceRecord(
   await assertAdmitted(ctx, space, boundary, auth)
 
   const exists = await ctx.actorStore.exists(repo)
-  if (!exists) {
+  // A taken-down account reads as a missing record, as a taken-down record does.
+  if (!exists || (await isAccountTakenDown(ctx.labelStore, repo))) {
     throw new InvalidRequestError('Record not found', 'RecordNotFound')
   }
 
@@ -242,9 +244,17 @@ async function handleListSpaceBlobs(
     throw new InvalidRequestError('Could not find repo', 'RepoNotFound')
   }
 
-  const cids = await ctx.actorStore.read(repo, async (store) => {
-    return store.blob.listBlobsForBoundary({ boundary, since, cursor, limit })
-  })
+  // A taken-down account lists no blobs, as if every record were taken down.
+  const cids = (await isAccountTakenDown(ctx.labelStore, repo))
+    ? []
+    : await ctx.actorStore.read(repo, async (store) => {
+        return store.blob.listBlobsForBoundary({
+          boundary,
+          since,
+          cursor,
+          limit,
+        })
+      })
 
   return {
     cids,

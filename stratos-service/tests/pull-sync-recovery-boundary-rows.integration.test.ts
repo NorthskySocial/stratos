@@ -24,7 +24,7 @@ import {
   startPostgresContainer,
   stopPostgresContainer,
 } from './helpers/test-env.js'
-import { createMockBlobStore } from './utils/index.js'
+import { createEmptyLabelLog, createMockBlobStore } from './utils/index.js'
 
 const COLLECTION = 'zone.stratos.feed.post'
 const OWNER_DID = 'did:plc:misato-katsuragi'
@@ -82,7 +82,10 @@ function describeRecoveryFromBoundaryRows(
 
     beforeAll(async () => {
       harness = await openStore()
-      ctx = { actorStore: harness.actorStore } as unknown as AppContext
+      ctx = {
+        actorStore: harness.actorStore,
+        labelStore: createEmptyLabelLog(),
+      } as unknown as AppContext
     }, 120_000)
 
     afterAll(async () => {

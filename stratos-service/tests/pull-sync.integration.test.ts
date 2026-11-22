@@ -962,7 +962,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
           callerSet('nerv'),
         )
 
-      it('makes one state call and no label call when every candidate has a row', async () => {
+      it('makes one state call and one label call, for the author only, when every candidate has a row', async () => {
         await actorStore.create(repoDid)
         await appendEvent(repoDid, REV.r1, [
           { action: 'create', path: `${POST}/ayanami`, cid: 'cidA' },
@@ -973,10 +973,10 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         await listWith(spyCtx)
 
         expect(calls.states).toBe(1)
-        expect(calls.labels).toEqual([])
+        expect(calls.labels).toEqual([[repoDid]])
       })
 
-      it('makes one state call and one label call, for the rowless URIs only', async () => {
+      it('makes one state call and one label call, for the author and the rowless URIs', async () => {
         await actorStore.create(repoDid)
         await appendEvent(repoDid, REV.r1, [
           { action: 'create', path: `${POST}/ayanami`, cid: 'cidA' },
@@ -989,7 +989,9 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         await listWith(spyCtx)
 
         expect(calls.states).toBe(1)
-        expect(calls.labels).toEqual([[uriOf('kaworu'), uriOf('shinji')]])
+        expect(calls.labels).toEqual([
+          [repoDid, uriOf('kaworu'), uriOf('shinji')].sort(),
+        ])
       })
 
       it('makes neither call when the page has no create or update candidates', async () => {

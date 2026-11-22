@@ -269,9 +269,20 @@ async function initCoreServices(
     logger,
   )
 
-  const blobCtx = initBlob(actorStore, boundaryResolver, logger)
+  const blobCtx = initBlob(
+    actorStore,
+    boundaryResolver,
+    storage.labelStore,
+    logger,
+  )
 
-  const hydrationCtx = initHydration(actorStore, enrollmentStore, cache, logger)
+  const hydrationCtx = initHydration(
+    actorStore,
+    enrollmentStore,
+    storage.labelStore,
+    cache,
+    logger,
+  )
 
   const mstCtx = initMst(signingKey)
 

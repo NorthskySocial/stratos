@@ -51,6 +51,8 @@ import { SqliteAdminSessionStore } from '../src/oauth/admin-session-store.js'
 import { SqliteAdminUserStore } from '../src/oauth/admin-user-store.js'
 import { createMockBlobStore, createTestConfig } from './utils'
 import { makeSpaceUri } from './helpers/space-uri.js'
+import { defineAccountTakedownReadPathScenarios } from './helpers/account-takedown-read-paths.js'
+import { startSqliteWriteHarness } from './helpers/write-harness.js'
 
 const SERVICE_DID = 'did:web:stratos.test'
 const CREATE_LABEL_NSID = 'zone.stratos.moderation.createLabel'
@@ -171,9 +173,14 @@ describe('read paths after a takedown label', () => {
       enrollmentStore,
       labelStore,
       boundaryResolver,
-      blobAuth: new BlobAuthServiceImpl(actorStore, boundaryResolver, logger),
+      blobAuth: new BlobAuthServiceImpl(
+        actorStore,
+        boundaryResolver,
+        labelStore,
+        logger,
+      ),
       hydrationService: new HydrationServiceImpl(
-        new ActorStoreRecordResolver(actorStore),
+        new ActorStoreRecordResolver(actorStore, labelStore),
         boundaryResolver,
         logger,
       ),
@@ -600,3 +607,7 @@ describe('read paths after a takedown label', () => {
     })
   })
 })
+
+defineAccountTakedownReadPathScenarios('SQLite', () =>
+  startSqliteWriteHarness(),
+)

@@ -7,14 +7,21 @@ import {
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from '../../actor-store-types.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
+import {
+  type AccountTakedownLog,
+  isAccountTakenDown,
+} from '../../subscription/takedown-filter.js'
 
 /**
- * Implementation of BlobAuthService that uses ActorStore to check record boundaries.
+ * Implementation of BlobAuthService that uses ActorStore to check record
+ * boundaries. No blob of a taken-down account is served, not even to the
+ * owner, whose own reads its hold already refuses.
  */
 export class BlobAuthServiceImpl implements BlobAuthService {
   constructor(
     private actorStore: ActorStore,
     private boundaryResolver: BoundaryResolver,
+    private takedownLog: AccountTakedownLog,
     private logger?: Logger,
   ) {}
 
@@ -31,14 +38,18 @@ export class BlobAuthServiceImpl implements BlobAuthService {
     actorDid: string,
     blobCid: Cid,
   ): Promise<boolean> {
-    // 1. Ownership Bypass: If the viewer is the actor owning the repository, access is granted.
-    if (viewerDid && viewerDid === actorDid) {
-      return true
-    }
-
-    // 2. Unauthenticated viewers cannot access private blobs (Stratos default)
+    // 1. Unauthenticated viewers cannot access private blobs (Stratos default)
     if (!viewerDid) {
       return false
+    }
+
+    if (await isAccountTakenDown(this.takedownLog, actorDid)) {
+      return false
+    }
+
+    // 2. Ownership Bypass: If the viewer is the actor owning the repository, access is granted.
+    if (viewerDid === actorDid) {
+      return true
     }
 
     // 3. Resolve viewer boundaries
@@ -101,21 +112,25 @@ export class BlobAuthServiceImpl implements BlobAuthService {
     blobCids: Cid[],
   ): Promise<Map<string, boolean>> {
     const results = new Map<string, boolean>()
-
-    // Ownership bypass: if viewer is the actor owning the repository, access is granted for all blobs.
-    if (viewerDid && viewerDid === actorDid) {
+    const answerAll = (access: boolean) => {
       for (const cid of blobCids) {
-        results.set(cid.toString(), true)
+        results.set(cid.toString(), access)
       }
       return results
     }
 
     // Unauthenticated viewers cannot access private blobs (Stratos default)
     if (!viewerDid) {
-      for (const cid of blobCids) {
-        results.set(cid.toString(), false)
-      }
-      return results
+      return answerAll(false)
+    }
+
+    if (await isAccountTakenDown(this.takedownLog, actorDid)) {
+      return answerAll(false)
+    }
+
+    // Ownership bypass: if viewer is the actor owning the repository, access is granted for all blobs.
+    if (viewerDid === actorDid) {
+      return answerAll(true)
     }
 
     // Optimization: Resolve boundaries once for the batch

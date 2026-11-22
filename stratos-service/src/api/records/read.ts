@@ -9,6 +9,7 @@ import {
 import type { ActorReader } from '../../actor-store-types.js'
 import type { AppContext } from '../../context-types.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
+import { isAccountTakenDown } from '../../subscription/takedown-filter.js'
 import type { ListRecordsResult, RecordResult } from './types.js'
 
 export interface GetRecordInput {
@@ -68,9 +69,9 @@ export async function getRecord(
   const { repo, collection, rkey, cid } = input
   const uri = `at://${repo}/${collection}/${rkey}`
 
-  // Check if actor store exists
+  // A taken-down account reads as a missing record, as a taken-down record does.
   const exists = await ctx.actorStore.exists(repo)
-  if (!exists) {
+  if (!exists || (await isAccountTakenDown(ctx.labelStore, repo))) {
     throw new InvalidRequestError('Record not found', 'RecordNotFound')
   }
 
@@ -124,9 +125,9 @@ export async function listRecords(
 ): Promise<ListRecordsResult> {
   const { repo, collection, limit = 50, cursor, reverse = false } = input
 
-  // Check if actor store exists
+  // A taken-down account lists nothing, as if every record were taken down.
   const exists = await ctx.actorStore.exists(repo)
-  if (!exists) {
+  if (!exists || (await isAccountTakenDown(ctx.labelStore, repo))) {
     return { records: [] }
   }
 

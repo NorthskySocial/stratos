@@ -11,7 +11,7 @@ import {
 } from '../src/features/hydration/adapter.js'
 import type { ActorStore } from '../src/actor-store-types.js'
 import { createCid } from './helpers/test-env.js'
-import { createMockBlobStore } from './utils/index.js'
+import { createEmptyLabelLog, createMockBlobStore } from './utils/index.js'
 
 describe('Hydration Features', () => {
   describe('ActorStoreRecordResolver', () => {
@@ -60,6 +60,7 @@ describe('Hydration Features', () => {
       }
       resolver = new ActorStoreRecordResolver(
         mockActorStore as unknown as ActorStore,
+        createEmptyLabelLog(),
       )
     })
 
@@ -75,7 +76,7 @@ describe('Hydration Features', () => {
 
     it('returns record with boundaries if actor exists in getRecord', async () => {
       const actorStore = await openSqliteActorStore()
-      resolver = new ActorStoreRecordResolver(actorStore)
+      resolver = new ActorStoreRecordResolver(actorStore, createEmptyLabelLog())
       const mockRecord = await seedRecord(
         actorStore,
         'did:plc:shinji',
@@ -109,7 +110,7 @@ describe('Hydration Features', () => {
 
     it('returns map of records in getRecords', async () => {
       const actorStore = await openSqliteActorStore()
-      resolver = new ActorStoreRecordResolver(actorStore)
+      resolver = new ActorStoreRecordResolver(actorStore, createEmptyLabelLog())
       const mockRecord = await seedRecord(
         actorStore,
         'did:plc:rei',

@@ -34,7 +34,11 @@ import {
   ServiceDb,
 } from '../src/db/index.js'
 import { registerSpaceReadHandlers } from '../src/features/space-read/handler.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  createEmptyLabelLog,
+  createMockBlobStore,
+  createTestConfig,
+} from './utils/index.js'
 import { makeSpaceUri } from './helpers/space-uri.js'
 
 const SERVICE_DID = 'did:web:nerv.tokyo.jp'
@@ -83,6 +87,7 @@ describe('zone.stratos.space.listBlobs', () => {
       cfg,
       actorStore,
       enrollmentStore,
+      labelStore: createEmptyLabelLog(),
       serviceDid: SERVICE_DID,
       authVerifier: { standardOrSpaceCredential: vi.fn() },
       logger: {
@@ -300,6 +305,7 @@ describe('zone.stratos.space.listBlobs', () => {
     const scriptedCtx = {
       serviceDid: SERVICE_DID,
       enrollmentStore,
+      labelStore: createEmptyLabelLog(),
       actorStore: {
         exists: async () => true,
         read: async (_did: string, fn: (store: unknown) => unknown) =>

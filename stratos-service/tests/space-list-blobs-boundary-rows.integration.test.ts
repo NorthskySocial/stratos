@@ -33,7 +33,11 @@ import {
   stopPostgresContainer,
 } from './helpers/test-env.js'
 import { makeSpaceUri } from './helpers/space-uri.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  createEmptyLabelLog,
+  createMockBlobStore,
+  createTestConfig,
+} from './utils/index.js'
 
 const SERVICE_DID = 'did:web:nerv.tokyo.jp'
 const SPACE_TYPE = 'zone.stratos.space.feed'
@@ -118,6 +122,7 @@ function describeListBlobsFromBoundaryRows(
         cfg: createTestConfig(dataDir),
         actorStore: harness.actorStore,
         enrollmentStore,
+        labelStore: createEmptyLabelLog(),
         serviceDid: SERVICE_DID,
         authVerifier: { standardOrSpaceCredential: vi.fn() },
         logger: {

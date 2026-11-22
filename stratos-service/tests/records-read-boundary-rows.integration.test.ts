@@ -24,7 +24,7 @@ import {
   startPostgresContainer,
   stopPostgresContainer,
 } from './helpers/test-env.js'
-import { createMockBlobStore } from './utils/index.js'
+import { createEmptyLabelLog, createMockBlobStore } from './utils/index.js'
 
 const SERVICE_DID = 'did:web:nerv.tokyo.jp'
 const ENGINEERING = `${SERVICE_DID}/engineering`
@@ -73,6 +73,7 @@ function describeReadsFromBoundaryRows(
     let harness: StoreHarness
     let ctx: {
       actorStore: ActorStore
+      labelStore: ReturnType<typeof createEmptyLabelLog>
       logger: { warn: ReturnType<typeof vi.fn> }
     }
 
@@ -85,7 +86,11 @@ function describeReadsFromBoundaryRows(
     }, 60_000)
 
     beforeEach(async () => {
-      ctx = { actorStore: harness.actorStore, logger: { warn: vi.fn() } }
+      ctx = {
+        actorStore: harness.actorStore,
+        labelStore: createEmptyLabelLog(),
+        logger: { warn: vi.fn() },
+      }
       await harness.actorStore.create(OWNER_DID)
     })
 
