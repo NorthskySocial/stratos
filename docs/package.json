@@ -10,6 +10,6 @@
     "gen:lexicons": "node scripts/gen-lexicons.js"
   },
   "devDependencies": {
-    "vitepress": "^1.6.3"
+    "vitepress": "^1.6.4"
   }
 }

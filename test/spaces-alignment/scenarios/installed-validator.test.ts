@@ -34,7 +34,7 @@ const schema = {
 
 describe('installed service space-ref validator', () => {
   it('records the installed version and accepts a space-ref schema', () => {
-    expect(installed.version).toBe('0.7.11')
+    expect(installed.version).toBe('0.7.21')
     expect(() => new Lexicons([schema])).not.toThrow()
   })
   it.each([

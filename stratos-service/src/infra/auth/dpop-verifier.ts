@@ -137,9 +137,7 @@ export class DpopVerifier {
         issuer: config.serviceEndpoint,
         keyset: [],
         dpopSecret: config.dpopSecret as
-          | string
-          | Uint8Array<ArrayBuffer>
-          | false,
+          string | Uint8Array<ArrayBuffer> | false,
         dpopRotationInterval: config.dpopRotationInterval,
       })
       this.dpopManager = {

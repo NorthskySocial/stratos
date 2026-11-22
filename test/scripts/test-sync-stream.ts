@@ -7,8 +7,8 @@
 // asserted from the consumer side: a viewer sharing the record's boundary
 // receives the commit; a viewer without it receives nothing for that record.
 
-import { WebSocket } from 'npm:ws@^8.19.0'
-import { decodeFirst } from 'npm:@atcute/cbor@^2.3.6'
+import { WebSocket } from 'npm:ws@^8.23.0'
+import { decodeFirst } from 'npm:@atcute/cbor@^2.3.8'
 
 import { DOMAINS, SERVICE_DID, STRATOS_URL } from './lib/config.ts'
 import { loadState } from './lib/state.ts'

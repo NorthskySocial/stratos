@@ -115,9 +115,12 @@ describe('combined October interoperability', () => {
           if (failure === 'duplicate')
             altered.push(altered.find((item) => item.id === id)!)
           if (failure === 'failed' || failure === 'skipped')
-            Object.assign(altered.find((item) => item.id === id)!, {
-              status: failure,
-            })
+            Object.assign(
+              altered.find((item) => item.id === id)!,
+              {
+                status: failure,
+              },
+            )
           if (name === 'standard')
             vi.mocked(standard.run).mockResolvedValueOnce(altered)
           else {

@@ -10,6 +10,7 @@ export default defineConfig(({ command, mode }) => {
 
   return {
     // base: '/',
+    root: __dirname,
     envDir: '../..',
     plugins: [
       svelte({

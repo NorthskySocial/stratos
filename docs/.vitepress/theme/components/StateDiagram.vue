@@ -49,8 +49,7 @@
       <ul class="state-moves">
         <li v-for="edge in transitions" :key="`${edge.from}-${edge.to}`">
           <strong>{{ nameOf(edge.from) }}</strong> to
-          <strong>{{ nameOf(edge.to) }}</strong
-          >: {{ edge.label }}
+          <strong>{{ nameOf(edge.to) }}</strong>: {{ edge.label }}
         </li>
       </ul>
     </figcaption>

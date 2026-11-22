@@ -1,6 +1,6 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use p256::ecdsa::{Signature, SigningKey, signature::Signer};
-use p256::elliptic_curve::rand_core::OsRng;
+use p256::elliptic_curve::Generate;
 
 use crate::identifier::Did;
 
@@ -32,11 +32,11 @@ impl std::error::Error for SpaceHttpSignatureError {}
 
 impl SpaceHttpSignatureKey {
     pub fn generate() -> Self {
-        Self::from_signing_key(SigningKey::random(&mut OsRng))
+        Self::from_signing_key(SigningKey::generate())
     }
 
     fn from_signing_key(signing_key: SigningKey) -> Self {
-        let point = signing_key.verifying_key().to_encoded_point(true);
+        let point = signing_key.verifying_key().to_sec1_point(true);
         let mut multikey = vec![0x80, 0x24];
         multikey.extend_from_slice(point.as_bytes());
         Self {
@@ -186,7 +186,7 @@ mod tests {
                 .verifying_key()
                 .verify(base.as_bytes(), &signature)
                 .unwrap();
-            let low = signature.normalize_s().unwrap_or(signature);
+            let low = signature.normalize_s();
             let high = Signature::from_scalars(low.r().to_bytes(), (-low.s()).to_bytes()).unwrap();
             let verifier = DidVerificationKey::parse(key.key_id()).unwrap();
             for signature in [low, high] {
@@ -210,7 +210,7 @@ mod tests {
                 )
                 .unwrap();
             let generated = Signature::from_slice(&generated).unwrap();
-            assert_eq!(generated.normalize_s().unwrap_or(generated), low);
+            assert_eq!(generated.normalize_s(), low);
             for altered in [
                 format!("{base}\n"),
                 base.replace("authorization", "Authorization"),

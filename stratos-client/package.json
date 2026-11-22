@@ -42,27 +42,27 @@
     "postbuild": "node scripts/check-self-contained.mjs && node scripts/check-exports.mjs"
   },
   "dependencies": {
-    "@atcute/atproto": "^4.0.4",
-    "@atcute/car": "^6.0.2",
-    "@atcute/cbor": "^2.3.6",
-    "@atcute/cid": "^2.4.2",
-    "@atcute/client": "^5.1.1",
+    "@atcute/atproto": "^4.0.5",
+    "@atcute/car": "^6.1.1",
+    "@atcute/cbor": "^2.3.8",
+    "@atcute/cid": "^2.5.0",
+    "@atcute/client": "^5.1.2",
     "@atcute/crypto": "^2.4.4",
     "@atcute/identity": "^2.0.2",
-    "@atcute/identity-resolver": "^2.0.1",
+    "@atcute/identity-resolver": "^2.0.3",
     "@atcute/multibase": "^1.2.5",
-    "@atcute/repo": "^1.0.2"
+    "@atcute/repo": "^1.1.1"
   },
   "devDependencies": {
-    "@atcute/mst": "^1.0.3",
-    "@atproto/crypto": "^0.5.4",
-    "@atproto/lexicon": "^0.7.11",
+    "@atcute/mst": "^1.1.1",
+    "@atproto/crypto": "^0.5.8",
+    "@atproto/lexicon": "^0.7.21",
     "@northskysocial/stratos-core": "workspace:*",
-    "@stryker-mutator/core": "^9.6.1",
-    "@stryker-mutator/vitest-runner": "^9.6.1",
-    "@types/node": "^25.2.1",
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/vitest-runner": "^10.1.1",
+    "@types/node": "^26.6.6",
     "typescript": "npm:@typescript/typescript6@~6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^4.0.18"
+    "vitest": "^5.1.1"
   }
 }

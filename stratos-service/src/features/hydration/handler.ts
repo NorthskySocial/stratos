@@ -53,8 +53,7 @@ export function registerHydrationHandlers(
         const { input, did, auth } = args
         // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-member-access
         const body = (input ?? (args as any).req?.body) as
-          | HydrateRecordsInput
-          | undefined
+          HydrateRecordsInput | undefined
         validateHydrateRecordsInput(body)
 
         if (body!.uris.length === 0) {

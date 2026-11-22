@@ -1,7 +1,7 @@
 // Shared Playwright helpers that drive the PDS OAuth sign-in + consent flow.
 // Used by the enrollment, auth-failure, and DPoP CRUD phases.
 
-import type { Page } from 'npm:playwright@1.58.2'
+import type { Page } from 'npm:playwright@1.65.1'
 import { dim, info, warn } from './log.ts'
 
 const SCREENSHOT_DIR = new URL('../../test-data/screenshots', import.meta.url)

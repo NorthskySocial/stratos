@@ -180,7 +180,7 @@ No production package, Clubhouse, or test sends
 request-field rename or dependency upgrade is needed. Internal space types and
 OAuth scope syntax remain unchanged.
 
-The installed service validator, `@atproto/lexicon` 0.7.11, accepts a
+The installed service validator, `@atproto/lexicon` 0.7.21, accepts a
 `space-ref` schema but also accepts an invalid space string: it does not
 enforce that format. The executable
 `test/spaces-alignment/scenarios/installed-validator.test.ts` regression loads
