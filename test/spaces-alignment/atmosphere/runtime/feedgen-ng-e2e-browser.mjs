@@ -277,10 +277,15 @@ function listenForPdsWrites(page) {
 function listenForFeedResponses(page) {
   const responses = []
   page.on('response', (response) => {
-    if (new URL(response.url()).pathname !== feedPath) return
+    const url = new URL(response.url())
+    if (url.pathname !== feedPath) return
+    const feed = url.searchParams.get('feed')
+    const cursor = url.searchParams.get('cursor')
     void response
       .json()
-      .then((body) => responses.push({ status: response.status(), body }))
+      .then((body) =>
+        responses.push({ status: response.status(), body, feed, cursor }),
+      )
       .catch(() => {})
   })
   return responses
@@ -795,16 +800,27 @@ async function deletePostFromClubhouse(page, text) {
 }
 
 async function waitForFeedWithout(page, responses, text, uri) {
+  const listed = (item) =>
+    item?.post?.uri === uri || item?.post?.record?.text === text
+  const lists = ({ status, body }) =>
+    status === 200 && Array.isArray(body?.feed) && body.feed.some(listed)
+  // An empty answer for another feed or a later page says nothing about the
+  // feed that served the post, so only a fresh first page of it counts.
+  const heldBy = new Set(responses.filter(lists).map(({ feed }) => feed))
+  if (heldBy.size === 0) {
+    throw new Error('No feed response held the custody post before deletion')
+  }
   const deadline = Date.now() + 120_000
   while (Date.now() < deadline) {
     const before = responses.length
     await page.reload({ waitUntil: 'domcontentloaded' })
     await delay(1_000)
     const fresh = responses.slice(before).filter(({ status }) => status === 200)
-    const listed = (item) =>
-      item?.post?.uri === uri || item?.post?.record?.text === text
+    const firstPageOfHolder = fresh.some(
+      ({ feed, cursor }) => heldBy.has(feed) && cursor === null,
+    )
     if (
-      fresh.length > 0 &&
+      firstPageOfHolder &&
       fresh.every(
         ({ body }) => Array.isArray(body?.feed) && !body.feed.some(listed),
       )

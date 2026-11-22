@@ -31,6 +31,8 @@ jobs:
               - 'stratos-*/**'
               - 'lexicons/**'
               - 'test/spaces-alignment/**'
+              - 'test/scripts/**'
+              - 'deno.json'
               - 'webapp/**'
               - 'clubhouse/**'
               - 'Dockerfile'

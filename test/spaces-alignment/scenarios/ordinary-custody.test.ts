@@ -254,14 +254,41 @@ describe('ordinary-custody driver', () => {
   })
 
   describe('deleted post leaves the feed', () => {
-    function waitForFeedWithout(responsesPerReload: Array<unknown[]>) {
+    interface FeedResponse {
+      status: number
+      body: unknown
+      feed: string | null
+      cursor: string | null
+    }
+
+    const listed = {
+      feed: [
+        {
+          post: {
+            uri: 'at://did:plc:ed/zone.stratos.feed.post/3k',
+            record: { text: 'Ed was here' },
+          },
+        },
+      ],
+    }
+    const empty = { feed: [] }
+
+    function onGeneral(body: unknown, cursor: string | null = null) {
+      return { status: 200, body, feed: 'general', cursor }
+    }
+
+    // `heldBefore` is what the feed answered before the delete, as the
+    // listener recorded it.
+    function waitForFeedWithout(
+      responsesPerReload: FeedResponse[][],
+      heldBefore: FeedResponse[] = [onGeneral(listed)],
+    ) {
       let now = 0
-      const responses: Array<{ status: number; body: unknown }> = []
+      const responses: FeedResponse[] = [...heldBefore]
       let reload = 0
       const page = {
         reload: async () => {
-          for (const body of responsesPerReload[reload++] ?? [])
-            responses.push({ status: 200, body })
+          responses.push(...(responsesPerReload[reload++] ?? []))
         },
       }
       const run = runInNewContext(
@@ -273,6 +300,7 @@ describe('ordinary-custody driver', () => {
           },
           Error,
           Array,
+          Set,
         },
       ) as (
         page: unknown,
@@ -288,27 +316,41 @@ describe('ordinary-custody driver', () => {
           'at://did:plc:ed/zone.stratos.feed.post/3k',
         )
     }
-    const listed = {
-      feed: [
-        {
-          post: {
-            uri: 'at://did:plc:ed/zone.stratos.feed.post/3k',
-            record: { text: 'Ed was here' },
-          },
-        },
-      ],
-    }
 
     it('resolves once a fresh feed response no longer lists the post', async () => {
       await expect(
-        waitForFeedWithout([[listed], [{ feed: [] }]])(),
+        waitForFeedWithout([[onGeneral(listed)], [onGeneral(empty)]])(),
       ).resolves.toBeUndefined()
     })
 
     it('fails when the feed keeps listing the post', async () => {
-      await expect(waitForFeedWithout([[listed], [listed]])()).rejects.toThrow(
-        'still returned the deleted custody post',
-      )
+      await expect(
+        waitForFeedWithout([[onGeneral(listed)], [onGeneral(listed)]])(),
+      ).rejects.toThrow('still returned the deleted custody post')
+    })
+
+    it('does not take an empty answer for another feed as the post gone', async () => {
+      await expect(
+        waitForFeedWithout([
+          [{ ...onGeneral(empty), feed: 'nerv-hq' }],
+          [{ ...onGeneral(empty), feed: 'nerv-hq' }],
+        ])(),
+      ).rejects.toThrow('still returned the deleted custody post')
+    })
+
+    it('does not take an empty later page of the same feed as the post gone', async () => {
+      await expect(
+        waitForFeedWithout([
+          [onGeneral(empty, 'kaworu-next')],
+          [onGeneral(empty, 'kaworu-next')],
+        ])(),
+      ).rejects.toThrow('still returned the deleted custody post')
+    })
+
+    it('fails at once when no feed answer held the post before the delete', async () => {
+      await expect(
+        waitForFeedWithout([[onGeneral(empty)]], [onGeneral(empty)])(),
+      ).rejects.toThrow('No feed response held the custody post')
     })
   })
 })
