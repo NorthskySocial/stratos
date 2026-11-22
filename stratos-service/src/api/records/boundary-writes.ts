@@ -76,7 +76,6 @@ interface PreparedRecordWrite {
   record: Record<string, unknown>
   recordBytes: Uint8Array
   cid: Cid
-  tempRev: string
   validationStatus?: LexiconValidationStatus
 }
 
@@ -356,7 +355,6 @@ async function prepareWrites(
         uri,
         record,
         ...(await encodeForStorage(write.collection, record)),
-        tempRev: TID.nextStr(),
         validationStatus,
       }
     }),
@@ -449,7 +447,7 @@ async function commitPlannedWrites(
   )
   for (const write of planned) {
     if (write.kind !== 'delete') {
-      await store.repo.putBlock(write.cid, write.recordBytes, write.tempRev)
+      await store.repo.putBlock(write.cid, write.recordBytes, unsigned.rev)
     }
   }
   const commit = await signAndPersistCommit(store.repo, actorSign, unsigned)
