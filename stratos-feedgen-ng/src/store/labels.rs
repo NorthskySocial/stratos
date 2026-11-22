@@ -4,11 +4,26 @@ use super::{
     actor::{load_actor_enrollment, unenroll_actor},
     *,
 };
-use crate::moderation_label::{LabelPage, LabelSubject};
+use crate::{
+    label_scope::{LabelScope, requires_replay},
+    moderation_label::{LabelPage, LabelSubject},
+};
 
 const MAX_REINSTATING_PAGE: u16 = 256;
 const TAKEDOWN_STATE: &str = "takedown";
 const REINSTATING_STATE: &str = "reinstating";
+// A lifted subject keeps the sequence of the label that lifted it, so a replay
+// of the log can skip every label it already applied.
+const LIFTED_STATE: &str = "lifted";
+
+/// What aligning the label cursor with the current scope did.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LabelScopeAlignment {
+    /// The cursor has seen every label of the scope and stays where it is.
+    Kept,
+    /// The cursor was set back to the start of the log, from `previous_cursor`.
+    Restarted { previous_cursor: u64 },
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LabelPageEffects {
@@ -116,6 +131,27 @@ fn subject_columns(subject: &LabelSubject) -> (&'static str, &str) {
     }
 }
 
+/// The one path that moves a label cursor backwards. The stale-cursor guard of
+/// `apply_label_page` still refuses any page older than the stored cursor, so
+/// a replay advances from here like a first read.
+fn restart_label_log(
+    transaction: &rusqlite::Transaction<'_>,
+    authority_did: &str,
+    scope: &LabelScope,
+    updated_at: &str,
+) -> Result<(), StoreError> {
+    transaction
+        .execute(
+            "INSERT INTO label_cursor (authority_did, sequence, updated_at, scope_json)
+             VALUES (?1, 0, ?2, ?3)
+             ON CONFLICT(authority_did) DO UPDATE SET
+               sequence = 0, updated_at = excluded.updated_at, scope_json = excluded.scope_json",
+            params![authority_did, updated_at, scope.to_json()],
+        )
+        .map_err(StoreError::Open)?;
+    Ok(())
+}
+
 impl EncryptedStore {
     pub fn label_cursor(&self, authority_did: &str) -> Result<u64, StoreError> {
         let sequence: Option<i64> = self
@@ -163,11 +199,14 @@ impl EncryptedStore {
                 i64::try_from(label.seq).map_err(|_| StoreError::InvalidProjectionMutation)?;
             let key = subject_key(&label.subject);
             let (kind, author_did) = subject_columns(&label.subject);
+            // A label at or below the subject's stored sequence was applied
+            // before, and only a replay of the log delivers it again.
             if label.neg {
                 let reinstated = transaction
                     .execute(
                         "UPDATE label_subject SET state = ?3, attempts = 0, label_sequence = ?4
-                         WHERE authority_did = ?1 AND subject_key = ?2 AND state = ?5",
+                         WHERE authority_did = ?1 AND subject_key = ?2 AND state = ?5
+                           AND label_sequence < ?4",
                         params![
                             authority_did,
                             key,
@@ -181,16 +220,20 @@ impl EncryptedStore {
                     final_states.insert(key, (&label.subject, false));
                 }
             } else {
-                transaction
+                let taken_down = transaction
                     .execute(
                         "INSERT INTO label_subject (authority_did, subject_key, subject_kind, author_did, label_sequence, state, attempts)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)
                          ON CONFLICT(authority_did, subject_key) DO UPDATE SET
                            subject_kind = excluded.subject_kind, author_did = excluded.author_did,
-                           label_sequence = excluded.label_sequence, state = excluded.state, attempts = 0",
+                           label_sequence = excluded.label_sequence, state = excluded.state, attempts = 0
+                         WHERE label_subject.label_sequence < excluded.label_sequence",
                         params![authority_did, key, kind, author_did, sequence, TAKEDOWN_STATE],
                     )
                     .map_err(StoreError::Open)?;
+                if taken_down == 0 {
+                    continue;
+                }
                 final_states.insert(key, (&label.subject, true));
                 if let LabelSubject::Account { did } = &label.subject {
                     removed_accounts.insert(did, &label.subject);
@@ -373,12 +416,61 @@ impl EncryptedStore {
     ) -> Result<(), StoreError> {
         self.connection
             .execute(
-                "DELETE FROM label_subject
+                "UPDATE label_subject SET state = ?4
                  WHERE authority_did = ?1 AND subject_key = ?2 AND state = ?3",
-                params![authority_did, subject_key, REINSTATING_STATE],
+                params![authority_did, subject_key, REINSTATING_STATE, LIFTED_STATE],
             )
             .map_err(StoreError::Open)?;
         Ok(())
+    }
+
+    /// Records `scope` with the label cursor, and sets the cursor back to the
+    /// start of the log when it was read under a scope that lacked one of the
+    /// boundaries of `scope`, or under an unknown one. Only a cursor past the
+    /// start can have scanned past a label.
+    pub fn align_label_scope(
+        &mut self,
+        authority_did: &str,
+        scope: &LabelScope,
+        updated_at: &str,
+    ) -> Result<LabelScopeAlignment, StoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        let stored: Option<(i64, Option<String>)> = transaction
+            .query_row(
+                "SELECT sequence, scope_json FROM label_cursor WHERE authority_did = ?1",
+                [authority_did],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(StoreError::Open)?;
+        let previous_cursor = stored
+            .as_ref()
+            .map_or(0, |(sequence, _)| u64::try_from(*sequence).unwrap_or(0));
+        let recorded = stored
+            .and_then(|(_, scope_json)| scope_json)
+            .and_then(|text| LabelScope::from_json(&text));
+        // A cursor at the start has scanned past nothing, whatever its scope.
+        let alignment = if previous_cursor > 0 && requires_replay(recorded.as_ref(), scope) {
+            restart_label_log(&transaction, authority_did, scope, updated_at)?;
+            LabelScopeAlignment::Restarted { previous_cursor }
+        } else {
+            // From here on the cursor reads under this scope only, which is no
+            // larger than the recorded one.
+            transaction
+                .execute(
+                    "INSERT INTO label_cursor (authority_did, sequence, updated_at, scope_json)
+                     VALUES (?1, 0, ?2, ?3)
+                     ON CONFLICT(authority_did) DO UPDATE SET scope_json = excluded.scope_json",
+                    params![authority_did, updated_at, scope.to_json()],
+                )
+                .map_err(StoreError::Open)?;
+            LabelScopeAlignment::Kept
+        };
+        transaction.commit().map_err(StoreError::Open)?;
+        Ok(alignment)
     }
 
     pub fn record_reinstatement_attempt(
@@ -402,7 +494,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::moderation_label::ModerationLabel;
+    use crate::{label_scope::LabelScope, moderation_label::ModerationLabel};
 
     const AUTHORITY: &str = "did:web:stratos.example.test";
     const SPIKE_POST: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop1";
@@ -611,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn finishing_a_reinstatement_removes_the_row_and_attempts_are_counted() {
+    fn finishing_a_reinstatement_lifts_the_subject_and_attempts_are_counted() {
         let mut store = EncryptedStore::open_memory(key()).unwrap();
         store
             .apply_label_page(
@@ -1222,5 +1314,417 @@ mod tests {
                 .is_current_pds_space_member(BEBOP_BOUNDARY, FAYE)
                 .unwrap()
         );
+    }
+
+    fn label_scope(boundaries: &[&str]) -> LabelScope {
+        let owned = || boundaries.iter().map(|boundary| (*boundary).to_owned());
+        LabelScope::served_and_entitled(owned(), owned())
+    }
+
+    fn recorded_scope(store: &EncryptedStore) -> Option<String> {
+        store
+            .connection
+            .query_row(
+                "SELECT scope_json FROM label_cursor WHERE authority_did = ?1",
+                [AUTHORITY],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn a_cursor_at_the_start_records_its_scope_without_a_restart() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+
+        let alignment = store
+            .align_label_scope(AUTHORITY, &label_scope(&["bebop"]), UPDATED_AT)
+            .unwrap();
+
+        assert_eq!(alignment, LabelScopeAlignment::Kept);
+        assert_eq!(store.label_cursor(AUTHORITY).unwrap(), 0);
+        assert_eq!(recorded_scope(&store).as_deref(), Some(r#"["bebop"]"#));
+    }
+
+    #[test]
+    fn a_scope_that_gains_a_boundary_restarts_the_cursor() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .align_label_scope(AUTHORITY, &label_scope(&["bebop"]), UPDATED_AT)
+            .unwrap();
+        store
+            .apply_label_page(AUTHORITY, &takedown_page(7), UPDATED_AT)
+            .unwrap();
+
+        let alignment = store
+            .align_label_scope(AUTHORITY, &label_scope(&["bebop", "swordfish"]), UPDATED_AT)
+            .unwrap();
+
+        assert_eq!(
+            alignment,
+            LabelScopeAlignment::Restarted { previous_cursor: 7 }
+        );
+        assert_eq!(store.label_cursor(AUTHORITY).unwrap(), 0);
+        assert_eq!(
+            recorded_scope(&store).as_deref(),
+            Some(r#"["bebop","swordfish"]"#)
+        );
+        assert!(store.is_taken_down(AUTHORITY, SPIKE_POST).unwrap());
+    }
+
+    #[test]
+    fn an_unchanged_scope_keeps_the_cursor() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        let scope = label_scope(&["bebop", "swordfish"]);
+        store
+            .align_label_scope(AUTHORITY, &scope, UPDATED_AT)
+            .unwrap();
+        store
+            .apply_label_page(AUTHORITY, &takedown_page(7), UPDATED_AT)
+            .unwrap();
+
+        let alignment = store
+            .align_label_scope(AUTHORITY, &scope, UPDATED_AT)
+            .unwrap();
+
+        assert_eq!(alignment, LabelScopeAlignment::Kept);
+        assert_eq!(store.label_cursor(AUTHORITY).unwrap(), 7);
+    }
+
+    #[test]
+    fn a_smaller_scope_keeps_the_cursor_and_a_boundary_that_returns_restarts_it() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        let both = label_scope(&["bebop", "swordfish"]);
+        store
+            .align_label_scope(AUTHORITY, &both, UPDATED_AT)
+            .unwrap();
+        store
+            .apply_label_page(AUTHORITY, &takedown_page(7), UPDATED_AT)
+            .unwrap();
+
+        let narrowed = store
+            .align_label_scope(AUTHORITY, &label_scope(&["bebop"]), UPDATED_AT)
+            .unwrap();
+        assert_eq!(narrowed, LabelScopeAlignment::Kept);
+        assert_eq!(store.label_cursor(AUTHORITY).unwrap(), 7);
+        assert_eq!(recorded_scope(&store).as_deref(), Some(r#"["bebop"]"#));
+
+        // Labels of the boundary that left may have been scanned past since.
+        let returned = store
+            .align_label_scope(AUTHORITY, &both, UPDATED_AT)
+            .unwrap();
+        assert_eq!(
+            returned,
+            LabelScopeAlignment::Restarted { previous_cursor: 7 }
+        );
+    }
+
+    #[test]
+    fn a_cursor_with_no_recorded_scope_restarts_once() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .apply_label_page(AUTHORITY, &takedown_page(7), UPDATED_AT)
+            .unwrap();
+        assert_eq!(recorded_scope(&store), None);
+        let scope = label_scope(&["bebop"]);
+
+        let first = store
+            .align_label_scope(AUTHORITY, &scope, UPDATED_AT)
+            .unwrap();
+        store
+            .apply_label_page(AUTHORITY, &takedown_page(7), UPDATED_AT)
+            .unwrap();
+        let second = store
+            .align_label_scope(AUTHORITY, &scope, UPDATED_AT)
+            .unwrap();
+
+        assert_eq!(first, LabelScopeAlignment::Restarted { previous_cursor: 7 });
+        assert_eq!(second, LabelScopeAlignment::Kept);
+        assert_eq!(store.label_cursor(AUTHORITY).unwrap(), 7);
+    }
+
+    #[test]
+    fn an_unreadable_recorded_scope_is_treated_as_unknown() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .apply_label_page(AUTHORITY, &takedown_page(7), UPDATED_AT)
+            .unwrap();
+        store
+            .connection
+            .execute("UPDATE label_cursor SET scope_json = 'bebop'", [])
+            .unwrap();
+
+        let alignment = store
+            .align_label_scope(AUTHORITY, &label_scope(&["bebop"]), UPDATED_AT)
+            .unwrap();
+
+        assert_eq!(
+            alignment,
+            LabelScopeAlignment::Restarted { previous_cursor: 7 }
+        );
+    }
+
+    #[test]
+    fn after_a_restart_the_stale_cursor_guard_still_refuses_an_older_page() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .apply_label_page(AUTHORITY, &page(10, Vec::new()), UPDATED_AT)
+            .unwrap();
+        store
+            .align_label_scope(AUTHORITY, &label_scope(&["bebop"]), UPDATED_AT)
+            .unwrap();
+
+        store
+            .apply_label_page(AUTHORITY, &page(4, Vec::new()), UPDATED_AT)
+            .unwrap();
+        let older = store.apply_label_page(AUTHORITY, &page(3, Vec::new()), UPDATED_AT);
+
+        assert!(matches!(older, Err(StoreError::StaleCursor)));
+        assert_eq!(store.label_cursor(AUTHORITY).unwrap(), 4);
+    }
+
+    #[test]
+    fn the_upgrade_from_version_eleven_replays_the_label_log_once_and_only_once() {
+        let path = database_path("scope-upgrade");
+        let mut version_eleven = Connection::open(&path).unwrap();
+        version_eleven
+            .execute_batch(&format!(
+                "PRAGMA key = \"x'{}'\"; PRAGMA foreign_keys = ON;",
+                key().as_hex()
+            ))
+            .unwrap();
+        migrations::apply_through(&mut version_eleven, 11).unwrap();
+        version_eleven
+            .execute(
+                "INSERT INTO label_cursor (authority_did, sequence, updated_at) VALUES (?1, 412, ?2)",
+                params![AUTHORITY, UPDATED_AT],
+            )
+            .unwrap();
+        drop(version_eleven);
+        let scope = label_scope(&["bebop"]);
+
+        let mut upgraded = EncryptedStore::open(&path, key()).unwrap();
+        assert_eq!(upgraded.label_cursor(AUTHORITY).unwrap(), 412);
+        let first = upgraded
+            .align_label_scope(AUTHORITY, &scope, UPDATED_AT)
+            .unwrap();
+        upgraded
+            .apply_label_page(AUTHORITY, &page(412, Vec::new()), UPDATED_AT)
+            .unwrap();
+        let second = upgraded
+            .align_label_scope(AUTHORITY, &scope, UPDATED_AT)
+            .unwrap();
+        drop(upgraded);
+        let mut reopened = EncryptedStore::open(&path, key()).unwrap();
+        let after_restart = reopened
+            .align_label_scope(AUTHORITY, &scope, UPDATED_AT)
+            .unwrap();
+
+        assert_eq!(
+            first,
+            LabelScopeAlignment::Restarted {
+                previous_cursor: 412
+            }
+        );
+        assert_eq!(second, LabelScopeAlignment::Kept);
+        assert_eq!(after_restart, LabelScopeAlignment::Kept);
+        assert_eq!(reopened.label_cursor(AUTHORITY).unwrap(), 412);
+        drop(reopened);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    const LATER_UPDATED_AT: &str = "2026-11-21T00:00:00.000Z";
+
+    fn enroll_with_a_post(store: &mut EncryptedStore, did: &str, rkey: &str) {
+        store
+            .reconcile_actor_enrollment(
+                did,
+                "1998-04-03T00:00:00.000Z",
+                Some(ActorEnrollment {
+                    did: did.to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        store
+            .apply_actor_page(ActorPage {
+                actor_did: did.to_owned(),
+                upserts: vec![ProjectionPost {
+                    author_did: did.to_owned(),
+                    ..spike_post_at(&format!("at://{did}/zone.stratos.feed.post/{rkey}"), b"[]")
+                }],
+                ..spike_page(1, Vec::new(), Vec::new())
+            })
+            .unwrap();
+    }
+
+    fn account(did: &str) -> LabelSubject {
+        LabelSubject::Account {
+            did: did.to_owned(),
+        }
+    }
+
+    fn third_spike_subject() -> LabelSubject {
+        LabelSubject::Record {
+            uri: "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop3".to_owned(),
+            author_did: SPIKE_DID.to_owned(),
+        }
+    }
+
+    /// A takedown and its negation, an account takedown, a negated account
+    /// takedown whose reinstatement is still pending, a lifted takedown, and a
+    /// record taken down again after its negation.
+    fn moderated_log() -> Vec<LabelPage> {
+        vec![
+            page(1, vec![label(1, spike_subject(), false)]),
+            page(2, vec![label(2, spike_subject(), true)]),
+            page(3, vec![label(3, account(FAYE), false)]),
+            page(
+                5,
+                vec![label(4, account(JET), false), label(5, account(JET), true)],
+            ),
+            page(
+                7,
+                vec![
+                    label(6, second_spike_subject(), false),
+                    label(7, second_spike_subject(), true),
+                ],
+            ),
+            page(
+                10,
+                vec![
+                    label(8, third_spike_subject(), false),
+                    label(9, third_spike_subject(), true),
+                    label(10, third_spike_subject(), false),
+                ],
+            ),
+        ]
+    }
+
+    /// Every row of every table a label page can change, apart from the cursor.
+    fn label_effect_tables(store: &EncryptedStore) -> Vec<(&'static str, Vec<String>)> {
+        [
+            "label_subject",
+            "post",
+            "post_boundary",
+            "interaction",
+            "actor_enrollment",
+            "actor_cursor",
+        ]
+        .into_iter()
+        .map(|table| {
+            let mut statement = store
+                .connection
+                .prepare(&format!("SELECT * FROM {table}"))
+                .unwrap();
+            let columns = statement.column_count();
+            let mut rows: Vec<String> = statement
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|index| row.get_ref(index).map(|value| format!("{value:?}")))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map(|values| values.join("|"))
+                })
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            rows.sort();
+            (table, rows)
+        })
+        .collect()
+    }
+
+    #[test]
+    fn a_replay_of_the_whole_log_ends_in_the_state_of_the_first_application() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        enroll_with_a_post(&mut store, SPIKE_DID, "bebop1");
+        enroll_with_a_post(&mut store, FAYE, "redtail");
+        enroll_with_a_post(&mut store, JET, "hammerhead");
+        store
+            .align_label_scope(AUTHORITY, &label_scope(&["bebop"]), UPDATED_AT)
+            .unwrap();
+        for log_page in moderated_log() {
+            store
+                .apply_label_page(AUTHORITY, &log_page, UPDATED_AT)
+                .unwrap();
+        }
+        store.record_reinstatement_attempt(AUTHORITY, JET).unwrap();
+        store.record_reinstatement_attempt(AUTHORITY, JET).unwrap();
+        store
+            .finish_reinstatement(AUTHORITY, SPIKE_SECOND_POST)
+            .unwrap();
+        let first_application = label_effect_tables(&store);
+
+        let alignment = store
+            .align_label_scope(
+                AUTHORITY,
+                &label_scope(&["bebop", "swordfish"]),
+                LATER_UPDATED_AT,
+            )
+            .unwrap();
+        let replay_effects = moderated_log()
+            .iter()
+            .map(|log_page| {
+                store
+                    .apply_label_page(AUTHORITY, log_page, LATER_UPDATED_AT)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            alignment,
+            LabelScopeAlignment::Restarted {
+                previous_cursor: 10
+            }
+        );
+        assert_eq!(label_effect_tables(&store), first_application);
+        assert!(
+            replay_effects
+                .iter()
+                .all(|effects| *effects == LabelPageEffects::default()),
+            "{replay_effects:?}"
+        );
+        assert_eq!(store.label_cursor(AUTHORITY).unwrap(), 10);
+        assert_eq!(
+            store.reinstating_subjects(AUTHORITY, 10).unwrap(),
+            [(spike_subject(), 0), (account(JET), 2)]
+        );
+        assert!(
+            store
+                .is_taken_down(
+                    AUTHORITY,
+                    "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop3"
+                )
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn a_label_never_applied_before_takes_effect_in_a_replay() {
+        let mut store = EncryptedStore::open_memory(key()).unwrap();
+        store
+            .apply_actor_page(spike_page(1, vec![spike_blob_post()], Vec::new()))
+            .unwrap();
+        store
+            .align_label_scope(AUTHORITY, &label_scope(&["bebop"]), UPDATED_AT)
+            .unwrap();
+        // The authority filtered the takedown at 2 out of this page.
+        store
+            .apply_label_page(AUTHORITY, &page(3, Vec::new()), UPDATED_AT)
+            .unwrap();
+        store
+            .align_label_scope(AUTHORITY, &label_scope(&["bebop", "swordfish"]), UPDATED_AT)
+            .unwrap();
+
+        let effects = store
+            .apply_label_page(
+                AUTHORITY,
+                &page(3, vec![label(2, spike_subject(), false)]),
+                UPDATED_AT,
+            )
+            .unwrap();
+
+        assert_eq!(effects.taken_down, [spike_subject()]);
+        assert_eq!(stored_posts(&store, SPIKE_POST), 0);
     }
 }

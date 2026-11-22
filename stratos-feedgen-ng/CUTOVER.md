@@ -83,8 +83,8 @@ Its report contains only statuses and a bounded mismatch category.
 This runbook starts the Rust feed generator with an empty state directory. To
 upgrade a Rust feed generator that already holds a projection, follow
 [November upgrade and rollback](../docs/operator/november-upgrade.md). Copy the
-database file before the first start of the new build. Migrations 10 and 11
-change the file, and an older binary refuses the migrated file. To go back,
+database file before the first start of the new build. Migrations 10, 11 and
+12 change the file, and an older binary refuses the migrated file. To go back,
 restore the copy. Do not start an older binary on the migrated file.
 
 ## Stop conditions and evidence

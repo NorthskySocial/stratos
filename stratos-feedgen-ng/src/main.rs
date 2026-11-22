@@ -15,7 +15,8 @@ use stratos_feedgen_ng::{
     credential_manager::SpaceCredentialManager,
     identity::HttpIdentityKeyResolver,
     label_poller::{
-        ACCOUNT_REINSTATEMENT_BUDGET, AccountEnforcement, LabelPoller, RecordEnforcement,
+        ACCOUNT_REINSTATEMENT_BUDGET, AccountEnforcement, LabelPoller, LabelScopeSource,
+        RecordEnforcement,
     },
     lifecycle::ControlLifecycle,
     membership_reconciler::MembershipReconciler,
@@ -172,6 +173,11 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
     );
     let label_poller = LabelPoller::start(
         label_log,
+        LabelScopeSource {
+            authority: Arc::clone(&authority),
+            feedgen_did: config.service_did.clone(),
+            served_boundaries: feeds.list().map(|feed| feed.boundary.clone()).collect(),
+        },
         AccountEnforcement {
             actors: Arc::clone(&actors),
             authority: Arc::clone(&authority),

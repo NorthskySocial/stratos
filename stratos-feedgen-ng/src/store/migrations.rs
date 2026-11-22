@@ -355,6 +355,33 @@ const MIGRATIONS: &[Migration] = &[
         DROP TABLE space_cursor;
     "#,
     },
+    // A cursor now records the boundaries it was read under; an existing one
+    // has none, which reads as unknown and makes the first poll replay the log
+    // once. A lifted subject keeps its row, so a replay can tell which labels
+    // were already applied; the state check is rebuilt to admit it.
+    Migration {
+        version: 12,
+        sql: r#"
+        ALTER TABLE label_cursor ADD COLUMN scope_json TEXT;
+        CREATE TABLE label_subject_rebuilt (
+          authority_did TEXT NOT NULL,
+          subject_key TEXT NOT NULL,
+          subject_kind TEXT NOT NULL CHECK (subject_kind IN ('record', 'account')),
+          author_did TEXT NOT NULL,
+          label_sequence INTEGER NOT NULL CHECK (label_sequence >= 0),
+          state TEXT NOT NULL CHECK (state IN ('takedown', 'reinstating', 'lifted')),
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          PRIMARY KEY (authority_did, subject_key)
+        ) WITHOUT ROWID;
+        INSERT INTO label_subject_rebuilt
+          (authority_did, subject_key, subject_kind, author_did, label_sequence, state, attempts)
+          SELECT authority_did, subject_key, subject_kind, author_did, label_sequence, state, attempts
+          FROM label_subject;
+        DROP TABLE label_subject;
+        ALTER TABLE label_subject_rebuilt RENAME TO label_subject;
+        CREATE INDEX label_subject_author_idx ON label_subject(authority_did, author_did, state);
+    "#,
+    },
 ];
 
 pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
@@ -399,6 +426,7 @@ mod tests {
 
     const LAST_VERSION_BEFORE_PURGE: usize = 9;
     const LAST_VERSION_BEFORE_DROP: usize = 10;
+    const LAST_VERSION_BEFORE_LABEL_SCOPE: usize = 11;
 
     #[test]
     fn initializes_the_versioned_projection_schema() {
@@ -408,13 +436,13 @@ mod tests {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
         let migration_count: u32 = connection
             .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(migration_count, 11);
+        assert_eq!(migration_count, 12);
         let post_boundary_sql: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_boundary'",
@@ -594,7 +622,7 @@ mod tests {
     #[test]
     fn rejects_a_database_from_a_newer_store_format() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection.pragma_update(None, "user_version", 12).unwrap();
+        connection.pragma_update(None, "user_version", 13).unwrap();
 
         assert!(apply(&mut connection).is_err());
     }
@@ -1168,10 +1196,10 @@ mod tests {
     }
 
     #[test]
-    fn a_database_at_version_twelve_is_refused_and_left_alone() {
+    fn a_database_at_version_thirteen_is_refused_and_left_alone() {
         let mut connection = old_build_memory_database();
         apply(&mut connection).unwrap();
-        connection.pragma_update(None, "user_version", 12).unwrap();
+        connection.pragma_update(None, "user_version", 13).unwrap();
         let before = whole_database(&connection);
 
         assert!(apply(&mut connection).is_err());
@@ -1322,7 +1350,11 @@ mod tests {
         let triggers_before = schema_names(&connection, "trigger");
         let indexes_before = schema_names(&connection, "index");
 
-        apply(&mut connection).unwrap();
+        apply_migrations(
+            &mut connection,
+            &MIGRATIONS[..LAST_VERSION_BEFORE_LABEL_SCOPE],
+        )
+        .unwrap();
 
         assert_eq!(version_of(&connection), 11);
         let mut after = whole_database(&connection);
@@ -1364,11 +1396,12 @@ mod tests {
     #[test]
     fn a_second_apply_after_the_drop_changes_nothing() {
         let mut connection = version_ten_database_with_stage_rows();
-        apply(&mut connection).unwrap();
+        let through_the_drop = &MIGRATIONS[..LAST_VERSION_BEFORE_LABEL_SCOPE];
+        apply_migrations(&mut connection, through_the_drop).unwrap();
         let after_first = whole_database(&connection);
         let schema_first = schema_names(&connection, "table");
 
-        apply(&mut connection).unwrap();
+        apply_migrations(&mut connection, through_the_drop).unwrap();
 
         assert_eq!(whole_database(&connection), after_first);
         assert_eq!(schema_names(&connection, "table"), schema_first);
@@ -1379,7 +1412,11 @@ mod tests {
     fn an_empty_database_reaches_version_eleven_without_the_stage_tables() {
         let mut connection = Connection::open_in_memory().unwrap();
 
-        apply(&mut connection).unwrap();
+        apply_migrations(
+            &mut connection,
+            &MIGRATIONS[..LAST_VERSION_BEFORE_LABEL_SCOPE],
+        )
+        .unwrap();
 
         assert_eq!(version_of(&connection), 11);
         assert_eq!(count(&connection, "schema_migration"), 11);
@@ -1490,7 +1527,7 @@ mod tests {
         let path = old_build_encrypted_file("verified-sync");
         let survivors_before = survivors_of_file(&path);
         let mut store = EncryptedStore::open(&path, key()).unwrap();
-        assert_eq!(version_of(&store.connection), 11);
+        assert_eq!(version_of(&store.connection), 12);
         assert_eq!(
             survivors(&store.connection),
             survivors_before,
@@ -1627,5 +1664,150 @@ mod tests {
             0,
             "the post-delete trigger fires"
         );
+    }
+
+    // Migration 12: databases at version 11, with a label cursor and label
+    // subjects in both states an older build knew.
+
+    fn version_eleven_database_with_a_label_cursor() -> Connection {
+        let mut connection = old_build_memory_database();
+        apply_migrations(
+            &mut connection,
+            &MIGRATIONS[..LAST_VERSION_BEFORE_LABEL_SCOPE],
+        )
+        .unwrap();
+        connection
+            .execute(
+                "INSERT INTO label_cursor (authority_did, sequence, updated_at) VALUES (?1, 412, ?2)",
+                params![AUTHORITY, THEN],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE label_subject SET state = 'reinstating', attempts = 2 WHERE subject_key = ?1",
+                [SPIKE],
+            )
+            .unwrap();
+        assert_eq!(version_of(&connection), 11);
+        connection
+    }
+
+    fn label_subject_rows(connection: &Connection) -> Rows {
+        table_rows(
+            connection,
+            "SELECT authority_did, subject_key, subject_kind, author_did, label_sequence, state, attempts
+             FROM label_subject ORDER BY authority_did, subject_key",
+        )
+    }
+
+    #[test]
+    fn a_version_eleven_database_keeps_its_labels_and_reads_its_scope_as_unknown() {
+        let mut connection = version_eleven_database_with_a_label_cursor();
+        let mut before = whole_database(&connection);
+        let subjects_before = label_subject_rows(&connection);
+        assert!(subjects_before.len() >= 2, "{subjects_before:?}");
+
+        apply(&mut connection).unwrap();
+
+        assert_eq!(version_of(&connection), 12);
+        assert_eq!(label_subject_rows(&connection), subjects_before);
+        assert_eq!(
+            table_rows(
+                &connection,
+                "SELECT authority_did, sequence, updated_at, scope_json FROM label_cursor",
+            ),
+            [vec![
+                Value::Text(AUTHORITY.to_owned()),
+                Value::Integer(412),
+                Value::Text(THEN.to_owned()),
+                Value::Null,
+            ]]
+        );
+        let mut after = whole_database(&connection);
+        for table in ["label_cursor", "label_subject", "schema_migration"] {
+            before.remove(table);
+            after.remove(table);
+        }
+        assert_eq!(after, before, "every other table is byte for byte the same");
+        assert!(
+            schema_names(&connection, "index").contains(&"label_subject_author_idx".to_owned())
+        );
+    }
+
+    #[test]
+    fn only_version_twelve_admits_a_lifted_subject() {
+        let mut connection = version_eleven_database_with_a_label_cursor();
+        let insert_lifted = |connection: &Connection| {
+            connection.execute(
+                "INSERT INTO label_subject (authority_did, subject_key, subject_kind, author_did, label_sequence, state, attempts)
+                 VALUES (?1, ?2, 'record', ?3, 9, 'lifted', 0)",
+                params![AUTHORITY, JET_POST, JET],
+            )
+        };
+        assert!(insert_lifted(&connection).is_err());
+
+        apply(&mut connection).unwrap();
+
+        insert_lifted(&connection).unwrap();
+    }
+
+    #[test]
+    fn a_second_apply_after_the_label_scope_migration_changes_nothing() {
+        let mut connection = version_eleven_database_with_a_label_cursor();
+        apply(&mut connection).unwrap();
+        let after_first = whole_database(&connection);
+
+        apply(&mut connection).unwrap();
+
+        assert_eq!(whole_database(&connection), after_first);
+        assert_eq!(version_of(&connection), 12);
+    }
+
+    #[test]
+    fn a_binary_that_knows_eleven_migrations_refuses_a_version_twelve_database_and_leaves_it_alone()
+    {
+        let mut connection = version_eleven_database_with_a_label_cursor();
+        apply(&mut connection).unwrap();
+        let before = whole_database(&connection);
+
+        let older_binary = apply_migrations(
+            &mut connection,
+            &MIGRATIONS[..LAST_VERSION_BEFORE_LABEL_SCOPE],
+        );
+
+        assert!(older_binary.is_err());
+        assert_eq!(whole_database(&connection), before);
+        assert_eq!(version_of(&connection), 12);
+    }
+
+    #[test]
+    fn a_failure_in_the_label_scope_migration_leaves_version_eleven_and_every_row() {
+        let mut connection = version_eleven_database_with_a_label_cursor();
+        let before = whole_database(&connection);
+        let scope_batch = &MIGRATIONS[LAST_VERSION_BEFORE_LABEL_SCOPE];
+        assert_eq!(scope_batch.version, 12);
+        // A duplicate version fails only when it runs, after the rebuild of the
+        // batch has run in the same transaction.
+        let failing_batch = format!(
+            "{} INSERT INTO schema_migration (version, applied_at) VALUES (1, 0);",
+            scope_batch.sql
+        );
+        let migrations: Vec<Migration> = MIGRATIONS[..LAST_VERSION_BEFORE_LABEL_SCOPE]
+            .iter()
+            .map(|migration| Migration {
+                version: migration.version,
+                sql: migration.sql,
+            })
+            .chain(std::iter::once(Migration {
+                version: scope_batch.version,
+                sql: failing_batch.leak(),
+            }))
+            .collect();
+
+        let outcome = apply_migrations(&mut connection, &migrations);
+
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert_eq!(version_of(&connection), 11);
+        assert_eq!(whole_database(&connection), before);
     }
 }

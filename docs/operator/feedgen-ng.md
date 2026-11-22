@@ -213,14 +213,17 @@ The four settings `FEEDGEN_STAGE_TARGET_MAX_ROWS`,
 
 ### The database file
 
-The store is at schema version 11. Migration 10 deletes every post and
+The store is at schema version 12. Migration 10 deletes every post and
 suppression marker whose URI is not a Stratos-custody URI, every interaction
 whose URI or subject is not one, and the record takedown subjects of those
 URIs. It empties the four staged-page tables and the space cursor table. It
 resets the label cursor, so the feed generator reads the label log again from
 the start, and it creates the tables of verified state. Migration 11 drops the
 four staged-page tables, the space cursor table and the triggers on the
-staged-page tables. An older binary refuses a migrated file, so the only way back is the copy made before the upgrade. The
+staged-page tables. Migration 12 records with the label cursor the boundaries it
+was read under, and keeps a row for every lifted takedown. An existing cursor
+has no record, so the first poll after the upgrade reads the label log again
+from the start, once. An older binary refuses a migrated file, so the only way back is the copy made before the upgrade. The
 effects and the steps are in
 [November upgrade and rollback](./november-upgrade.md).
 
@@ -512,6 +515,12 @@ author stream also ends the session and forces a reconnect.
 A feed read that takes longer than 2 seconds also closes feeds. They stay
 closed until the service-level stream next reconnects and the check passes.
 `/health` then shows `feedReady: false` and `serviceStreamConnected: false`.
+
+Feeds also close while the label log is read again from the start. That
+happens when a boundary joins the label scope: a new feed, or a wider service
+enrollment of the feed generator DID. It also happens once after the upgrade
+to store version 12. Feeds reopen when the read reaches the head. The
+moderation labels section of `stratos-feedgen-ng/README.md` has the details.
 
 While feeds are closed, `getFeed` and `getBlob` return `503 FeedNotReady`.
 The feed generator does not serve from a projection it cannot vouch for.

@@ -27,6 +27,7 @@ pub mod identifier;
 pub mod identity;
 mod identity_key;
 pub mod label_poller;
+pub mod label_scope;
 pub mod lifecycle;
 pub mod membership_reconciler;
 pub mod moderation_label;

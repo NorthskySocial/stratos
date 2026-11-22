@@ -129,6 +129,7 @@ const URI_INVENTORY_IDS = [
   'uri-feedgen-migration-v9-interactions',
   'uri-feedgen-migration-v10-verified-state',
   'uri-feedgen-migration-v11-drop-stage-tables',
+  'uri-feedgen-migration-v12-label-scope',
   'uri-feed-pagination-cursors',
   'uri-rust-credential-cache',
   'uri-clubhouse-space-map',

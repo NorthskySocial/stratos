@@ -11,6 +11,7 @@ use crate::{
     },
     feeds::FeedRegistry,
     identifier::{Did, RecordUri},
+    label_scope::LabelScope,
     moderation_label::{LabelPage, LabelSubject},
     readiness::{FeedReadinessGate, ReconciliationOutcome},
     service::ProjectionReader,
@@ -19,8 +20,8 @@ use crate::{
     space_ops::ChangeSet,
     store::{
         ActorEnrollment, ActorPage, ActorSyncState, EnrollmentReconciliation, LabelPageEffects,
-        PdsSpaceMember, StoreError, StoreInterrupt, VerifiedSpaceBase, VerifiedSpaceRecord,
-        VerifiedSpaceTarget,
+        LabelScopeAlignment, PdsSpaceMember, StoreError, StoreInterrupt, VerifiedSpaceBase,
+        VerifiedSpaceRecord, VerifiedSpaceTarget,
     },
     telemetry::FeedTelemetry,
 };
@@ -268,6 +269,27 @@ impl ControlLifecycle {
             .lock()
             .expect("projection lock poisoned")
             .label_cursor(authority_did)
+    }
+
+    /// Records the scope the label cursor is read under from now on. When the
+    /// cursor goes back to the start of the log, reads close until the replay
+    /// reaches the head, so a boundary new to the scope serves nothing first.
+    pub fn align_label_scope(
+        &self,
+        scope: &LabelScope,
+        updated_at: &str,
+    ) -> Result<LabelScopeAlignment, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let alignment = self
+            .projection
+            .lock()
+            .expect("projection lock poisoned")
+            .align_label_scope(authority_did, scope, updated_at)?;
+        if matches!(alignment, LabelScopeAlignment::Restarted { .. }) {
+            self.withdraw_labels_locked();
+        }
+        Ok(alignment)
     }
 
     pub fn apply_label_page(

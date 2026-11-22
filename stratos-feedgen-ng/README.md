@@ -135,7 +135,28 @@ The feed generator DID needs a service enrollment that covers every boundary it
 serves. With no service enrollment, the authority refuses its label queries and
 its feeds never open. An enrollment that covers only some served boundaries
 gives no error. The authority returns only the labels of the covered
-boundaries, so takedowns in the other boundaries are never applied.
+boundaries, and its cursor moves past the labels of the others.
+
+The store therefore keeps the label scope with the cursor. The scope is the
+served feed boundaries that the authority's enrollment answer for the feed
+generator DID covers. Each poll first asks the authority for that answer. It is
+one request of at most 5 seconds, and a failed request fails the poll. The
+comparison uses the full `did/name` form of a boundary, so write served
+boundaries in that form.
+
+When the scope gains a boundary, through a new feed or a wider enrollment, the
+feed generator reads the whole label log again from the start. Every feed
+returns `FeedNotReady` until that read reaches the head, so a new boundary
+serves nothing first. A long log takes several polls, at most 50 pages each. A
+scope that only shrinks keeps the cursor and replays nothing.
+
+A replay applies only the labels it has not applied before. Posts, members and
+pending reinstatements that the first read handled stay as they are. To make
+that possible, the store keeps a row for every lifted takedown.
+
+The authority can answer for the feed generator DID from its cache for up to 60
+seconds. A boundary that leaves the enrollment and comes back within that time
+can lose the labels recorded in between.
 
 An account takedown removes the member's posts, sync position and viewer
 authorization. It also stops the member's worker. This happens even when the
@@ -252,8 +273,10 @@ with a minimum of one second. `FEEDGEN_STAGE_TARGET_MAX_ROWS`,
 `FEEDGEN_STAGE_GLOBAL_MAX_ROWS`, `FEEDGEN_STAGE_TARGET_MAX_BYTES` and
 `FEEDGEN_STAGE_GLOBAL_MAX_BYTES` are no longer read, and a set one is ignored.
 
-The store is at schema version 11. An older binary refuses a migrated
-database.
+The store is at schema version 12. Migration 12 adds the label scope to the
+cursor, and an existing cursor has none. The first poll after the upgrade
+therefore reads the label log again from the start, once, and feeds stay closed
+until it reaches the head. An older binary refuses a migrated database.
 
 Each pass logs `event=pds_space_sync_pass` with the counts `promoted`,
 `unchanged`, `replaced`, `cleared`, `deferred` and `target_failures`, and the

@@ -49,7 +49,7 @@ what did run.
 4. The feed generator keeps a verified state for each member who hosts their own
    repo. It promotes a change only when the set hash equals the commit's
    `data`. Nothing is staged.
-5. The feed generator's database moves to schema version 11. An older binary
+5. The feed generator's database moves to schema version 12. An older binary
    refuses the migrated file.
 6. Migration 10 deletes the feed generator's posts and interactions of members
    with `pds` custody. They come back only through a verified whole-repo read
@@ -600,14 +600,23 @@ reset the actor cursor, so the stream does not send them again. They are lost.
 **Migration 11** drops the four staged-page tables, the space cursor table and
 the three triggers on the staged-page tables. The `stage_*` keys that an older
 build wrote into the retention metadata stay in the file, and nothing reads
-them. The version becomes 11. A second start changes nothing.
+them.
+
+**Migration 12** adds a column to the label cursor that records the boundaries
+the cursor was read under. It rebuilds the label subject table with the same
+rows, so that a lifted takedown can keep its row. The version becomes 12. A
+second start changes nothing. A cursor with no recorded boundaries makes the
+first poll read the label log again from the start, once. Migration 10 already
+removed every cursor of a database from before this upgrade, so this adds no
+second read for it. A database that a build at version 10 or 11 wrote does get
+the one read.
 
 **An older binary refuses the migrated file.** A binary that knows fewer
 migrations does not open a database above its latest version. The way back is
 the copy you made in step 5.
 
 You know it worked when the step 5 commands, run against `$FEEDGEN_SQLITE_PATH`
-instead of the copy, print `11`, and the feed generator's `/health` reaches
+instead of the copy, print `12`, and the feed generator's `/health` reaches
 `200` after the label log is read. Mark: **READY**.
 
 ## Monitoring
@@ -774,7 +783,7 @@ cost of the loss below. Mark: **READY**, except step 6.
 
 Rehearsed, with real encrypted stores and the real migrations:
 
-- `cargo test --locked -p stratos-feedgen-ng --lib store::migrations` ran 22 tests. All
+- `cargo test --locked -p stratos-feedgen-ng --lib store::migrations` ran 27 tests. All
   passed. They include
   `purges_every_space_row_and_keeps_everything_else_byte_for_byte`,
   `the_purge_is_all_or_nothing`,
@@ -783,15 +792,22 @@ Rehearsed, with real encrypted stores and the real migrations:
   `an_encrypted_file_migrates_once_and_stays_migrated_across_reopens`,
   `a_version_ten_database_with_rows_in_the_five_tables_reaches_eleven_and_loses_only_them`,
   `a_failure_after_the_drops_rolls_back_to_version_ten_through_apply_migrations`,
-  `a_database_at_version_twelve_is_refused_and_left_alone` and
+  `a_database_at_version_thirteen_is_refused_and_left_alone`,
+  `a_version_eleven_database_keeps_its_labels_and_reads_its_scope_as_unknown`,
+  `a_failure_in_the_label_scope_migration_leaves_version_eleven_and_every_row`,
+  `a_binary_that_knows_eleven_migrations_refuses_a_version_twelve_database_and_leaves_it_alone`
+  and
   `a_verified_sync_of_a_member_works_end_to_end_on_a_migrated_file_store`.
+- `cargo test --locked -p stratos-feedgen-ng --lib store::labels` includes
+  `the_upgrade_from_version_eleven_replays_the_label_log_once_and_only_once`.
 - The audience and presentation checks of the service verifiers, with the
   pinned upstream package as the oracle, at package level.
 
 Not rehearsed:
 
 - No older binary opened the migrated file. The refusal is tested with a
-  database whose version is above the latest the code knows.
+  database whose version is above the latest the code knows, and with the
+  first eleven migrations of this build run on a version 12 database.
 - The test files are made by applying the migrations of this build up to version
   9 and adding rows the way an older build wrote them. No kept production
   database was used.

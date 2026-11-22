@@ -1,13 +1,14 @@
 use crate::{
     admission::{ReadAdmission, ReadToken},
     cursor::FeedCursor,
+    label_scope::LabelScope,
     moderation_label::LabelPage,
     space_mac::MacVerifiedCommit,
     space_ops::ChangeSet,
     store::{
         ActorEnrollment, ActorPage, ActorSyncState, EncryptedStore, EnrollmentReconciliation,
-        FeedPage, LabelPageEffects, PdsSpaceMember, ProjectionCompaction, StoreError,
-        StoreInterrupt, VerifiedSpaceBase, VerifiedSpaceRecord, VerifiedSpaceTarget,
+        FeedPage, LabelPageEffects, LabelScopeAlignment, PdsSpaceMember, ProjectionCompaction,
+        StoreError, StoreInterrupt, VerifiedSpaceBase, VerifiedSpaceRecord, VerifiedSpaceTarget,
     },
 };
 use std::collections::BTreeSet;
@@ -223,6 +224,15 @@ impl ProjectionReader {
     }
     pub fn label_cursor(&self, authority_did: &str) -> Result<u64, StoreError> {
         self.store.label_cursor(authority_did)
+    }
+    pub fn align_label_scope(
+        &mut self,
+        authority_did: &str,
+        scope: &LabelScope,
+        updated_at: &str,
+    ) -> Result<LabelScopeAlignment, StoreError> {
+        self.store
+            .align_label_scope(authority_did, scope, updated_at)
     }
     pub fn apply_label_page(
         &mut self,

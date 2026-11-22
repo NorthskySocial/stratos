@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -13,9 +13,10 @@ use crate::{
     blob_service::BlobService,
     credential_manager::boundary_to_space_uri,
     identifier::RecordUri,
+    label_scope::LabelScope,
     lifecycle::ControlLifecycle,
     moderation_label::{LabelPage, LabelSubject},
-    store::ActorEnrollment,
+    store::{ActorEnrollment, LabelScopeAlignment},
     telemetry::{FeedTelemetry, LabelPollOutcome},
 };
 
@@ -54,6 +55,15 @@ pub struct RecordEnforcement {
     pub blobs: Arc<BlobService>,
 }
 
+/// What a label poller needs to learn the scope its cursor is read under: the
+/// configured feed boundaries, and the authority's answer for its own DID.
+#[derive(Clone)]
+pub struct LabelScopeSource {
+    pub authority: Arc<dyn AuthorityClient>,
+    pub feedgen_did: String,
+    pub served_boundaries: BTreeSet<String>,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct LabelTiming {
     poll_interval: Duration,
@@ -71,6 +81,7 @@ pub struct LabelPoller {
 impl LabelPoller {
     pub fn start(
         client: Arc<dyn LabelLogClient>,
+        scope: LabelScopeSource,
         accounts: AccountEnforcement,
         records: RecordEnforcement,
         lifecycle: Arc<ControlLifecycle>,
@@ -78,6 +89,7 @@ impl LabelPoller {
     ) -> Self {
         Self::start_with_timing(
             client,
+            scope,
             accounts,
             records,
             lifecycle,
@@ -91,6 +103,7 @@ impl LabelPoller {
 
     fn start_with_timing(
         client: Arc<dyn LabelLogClient>,
+        scope: LabelScopeSource,
         accounts: AccountEnforcement,
         records: RecordEnforcement,
         lifecycle: Arc<ControlLifecycle>,
@@ -104,11 +117,14 @@ impl LabelPoller {
             receiver.clone(),
         ));
         let task = tokio::spawn(run_forever(
-            client,
-            accounts,
-            records,
-            lifecycle,
-            telemetry,
+            CycleInputs {
+                client,
+                scope,
+                accounts,
+                records,
+                lifecycle,
+                telemetry,
+            },
             timing.poll_interval,
             receiver,
         ));
@@ -155,18 +171,27 @@ async fn guard_label_staleness(
     }
 }
 
-async fn run_forever(
+/// What every cycle of a running poller reads from and acts on.
+struct CycleInputs {
     client: Arc<dyn LabelLogClient>,
+    scope: LabelScopeSource,
     accounts: AccountEnforcement,
     records: RecordEnforcement,
     lifecycle: Arc<ControlLifecycle>,
     telemetry: Arc<FeedTelemetry>,
-    interval: Duration,
-    mut shutdown: watch::Receiver<bool>,
-) {
+}
+
+async fn run_forever(inputs: CycleInputs, interval: Duration, mut shutdown: watch::Receiver<bool>) {
     loop {
         tokio::select! {
-            _ = run_cycle(&lifecycle, client.as_ref(), &accounts, &records, &telemetry) => {}
+            _ = run_cycle(
+                &inputs.lifecycle,
+                inputs.client.as_ref(),
+                &inputs.scope,
+                &inputs.accounts,
+                &inputs.records,
+                &inputs.telemetry,
+            ) => {}
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
                     return;
@@ -187,6 +212,7 @@ async fn run_forever(
 async fn run_cycle(
     lifecycle: &ControlLifecycle,
     client: &dyn LabelLogClient,
+    scope: &LabelScopeSource,
     accounts: &AccountEnforcement,
     records: &RecordEnforcement,
     telemetry: &FeedTelemetry,
@@ -198,6 +224,7 @@ async fn run_cycle(
     let result = poll_to_caught_up(
         lifecycle,
         client,
+        scope,
         accounts,
         records,
         telemetry,
@@ -217,11 +244,15 @@ async fn run_cycle(
 async fn poll_to_caught_up(
     lifecycle: &ControlLifecycle,
     client: &dyn LabelLogClient,
+    scope: &LabelScopeSource,
     accounts: &AccountEnforcement,
     records: &RecordEnforcement,
     telemetry: &FeedTelemetry,
     failures: &mut EnforcementFailures,
 ) -> LabelCycle {
+    if let Err(outcome) = align_label_scope(lifecycle, scope).await {
+        return LabelCycle::Failed(outcome);
+    }
     let mut cursor = match lifecycle.label_cursor() {
         Ok(cursor) => cursor,
         Err(_) => return LabelCycle::Failed(LabelPollOutcome::Store),
@@ -263,6 +294,35 @@ async fn poll_to_caught_up(
         telemetry.record_label_poll(LabelPollOutcome::Ok);
     }
     LabelCycle::PageCapReached
+}
+
+/// Asks the authority which served boundaries the feed generator's enrollment
+/// covers before the pages are read, so the scope recorded with the cursor
+/// never claims more than the pages could show.
+async fn align_label_scope(
+    lifecycle: &ControlLifecycle,
+    source: &LabelScopeSource,
+) -> Result<(), LabelPollOutcome> {
+    let now = OffsetDateTime::now_utc();
+    let resolution = source
+        .authority
+        .resolve_enrollment(&source.feedgen_did, now.unix_timestamp().max(0) as u64)
+        .await
+        .map_err(|error| outcome_for(&error))?;
+    let entitled = if resolution.enrolled {
+        resolution.boundaries
+    } else {
+        Vec::new()
+    };
+    let scope = LabelScope::served_and_entitled(source.served_boundaries.iter().cloned(), entitled);
+    match lifecycle.align_label_scope(&scope, &format_utc_millis(now)) {
+        Ok(LabelScopeAlignment::Restarted { .. }) => {
+            eprintln!("event=label_log_replay_started");
+            Ok(())
+        }
+        Ok(LabelScopeAlignment::Kept) => Ok(()),
+        Err(_) => Err(LabelPollOutcome::Store),
+    }
 }
 
 async fn reinstate_accounts(
@@ -549,8 +609,8 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::{
-        AccountEnforcement, LabelCycle, LabelPoller, LabelTiming, RecordEnforcement, failure_line,
-        run_cycle, skipped_subjects_line,
+        AccountEnforcement, LabelCycle, LabelPoller, LabelScopeSource, LabelTiming,
+        RecordEnforcement, failure_line, run_cycle, skipped_subjects_line,
     };
     use crate::{
         actor_stream::{ActorPool, ActorStreamConfig},
@@ -573,6 +633,9 @@ mod tests {
     };
 
     const AUTHORITY_DID: &str = "did:web:stratos.example.test";
+    const FEEDGEN_DID: &str = "did:web:feedgen.example.test";
+    /// How the feed generator's own DID appears in a `resolveEnrollments` query.
+    const OWN_RESOLUTION_QUERY: &str = "did=did%3Aweb%3Afeedgen.example.test";
     const SPIKE_POST: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop1";
     const FAYE_POST: &str = "at://did:plc:faye/zone.stratos.feed.post/redtail";
 
@@ -581,6 +644,7 @@ mod tests {
         routes: Arc<Mutex<BTreeMap<u64, Vec<u8>>>>,
         requests: Arc<Mutex<Vec<u64>>>,
         resolution: Arc<Mutex<Vec<u8>>>,
+        own_resolution: Arc<Mutex<Vec<u8>>>,
         resolve_calls: Arc<AtomicUsize>,
         resolution_delay: Arc<Mutex<Option<Duration>>>,
         endless_log: Arc<AtomicBool>,
@@ -611,6 +675,16 @@ mod tests {
             );
         }
 
+        /// The authority's answer for the feed generator's own enrollment.
+        fn set_own_boundaries(&self, boundaries: &[&str]) {
+            *self.own_resolution.lock().unwrap() = own_resolution(boundaries);
+        }
+
+        fn fail_own_resolution(&self) {
+            *self.own_resolution.lock().unwrap() =
+                http_response("500 Internal Server Error", b"{}");
+        }
+
         fn resolve_call_count(&self) -> usize {
             self.resolve_calls.load(Ordering::SeqCst)
         }
@@ -633,6 +707,7 @@ mod tests {
         let routes = Arc::new(Mutex::new(routes.into_iter().collect::<BTreeMap<_, _>>()));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let resolution = Arc::new(Mutex::new(http_response("404 Not Found", b"{}")));
+        let own_resolution = Arc::new(Mutex::new(own_resolution(&["bebop"])));
         let resolve_calls = Arc::new(AtomicUsize::new(0));
         let resolution_delay = Arc::new(Mutex::new(None::<Duration>));
         let endless_log = Arc::new(AtomicBool::new(false));
@@ -640,6 +715,7 @@ mod tests {
             let routes = Arc::clone(&routes);
             let requests = Arc::clone(&requests);
             let resolution = Arc::clone(&resolution);
+            let own_resolution = Arc::clone(&own_resolution);
             let resolve_calls = Arc::clone(&resolve_calls);
             let resolution_delay = Arc::clone(&resolution_delay);
             let endless_log = Arc::clone(&endless_log);
@@ -661,6 +737,14 @@ mod tests {
                     }
                     let head = String::from_utf8_lossy(&head).into_owned();
                     let request_line = head.lines().next().unwrap_or_default();
+                    // Answered at once and not counted, so the scope check of
+                    // every cycle leaves the member resolutions alone.
+                    if request_line.contains(OWN_RESOLUTION_QUERY) {
+                        let response = own_resolution.lock().unwrap().clone();
+                        let _ = stream.write_all(&response).await;
+                        let _ = stream.shutdown().await;
+                        continue;
+                    }
                     if request_line.contains("resolveEnrollments") {
                         resolve_calls.fetch_add(1, Ordering::SeqCst);
                         let response = resolution.lock().unwrap().clone();
@@ -698,11 +782,36 @@ mod tests {
             routes,
             requests,
             resolution,
+            own_resolution,
             resolve_calls,
             resolution_delay,
             endless_log,
             task,
         }
+    }
+
+    fn own_resolution(boundaries: &[&str]) -> Vec<u8> {
+        let boundaries = serde_json::to_string(boundaries).unwrap();
+        http_response(
+            "200 OK",
+            format!(r#"{{"did":"{FEEDGEN_DID}","enrolled":true,"boundaries":{boundaries}}}"#)
+                .as_bytes(),
+        )
+    }
+
+    fn serving(responder: &Responder, boundaries: &[&str]) -> LabelScopeSource {
+        LabelScopeSource {
+            authority: client(responder),
+            feedgen_did: FEEDGEN_DID.to_owned(),
+            served_boundaries: boundaries
+                .iter()
+                .map(|boundary| (*boundary).to_owned())
+                .collect(),
+        }
+    }
+
+    fn scope_source(responder: &Responder) -> LabelScopeSource {
+        serving(responder, &["did:web:stratos.example.test/bebop"])
     }
 
     fn http_response(status: &str, body: &[u8]) -> Vec<u8> {
@@ -736,7 +845,7 @@ mod tests {
             HttpAuthorityClient::new(
                 &format!("http://{}", responder.address),
                 AUTHORITY_DID,
-                "did:web:feedgen.example.test",
+                FEEDGEN_DID,
                 ServiceSigningKey::from_hex(&"11".repeat(32)).unwrap(),
             )
             .unwrap(),
@@ -760,11 +869,18 @@ mod tests {
     }
 
     fn reconcile_session(lifecycle: &ControlLifecycle) {
+        reconcile_session_reading(lifecycle, &["bebop"]);
+    }
+
+    fn reconcile_session_reading(lifecycle: &ControlLifecycle, boundaries: &[&str]) {
         lifecycle
             .apply_viewer_authorization(
                 crate::authorization::ViewerAuthorization {
                     did: "did:plc:faye".to_owned(),
-                    boundaries: vec!["bebop".to_owned()],
+                    boundaries: boundaries
+                        .iter()
+                        .map(|boundary| (*boundary).to_owned())
+                        .collect(),
                     expires_at: u64::MAX,
                 },
                 1,
@@ -827,6 +943,7 @@ mod tests {
         let cycle = run_cycle(
             &lifecycle,
             client(&responder).as_ref(),
+            &scope_source(&responder),
             &enforcement(&responder, &lifecycle),
             &record_enforcement(),
             &FeedTelemetry::disabled(),
@@ -857,6 +974,7 @@ mod tests {
         let cycle = run_cycle(
             &lifecycle,
             client(&responder).as_ref(),
+            &scope_source(&responder),
             &enforcement(&responder, &lifecycle),
             &record_enforcement(),
             &FeedTelemetry::disabled(),
@@ -900,6 +1018,7 @@ mod tests {
         let cycle = run_cycle(
             &lifecycle,
             client(&responder).as_ref(),
+            &scope_source(&responder),
             &enforcement(&responder, &lifecycle),
             &record_enforcement(),
             &FeedTelemetry::disabled(),
@@ -924,6 +1043,7 @@ mod tests {
         let failed = run_cycle(
             &lifecycle,
             label_client.as_ref(),
+            &scope_source(&responder),
             &accounts,
             &record_enforcement(),
             &FeedTelemetry::disabled(),
@@ -938,6 +1058,7 @@ mod tests {
         let recovered = run_cycle(
             &lifecycle,
             label_client.as_ref(),
+            &scope_source(&responder),
             &accounts,
             &record_enforcement(),
             &FeedTelemetry::disabled(),
@@ -961,6 +1082,7 @@ mod tests {
         let cycle = run_cycle(
             &lifecycle,
             client(&responder).as_ref(),
+            &scope_source(&responder),
             &enforcement(&responder, &lifecycle),
             &record_enforcement(),
             &FeedTelemetry::disabled(),
@@ -984,6 +1106,7 @@ mod tests {
         // A short injected interval keeps the test off the production 10 s cadence.
         let poller = LabelPoller::start_with_timing(
             client(&responder),
+            scope_source(&responder),
             enforcement(&responder, &lifecycle),
             record_enforcement(),
             Arc::clone(&lifecycle),
@@ -1038,6 +1161,7 @@ mod tests {
             run_cycle(
                 &lifecycle,
                 label_client.as_ref(),
+                &scope_source(&responder),
                 &accounts,
                 &record_enforcement(),
                 &telemetry
@@ -1050,6 +1174,7 @@ mod tests {
             run_cycle(
                 &lifecycle,
                 label_client.as_ref(),
+                &scope_source(&responder),
                 &accounts,
                 &record_enforcement(),
                 &telemetry
@@ -1239,6 +1364,7 @@ mod tests {
             run_cycle(
                 &self.lifecycle,
                 self.label_client.as_ref(),
+                &scope_source(&self.responder),
                 &self.accounts,
                 &record_enforcement(),
                 &FeedTelemetry::disabled(),
@@ -1809,6 +1935,7 @@ mod tests {
             run_cycle(
                 &self.lifecycle,
                 self.label_client.as_ref(),
+                &scope_source(&self.responder),
                 &self.accounts,
                 &self.records,
                 &FeedTelemetry::disabled(),
@@ -2508,6 +2635,7 @@ mod tests {
             let cycle = run_cycle(
                 &self.lifecycle,
                 client(&self.responder).as_ref(),
+                &scope_source(&self.responder),
                 &self.accounts,
                 &record_enforcement(),
                 &FeedTelemetry::disabled(),
@@ -2616,6 +2744,7 @@ mod tests {
     ) -> LabelPoller {
         LabelPoller::start_with_timing(
             client(responder),
+            scope_source(responder),
             accounts,
             record_enforcement(),
             Arc::clone(lifecycle),
@@ -2795,6 +2924,7 @@ mod tests {
         let cycle = run_cycle(
             &scene.lifecycle,
             scene.label_client.as_ref(),
+            &scope_source(&scene.responder),
             &budgeted,
             &record_enforcement(),
             &FeedTelemetry::disabled(),
@@ -3010,5 +3140,236 @@ mod tests {
             "the next poll must start from nothing"
         );
         assert!(!scene.feed_lists(FAYE_SPACE_POST), "until a replacement");
+    }
+
+    // The authority answers in the full form, so a served boundary must match it.
+    const BEBOP: &str = "did:web:stratos.example.test/bebop";
+    const SWORDFISH: &str = "did:web:stratos.example.test/swordfish";
+    const JET_SWORDFISH_POST: &str = "at://did:plc:jetblack/zone.stratos.feed.post/swordfish";
+
+    fn feed_body(lifecycle: &ControlLifecycle, boundary: &str) -> Result<String, FeedServiceError> {
+        let feeds = FeedRegistry::new([FeedDescription {
+            id: boundary.to_owned(),
+            boundary: boundary.to_owned(),
+            display_name: None,
+            description: None,
+        }])
+        .unwrap();
+        lifecycle
+            .serve_viewer_feed(
+                "did:plc:faye",
+                &feeds,
+                FeedQuery {
+                    feed_id: boundary,
+                    cursor: None,
+                    limit: 50,
+                    now: 2,
+                    as_of: "1998-04-03T00:00:00.000Z",
+                    blob_base_url: "https://feedgen.example.test",
+                },
+            )
+            .map(|(body, _)| String::from_utf8(body).unwrap())
+    }
+
+    fn ingest_swordfish_post(lifecycle: &ControlLifecycle) {
+        lifecycle
+            .apply_actor_page(ActorPage {
+                authority_did: AUTHORITY_DID.to_owned(),
+                actor_did: "did:plc:jetblack".to_owned(),
+                sequence: 1,
+                upserts: vec![ProjectionPost {
+                    uri: JET_SWORDFISH_POST.to_owned(),
+                    author_did: "did:plc:jetblack".to_owned(),
+                    boundaries: vec![SWORDFISH.to_owned()],
+                    ..spike_post("unused")
+                }],
+                deletes: Vec::new(),
+                updated_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                interactions: crate::store::InteractionChanges::default(),
+            })
+            .unwrap();
+    }
+
+    async fn cycle_serving(
+        lifecycle: &Arc<ControlLifecycle>,
+        responder: &Responder,
+        served: &[&str],
+    ) -> LabelCycle {
+        run_cycle(
+            lifecycle,
+            client(responder).as_ref(),
+            &serving(responder, served),
+            &enforcement(responder, lifecycle),
+            &record_enforcement(),
+            &FeedTelemetry::disabled(),
+        )
+        .await
+    }
+
+    fn cursors_requested_since(responder: &Responder, earlier: usize) -> Vec<u64> {
+        responder.requested_cursors()[earlier..].to_vec()
+    }
+
+    /// The takedown at 2 concerns only the swordfish post. Under a scope
+    /// without swordfish the authority leaves it out of the page but still
+    /// moves the cursor past it.
+    async fn scanned_past_the_swordfish_takedown(
+        own_boundaries: &[&str],
+        served: &[&str],
+    ) -> (Responder, Arc<ControlLifecycle>) {
+        let responder = respond_by_cursor([
+            (0, label_page(3, &[(1, SPIKE_POST)])),
+            (3, label_page(3, &[])),
+        ])
+        .await;
+        responder.set_own_boundaries(own_boundaries);
+        let (lifecycle, _readiness) = lifecycle_with(Arc::new(FeedTelemetry::disabled()));
+        reconcile_session_reading(&lifecycle, &[BEBOP, SWORDFISH]);
+        assert_eq!(
+            cycle_serving(&lifecycle, &responder, served).await,
+            LabelCycle::CaughtUp
+        );
+        assert_eq!(lifecycle.label_cursor().unwrap(), 3);
+        assert!(feed_body(&lifecycle, BEBOP).is_ok());
+        (responder, lifecycle)
+    }
+
+    /// Swordfish joins the scope. The replay meets the takedown at 2, then the
+    /// log fails before its head.
+    async fn replay_with_the_swordfish_takedown(
+        responder: &Responder,
+        lifecycle: &Arc<ControlLifecycle>,
+    ) {
+        responder.set_own_boundaries(&[BEBOP, SWORDFISH]);
+        responder.set_routes([
+            (
+                0,
+                label_page(3, &[(1, SPIKE_POST), (2, JET_SWORDFISH_POST)]),
+            ),
+            (3, http_response("500 Internal Server Error", b"{}")),
+        ]);
+        ingest_swordfish_post(lifecycle);
+        let earlier = responder.requested_cursors().len();
+
+        let replay = cycle_serving(lifecycle, responder, &[BEBOP, SWORDFISH]).await;
+
+        assert_eq!(replay, LabelCycle::Failed(LabelPollOutcome::Unavailable));
+        assert_eq!(cursors_requested_since(responder, earlier), [0, 3]);
+        assert_eq!(lifecycle.label_cursor().unwrap(), 3);
+        for boundary in [BEBOP, SWORDFISH] {
+            assert!(
+                matches!(
+                    feed_body(lifecycle, boundary),
+                    Err(FeedServiceError::FeedNotReady)
+                ),
+                "{boundary} opened before the replay reached the head"
+            );
+        }
+
+        responder.set_routes([
+            (
+                0,
+                label_page(3, &[(1, SPIKE_POST), (2, JET_SWORDFISH_POST)]),
+            ),
+            (3, label_page(3, &[])),
+        ]);
+        let head = cycle_serving(lifecycle, responder, &[BEBOP, SWORDFISH]).await;
+
+        assert_eq!(head, LabelCycle::CaughtUp);
+        let swordfish = feed_body(lifecycle, SWORDFISH).unwrap();
+        assert!(!swordfish.contains(JET_SWORDFISH_POST), "{swordfish}");
+        assert!(feed_body(lifecycle, BEBOP).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_takedown_scanned_past_before_the_enrollment_grew_is_applied_before_feeds_reopen() {
+        let (responder, lifecycle) =
+            scanned_past_the_swordfish_takedown(&[BEBOP], &[BEBOP, SWORDFISH]).await;
+
+        replay_with_the_swordfish_takedown(&responder, &lifecycle).await;
+    }
+
+    #[tokio::test]
+    async fn a_restart_that_serves_a_new_boundary_applies_its_takedown_before_feeds_reopen() {
+        let (responder, lifecycle) = scanned_past_the_swordfish_takedown(&[BEBOP], &[BEBOP]).await;
+
+        replay_with_the_swordfish_takedown(&responder, &lifecycle).await;
+    }
+
+    #[tokio::test]
+    async fn a_feed_configured_for_an_enrolled_boundary_replays_the_log_too() {
+        let (responder, lifecycle) =
+            scanned_past_the_swordfish_takedown(&[BEBOP, SWORDFISH], &[BEBOP]).await;
+
+        replay_with_the_swordfish_takedown(&responder, &lifecycle).await;
+    }
+
+    #[tokio::test]
+    async fn a_scope_that_only_shrinks_replays_nothing() {
+        let (responder, lifecycle) =
+            scanned_past_the_swordfish_takedown(&[BEBOP, SWORDFISH], &[BEBOP, SWORDFISH]).await;
+        let earlier = responder.requested_cursors().len();
+
+        let cycle = cycle_serving(&lifecycle, &responder, &[BEBOP]).await;
+
+        assert_eq!(cycle, LabelCycle::CaughtUp);
+        assert_eq!(cursors_requested_since(&responder, earlier), [3]);
+        assert!(feed_body(&lifecycle, BEBOP).is_ok());
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_scope_replays_nothing() {
+        let (responder, lifecycle) =
+            scanned_past_the_swordfish_takedown(&[BEBOP, SWORDFISH], &[BEBOP, SWORDFISH]).await;
+        let earlier = responder.requested_cursors().len();
+
+        let cycle = cycle_serving(&lifecycle, &responder, &[BEBOP, SWORDFISH]).await;
+
+        assert_eq!(cycle, LabelCycle::CaughtUp);
+        assert_eq!(cursors_requested_since(&responder, earlier), [3]);
+    }
+
+    #[tokio::test]
+    async fn a_cursor_stored_before_scopes_were_recorded_is_replayed_once() {
+        let responder = respond_by_cursor([
+            (0, label_page(3, &[(1, SPIKE_POST)])),
+            (3, label_page(3, &[])),
+        ])
+        .await;
+        let (lifecycle, _readiness) = lifecycle_with(Arc::new(FeedTelemetry::disabled()));
+        reconcile_session(&lifecycle);
+        lifecycle
+            .apply_label_page(
+                &LabelPage {
+                    cursor: 3,
+                    labels: Vec::new(),
+                    skipped_subjects: 0,
+                },
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap();
+
+        let upgraded = cycle_serving(&lifecycle, &responder, &[BEBOP]).await;
+        let next = cycle_serving(&lifecycle, &responder, &[BEBOP]).await;
+
+        assert_eq!(upgraded, LabelCycle::CaughtUp);
+        assert_eq!(next, LabelCycle::CaughtUp);
+        assert_eq!(responder.requested_cursors(), [0, 3, 3]);
+        assert!(serve_feed(&lifecycle).is_ok());
+    }
+
+    #[tokio::test]
+    async fn an_unanswered_scope_question_fails_the_cycle_before_any_page() {
+        let responder = respond_by_cursor(two_pages_then_no_progress()).await;
+        responder.fail_own_resolution();
+        let (lifecycle, readiness) = lifecycle_with(Arc::new(FeedTelemetry::disabled()));
+        reconcile_session(&lifecycle);
+
+        let cycle = cycle_serving(&lifecycle, &responder, &[BEBOP]).await;
+
+        assert_eq!(cycle, LabelCycle::Failed(LabelPollOutcome::Unavailable));
+        assert!(responder.requested_cursors().is_empty());
+        assert_eq!(lifecycle.label_cursor().unwrap(), 0);
+        assert!(!readiness.lock().unwrap().is_ready());
     }
 }

@@ -97,6 +97,15 @@ and Clubhouse use these interfaces.
   guidance to drop an account's data on those answers. A takedown that reaches
   the feed generator through the moderation label log is a separate path and
   does remove posts.
+- **A consumer that applies no labels keeps a taken-down account's copies.**
+  Stratos stops serving the account's records and blobs, and it sends no event.
+  The Rust feed generator applies account labels from the label log. The
+  TypeScript feed generator and the indexer do not.
+- **A wider label scope closes every feed for a while.** When a served boundary
+  joins the feed generator's label scope, it reads the label log again from
+  the start. Every feed is closed until that read reaches the head. The scope
+  comes from the authority's answer for the feed generator DID, which another
+  Stratos process can serve from a cache for up to 60 seconds.
 - **A credential outlives a hold until it expires.** A credential minted before
   an operator hold or an account takedown stays accepted on a Stratos read route
   until `exp`. Stratos does not tell a foreign PDS. The lifetime is 600 seconds

@@ -107,6 +107,10 @@ Caught up means the authority returned the cursor the Feedgen already held. A
 Feedgen whose `queryLabels` calls are refused, for example because its DID has
 no service enrollment covering its boundaries, never opens its feeds.
 
+The cursor records the served boundaries that the Feedgen's enrollment covers.
+When a boundary joins that set, the Feedgen reads the label log again from the
+start, and feeds stay closed until that read catches up.
+
 Reads close again once five poll intervals, which is 50 seconds, pass without
 the cursor catching up. A separate task enforces this, so it holds while a poll
 is still running, when polls keep stopping at their page limit, and when the
