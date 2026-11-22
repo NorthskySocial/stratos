@@ -326,7 +326,8 @@ async function writeLabel(
 /**
  * Sets the marker from the subject's latest label. It repeats until the latest
  * label is unchanged after the write, so a concurrent append cannot leave this
- * request's older view as the final marker.
+ * request's older view as the final marker. If it gives up, the marker is left
+ * hidden whenever either of the last two labels it saw was a takedown.
  */
 async function reconcileMarker(
   ctx: AppContext,
@@ -334,17 +335,19 @@ async function reconcileMarker(
   subjectKey: string,
 ): Promise<void> {
   let latest = await ctx.labelStore.latestForSubject(subjectKey)
+  let written: TakedownMarker | undefined
   for (let round = 0; round < MAX_RECONCILE_ROUNDS; round++) {
-    await setMarker(
-      ctx,
-      subject,
-      latest && !latest.neg
-        ? { applied: true, ref: takedownMarker(latest) }
-        : { applied: false },
-    )
+    written = markerFor(latest)
+    await setMarker(ctx, subject, written)
     const after = await ctx.labelStore.latestForSubject(subjectKey)
     if (after?.seq === latest?.seq) return
     latest = after
+  }
+  // The direction can flip on every round, so the last write may have cleared
+  // the marker while the newest label is a takedown. Giving up fails hidden.
+  const newest = markerFor(latest)
+  if (newest.applied && !written?.applied) {
+    await setMarker(ctx, subject, newest)
   }
   ctx.logger?.warn(
     { subject: subjectKey },
@@ -352,10 +355,21 @@ async function reconcileMarker(
   )
 }
 
+interface TakedownMarker {
+  applied: boolean
+  ref?: string
+}
+
+function markerFor(label: StoredLabel | undefined): TakedownMarker {
+  return label && !label.neg
+    ? { applied: true, ref: takedownMarker(label) }
+    : { applied: false }
+}
+
 async function setMarker(
   ctx: AppContext,
   subject: HostedRecordSubject,
-  takedown: { applied: boolean; ref?: string },
+  takedown: TakedownMarker,
 ): Promise<void> {
   const unlock = await ctx.repoWriteLocks.acquire(subject.authorDid)
   try {
