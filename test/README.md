@@ -9,11 +9,14 @@ and boundary-based access control against a real PDS and a Dockerized Stratos in
 - Docker Compose
 - Playwright Chromium (for OAuth browser automation)
 
-Install Playwright's Chromium browser (one-time):
+Install Playwright's Chromium browser:
 
 ```bash
 npx playwright install chromium
 ```
+
+Run it again whenever the `playwright` version in the scripts changes. Each
+Playwright release needs its own browser build.
 
 ## Test Users
 

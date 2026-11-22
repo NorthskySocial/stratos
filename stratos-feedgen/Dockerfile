@@ -63,8 +63,8 @@ WORKDIR /app
 # sync with stratos-feedgen/package.json and scripts/bundle.mjs `external`).
 RUN apk add --no-cache wget \
     && npm install --omit=dev --no-package-lock --no-audit --no-fund \
-        @libsql/client@0.17.0 \
-        postgres@3.4.8 \
+        @libsql/client@0.18.0 \
+        postgres@4.1.1 \
     && npm cache clean --force
 
 # Bundled application (single ESM file + sourcemap).

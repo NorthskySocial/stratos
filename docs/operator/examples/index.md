@@ -41,9 +41,11 @@ scheme.
 
 The compose files run Postgres 19. An existing data volume from an older major
 version does not start under Postgres 19. Migrate that database with
-`pg_upgrade` or with a dump and restore. Local and test volumes hold no data
-worth keeping, so remove them with `docker compose down -v` and let Postgres
-create a fresh database.
+`pg_upgrade` or with a dump and restore. A local or test Postgres volume holds
+no data worth keeping. Stop the stack with `docker compose down`, remove the
+`pgdata` volume alone, and let Postgres create a fresh database. Do not use
+`docker compose down -v`: it also removes `stratos-data`, which holds the
+member data and the service signing identity.
 
 Copy the environment template, fill in the required values, then start the
 stack:

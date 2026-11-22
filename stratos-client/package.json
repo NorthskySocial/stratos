@@ -32,7 +32,7 @@
     "build": "pnpm lexgen && tsc -p tsconfig.build.json",
     "lexgen": "node scripts/gen-lexicons.mjs",
     "clean": "rm -rf dist",
-    "test": "vitest run --project stratos-client",
+    "test": "vitest run --config ../vitest.config.ts --project stratos-client",
     "mutation": "stryker run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "format": "prettier --write .",
