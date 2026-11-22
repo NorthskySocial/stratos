@@ -296,6 +296,14 @@ async function createReply(
 A reply stays in the parent's boundary. Use the same boundary value. A reply to a
 public `app.bsky.feed.post` is rejected.
 
+A parent by a member who hosts their own repo has a space record URI. Stratos
+does not hold that record and does not fetch it. On the
+[boundary procedures](#boundary-procedures), such a parent must be a post by an
+active member of the boundary who hosts their own repo, in the space type this
+service hosts. Any other space-form parent fails with `InvalidRecord`, the
+error a parent in another boundary returns. The older `com.atproto.repo`
+methods check only the boundary in the URI.
+
 ## Deletes, updates, and batches
 
 Stratos serves `com.atproto.repo.deleteRecord` and
