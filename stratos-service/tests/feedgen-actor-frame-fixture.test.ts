@@ -25,7 +25,10 @@ import {
 } from '../src/api/records/index.js'
 import { createRepoManager } from '../src/api/records/util.js'
 import { createSubscribeAuthVerifier } from '../src/infra/auth/verifiers.js'
-import { registerSubscribeRecords } from '../src/subscription/index.js'
+import {
+  MAX_COMMIT_FRAME_BYTES,
+  registerSubscribeRecords,
+} from '../src/subscription/index.js'
 import {
   HARNESS_SERVICE_DID,
   startSqliteWriteHarness,
@@ -51,7 +54,6 @@ const ACTOR_DID = 'did:plc:misato-katsuragi'
 const SUBSCRIBER_DID = 'did:web:geofront.tokyo.jp'
 const SUBSCRIBE_METHOD = 'zone.stratos.sync.subscribeRecords'
 const FRAME_TIMEOUT_MS = 10_000
-const MAX_ACTOR_FRAME_BYTES = 32 * 1024
 
 function openBoundarySettings(displayName: string): BoundarySettings {
   return {
@@ -433,8 +435,8 @@ describe('the shared actor commit frame fixture', () => {
       expect(pinned.expected).toEqual(live.expected)
 
       const pinnedBytes = Buffer.from(pinned.frameBase64, 'base64')
-      expect(pinnedBytes.length).toBeLessThanOrEqual(MAX_ACTOR_FRAME_BYTES)
-      expect(frames[index].length).toBeLessThanOrEqual(MAX_ACTOR_FRAME_BYTES)
+      expect(pinnedBytes.length).toBeLessThanOrEqual(MAX_COMMIT_FRAME_BYTES)
+      expect(frames[index].length).toBeLessThanOrEqual(MAX_COMMIT_FRAME_BYTES)
       // Bytes, CIDs, revisions and times differ between runs; the shape each
       // consumer reads does not.
       expect(opsOf(frames[index])).toEqual(opsOf(pinnedBytes))

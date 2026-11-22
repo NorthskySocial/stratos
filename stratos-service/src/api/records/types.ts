@@ -2,6 +2,7 @@ import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { ActorTransactor } from '../../actor-store-types.js'
 import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
 import type { Cid } from '@atproto/lex-data'
+import type { RecordOp } from '../../subscription/subscribe-records.js'
 
 export interface RecordWriteInput {
   callerDid: string
@@ -115,16 +116,9 @@ export async function sequenceChange(
     trace?: SequenceTrace
   },
 ) {
-  // Sequence the change for subscriptions.
-  // Path is canonicalized to `${collection}/${rkey}` (no leading slash) to
-  // match the format produced by every other code path (postgres actor-store,
-  // record reader, etc). AtUri.pathname has a leading slash which would break
-  // downstream `path.startsWith('${collection}/')` checks.
-  const uriPathname = new AtUriSyntax(op.uri).pathname
-  const path = uriPathname.startsWith('/') ? uriPathname.slice(1) : uriPathname
   const event: LexValue = {
     action: op.action,
-    path,
+    path: recordPath(op.uri),
     cid: op.cid,
     record: op.record as LexValue | undefined,
     boundary: op.boundary as LexValue | undefined,
@@ -134,6 +128,44 @@ export async function sequenceChange(
     trace: op.trace as LexValue | undefined,
   }
 
+  await appendSequenceEvent(store, event)
+}
+
+/**
+ * Sequences one commit as one event carrying every op in commit order, so
+ * neither sync reader can split it.
+ */
+export async function sequenceCommit(
+  store: ActorTransactor,
+  commit: {
+    ops: RecordOp[]
+    commitCid: string
+    rev: string
+    trace?: SequenceTrace
+  },
+): Promise<void> {
+  await appendSequenceEvent(store, {
+    ops: commit.ops as unknown as LexValue,
+    commit: commit.commitCid,
+    rev: commit.rev,
+    trace: commit.trace as LexValue | undefined,
+  })
+}
+
+/**
+ * The op path of a record URI, `${collection}/${rkey}` with no leading slash:
+ * every other code path writes it that way, and readers match on
+ * `path.startsWith('${collection}/')`.
+ */
+export function recordPath(uri: string): string {
+  const uriPathname = new AtUriSyntax(uri).pathname
+  return uriPathname.startsWith('/') ? uriPathname.slice(1) : uriPathname
+}
+
+async function appendSequenceEvent(
+  store: ActorTransactor,
+  event: LexValue,
+): Promise<void> {
   await store.sequence.appendEvent({
     did: store.did,
     eventType: 'append',

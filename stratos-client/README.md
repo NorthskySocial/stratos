@@ -618,6 +618,11 @@ The `zone.stratos.repo` procedures follow the upstream shapes, with `boundary` i
   cap for a space.
 - `applyWrites` takes 1 to 200 writes. The upstream lexicon does not declare a limit. The
   reference PDS enforces 200. A batch that names the same record twice is refused.
+- Each call is one commit and one sync event. `zone.stratos.sync.subscribeRecords` sends it as one
+  `#commit` frame, and `zone.stratos.sync.listRepoOps` never splits it across pages. A delete is
+  one op, scoped to the boundary. A commit whose frame would exceed 2,359,296 bytes is refused with
+  413 `PayloadTooLarge` and nothing is stored. A body within the 1,000,000-byte limit cannot reach
+  that size.
 - `deleteRecord` of a record that is missing, or that is in another boundary, succeeds with `{}`.
   It writes no commit and sends no event.
 - A boundary the caller does not hold returns `ForbiddenBoundary`, whether or not it exists.

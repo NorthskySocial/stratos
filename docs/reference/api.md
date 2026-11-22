@@ -215,6 +215,13 @@ Content-Type: application/json
   `collection`, `rkey` and `value`. A `create` may leave out `rkey`. A `delete`
   has no `value`. Each result has the type `#createResult`, `#updateResult` or
   `#deleteResult`.
+- Each call of these procedures is one commit and one sync event.
+  `subscribeRecords` sends the event as one `#commit` frame, with the ops in
+  the order of the writes. `listRepoOps` never splits it across pages. A delete
+  is one op, scoped to the boundary.
+- Stratos refuses a commit whose frame would be larger than 2,359,296 bytes
+  with 413 `PayloadTooLarge`, and stores nothing. A body within the
+  1,000,000-byte limit cannot reach that size.
 
 The errors are listed under
 [Writing into a boundary](/reference/errors#writing-into-a-boundary). The client library wraps all
@@ -598,6 +605,12 @@ A WebSocket stream of Stratos-hosted record changes. Messages are `#commit`,
 the newest event. A cursor older than the kept events receives an
 `OutdatedCursor` info message. A user session is not accepted.
 
+A commit of the `zone.stratos.repo` write procedures is one `#commit` frame
+that carries all of its ops. A `#commit` frame is at most 2,359,296 bytes. Read
+frames up to that size: a reader that refuses a frame and reconnects at the same
+cursor meets the same frame again. The `com.atproto.repo` methods send each op
+as a frame of its own.
+
 ### Pull Sync: List Repo Operations
 
 ```http
@@ -616,7 +629,8 @@ write is detected, the response instead carries a cursor with no commit. Such a 
 carry no ops and repeat the cursor you sent, so poll again while a cursor is present, and do
 not read an unchanged cursor as a stall. Under continuous writes the head may never be
 reached. A write that commits after the head probe is not detected; it falls outside this
-snapshot and arrives on a later poll. `cursor` takes precedence over `since` when both are
+snapshot and arrives on a later poll. The ops of one `zone.stratos.repo` commit always arrive
+in the same page, so a page can hold more ops than `limit`. `cursor` takes precedence over `since` when both are
 supplied. The `OplogTruncated` error (stricter than upstream, which silently restarts) means
 the oplog cannot serve your position truthfully - fall back to full-state recovery below. It
 is returned when the cursor is malformed, predates retained history (compaction passed it),

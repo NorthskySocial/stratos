@@ -8,6 +8,7 @@ use serde_json::{Map as JsonMap, Value as JsonValue};
 
 use crate::{
     authority::normalize_boundary,
+    config::MAX_ACTOR_FRAME_BYTES,
     identifier::{Did, RecordUri},
     store::{
         ActorPage, InteractionChanges, InteractionKind, MAX_SUBJECT_URI_BYTES,
@@ -16,7 +17,6 @@ use crate::{
 };
 
 const POST_COLLECTION: &str = "zone.stratos.feed.post";
-const MAX_ACTOR_FRAME_BYTES: usize = 32 * 1024;
 const MAX_BOUNDARIES: usize = 128;
 const MAX_BOUNDARY_BYTES: usize = 256;
 const MAX_BLOB_REFS: usize = 128;

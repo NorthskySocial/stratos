@@ -402,6 +402,10 @@ collection.
 - `ScopeUpgradeRequiredError` is a `BoundaryWriteError`. Catch it and send the
   member through OAuth authorization again. Do not retry the write first.
   [Errors](/reference/errors#writing-into-a-boundary) says when it is returned.
+- One `applyBoundaryWrites` call of 1 to 200 writes is one commit. Services
+  that sync the member receive it as one event, never part of it. A commit too
+  large for that event fails with status 413 and `errorName`
+  `PayloadTooLarge`. Send fewer writes in each call.
 
 `putBoundaryRecord`, `deleteBoundaryRecord` and `applyBoundaryWrites` take the
 same `boundary` and `repo`. The

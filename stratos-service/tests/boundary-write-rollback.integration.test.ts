@@ -56,16 +56,17 @@ const BATCH: BoundaryWrite[] = [
   },
 ]
 
-/** A step of the commit transaction that runs once per write. */
+/** A step of the commit transaction, made to fail after earlier work landed. */
 interface FailurePoint {
   name: string
-  /** Makes the second call of the step throw; earlier calls go through. */
-  breakSecondCall(store: ActorTransactor): void
+  breakStep(store: ActorTransactor): void
 }
 
-function throwOnSecondCall<T extends object, K extends keyof T>(
+/** Makes the given call of a method throw; earlier calls go through. */
+function throwOnCall<T extends object, K extends keyof T>(
   target: T,
   method: K,
+  failingCall: number,
 ): void {
   const real = (target[method] as (...args: unknown[]) => unknown).bind(target)
   let calls = 0
@@ -73,21 +74,20 @@ function throwOnSecondCall<T extends object, K extends keyof T>(
     ...args: unknown[]
   ) => {
     calls += 1
-    if (calls === 2) throw new Error(FAILURE_MESSAGE)
+    if (calls === failingCall) throw new Error(FAILURE_MESSAGE)
     return real(...args)
   }) as never)
 }
 
 const FAILURE_POINTS: FailurePoint[] = [
   {
-    name: 'the second sequence event',
-    breakSecondCall: (store) =>
-      throwOnSecondCall(store.sequence, 'appendEvent'),
+    // The commit's one event is the last step, after every record is indexed.
+    name: 'the sequence event',
+    breakStep: (store) => throwOnCall(store.sequence, 'appendEvent', 1),
   },
   {
     name: 'the second record index',
-    breakSecondCall: (store) =>
-      throwOnSecondCall(store.record, 'indexRecordInBoundary'),
+    breakStep: (store) => throwOnCall(store.record, 'indexRecordInBoundary', 2),
   },
 ]
 
@@ -118,7 +118,7 @@ function defineRollbackScenarios(getHarness: () => WriteHarness) {
     const realTransact = actorStore.transact.bind(actorStore)
     vi.spyOn(actorStore, 'transact').mockImplementation((did, fn) =>
       realTransact(did, (store) => {
-        point.breakSecondCall(store)
+        point.breakStep(store)
         return fn(store)
       }),
     )

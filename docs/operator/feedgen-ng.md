@@ -79,6 +79,19 @@ The feed generator keeps only `zone.stratos.feed.post` records. It keeps a
 boundary on a post only when the post names that boundary and the author is
 currently enrolled in it. A post left with no boundary is deleted.
 
+Stratos sends each commit as one frame of up to 200 writes. The feed generator
+stores all of a frame's posts and moves the author's cursor in one step, or
+does neither. A frame is at most 2,359,296 bytes, the most Stratos sends. Each
+connection holds one frame at a time: up to 18 MiB of frames at the default 8
+connections, and 144 MiB at 64.
+
+A larger frame ends the connection. The cursor does not move, so the next
+connection meets the same frame and that author's posts stop arriving. The feed
+generator logs `actor_frame_too_large` and counts
+`stratos.feedgen.subscription.oversized_frames` each time. Stratos refuses to
+write a commit that large, so the event means that Stratos and the feed
+generator disagree on the limit. Run versions that agree.
+
 ### PDS-custody authors
 
 Some members keep their records on their own PDS. Every 30 seconds the feed
@@ -433,6 +446,7 @@ level setting. Useful events:
 | `service_reconciliation_completed` | The readiness check ran. Check `errors`.      |
 | `service_stream_connect_failed`    | The stream to Stratos did not connect.        |
 | `service_stream_session_ended`     | The stream dropped. `kind` gives the reason.  |
+| `actor_frame_too_large`            | An author's frame was over the frame limit.   |
 | `pds_space_sync_pass`              | One PDS pass ended. Check `healthy`.          |
 | `pds_space_membership_failed`      | A member list failed. `kind` gives the stage. |
 | `pds_space_target_failed`          | One member's sync failed.                     |

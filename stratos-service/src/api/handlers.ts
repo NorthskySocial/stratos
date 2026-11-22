@@ -30,8 +30,8 @@ import {
 } from './handlers/index.js'
 
 // The most a boundary write request body may carry; legacy writes keep the
-// parser's default.
-const BOUNDARY_WRITE_JSON_LIMIT_BYTES = 1_000_000
+// parser's default. The sync stream's frame limit is derived from it.
+export const BOUNDARY_WRITE_JSON_LIMIT_BYTES = 1_000_000
 
 export enum HANDLER_METHOD {
   CREATE_RECORD = 'com.atproto.repo.createRecord',

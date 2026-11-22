@@ -677,7 +677,7 @@ function defineBoundaryWriteScenarios(
   })
 
   describeIn('deletes', 'delete inside a batch', () => {
-    it('deletes a record held in the boundary with the plain and the scoped delete', async () => {
+    it('deletes a record held in the boundary with one scoped delete', async () => {
       await seed('eva00')
 
       const outcome = await writeEngineering([
@@ -690,7 +690,6 @@ function defineBoundaryWriteScenarios(
       expect(rows.boundaries).toEqual([])
       const ops = (await harness.sequencedOps(PILOT)).slice(1)
       expect(ops.map(({ action, scope }) => ({ action, scope }))).toEqual([
-        { action: 'delete', scope: [] },
         { action: 'delete', scope: [HARNESS_ENGINEERING] },
       ])
     })
@@ -1336,7 +1335,9 @@ function defineBoundaryWriteScenarios(
       expect(await shapeOf(PILOT)).toEqual(await shapeOf(RIVAL))
     })
 
-    it('sequences a delete like the legacy delete', async () => {
+    // The legacy delete also sequences a delete with no boundary, which no
+    // reader delivers.
+    it('sequences a delete like the legacy delete, less its unscoped delete', async () => {
       await createRecord(
         harness.ctx,
         {
@@ -1356,7 +1357,11 @@ function defineBoundaryWriteScenarios(
 
       await deleteEngineering('eva00')
 
-      expect(await shapeOf(PILOT)).toEqual(await shapeOf(RIVAL))
+      const legacy = await shapeOf(RIVAL)
+      expect(legacy.filter((op) => op.scope.length === 0)).toHaveLength(1)
+      expect(await shapeOf(PILOT)).toEqual(
+        legacy.filter((op) => op.scope.length > 0),
+      )
     })
   })
 

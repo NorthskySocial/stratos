@@ -1,4 +1,8 @@
-import { InvalidRequestError } from '@atproto/xrpc-server'
+import {
+  InvalidRequestError,
+  ResponseType,
+  XRPCError,
+} from '@atproto/xrpc-server'
 import { TID } from '@atproto/common-web'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { Cid } from '@atproto/lex-data'
@@ -16,6 +20,11 @@ import type { AppContext } from '../../context.js'
 import type { ActorSignFn } from '../../infra/signing/actor-signer.js'
 import { signAndPersistCommit, StratosBlockStoreReader } from '../../features'
 import {
+  commitFrameBytes,
+  MAX_COMMIT_FRAME_BYTES,
+} from '../../subscription/commit-frame.js'
+import type { RecordOp } from '../../subscription/subscribe-records.js'
+import {
   assertStratosCustody,
   assertWritableEnrollment,
   assertWriterStillAuthorized,
@@ -24,7 +33,8 @@ import {
   type BatchWriteResult,
   type CommitResult,
   opBoundary,
-  sequenceChange,
+  recordPath,
+  sequenceCommit,
   type SequenceTrace,
 } from './types.js'
 import {
@@ -83,11 +93,7 @@ type PreparedWrite = PreparedDelete | PreparedRecordWrite
 
 type PlannedAction = 'create' | 'update' | 'delete'
 
-type PlannedWrite = PreparedWrite & {
-  action: PlannedAction
-  /** The boundaries the record is stored in before this write. */
-  storedBoundaries: string[]
-}
+type PlannedWrite = PreparedWrite & { action: PlannedAction }
 
 interface StoredRecordState {
   exists: boolean
@@ -230,6 +236,7 @@ async function runBoundaryWrites(
     lexiconCheck,
     subjectCollections,
   )
+  assertCommitFitsSyncStream(callerDid, boundary, prepared)
   const actorSign = await ctx.actorSigner.getSignFn(callerDid)
 
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
@@ -432,9 +439,7 @@ async function commitPlannedWrites(
   for (const write of prepared) {
     const stored = await readStoredState(store, write.uri)
     const action = plan(write, stored, boundary)
-    if (action) {
-      planned.push({ ...write, action, storedBoundaries: stored.boundaries })
-    }
+    if (action) planned.push({ ...write, action })
   }
   if (planned.length === 0) return null
   await assertNoSubjectConflicts(store, planned, subjectCollections)
@@ -457,16 +462,12 @@ async function commitPlannedWrites(
   for (const write of planned) {
     results.push(await applyPlannedWrite(store, write, boundary, commit.rev))
   }
-  for (const write of planned) {
-    await sequencePlannedWrite(
-      store,
-      write,
-      boundary,
-      commitCid,
-      commit.rev,
-      sequenceTrace,
-    )
-  }
+  await sequenceCommit(store, {
+    ops: planned.map((write) => toSequencedOp(write, write.action, boundary)),
+    commitCid,
+    rev: commit.rev,
+    trace: sequenceTrace,
+  })
   return { results, commit: { cid: commitCid, rev: commit.rev } }
 }
 
@@ -604,46 +605,53 @@ async function applyPlannedWrite(
   }
 }
 
-async function sequencePlannedWrite(
-  store: ActorTransactor,
-  write: PlannedWrite,
+/**
+ * The op a write adds to the commit's event. A delete carries the boundary the
+ * record was held in, which the planner requires to be this one, so every op
+ * of a boundary commit is scoped to the same boundary. A delete with no
+ * boundary is not sequenced: no reader delivers an op without one.
+ */
+function toSequencedOp(
+  write: PreparedWrite,
+  action: PlannedAction,
   boundary: string,
-  commitCid: string,
-  rev: string,
-  trace: SequenceTrace,
-): Promise<void> {
+): RecordOp {
+  const path = recordPath(write.uri)
   if (write.kind === 'delete') {
-    await sequenceChange(store, {
-      action: 'delete',
-      uri: write.uri,
-      commitCid,
-      rev,
-      trace,
-    })
-    // The plain delete carries no boundary and reaches no subscriber, so the
-    // scoped removal is what tells members of the record's boundary.
-    if (write.storedBoundaries.length > 0) {
-      await sequenceChange(store, {
-        action: 'delete',
-        uri: write.uri,
-        boundary: {
-          values: write.storedBoundaries.map((value) => ({ value })),
-        },
-        commitCid,
-        rev,
-        trace,
-      })
-    }
-    return
+    return { action: 'delete', path, boundary: opBoundary(boundary) }
   }
-  await sequenceChange(store, {
-    action: write.action === 'create' ? 'create' : 'update',
-    uri: write.uri,
+  return {
+    action,
+    path,
     cid: write.cid.toString(),
     record: write.record,
     boundary: opBoundary(boundary),
-    commitCid,
-    rev,
-    trace,
-  })
+  }
+}
+
+/**
+ * Refuses a commit whose event the actor stream could not send as one frame.
+ * It runs before the lock, so a refused commit stores and sequences nothing.
+ * The planner has not yet decided whether a put creates or updates; both
+ * actions encode to the same length.
+ * @throws XRPCError `PayloadTooLarge` when the frame would exceed {@link MAX_COMMIT_FRAME_BYTES}
+ */
+function assertCommitFitsSyncStream(
+  callerDid: string,
+  boundary: string,
+  prepared: PreparedWrite[],
+): void {
+  const ops = prepared.map((write) =>
+    toSequencedOp(
+      write,
+      write.kind === 'put' ? 'create' : write.kind,
+      boundary,
+    ),
+  )
+  if (commitFrameBytes(callerDid, ops) > MAX_COMMIT_FRAME_BYTES) {
+    throw new XRPCError(
+      ResponseType.PayloadTooLarge,
+      'The commit is too large for the sync stream',
+    )
+  }
 }
