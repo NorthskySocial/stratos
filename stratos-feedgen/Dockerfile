@@ -27,9 +27,9 @@
 # after the import. Before normal starts, remove FEEDGEN_SQLITE_PATH.
 
 # --- Build stage: install workspace deps and run esbuild bundle ---
-FROM node:24-alpine AS builder
+FROM node:26-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN npm install --global pnpm@12.21.0
 
 WORKDIR /app
 
@@ -55,7 +55,7 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 RUN pnpm --filter @northskysocial/stratos-feedgen bundle
 
 # --- Production stage: just the bundle + native externals ---
-FROM node:24-alpine AS feedgen
+FROM node:26-alpine AS feedgen
 
 WORKDIR /app
 

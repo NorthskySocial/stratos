@@ -70,7 +70,7 @@ See the [security review](../docs/security/ssrf-review.md#compatibility-and-depl
 
 ### Prerequisites
 
-- Node.js 24 for workspace development; Deno 2 for the indexer runtime
+- Node.js 26 for workspace development; Deno 2 for the indexer runtime
 - Pnpm
 - Postgres database
 

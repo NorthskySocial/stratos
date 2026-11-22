@@ -94,7 +94,7 @@ export const suite: ScenarioSuite = {
       bundle: true,
       platform: 'node',
       format: 'esm',
-      target: 'node24',
+      target: 'node26',
     })
     const script = fileURLToPath(
       new URL('./client-custody.mjs', import.meta.url),
