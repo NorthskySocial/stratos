@@ -22,6 +22,7 @@
     "npm:@atcute/identity-resolver@^2.0.1": "2.0.1_@atcute+identity@2.0.2__@atcute+lexicons@2.1.0__typescript@7.0.2_typescript@7.0.2",
     "npm:@atcute/identity@^2.0.2": "2.0.2_@atcute+lexicons@2.1.0_typescript@7.0.2",
     "npm:@atcute/mst@^1.0.3": "1.0.3_@atcute+cbor@2.3.6__@atcute+cid@2.4.2_@atcute+cid@2.4.2",
+    "npm:@atcute/multibase@^1.2.5": "1.2.5",
     "npm:@atcute/repo@*": "1.0.2_@atcute+cbor@2.3.6__@atcute+cid@2.4.2_@atcute+cid@2.4.2_@atcute+lexicons@2.1.0",
     "npm:@atcute/repo@^1.0.2": "1.0.2_@atcute+cbor@2.3.6__@atcute+cid@2.4.2_@atcute+cid@2.4.2_@atcute+lexicons@2.1.0",
     "npm:@atcute/uint8array@^1.1.5": "1.1.5",
@@ -44,7 +45,7 @@
     "npm:@atproto/oauth-client-browser@~0.5.3": "0.5.3",
     "npm:@atproto/oauth-client-node@~0.5.7": "0.5.7",
     "npm:@atproto/oauth-provider@~0.22.8": "0.22.8",
-    "npm:@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953": "0.0.0-spaces-alpha-20260818163953",
+    "npm:@atproto/oauth-scopes@0.0.0-spaces-alpha-20261117141222": "0.0.0-spaces-alpha-20261117141222",
     "npm:@atproto/oauth-types@~0.7.5": "0.7.6",
     "npm:@atproto/repo@~0.8.1": "0.8.13",
     "npm:@atproto/syntax@~0.7.4": "0.7.6",
@@ -108,6 +109,7 @@
     "npm:postgres@3": "3.4.9",
     "npm:postgres@^3.4.8": "3.4.9",
     "npm:prettier@^3.8.1": "3.9.6",
+    "npm:structured-headers@1.0.1": "1.0.1",
     "npm:svelte-eslint-parser@^1.6.0": "1.7.0_svelte@5.56.0__acorn@8.15.0_postcss@8.5.6",
     "npm:svelte-spa-router@^5.1.1": "5.1.1_svelte@5.56.0__acorn@8.15.0",
     "npm:svelte@^5.20.0": "5.56.0_acorn@8.15.0",
@@ -341,7 +343,7 @@
         "@atproto-labs/pipe",
         "@atproto-labs/simple-store",
         "@atproto-labs/simple-store-memory",
-        "@atproto/did",
+        "@atproto/did@0.5.5",
         "zod@3.25.76"
       ]
     },
@@ -367,7 +369,7 @@
       "dependencies": [
         "@atproto-labs/fetch-node",
         "@atproto-labs/handle-resolver",
-        "@atproto/did"
+        "@atproto/did@0.5.5"
       ]
     },
     "@atproto-labs/handle-resolver@0.4.9": {
@@ -375,7 +377,7 @@
       "dependencies": [
         "@atproto-labs/simple-store",
         "@atproto-labs/simple-store-memory",
-        "@atproto/did",
+        "@atproto/did@0.5.5",
         "zod@3.25.76"
       ]
     },
@@ -462,7 +464,7 @@
         "@atproto/api",
         "@atproto/common@0.8.3",
         "@atproto/crypto@0.5.5",
-        "@atproto/did",
+        "@atproto/did@0.5.5",
         "@atproto/identity",
         "@atproto/lex",
         "@atproto/repo@0.10.14",
@@ -578,6 +580,12 @@
         "@noble/curves",
         "@noble/hashes",
         "uint8arrays@5.1.1"
+      ]
+    },
+    "@atproto/did@0.0.0-spaces-alpha-20261117141222": {
+      "integrity": "sha512-osWjQoQWRXKAYzm5MnQhc3D6lzKMsq7vNTnaTG7nrC5w9vGOBPMHPMxyWMhUWkRhHIrDSKPQnscNlfwYQ0bNHA==",
+      "dependencies": [
+        "zod@3.25.76"
       ]
     },
     "@atproto/did@0.5.5": {
@@ -773,7 +781,7 @@
         "@atproto-labs/did-resolver",
         "@atproto-labs/handle-resolver",
         "@atproto-labs/simple-store",
-        "@atproto/did",
+        "@atproto/did@0.5.5",
         "@atproto/jwk",
         "@atproto/jwk-webcrypto",
         "@atproto/oauth-client",
@@ -787,7 +795,7 @@
         "@atproto-labs/did-resolver",
         "@atproto-labs/handle-resolver-node",
         "@atproto-labs/simple-store",
-        "@atproto/did",
+        "@atproto/did@0.5.5",
         "@atproto/jwk",
         "@atproto/jwk-jose",
         "@atproto/jwk-webcrypto",
@@ -804,7 +812,7 @@
         "@atproto-labs/identity-resolver",
         "@atproto-labs/simple-store",
         "@atproto-labs/simple-store-memory",
-        "@atproto/did",
+        "@atproto/did@0.5.5",
         "@atproto/jwk",
         "@atproto/oauth-types",
         "@atproto/xrpc",
@@ -835,7 +843,7 @@
         "@atproto-labs/simple-store",
         "@atproto-labs/simple-store-memory",
         "@atproto/common@0.8.3",
-        "@atproto/did",
+        "@atproto/did@0.5.5",
         "@atproto/jwk",
         "@atproto/jwk-jose",
         "@atproto/lex-document",
@@ -858,24 +866,24 @@
         "zod@3.25.76"
       ]
     },
-    "@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953": {
-      "integrity": "sha512-bQz4BwNk/FAPd8bXGO3EyhlIKu/UJzN5XIgmNeiZXtJbhbe30J78A3WnvBuA+SILiGFw7/M9hfgq9FcJKCzjCw==",
+    "@atproto/oauth-scopes@0.0.0-spaces-alpha-20261117141222": {
+      "integrity": "sha512-7crBfEPSaXsROwMzrgCSVd2+2PJB2scUjlUXpC3pO8NmoJLt/2S6NdP9iaIVTVa6H5sBNmFwurTtloSjgqUWzQ==",
       "dependencies": [
-        "@atproto/did",
-        "@atproto/syntax@0.0.0-spaces-alpha-20260818163953"
+        "@atproto/did@0.0.0-spaces-alpha-20261117141222",
+        "@atproto/syntax@0.0.0-spaces-alpha-20261117141222"
       ]
     },
     "@atproto/oauth-scopes@0.5.12": {
       "integrity": "sha512-IGMq3w0qSizOejm6MRoGVMGbqyAPafEAXnlqn2x2AtDlPIBD1jtBE9ekWBXoaawkkLeeGZP+NECoiotBgBJHxA==",
       "dependencies": [
-        "@atproto/did",
+        "@atproto/did@0.5.5",
         "@atproto/syntax@0.7.6"
       ]
     },
     "@atproto/oauth-types@0.7.6": {
       "integrity": "sha512-FgFe2mJOUgJSQBxKBwLWv+lFyDxBnlqA+wfSLabCNnabtNuSO3UQI0CGI72K7/OQRQvdwkcYQMoUuw3Rqex/mg==",
       "dependencies": [
-        "@atproto/did",
+        "@atproto/did@0.5.5",
         "@atproto/jwk",
         "zod@3.25.76"
       ]
@@ -920,8 +928,8 @@
         "ws"
       ]
     },
-    "@atproto/syntax@0.0.0-spaces-alpha-20260818163953": {
-      "integrity": "sha512-Xl2fpD/NcfVOWpHR86HKym2XNDYHmgiqThZXoYMwh9XUo+/LgVZYGVpSecfKRBcQ5tNGiRivE1Fvio5YDfJ3lA==",
+    "@atproto/syntax@0.0.0-spaces-alpha-20261117141222": {
+      "integrity": "sha512-EwGfevaQpSHFYl95a4r7Kl63PLSLeYm6Qwf3XWVzCjJO55HuuNLUQbsrF2iUlTy++82YoC/1dxHk57SWJCom8A==",
       "dependencies": [
         "iso-datestring-validator",
         "tslib"
@@ -3318,7 +3326,8 @@
       "dependencies": [
         "@opentelemetry/api",
         "@opentelemetry/core@2.8.0_@opentelemetry+api@1.9.1"
-      ]
+      ],
+      "deprecated": true
     },
     "@opentelemetry/redis-common@0.38.3": {
       "integrity": "sha512-VCghU1JYs/4gP6Gqf/xro9MEsZ7LrMv2uONVsaESKL38ZOB9BqnI98FfS23wjMnHlpuE+TTaWSoAVNpTwYXzjw=="
@@ -3458,7 +3467,8 @@
         "@opentelemetry/resources@2.11.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/sdk-trace",
         "@opentelemetry/semantic-conventions"
-      ]
+      ],
+      "deprecated": true
     },
     "@opentelemetry/sdk-trace-base@2.8.0_@opentelemetry+api@1.9.1": {
       "integrity": "sha512-mhU4jp+vW0mGbFRd+GeXHvmfA4aDqWjBjLC3pE5XMpLs0IE2ryYb019Ts2AQrOq67gaTF25D91+fgvEHDZEnuQ==",
@@ -3467,7 +3477,8 @@
         "@opentelemetry/core@2.8.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/resources@2.8.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/semantic-conventions"
-      ]
+      ],
+      "deprecated": true
     },
     "@opentelemetry/sdk-trace-node@2.8.0_@opentelemetry+api@1.9.1": {
       "integrity": "sha512-nZt9OGufioAc3AfoLTqA9bsAeaMJAictYDdI2VcNQ+PmT+3rfKjAZDZvgPfd8VPX0O5Bw1hdQF6kDK8VSpZiWg==",
@@ -3476,7 +3487,8 @@
         "@opentelemetry/context-async-hooks",
         "@opentelemetry/core@2.8.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/sdk-trace-base@2.8.0_@opentelemetry+api@1.9.1"
-      ]
+      ],
+      "deprecated": true
     },
     "@opentelemetry/sdk-trace@2.11.0_@opentelemetry+api@1.9.1": {
       "integrity": "sha512-fFnTqGm8/G73GQVnxYi7LXa1ZVYEUvgL6XI1LpvV0bPC7WQ/ZGgKxCSl8FnlZBKto9JHHEFTO6s6CUpvvtwFrA==",
@@ -3701,7 +3713,6 @@
       "dependencies": [
         "@opentelemetry/api",
         "@opentelemetry/core@2.11.0_@opentelemetry+api@1.9.1",
-        "@opentelemetry/instrumentation@0.220.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/sdk-trace-base@2.11.0_@opentelemetry+api@1.9.1",
         "@sentry/conventions",
         "@sentry/core",
@@ -3711,7 +3722,6 @@
       "optionalPeers": [
         "@opentelemetry/api",
         "@opentelemetry/core@2.11.0_@opentelemetry+api@1.9.1",
-        "@opentelemetry/instrumentation@0.220.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/sdk-trace-base@2.11.0_@opentelemetry+api@1.9.1"
       ]
     },
@@ -3761,7 +3771,8 @@
       "dependencies": [
         "@smithy/types",
         "tslib"
-      ]
+      ],
+      "deprecated": true
     },
     "@smithy/credential-provider-imds@4.5.2": {
       "integrity": "sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==",
@@ -9091,6 +9102,8 @@
     "packageJson": {
       "dependencies": [
         "npm:@eslint/js@^10.0.1",
+        "npm:@stryker-mutator/core@^9.6.1",
+        "npm:@stryker-mutator/vitest-runner@^9.6.1",
         "npm:@types/deno@^2.5.0",
         "npm:@types/node@^25.2.1",
         "npm:@typescript-eslint/eslint-plugin@^8.58.0",
@@ -9123,6 +9136,7 @@
             "npm:@atcute/identity-resolver@^2.0.1",
             "npm:@atcute/identity@^2.0.2",
             "npm:@atcute/mst@^1.0.3",
+            "npm:@atcute/multibase@^1.2.5",
             "npm:@atcute/repo@^1.0.2",
             "npm:@atproto/crypto@~0.5.4",
             "npm:@atproto/lexicon@~0.7.11",
@@ -9227,7 +9241,7 @@
             "npm:@atproto/lexicon@~0.7.11",
             "npm:@atproto/oauth-client-node@~0.5.7",
             "npm:@atproto/oauth-provider@~0.22.8",
-            "npm:@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953",
+            "npm:@atproto/oauth-scopes@0.0.0-spaces-alpha-20261117141222",
             "npm:@atproto/oauth-types@~0.7.5",
             "npm:@atproto/syntax@~0.7.4",
             "npm:@atproto/xrpc-server@~0.12.5",
@@ -9269,6 +9283,7 @@
             "npm:pino-http@11",
             "npm:pino@^10.3.0",
             "npm:postgres@^3.4.8",
+            "npm:structured-headers@1.0.1",
             "npm:svelte-spa-router@^5.1.1",
             "npm:svelte@^5.20.0",
             "npm:tailwindcss@^4.1.0",
@@ -9297,6 +9312,8 @@
             "npm:@atproto/syntax@~0.7.4",
             "npm:@eslint/js@^10.0.1",
             "npm:@playwright/test@^1.60.0",
+            "npm:@stryker-mutator/core@^9.6.1",
+            "npm:@stryker-mutator/vitest-runner@^9.6.1",
             "npm:@sveltejs/vite-plugin-svelte@^5.0.3",
             "npm:@testing-library/jest-dom@^6.9.1",
             "npm:@testing-library/svelte@^5.3.1",
