@@ -178,7 +178,7 @@ describe('account subjects in createLabel on SQLite', () => {
     expect(harness.signals).toEqual([])
   })
 
-  it('keeps the member inactive when a negation fails at the recompute, and a retry reactivates it', async () => {
+  it('appends nothing when a negation fails to reactivate the member, and a retry reactivates it', async () => {
     await seedAccount(backend, { did: SPIKE_DID })
     await harness.takedown(SPIKE_DID)
     vi.spyOn(backend.enrollmentStore, 'updateEnrollment').mockRejectedValueOnce(
@@ -188,7 +188,7 @@ describe('account subjects in createLabel on SQLite', () => {
     const failed = await harness.negate(SPIKE_DID)
 
     expect(failed.status).toBe(500)
-    expect(await harness.labels()).toHaveLength(2)
+    expect(await harness.labels()).toHaveLength(1)
     expect((await rowOf(backend, SPIKE_DID))?.active).toBe(false)
 
     const retry = await harness.negate(SPIKE_DID)
@@ -227,18 +227,24 @@ describe('account subjects in createLabel on SQLite', () => {
     expect(marker === null || marker.applied === false).toBe(true)
   })
 
-  it('does not recompute while a negation waits on the member lock', async () => {
+  it('changes nothing while a negation waits on the member lock', async () => {
     await seedAccount(backend, { did: SPIKE_DID })
     await harness.takedown(SPIKE_DID)
     const release = await harness.ctx.repoWriteLocks.acquire(SPIKE_DID)
+    const acquire = vi.spyOn(harness.ctx.repoWriteLocks, 'acquire')
 
     const pending = harness.negate(SPIKE_DID)
-    await vi.waitFor(async () => expect(await harness.labels()).toHaveLength(2))
+    try {
+      await vi.waitFor(() => expect(acquire).toHaveBeenCalledWith(SPIKE_DID))
+      expect(await harness.labels()).toHaveLength(1)
+      expect((await rowOf(backend, SPIKE_DID))?.active).toBe(false)
+    } finally {
+      release()
+    }
 
-    expect((await rowOf(backend, SPIKE_DID))?.active).toBe(false)
-    release()
     const res = await pending
     expect(res.status).toBe(200)
+    expect(await harness.labels()).toHaveLength(2)
     expect((await rowOf(backend, SPIKE_DID))?.active).toBe(true)
   })
 
@@ -322,6 +328,20 @@ describe('account subjects in createLabel on SQLite', () => {
 
       expect(result.status).toBe(200)
       expect(result.data.label.neg).toBe(true)
+      expectNoEntryContains(entries, [SPIKE_DID, CASE_REF])
+    })
+
+    it('an account takedown whose append fails', async () => {
+      await seedAccount(backend, { did: SPIKE_DID })
+      vi.spyOn(backend.labelStore, 'appendIfLatest').mockRejectedValueOnce(
+        new Error('label log unavailable'),
+      )
+
+      const { result, entries } = await logsDuring(harness.ctx.logger!, () =>
+        harness.takedown(SPIKE_DID, { ref: CASE_REF }),
+      )
+
+      expect(result.status).toBe(500)
       expectNoEntryContains(entries, [SPIKE_DID, CASE_REF])
     })
 

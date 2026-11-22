@@ -52,7 +52,7 @@ interface LabelRequestContext {
   neg: boolean
   ref: string | undefined
   boundaries: string[]
-  /** A hosted or account takedown hides the subject before the append; space records have nothing to hide. */
+  /** A hosted takedown hides the record and an account label changes the hold before the append; space records have nothing to change. */
   beforeAppend?: () => Promise<void>
 }
 
@@ -195,28 +195,36 @@ async function handleAccountLabel(
     )
   }
 
-  const deactivateMember = async () => {
+  const changeHoldBeforeAppend = async () => {
     const holds = await applyEnrollmentHolds(ctx, subject.did, {
-      takedownHold: true,
+      takedownHold: !neg,
     })
     // The row can vanish after the existence check, for example a concurrent
     // unenroll. Appending then would label a DID with no enrollment.
     if (!holds) throw subjectAccountNotFound()
   }
-  // A takedown deactivates first so a failed append leaves the member
-  // inactive. The recompute runs last and reads the stored operator hold, so a
-  // negation never lifts one. A failed append skips it and a repeat finishes.
-  const label = await writeLabel({
-    ctx,
-    subject,
-    subjectKey: labelSubjectKey(subject),
-    callerDid,
-    neg,
-    ref: input.ref,
-    boundaries: [],
-    ...(neg ? {} : { beforeAppend: deactivateMember }),
-  })
-  await applyEnrollmentHolds(ctx, subject.did, {})
+  // The enrollment changes before the label. Revoke and unenroll refuse only
+  // an inactive row, so a takedown label never stands while the member can
+  // still delete their enrollment, and a negation never serves the records of
+  // a member the takedown still holds. The recompute settles the enrollment to
+  // the label log: it finishes a change whose label landed and undoes one whose
+  // append failed. It reads the stored operator hold, so a negation never
+  // lifts one.
+  let label: StoredLabel | undefined
+  try {
+    label = await writeLabel({
+      ctx,
+      subject,
+      subjectKey: labelSubjectKey(subject),
+      callerDid,
+      neg,
+      ref: input.ref,
+      boundaries: [],
+      beforeAppend: changeHoldBeforeAppend,
+    })
+  } finally {
+    await applyEnrollmentHolds(ctx, subject.did, {})
+  }
   return label ? { label: toWireLabel(label) } : {}
 }
 

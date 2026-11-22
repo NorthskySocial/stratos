@@ -272,9 +272,20 @@ A `pds`-custody member's records are on their own PDS, which Stratos does not
 serve. `listRepos` already leaves out the inactive member, so the feed
 generator stops reading that PDS.
 
-One limit applies. A takedown deactivates the member before it records the
-label. If recording fails, the member stays inactive, and Stratos serves the
-records until the moderation service repeats the call.
+When an account label fails, the request either changes nothing or completes.
+Stratos changes the enrollment first, then records the label. If recording
+fails, Stratos sets the enrollment back from the label log and reports an
+error. Then the takedown or the negation has no effect. If Stratos records the
+label and a later step fails, the change is complete. Stratos still reports an
+error. Repeat the call after any error. A repeat is safe.
+
+One limit applies. Recording the label and setting the enrollment back can
+both fail. Then the enrollment keeps the change until the moderation service
+repeats the call:
+
+- After a failed takedown, the member is inactive and Stratos serves the
+  records.
+- After a failed negation, the member is active and Stratos hides the records.
 
 An operator hold is separate. `zone.stratos.admin.setActive` with `active: false`
 sets it. `active: true` clears it. The two holds do not lift each other.

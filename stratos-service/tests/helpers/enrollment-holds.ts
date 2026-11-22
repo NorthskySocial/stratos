@@ -4,7 +4,7 @@ import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { inspect } from 'node:util'
-import { afterEach, expect, it, vi, type Mock } from 'vitest'
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import axios, { type AxiosResponse } from 'axios'
 import express from 'express'
 import { Secp256k1Keypair } from '@atproto/crypto'
@@ -879,6 +879,108 @@ export async function expectMemberRefusedWrites(
   ).rejects.toMatchObject({ name: 'EnrollmentDeniedError' })
 }
 
+/** What the label log says about an account, and whether its member is active. */
+interface AccountState {
+  latestLabel: 'none' | 'takedown' | 'negation'
+  active: boolean | undefined
+}
+
+const ACCOUNT_UNLABELLED: AccountState = { latestLabel: 'none', active: true }
+const TAKEDOWN_IN_FORCE: AccountState = {
+  latestLabel: 'takedown',
+  active: false,
+}
+const NEGATION_IN_FORCE: AccountState = {
+  latestLabel: 'negation',
+  active: true,
+}
+
+async function accountState(
+  harness: AccountLabelHarness,
+  backend: HoldsBackend,
+  did: string,
+): Promise<AccountState> {
+  const latest = (await harness.labels())
+    .filter((label) => label.subjectKey === did)
+    .at(-1)
+  const latestLabel = !latest ? 'none' : latest.neg ? 'negation' : 'takedown'
+  return { latestLabel, active: (await rowOf(backend, did))?.active }
+}
+
+const STORE_UNAVAILABLE = new Error('store unavailable')
+
+interface AccountLabelFailure {
+  step: string
+  failNext: (backend: HoldsBackend) => void
+  takedownLeaves: AccountState
+  negationLeaves: AccountState
+}
+
+/**
+ * One failure per step of an account createLabel, in order. A failed request
+ * leaves the account unchanged or the change in force. The last row is the one
+ * exception: when the append and the undo both fail, the enrollment keeps the
+ * change the label log never got, until a retry.
+ */
+const ACCOUNT_LABEL_FAILURES: AccountLabelFailure[] = [
+  {
+    step: 'reading the latest label',
+    failNext: (backend) => {
+      vi.spyOn(backend.labelStore, 'latestForSubject').mockRejectedValueOnce(
+        STORE_UNAVAILABLE,
+      )
+    },
+    takedownLeaves: ACCOUNT_UNLABELLED,
+    negationLeaves: TAKEDOWN_IN_FORCE,
+  },
+  {
+    step: 'changing the enrollment before the append',
+    failNext: (backend) => {
+      vi.spyOn(
+        backend.enrollmentStore,
+        'updateEnrollment',
+      ).mockRejectedValueOnce(STORE_UNAVAILABLE)
+    },
+    takedownLeaves: ACCOUNT_UNLABELLED,
+    negationLeaves: TAKEDOWN_IN_FORCE,
+  },
+  {
+    step: 'appending the label',
+    failNext: (backend) => {
+      vi.spyOn(backend.labelStore, 'appendIfLatest').mockRejectedValueOnce(
+        STORE_UNAVAILABLE,
+      )
+    },
+    takedownLeaves: ACCOUNT_UNLABELLED,
+    negationLeaves: TAKEDOWN_IN_FORCE,
+  },
+  {
+    step: 'settling the enrollment to the label log',
+    failNext: (backend) => {
+      vi.spyOn(backend.labelStore, 'latestTakedowns').mockRejectedValueOnce(
+        STORE_UNAVAILABLE,
+      )
+    },
+    takedownLeaves: TAKEDOWN_IN_FORCE,
+    negationLeaves: NEGATION_IN_FORCE,
+  },
+  {
+    step: 'appending the label and then undoing the enrollment change',
+    failNext: (backend) => {
+      vi.spyOn(backend.labelStore, 'appendIfLatest').mockRejectedValueOnce(
+        STORE_UNAVAILABLE,
+      )
+      const store = backend.enrollmentStore
+      const forward = store.updateEnrollment.bind(store)
+      vi.spyOn(store, 'updateEnrollment')
+        .mockImplementationOnce(forward)
+        .mockRejectedValueOnce(STORE_UNAVAILABLE)
+    },
+    takedownLeaves: { latestLabel: 'none', active: false },
+    negationLeaves: { latestLabel: 'takedown', active: true },
+  },
+]
+
 /** Account-subject createLabel scenarios shared by both backends. */
 export function defineAccountLabelScenarios(getBackend: () => HoldsBackend) {
   const open: AccountLabelHarness[] = []
@@ -992,28 +1094,53 @@ export function defineAccountLabelScenarios(getBackend: () => HoldsBackend) {
     expect(await harness.labels()).toHaveLength(2)
   })
 
-  it('leaves the member inactive and unlabelled when the append fails, and a retry finishes', async () => {
-    const backend = getBackend()
-    const harness = await openHarness()
-    await seedAccount(backend, { did: SPIKE_DID })
-    vi.spyOn(backend.labelStore, 'appendIfLatest').mockRejectedValueOnce(
-      new Error('label log unavailable'),
-    )
+  describe.each(ACCOUNT_LABEL_FAILURES)(
+    'a request that fails at $step',
+    (failure) => {
+      it('leaves a takedown unchanged or in force, and a retry takes the account down', async () => {
+        const backend = getBackend()
+        const harness = await openHarness()
+        await seedAccount(backend, { did: SPIKE_DID })
+        failure.failNext(backend)
 
-    const failed = await harness.takedown(SPIKE_DID)
+        const failed = await harness.takedown(SPIKE_DID)
 
-    expect(failed.status).toBe(500)
-    const row = await rowOf(backend, SPIKE_DID)
-    expect(row?.active).toBe(false)
-    expect(row?.operatorHold).toBe(false)
-    expect(await harness.labels()).toEqual([])
+        expect(failed.status).toBe(500)
+        expect(await accountState(harness, backend, SPIKE_DID)).toEqual(
+          failure.takedownLeaves,
+        )
 
-    const retry = await harness.takedown(SPIKE_DID)
+        const retry = await harness.takedown(SPIKE_DID)
 
-    expect(retry.status).toBe(200)
-    expect(await harness.labels()).toHaveLength(1)
-    expect((await rowOf(backend, SPIKE_DID))?.active).toBe(false)
-  })
+        expect(retry.status).toBe(200)
+        expect(await accountState(harness, backend, SPIKE_DID)).toEqual(
+          TAKEDOWN_IN_FORCE,
+        )
+      })
+
+      it('leaves a negation unchanged or in force, and a retry restores the account', async () => {
+        const backend = getBackend()
+        const harness = await openHarness()
+        await seedAccount(backend, { did: SPIKE_DID })
+        expect((await harness.takedown(SPIKE_DID)).status).toBe(200)
+        failure.failNext(backend)
+
+        const failed = await harness.negate(SPIKE_DID)
+
+        expect(failed.status).toBe(500)
+        expect(await accountState(harness, backend, SPIKE_DID)).toEqual(
+          failure.negationLeaves,
+        )
+
+        const retry = await harness.negate(SPIKE_DID)
+
+        expect(retry.status).toBe(200)
+        expect(await accountState(harness, backend, SPIKE_DID)).toEqual(
+          NEGATION_IN_FORCE,
+        )
+      })
+    },
+  )
 
   it('rejects a service enrollment as an account subject and writes nothing', async () => {
     const backend = getBackend()

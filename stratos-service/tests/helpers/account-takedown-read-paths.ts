@@ -1,6 +1,14 @@
 import http from 'node:http'
 import express from 'express'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import { createServiceJwt, Server as XrpcServer } from '@atproto/xrpc-server'
 import {
@@ -541,6 +549,7 @@ export function defineAccountTakedownReadPathScenarios(
 
     // A failed case must not leave the author taken down or held for the next.
     afterEach(async () => {
+      vi.restoreAllMocks()
       await releaseOperatorHold(AUTHOR)
       await negateAccount(AUTHOR)
       await negateRecords(AUTHOR)
@@ -724,6 +733,71 @@ export function defineAccountTakedownReadPathScenarios(
       CASE_TIMEOUT_MS,
     )
 
+    describe('an account label whose append fails', () => {
+      const readAsMember = () =>
+        queryProbe(fixture, 'com.atproto.repo.getRecord', 'member', {
+          repo: AUTHOR,
+          collection: POST,
+          rkey: POSTS[AUTHOR][0],
+        })
+      const authorActive = async () =>
+        (await fixture.harness.ctx.enrollmentStore.getEnrollment(AUTHOR))
+          ?.active
+      const failNextAppend = () =>
+        vi
+          .spyOn(fixture.harness.ctx.labelStore, 'appendIfLatest')
+          .mockRejectedValueOnce(new Error('label log unavailable'))
+
+      it(
+        'leaves a takedown unapplied, the author active and served, until a retry hides and holds them',
+        async () => {
+          const served = await readAsMember()
+          expect(carriesAuthorContent(fixture, AUTHOR, served)).toBe(true)
+          failNextAppend()
+
+          expect(
+            await fixture.labels.label(accountSubject(AUTHOR), {
+              ref: 'case-third-impact',
+            }),
+          ).toBe(500)
+
+          expect(await readAsMember()).toBe(served)
+          expect(await authorActive()).toBe(true)
+
+          await takeDownAccount(AUTHOR)
+          expect(
+            carriesAuthorContent(fixture, AUTHOR, await readAsMember()),
+          ).toBe(false)
+          expect(await authorActive()).toBe(false)
+        },
+        CASE_TIMEOUT_MS,
+      )
+
+      it(
+        'leaves a negation unapplied, the author held and hidden, until a retry restores them',
+        async () => {
+          await takeDownAccount(AUTHOR)
+          const hidden = await readAsMember()
+          expect(carriesAuthorContent(fixture, AUTHOR, hidden)).toBe(false)
+          failNextAppend()
+
+          expect(
+            await fixture.labels.label(accountSubject(AUTHOR), { neg: true }),
+          ).toBe(500)
+
+          expect(await readAsMember()).toBe(hidden)
+          expect(await authorActive()).toBe(false)
+
+          await negateAccount(AUTHOR)
+          expect(
+            carriesAuthorContent(fixture, AUTHOR, await readAsMember()),
+          ).toBe(true)
+          expect(await authorActive()).toBe(true)
+        },
+        CASE_TIMEOUT_MS,
+      )
+    })
+
     describe.each(['service', 'space credential'] as const)(
       'zone.stratos.space.listRepos as %s',
       (auth) => {
@@ -785,11 +859,12 @@ export function defineAccountTakedownReadPathScenarios(
           expect(ownExport.status).toBe(200)
           expect((await exportAs(VIEWER)).status).toBe(400)
 
-          // The dev-mode verifier lets the held owner's enrollment error
-          // escape as a 500; DPoP maps it to NotEnrolled. Either way no CAR.
           await takeDownAccount(AUTHOR)
           const takenDown = await exportAs(AUTHOR)
-          expect(takenDown.status).not.toBe(200)
+          expect(takenDown.status).toBe(400)
+          expect(JSON.parse(takenDown.body.toString())).toMatchObject({
+            error: 'NotEnrolled',
+          })
           expect(takenDown.body).not.toEqual(ownExport.body)
           expect((await exportAs(VIEWER)).status).toBe(400)
           await negateAccount(AUTHOR)
