@@ -13,6 +13,12 @@ describe('OAuth Revoke Handler', () => {
     revoke: vi.fn(),
   }
 
+  const mockPdsSyncWorker = {
+    cancel: vi.fn(),
+    enqueue: vi.fn(),
+    kick: vi.fn(),
+  }
+
   const mockLogger = {
     warn: vi.fn(),
     info: vi.fn(),
@@ -28,6 +34,7 @@ describe('OAuth Revoke Handler', () => {
     createSigningKey: vi.fn(),
     createAttestation: vi.fn(),
     repoWriteLocks: new RepoWriteLocks(),
+    pdsSyncWorker: mockPdsSyncWorker,
   }
 
   const authenticateRequest = vi.fn()
@@ -55,6 +62,7 @@ describe('OAuth Revoke Handler', () => {
 
     await handler(req, res)
 
+    expect(mockPdsSyncWorker.cancel).toHaveBeenCalledWith(did)
     expect(mockEnrollmentStore.unenroll).toHaveBeenCalledWith(did)
     expect(mockOauthClient.revoke).toHaveBeenCalledWith(did)
     expect(res.json).toHaveBeenCalledWith(
