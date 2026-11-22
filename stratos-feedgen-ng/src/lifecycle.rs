@@ -2269,4 +2269,126 @@ mod tests {
             "{outcome:?}"
         );
     }
+
+    const COMMIT_WRITE_LIMIT: usize = 200;
+    const POST_AS_OF: &str = "1998-04-03T00:00:00.000Z";
+
+    fn post_create(rkey: &str, text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "action": "create",
+            "path": format!("zone.stratos.feed.post/{rkey}"),
+            "cid": "bafyreia",
+            "record": {
+                "$type": "zone.stratos.feed.post",
+                "text": text,
+                "createdAt": POST_AS_OF,
+            },
+            "boundary": {"values": [{"value": ACTOR_BEBOP}]},
+        })
+    }
+
+    /// A one-post commit frame padded to exactly `length` bytes.
+    fn post_frame_of_length(length: usize) -> Vec<u8> {
+        let unpadded = commit_frame(7, serde_json::json!([post_create("julia", "")])).len();
+        // Past 65,535 bytes a CBOR text header stops growing, so one step lands.
+        let text = "j".repeat(length - unpadded - 4);
+        let frame = commit_frame(7, serde_json::json!([post_create("julia", &text)]));
+        assert_eq!(frame.len(), length);
+        frame
+    }
+
+    fn stored_posts(lifecycle: &ControlLifecycle, rkeys: &[String]) -> usize {
+        rkeys
+            .iter()
+            .filter(|rkey| {
+                lifecycle
+                    .read(|projection| {
+                        projection.blob_post(&faye_uri("zone.stratos.feed.post", rkey), POST_AS_OF)
+                    })
+                    .unwrap()
+                    .is_some()
+            })
+            .count()
+    }
+
+    #[test]
+    fn a_frame_at_the_frame_limit_applies() {
+        let lifecycle = enrolled_lifecycle();
+
+        let frame = post_frame_of_length(crate::config::MAX_ACTOR_FRAME_BYTES);
+
+        assert!(matches!(
+            apply(&lifecycle, &frame),
+            ActorFrameResult::Applied
+        ));
+        assert_eq!(stored_posts(&lifecycle, &["julia".to_owned()]), 1);
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+    }
+
+    #[test]
+    fn a_frame_one_byte_over_the_limit_is_refused_without_advancing_the_cursor() {
+        let lifecycle = enrolled_lifecycle();
+
+        let frame = post_frame_of_length(crate::config::MAX_ACTOR_FRAME_BYTES + 1);
+
+        assert!(matches!(
+            lifecycle.apply_actor_frame(&frame, ACTOR_AUTHORITY, FAYE, RETAINED_AT),
+            Err(ActorFrameError::Event(
+                crate::actor_event::ActorEventError::FrameTooLarge
+            ))
+        ));
+        assert_eq!(stored_posts(&lifecycle, &["julia".to_owned()]), 0);
+        assert_eq!(faye_cursor(&lifecycle), None);
+    }
+
+    #[test]
+    fn a_commit_of_the_most_writes_applies_every_op_and_advances_the_cursor_once() {
+        let lifecycle = enrolled_lifecycle();
+        let rkeys = (0..COMMIT_WRITE_LIMIT)
+            .map(|index| format!("bebop{index:03}"))
+            .collect::<Vec<_>>();
+        let ops = rkeys
+            .iter()
+            .map(|rkey| post_create(rkey, "See you, space cowboy"))
+            .collect::<Vec<_>>();
+
+        assert!(matches!(
+            apply(&lifecycle, &commit_frame(7, serde_json::Value::Array(ops))),
+            ActorFrameResult::Applied
+        ));
+
+        assert_eq!(stored_posts(&lifecycle, &rkeys), COMMIT_WRITE_LIMIT);
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+    }
+
+    #[test]
+    fn a_commit_of_the_most_writes_with_an_unreadable_last_post_applies_nothing() {
+        let lifecycle = enrolled_lifecycle();
+        let rkeys = (0..COMMIT_WRITE_LIMIT)
+            .map(|index| format!("bebop{index:03}"))
+            .collect::<Vec<_>>();
+        let mut ops = rkeys
+            .iter()
+            .map(|rkey| post_create(rkey, "See you, space cowboy"))
+            .collect::<Vec<_>>();
+        ops[COMMIT_WRITE_LIMIT - 1]
+            .as_object_mut()
+            .unwrap()
+            .remove("record");
+
+        assert!(matches!(
+            lifecycle.apply_actor_frame(
+                &commit_frame(7, serde_json::Value::Array(ops)),
+                ACTOR_AUTHORITY,
+                FAYE,
+                RETAINED_AT,
+            ),
+            Err(ActorFrameError::Event(
+                crate::actor_event::ActorEventError::InvalidFrame
+            ))
+        ));
+
+        assert_eq!(stored_posts(&lifecycle, &rkeys), 0);
+        assert_eq!(faye_cursor(&lifecycle), None);
+    }
 }

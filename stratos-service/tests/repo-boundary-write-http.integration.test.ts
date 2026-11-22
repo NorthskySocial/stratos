@@ -762,7 +762,7 @@ function defineDeleteScenarios(getHarness: () => WriteHarness) {
     )
   }
 
-  it('deletes a record in the boundary with an empty body and the plain and scoped delete events', async () => {
+  it('deletes a record in the boundary with an empty body and one scoped delete event', async () => {
     await seed('eva00')
 
     const response = await send()
@@ -772,7 +772,6 @@ function defineDeleteScenarios(getHarness: () => WriteHarness) {
     expect((await harness.recordRows(uriOf('eva00'))).record).toBeNull()
     const ops = (await harness.sequencedOps(PILOT)).slice(1)
     expect(ops.map(({ action, scope }) => ({ action, scope }))).toEqual([
-      { action: 'delete', scope: [] },
       { action: 'delete', scope: [HARNESS_ENGINEERING] },
     ])
   })

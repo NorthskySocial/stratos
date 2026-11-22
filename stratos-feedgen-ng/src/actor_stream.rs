@@ -16,13 +16,14 @@ use tokio::{
 };
 use tokio_tungstenite::{
     connect_async_with_config,
-    tungstenite::{Message, protocol::WebSocketConfig},
+    tungstenite::{Error as WebSocketError, Message, protocol::WebSocketConfig},
 };
 use url::Url;
 
 use crate::{
-    config::MAX_ACTOR_CONNECTIONS,
-    lifecycle::{ActorFrameResult, ControlLifecycle},
+    actor_event::ActorEventError,
+    config::{MAX_ACTOR_CONNECTIONS, MAX_ACTOR_FRAME_BYTES},
+    lifecycle::{ActorFrameError, ActorFrameResult, ControlLifecycle},
     service_auth::{ServiceSigningKey, mint_service_jwt},
     store::StoreError,
     telemetry::FeedTelemetry,
@@ -33,7 +34,6 @@ const SUBSCRIBE_RECORDS_LXM: &str = "zone.stratos.sync.subscribeRecords";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const BASE_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(60);
-const MAX_ACTOR_FRAME_BYTES: usize = 32 * 1024;
 const DEFAULT_MAX_CONNECTIONS: u16 = 8;
 pub(crate) const MAX_TRACKED_ACTORS: usize = 4_096;
 const ENROLLMENT_PAGE_SIZE: u16 = 128;
@@ -76,6 +76,7 @@ impl ActorStreamConfig {
 pub enum ActorPoolError {
     InvalidConfiguration,
     CapacityExceeded,
+    FrameTooLarge,
     Stopped,
     Store(StoreError),
 }
@@ -598,6 +599,12 @@ async fn run_actor_worker_with_telemetry(
         {
             return;
         }
+        if matches!(result, Err(ActorPoolError::FrameTooLarge)) {
+            // The worker reconnects at the same cursor and meets the frame
+            // again, so this is the only sign of a stalled stream.
+            eprintln!("event=actor_frame_too_large limit_bytes={MAX_ACTOR_FRAME_BYTES}");
+            telemetry.record_oversized_actor_frame();
+        }
         failures.send_modify(|count| *count = count.saturating_add(1));
         telemetry.record_reconnect("actor");
         attempt = attempt.saturating_add(1);
@@ -676,13 +683,17 @@ async fn run_actor_connection(
             }
             message = socket.next() => {
                 let message = message.ok_or(ActorPoolError::Stopped)?
-                    .map_err(|_| ActorPoolError::Stopped)?;
+                    .map_err(|error| match error {
+                        WebSocketError::Capacity(_) => ActorPoolError::FrameTooLarge,
+                        _ => ActorPoolError::Stopped,
+                    })?;
                 match message {
                     Message::Binary(frame) => {
                         let retained_at = retention_deadline(OffsetDateTime::now_utc(), config.retention)?;
                         match lifecycle.apply_actor_frame(&frame, &config.service_did, did, &retained_at) {
                             Ok(ActorFrameResult::Applied | ActorFrameResult::Ignored) => {}
                             Ok(ActorFrameResult::NotEnrolled) => return Ok(ActorFrameResult::NotEnrolled),
+                            Err(ActorFrameError::Event(ActorEventError::FrameTooLarge)) => return Err(ActorPoolError::FrameTooLarge),
                             Err(_) => return Err(ActorPoolError::Stopped),
                         }
                     }
@@ -762,6 +773,9 @@ fn retention_deadline(now: OffsetDateTime, retention: Duration) -> Result<String
         deadline.millisecond(),
     ))
 }
+
+#[cfg(test)]
+mod frame_limit_tests;
 
 #[cfg(test)]
 mod tests {

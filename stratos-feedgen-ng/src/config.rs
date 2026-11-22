@@ -10,6 +10,14 @@ use crate::store::read_secret_file;
 
 pub const MAX_ACTOR_CONNECTIONS: u16 = 64;
 
+/// Stratos sends one commit as one frame and refuses a commit whose frame is
+/// larger than this (`MAX_COMMIT_FRAME_BYTES` in stratos-service), so a frame
+/// over the limit cannot stall a stream. The bound covers the largest frame a
+/// boundary applyWrites can produce: 200 writes in a 1,000,000-byte JSON body
+/// come to at most 2,297,439 bytes, because an integer written as `5e9` takes
+/// 3 bytes of JSON and 9 of CBOR.
+pub const MAX_ACTOR_FRAME_BYTES: usize = 2_359_296;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StorageProfile {
     Memory,

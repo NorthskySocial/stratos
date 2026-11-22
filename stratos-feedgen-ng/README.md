@@ -113,6 +113,48 @@ To poll a PDS on a private network, set both
 `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS` (the same CIDR format). This grant is
 separate from PLC trust and applies to that PDS origin only.
 
+## Actor commit frames
+
+Stratos sends each commit of an actor as one `#commit` frame. The worker
+parses every op of the frame first, then writes the ops and the new cursor in
+one SQLite transaction. An unreadable post refuses the whole frame, and a
+store error rolls the transaction back, so the cursor moves only when every op
+applied. An unreadable like or repost is skipped, as before.
+
+`MAX_ACTOR_FRAME_BYTES` in `config.rs` is 2,359,296 bytes. Stratos refuses a
+commit whose frame is larger (`MAX_COMMIT_FRAME_BYTES` in stratos-service), so
+the two numbers must stay equal. The value covers the largest frame a boundary
+`applyWrites` can produce, 200 writes in a body of at most 1,000,000 bytes:
+
+| Part                                                           | Bytes at most |
+| -------------------------------------------------------------- | ------------- |
+| Records: 9 bytes of CBOR for every 4 bytes of JSON             | 2,250,000     |
+| Per op: CID, op boundary of 253 bytes, record key, field names | 45,300        |
+| Frame header, sequence, time, revision, a DID of 2,048 bytes   | 2,139         |
+| Total                                                          | 2,297,439     |
+
+An integer of 2^32 or more written as `5e9` takes 3 bytes of JSON and 9 of
+CBOR, the largest growth of any JSON value. With its separating comma that is
+4 bytes of body for 9 bytes of frame. The records row counts the whole body at
+that rate. The per-op row is what each op adds beyond that: at most 393 bytes,
+less 2.25 times the 74 bytes its write's own `$type`, `collection` and `value`
+fields took. The limit leaves 61,857 bytes above the total. A body built to
+reach the total measured 2,274,539 bytes.
+
+A frame over the limit ends the connection, and the worker reconnects at the
+same cursor. It logs `event=actor_frame_too_large limit_bytes=<n>` and counts
+`stratos.feedgen.subscription.oversized_frames` each time. The log line names
+no DID, record URI, or CID.
+
+Each connection holds at most one frame. At the 64-connection maximum that is
+144 MiB of frames, and 18 MiB at the default of 8; at 32 KiB it was 2 MiB and
+256 KiB. Parsing runs under the lifecycle lock, so one frame is decoded at a
+time. A frame decodes to one `serde_cbor::Value` of 32 bytes per CBOR item. A
+frame at the limit made of one-byte items is about 75 MB of values, and up to
+twice that while a vector grows; at 32 KiB it was about 1 MB. A commit Stratos
+accepts holds at most about 500,000 items, because each takes at least 2 bytes
+of the body: about 16 MB of values.
+
 ## Moderation labels
 
 The feed generator reads the authority's moderation label log every 10 seconds.
@@ -308,6 +350,7 @@ existing private Prometheus exporter/scrape path, never through this service.
 | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `stratos.telemetry.heartbeat`, `stratos.feedgen.ready`                                                                  | 60-second callback gauges, including idle processes                                                          | Same name and intent                                                                                           |
 | `stratos.feedgen.subscription.connected`, `stratos.feedgen.subscription.reconnects`                                     | Service-stream WebSocket state plus service and failed actor-worker reconnects                               | Same name; intentional actor idle/lease rotation is not counted                                                |
+| `stratos.feedgen.subscription.oversized_frames`                                                                         | Actor commit frames refused for exceeding `MAX_ACTOR_FRAME_BYTES`                                            | Rust only; the TypeScript reader has no frame limit                                                            |
 | `stratos.feedgen.actor_pool`                                                                                            | Active, waiting, and configured-capacity gauges after authoritative pool changes                             | Same name and labels                                                                                           |
 | `http.server.request.duration`, `http.server.active_requests`                                                           | Static method, route, and status dimensions for public routes                                                | Same name and bounded dimensions                                                                               |
 | `stratos.feedgen.feed.requests`, `stratos.feedgen.feed.posts_returned`                                                  | Completed projection reads; post count is carried from the bounded response before serialization             | Same name and intent                                                                                           |

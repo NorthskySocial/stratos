@@ -94,6 +94,10 @@ export const handleRevoke = (
       if ('refusal' in revocable) {
         return res.status(revocable.refusal.status).json(revocable.refusal.body)
       }
+      // A write still running would otherwise land after the delete below and
+      // put the enrollment record back on a PDS that OAuth revocation has made
+      // unreachable.
+      await config.pdsSyncWorker.cancel(did)
       await deletePdsEnrollmentRecord(config, did, revocable.enrollment)
 
       // A hold can land while the PDS call runs, so the check runs again. A

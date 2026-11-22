@@ -1257,3 +1257,50 @@ fn retention_and_orphan_eviction_run_over_rows_in_the_previous_spelling() {
         .unwrap();
     assert_eq!(rows_left, 0);
 }
+
+#[test]
+fn an_actor_page_that_fails_partway_through_its_transaction_stores_nothing() {
+    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+    store
+        .apply_actor_page(actor_page(6, Vec::new(), Vec::new()))
+        .unwrap();
+    let posts = (0..200)
+        .map(|index| {
+            let mut post = spike_post();
+            post.uri = format!("at://did:plc:spikespiegel/zone.stratos.feed.post/bebop{index:03}");
+            post
+        })
+        .collect::<Vec<_>>();
+    let last_uri = posts[199].uri.clone();
+    // The last of the page's writes fails after the other 199 have been made.
+    store
+        .connection
+        .execute(
+            &format!(
+                "CREATE TEMP TRIGGER refuse_last_post BEFORE INSERT ON post WHEN NEW.uri = '{last_uri}'
+                 BEGIN SELECT RAISE(ABORT, 'the last post is refused'); END"
+            ),
+            [],
+        )
+        .unwrap();
+
+    assert!(
+        store
+            .apply_actor_page(actor_page(7, posts, Vec::new()))
+            .is_err()
+    );
+
+    let stored: i64 = store
+        .connection
+        .query_row("SELECT COUNT(*) FROM post", [], |row| row.get(0))
+        .unwrap();
+    let cursor: i64 = store
+        .connection
+        .query_row(
+            "SELECT sequence FROM actor_cursor WHERE did = 'did:plc:spikespiegel'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!((stored, cursor), (0, 6));
+}

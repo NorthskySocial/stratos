@@ -74,6 +74,7 @@ collections and answers `InvalidCollection` for a like or repost.
 | `BoundaryNotFound`     | 400    | The caller holds the boundary, but it is absent or inactive           | Choose a boundary from the user's enrollment                          |
 | `RecordAlreadyExists`  | 400    | The key is taken, or the member already likes or reposts that post    | Use another `rkey`, call `putRecord`, or delete the existing record   |
 | `RecordNotFound`       | 400    | An update or delete in `applyWrites` named a record that is not there | Refresh the record list, then send the batch again                    |
+| `PayloadTooLarge`      | 413    | The body or the commit's sync frame is over its limit                 | Send fewer writes in each `applyWrites` call                          |
 | `ScopeUpgradeRequired` | 400    | The member's grant predates the collection of a like or repost        | Send the member through OAuth authorization again. Do not retry first |
 | `InvalidRecord`        | 400    | For a like or repost: `The subject must be a post in this boundary`   | Use the `uri` and `cid` of a post in the same boundary, as served     |
 | `InvalidRecord`        | 400    | For a reply: the parent cannot be read in this boundary               | Reply in the boundary of a parent that the member can read            |

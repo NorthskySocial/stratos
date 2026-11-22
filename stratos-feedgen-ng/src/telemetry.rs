@@ -153,6 +153,7 @@ struct RuntimeState {
     actor_capacity: AtomicU64,
     last_space_sync_success: AtomicU64,
     actor_reconnects: AtomicU64,
+    oversized_actor_frames: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -164,6 +165,7 @@ pub struct FeedTelemetry {
     feed_requests: Option<Counter<u64>>,
     posts_returned: Option<Histogram<u64>>,
     reconnects: Option<Counter<u64>>,
+    oversized_actor_frames: Option<Counter<u64>>,
     index_operations: Option<Counter<u64>>,
     cache_requests: Option<Counter<u64>>,
     reconciliation_duration: Option<Histogram<f64>>,
@@ -191,6 +193,7 @@ impl FeedTelemetry {
             feed_requests: None,
             posts_returned: None,
             reconnects: None,
+            oversized_actor_frames: None,
             index_operations: None,
             cache_requests: None,
             reconciliation_duration: None,
@@ -255,6 +258,12 @@ impl FeedTelemetry {
                 meter
                     .u64_counter("stratos.feedgen.subscription.reconnects")
                     .with_description("Scheduled subscription reconnects.")
+                    .build(),
+            ),
+            oversized_actor_frames: Some(
+                meter
+                    .u64_counter("stratos.feedgen.subscription.oversized_frames")
+                    .with_description("Actor commit frames refused for exceeding the frame limit.")
                     .build(),
             ),
             index_operations: Some(
@@ -425,6 +434,18 @@ impl FeedTelemetry {
     #[cfg(test)]
     pub(crate) fn actor_reconnects(&self) -> u64 {
         self.state.actor_reconnects.load(Ordering::Relaxed)
+    }
+    pub fn record_oversized_actor_frame(&self) {
+        self.state
+            .oversized_actor_frames
+            .fetch_add(1, Ordering::Relaxed);
+        if let Some(metric) = &self.oversized_actor_frames {
+            metric.add(1, &[]);
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn oversized_actor_frames(&self) -> u64 {
+        self.state.oversized_actor_frames.load(Ordering::Relaxed)
     }
     pub fn record_cache(&self, outcome: &'static str) {
         if let Some(metric) = &self.cache_requests {
