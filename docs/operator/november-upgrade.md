@@ -437,19 +437,18 @@ resolves the declaration. When it cannot, the authorization ends with
 accepts `name` beside `title` and ignores it. `title` is optional there, from 1
 to 64 UTF-8 bytes.
 
-There are two ways to publish the declaration. Neither is recommended here.
+Publish the declaration with `title` only, as the repository file holds it. We
+support the November release only, so the declaration carries no `name` member.
+A member on a spaces PDS older than the November release cannot enroll: the
+host refuses the declaration, the authorization ends with `invalid_scope`, and
+Stratos records no enrollment with any custody, because it always requests the
+space scope. This is read from the October PDS source and the service code.
+Such a member enrolls after the host upgrades. The step 2 list tells you how
+many members this affects.
 
-| Way                        | Declaration holds                      | A member on a spaces PDS older than the November release                                                                                                                                                                                |
-| -------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Both during the transition | `title` and `name`, with the same text | Expected: the host grants the space scope, and the member is enrolled with `pds` custody. Then the member cannot post or be synced until the host accepts the `at:space/` spelling. Not observed.                                       |
-| `title` only               | `title`                                | The host refuses the declaration, and the authorization ends with `invalid_scope`. The member is not enrolled with any custody, because Stratos always requests the space scope. Read from the October PDS source and the service code. |
-
-A member on a November host is expected to be enrolled with `pds` custody under
-either form. Such a member cannot post or be synced yet either, because the
-upstream reference at the pinned revision does not accept the `at:space/`
-spelling. The repository file holds `title` only. The choice of how to publish
-is the operator's, and it is open. The step 2 list tells you how many members
-each form affects.
+A member on a November host is expected to be enrolled with `pds` custody. Such
+a member cannot post or be synced yet, because the upstream reference at the
+pinned revision does not accept the `at:space/` spelling.
 
 Publishing is a write to the repository of the DID that the
 `_lexicon.space.stratos.zone` DNS record names. Mark:
@@ -458,8 +457,7 @@ script that publishes it. A PDS resolves the published record, so publish
 again whenever the file changes. A member who got a partial grant may need
 to authorize again after the declaration lists all three collections.
 
-You know it worked when the published record holds the members of the form you
-chose:
+You know it worked when the published record holds `title` and no `name`:
 
 ```sh
 curl -s "<lexicon PDS>/xrpc/com.atproto.repo.getRecord?repo=<lexicon DID>&collection=com.atproto.lexicon.schema&rkey=zone.stratos.space.feed" \
