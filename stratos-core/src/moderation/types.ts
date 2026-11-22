@@ -1,10 +1,7 @@
 import type { RecordUri, SpacesErrorCode } from '../spaces/index.js'
 
 export type ModerationErrorCode =
-  | 'invalid-subject'
-  | 'invalid-value'
-  | 'foreign-authority'
-  | 'invalid-cursor'
+  'invalid-subject' | 'invalid-value' | 'foreign-authority' | 'invalid-cursor'
 
 export interface ModerationError {
   code: ModerationErrorCode
@@ -14,8 +11,7 @@ export interface ModerationError {
 }
 
 export type ModerationResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: ModerationError }
+  { ok: true; value: T } | { ok: false; error: ModerationError }
 
 /** Wire shape of the lexicon subject union, before validation. */
 export interface LabelSubjectInput {
