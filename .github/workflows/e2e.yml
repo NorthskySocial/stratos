@@ -107,22 +107,40 @@ jobs:
           fi
           echo "GITHUB_BASE_SHA=$base" >> "$GITHUB_ENV"
 
-      - name: Run Atmosphere in a Box baseline
+      - name: Check and test the Deno scripts without a host
+        working-directory: test/scripts
+        run: |
+          deno check *.ts lib/*.ts
+          deno test --allow-read --allow-env lib
+
+      - name: Run the ordinary-custody suite
+        run: |
+          pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
+            --sandbox-dir "$RUNNER_TEMP/aiab-sandbox" \
+            --source "$GITHUB_WORKSPACE" \
+            --suite ordinary-custody \
+            --ci-evidence \
+            --report-dir "$RUNNER_TEMP/aiab-report-ordinary-custody"
+
+      - name: Run the baseline diagnostic
+        continue-on-error: true
         run: |
           pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
             --sandbox-dir "$RUNNER_TEMP/aiab-sandbox" \
             --source "$GITHUB_WORKSPACE" \
             --suite baseline \
             --ci-evidence \
-            --report-dir "$RUNNER_TEMP/aiab-report"
+            --report-dir "$RUNNER_TEMP/aiab-report-baseline"
 
-      - name: Upload sandbox receipt
+      - name: Upload sandbox receipts
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: aiab-receipt
+          name: aiab-receipts
           path: |
-            ${{ runner.temp }}/aiab-report/receipt.json
-            ${{ runner.temp }}/aiab-report/failure.json
+            ${{ runner.temp }}/aiab-report-ordinary-custody/receipt.json
+            ${{ runner.temp }}/aiab-report-ordinary-custody/failure.json
+            ${{ runner.temp }}/aiab-report-baseline/receipt.json
+            ${{ runner.temp }}/aiab-report-baseline/failure.json
           if-no-files-found: ignore
           retention-days: 30
