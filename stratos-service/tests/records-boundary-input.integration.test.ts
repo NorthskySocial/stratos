@@ -267,60 +267,72 @@ describe('authorizeRecordBoundary properties', () => {
     return caller
   }
 
-  it('returns the exact requested boundary when the caller holds it', async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        boundaryArb,
-        fc.array(boundaryArb, { maxLength: 4 }),
-        async (requested, otherHeld) => {
-          const held = [...otherHeld, requested]
-          const authorized = await authorizeRecordBoundary(
-            harness.ctx,
-            await callerHolding(held),
-            COLLECTION,
-            postWithBoundaries('Eva', [requested]),
-          )
-          expect(authorized).toBe(requested)
-        },
-      ),
-    )
-  }, PROPERTY_TIMEOUT_MS)
-
-  it('rejects a requested boundary the caller does not hold with ForbiddenBoundary', async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        boundaryArb,
-        fc.array(boundaryArb, { maxLength: 4 }),
-        async (requested, held) => {
-          fc.pre(!held.includes(requested))
-          await expect(
-            authorizeRecordBoundary(
+  it(
+    'returns the exact requested boundary when the caller holds it',
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          boundaryArb,
+          fc.array(boundaryArb, { maxLength: 4 }),
+          async (requested, otherHeld) => {
+            const held = [...otherHeld, requested]
+            const authorized = await authorizeRecordBoundary(
               harness.ctx,
               await callerHolding(held),
               COLLECTION,
               postWithBoundaries('Eva', [requested]),
-            ),
-          ).rejects.toMatchObject({ customErrorName: 'ForbiddenBoundary' })
-        },
-      ),
-    )
-  }, PROPERTY_TIMEOUT_MS)
+            )
+            expect(authorized).toBe(requested)
+          },
+        ),
+      )
+    },
+    PROPERTY_TIMEOUT_MS,
+  )
 
-  it('rejects zero or several requested boundaries with InvalidDomainCount', async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(boundaryArb, { maxLength: 4 }).filter((b) => b.length !== 1),
-        async (requested) => {
-          await expect(
-            authorizeRecordBoundary(
-              harness.ctx,
-              await callerHolding(requested),
-              COLLECTION,
-              postWithBoundaries('Eva', requested),
-            ),
-          ).rejects.toMatchObject({ customErrorName: 'InvalidDomainCount' })
-        },
-      ),
-    )
-  }, PROPERTY_TIMEOUT_MS)
+  it(
+    'rejects a requested boundary the caller does not hold with ForbiddenBoundary',
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          boundaryArb,
+          fc.array(boundaryArb, { maxLength: 4 }),
+          async (requested, held) => {
+            fc.pre(!held.includes(requested))
+            await expect(
+              authorizeRecordBoundary(
+                harness.ctx,
+                await callerHolding(held),
+                COLLECTION,
+                postWithBoundaries('Eva', [requested]),
+              ),
+            ).rejects.toMatchObject({ customErrorName: 'ForbiddenBoundary' })
+          },
+        ),
+      )
+    },
+    PROPERTY_TIMEOUT_MS,
+  )
+
+  it(
+    'rejects zero or several requested boundaries with InvalidDomainCount',
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(boundaryArb, { maxLength: 4 }).filter((b) => b.length !== 1),
+          async (requested) => {
+            await expect(
+              authorizeRecordBoundary(
+                harness.ctx,
+                await callerHolding(requested),
+                COLLECTION,
+                postWithBoundaries('Eva', requested),
+              ),
+            ).rejects.toMatchObject({ customErrorName: 'InvalidDomainCount' })
+          },
+        ),
+      )
+    },
+    PROPERTY_TIMEOUT_MS,
+  )
 })
