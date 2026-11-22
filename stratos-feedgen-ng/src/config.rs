@@ -291,6 +291,10 @@ pub const MAX_SPACE_CYCLE_VALUES: usize = 2_000_000;
 pub const SPACE_TARGET_DEADLINE: Duration = Duration::from_secs(60);
 /// After a replacement fails for a member, how long before another is tried.
 pub const SPACE_REPLACEMENT_COOLDOWN: Duration = Duration::from_secs(10 * 60);
+/// How long a member's host must keep answering `RepoNotFound` before the
+/// member's state in the space is cleared. The answer carries no MAC, so one
+/// wrong answer must not delete the member's posts.
+pub const SPACE_REPO_NOT_FOUND_CONFIRMATION: Duration = Duration::from_secs(60 * 60);
 /// Path rows across every member and space. They are not feed rows: they do not
 /// count against the retention budget and retention never deletes them, so they
 /// need a bound of their own.
@@ -807,5 +811,6 @@ mod tests {
         assert_eq!(super::MAX_SPACE_POLL_BODY_BYTES, 16 * 1024 * 1024);
         assert_eq!(super::SPACE_TARGET_DEADLINE.as_secs(), 60);
         assert_eq!(super::SPACE_REPLACEMENT_COOLDOWN.as_secs(), 600);
+        assert_eq!(super::SPACE_REPO_NOT_FOUND_CONFIRMATION.as_secs(), 3600);
     }
 }

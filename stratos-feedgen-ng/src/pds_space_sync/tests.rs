@@ -17,8 +17,8 @@ use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 use serde_json::{Value, json};
 
 use super::{
-    FailureReason, PdsSpaceSynchronizer, PollEnd, SyncLimits, VerifiedSyncOutcome,
-    host_refusal_reason, promotion_refusal, replacement_refusal,
+    FailureReason, PdsSpaceSynchronizer, PollEnd, SPACE_REPO_NOT_FOUND_CONFIRMATION, SyncLimits,
+    VerifiedSyncOutcome, host_refusal_reason, promotion_refusal, replacement_refusal,
     test_host::{
         ArchiveStep, Fault, Gate, HostRepo, PageStep, StaticKemKeys, TestClock, TestHost,
         TestSource, cid_of, page_body, star_archive, tid,
@@ -1301,22 +1301,72 @@ async fn with_a_gap_to_recover_from() -> Scene {
     scene
 }
 
-#[tokio::test]
-async fn repo_not_found_with_status_400_clears_the_members_state_and_nothing_else() {
+fn not_found_page() -> PageStep {
+    PageStep::Refused {
+        status: 400,
+        code: Some("RepoNotFound"),
+    }
+}
+
+fn not_found_archive() -> ArchiveStep {
+    ArchiveStep::Refused {
+        status: 400,
+        code: Some("RepoNotFound"),
+    }
+}
+
+const NOT_FOUND: VerifiedSyncOutcome = VerifiedSyncOutcome::Failed(FailureReason::RepoNotFound);
+
+// Faye with two posts and Jet with one, both already replaced into the store.
+async fn with_faye_and_jet_served() -> Scene {
     let scene = Scene::with_a_base().await;
     scene.host.edit(JET, |repo| {
         repo.put(2, POST, "bebop", post("Spike"));
     });
     assert_eq!(scene.cycle(JET).await, VerifiedSyncOutcome::Replaced);
-    scene.host.script_pages(
-        FAYE,
-        vec![PageStep::Refused {
-            status: 400,
-            code: Some("RepoNotFound"),
-        }],
-    );
+    assert_eq!(scene.served_uris().len(), 3);
+    scene
+}
 
-    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Cleared);
+async fn answer_not_found(scene: &Scene, did: &str) -> VerifiedSyncOutcome {
+    scene.host.script_pages(did, vec![not_found_page()]);
+    scene.cycle(did).await
+}
+
+#[tokio::test]
+async fn a_first_repo_not_found_with_status_400_fails_the_member_and_changes_nothing() {
+    let scene = with_faye_and_jet_served().await;
+    let before = scene.snapshot();
+    let served = scene.served_uris();
+
+    assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND);
+
+    assert_eq!(scene.snapshot(), before, "byte-identical rows");
+    assert_eq!(scene.served_uris(), served, "Faye's posts are still served");
+    assert_eq!(scene.base_rev(FAYE), Some(tid(3)));
+}
+
+#[tokio::test]
+async fn repo_not_found_with_status_400_clears_the_members_state_only_once_it_has_lasted_an_hour() {
+    let scene = with_faye_and_jet_served().await;
+    let before = scene.snapshot();
+
+    assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND);
+    scene
+        .clock
+        .advance(SPACE_REPO_NOT_FOUND_CONFIRMATION - Duration::from_secs(1));
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        NOT_FOUND,
+        "a second before the hour"
+    );
+    assert_eq!(scene.snapshot(), before, "nothing changed within the hour");
+
+    scene.clock.advance(Duration::from_secs(1));
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        VerifiedSyncOutcome::Cleared
+    );
 
     assert_eq!(scene.base(FAYE), None);
     assert_eq!(
@@ -1328,7 +1378,207 @@ async fn repo_not_found_with_status_400_clears_the_members_state_and_nothing_els
 }
 
 #[tokio::test]
-async fn repo_not_found_from_an_archive_request_clears_the_members_rows_in_that_space_and_nothing_else()
+async fn a_good_poll_between_two_repo_not_found_answers_starts_the_hour_again() {
+    let scene = with_faye_and_jet_served().await;
+    let before = scene.snapshot();
+
+    assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND);
+    scene.clock.advance(Duration::from_secs(60));
+    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Unchanged);
+    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        NOT_FOUND,
+        "an hour after the first answer, but the good poll came between"
+    );
+    assert_eq!(scene.snapshot(), before);
+
+    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        VerifiedSyncOutcome::Cleared,
+        "an hour after the answer that followed the good poll"
+    );
+    assert_eq!(scene.base(FAYE), None);
+}
+
+#[tokio::test]
+async fn any_other_end_of_a_cycle_between_two_repo_not_found_answers_starts_the_hour_again() {
+    let cases: [(&str, VerifiedSyncOutcome); 4] = [
+        (
+            "an unreachable host",
+            VerifiedSyncOutcome::Failed(FailureReason::Transport),
+        ),
+        (
+            "an account status",
+            VerifiedSyncOutcome::Failed(FailureReason::RepoTakendown),
+        ),
+        ("the name at status 500", NOT_FOUND),
+        (
+            "a key the directory cannot give",
+            VerifiedSyncOutcome::Deferred,
+        ),
+    ];
+    for (name, between) in cases {
+        let scene = with_faye_and_jet_served().await;
+        let before = scene.snapshot();
+        assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND, "{name}");
+        scene.clock.advance(Duration::from_secs(60));
+        match name {
+            "an unreachable host" => scene
+                .host
+                .script_pages(FAYE, vec![PageStep::Failed(Fault::Unreachable)]),
+            "an account status" => scene.host.script_pages(
+                FAYE,
+                vec![PageStep::Refused {
+                    status: 400,
+                    code: Some("RepoTakendown"),
+                }],
+            ),
+            "the name at status 500" => scene.host.script_pages(
+                FAYE,
+                vec![PageStep::Refused {
+                    status: 500,
+                    code: Some("RepoNotFound"),
+                }],
+            ),
+            _ => scene.kem_keys.withdraw(),
+        }
+
+        assert_eq!(scene.cycle(FAYE).await, between, "{name}");
+
+        scene.kem_keys.restore();
+        scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+        assert_eq!(
+            answer_not_found(&scene, FAYE).await,
+            NOT_FOUND,
+            "{name}: the hour started again"
+        );
+        assert_eq!(scene.snapshot(), before, "{name}");
+    }
+}
+
+// Only a cycle that asks the host nothing keeps the remembered answer when the
+// replacement cooldown turns it away. This one read a page first.
+#[tokio::test]
+async fn a_poll_that_reads_a_page_and_is_then_turned_away_by_the_cooldown_starts_the_hour_again() {
+    let scene = with_faye_and_jet_served().await;
+    scene
+        .host
+        .script_pages(FAYE, vec![PageStep::WrongDigest([9; 32])]);
+    scene.host.script_archives(
+        FAYE,
+        vec![ArchiveStep::Refused {
+            status: 500,
+            code: None,
+        }],
+    );
+    assert_eq!(
+        scene.cycle(FAYE).await,
+        VerifiedSyncOutcome::Failed(FailureReason::Other)
+    );
+    let before = scene.snapshot();
+    assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND);
+    scene
+        .host
+        .script_pages(FAYE, vec![PageStep::WrongDigest([9; 32])]);
+
+    assert_eq!(
+        scene.cycle(FAYE).await,
+        VerifiedSyncOutcome::Failed(FailureReason::ReplacementCooldown)
+    );
+
+    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        NOT_FOUND,
+        "the page came between the two answers"
+    );
+    assert_eq!(scene.snapshot(), before);
+}
+
+// The map of remembered answers is lowered to one entry, which Jet's answer
+// takes.
+#[tokio::test]
+async fn a_full_map_of_remembered_answers_remembers_no_new_one_and_clears_nothing() {
+    let scene = Scene::with_a_base_and_limits(SyncLimits {
+        repo_not_found_capacity: 1,
+        ..SyncLimits::default()
+    })
+    .await;
+    scene.host.edit(JET, |repo| {
+        repo.put(2, POST, "bebop", post("Spike"));
+    });
+    assert_eq!(scene.cycle(JET).await, VerifiedSyncOutcome::Replaced);
+    assert_eq!(answer_not_found(&scene, JET).await, NOT_FOUND);
+    let before = scene.snapshot();
+
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        NOT_FOUND,
+        "no room for Faye's answer"
+    );
+    assert_eq!(scene.snapshot(), before);
+
+    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    assert_eq!(
+        answer_not_found(&scene, JET).await,
+        VerifiedSyncOutcome::Cleared,
+        "Jet's answer was remembered"
+    );
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        NOT_FOUND,
+        "Faye's first answer was never remembered"
+    );
+    assert_eq!(scene.base_rev(FAYE), Some(tid(3)));
+    assert_eq!(scene.served_uris().len(), 2, "Faye's two posts");
+
+    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        VerifiedSyncOutcome::Cleared,
+        "Jet's clear made room for Faye's answer"
+    );
+}
+
+// With room for one answer, Jet's is remembered and his cycles then stop, as
+// when he leaves the space.
+#[tokio::test]
+async fn a_remembered_answer_no_cycle_has_repeated_for_an_hour_makes_room_for_another() {
+    let scene = Scene::with_a_base_and_limits(SyncLimits {
+        repo_not_found_capacity: 1,
+        ..SyncLimits::default()
+    })
+    .await;
+    scene.host.edit(JET, |repo| {
+        repo.put(2, POST, "bebop", post("Spike"));
+    });
+    assert_eq!(scene.cycle(JET).await, VerifiedSyncOutcome::Replaced);
+    assert_eq!(answer_not_found(&scene, JET).await, NOT_FOUND);
+
+    scene
+        .clock
+        .advance(SPACE_REPO_NOT_FOUND_CONFIRMATION - Duration::from_secs(1));
+    assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND);
+    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        NOT_FOUND,
+        "Jet's answer was not stale when Faye's came"
+    );
+    assert_eq!(scene.base_rev(FAYE), Some(tid(3)));
+
+    scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+    assert_eq!(
+        answer_not_found(&scene, FAYE).await,
+        VerifiedSyncOutcome::Cleared,
+        "Jet's stale answer made room for Faye's"
+    );
+}
+
+#[tokio::test]
+async fn repo_not_found_from_an_archive_request_clears_the_members_rows_in_that_space_only_once_it_has_lasted_an_hour()
  {
     const REDTAIL_BOUNDARY: &str = "did:web:stratos.example.test/redtail";
     const REDTAIL_SPACE: &str =
@@ -1394,20 +1644,34 @@ async fn repo_not_found_from_an_archive_request_clears_the_members_rows_in_that_
     // there, so the cycle goes to a replacement and the archive request is
     // refused with that name.
     let (mirror, moved) = moved_to_a_mirror(&scene, HostRepo::new(1));
-    mirror.script_archives(
-        FAYE,
-        vec![ArchiveStep::Refused {
-            status: 400,
-            code: Some("RepoNotFound"),
-        }],
-    );
+    mirror.script_archives(FAYE, (0..3).map(|_| not_found_archive()).collect());
+    let before = scene.snapshot();
 
+    assert_eq!(scene.cycle_target(&moved).await, NOT_FOUND);
+    // The failed replacement cools down, and a cycle the cooldown turns away
+    // asks the host nothing, so the remembered answer stands.
+    assert_eq!(
+        scene.cycle_target(&moved).await,
+        VerifiedSyncOutcome::Failed(FailureReason::ReplacementCooldown)
+    );
+    scene.clock.advance(SPACE_REPLACEMENT_COOLDOWN);
+    assert_eq!(
+        scene.cycle_target(&moved).await,
+        NOT_FOUND,
+        "ten minutes after the first answer"
+    );
+    assert_eq!(mirror.archives_requested(), 2);
+    assert_eq!(scene.snapshot(), before, "nothing changed within the hour");
+
+    scene
+        .clock
+        .advance(SPACE_REPO_NOT_FOUND_CONFIRMATION - SPACE_REPLACEMENT_COOLDOWN);
     assert_eq!(
         scene.cycle_target(&moved).await,
         VerifiedSyncOutcome::Cleared
     );
 
-    assert_eq!(mirror.archives_requested(), 1);
+    assert_eq!(mirror.archives_requested(), 3);
     assert!(mirror.pages_requested(FAYE).is_empty());
     assert_eq!(scene.base(FAYE), None);
     assert_eq!(
@@ -1426,12 +1690,7 @@ async fn repo_not_found_from_an_archive_request_clears_the_members_rows_in_that_
 #[tokio::test]
 async fn only_repo_not_found_with_status_400_clears_and_only_invalid_cursor_replaces() {
     let refusals: [(&str, u16, Option<&str>, VerifiedSyncOutcome); 14] = [
-        (
-            "RepoNotFound",
-            400,
-            Some("RepoNotFound"),
-            VerifiedSyncOutcome::Cleared,
-        ),
+        ("RepoNotFound", 400, Some("RepoNotFound"), NOT_FOUND),
         (
             "InvalidCursor",
             400,
@@ -1513,9 +1772,12 @@ async fn only_repo_not_found_with_status_400_clears_and_only_invalid_cursor_repl
     ];
     for (name, status, code, outcome) in refusals {
         let scene = with_a_gap_to_recover_from().await;
-        scene
-            .host
-            .script_pages(FAYE, vec![PageStep::Refused { status, code }]);
+        let refuse = || {
+            scene
+                .host
+                .script_pages(FAYE, vec![PageStep::Refused { status, code }]);
+        };
+        refuse();
         let before = scene.snapshot();
 
         assert_eq!(scene.cycle(FAYE).await, outcome, "{name}");
@@ -1529,7 +1791,20 @@ async fn only_repo_not_found_with_status_400_clears_and_only_invalid_cursor_repl
                 assert_eq!(scene.host.archives_requested(), 2, "{name}");
                 assert_eq!(scene.base_digest(FAYE), scene.host_digest(FAYE));
             }
-            _ => assert_eq!(scene.base(FAYE), None, "{name}"),
+            other => panic!("{name}: {other:?} is in no row"),
+        }
+
+        // The same refusal an hour later.
+        scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+        refuse();
+        let again = scene.cycle(FAYE).await;
+        assert_eq!(
+            again == VerifiedSyncOutcome::Cleared,
+            name == "RepoNotFound",
+            "{name}: {again:?} an hour later"
+        );
+        if again == VerifiedSyncOutcome::Cleared {
+            assert_eq!(scene.base(FAYE), None, "{name}");
         }
     }
 }
@@ -2621,6 +2896,8 @@ fn the_configured_limits_are_the_ones_the_synchronizer_starts_with() {
     let limits = SyncLimits::default();
     assert_eq!(limits.deadline, SPACE_TARGET_DEADLINE);
     assert_eq!(limits.cooldown, SPACE_REPLACEMENT_COOLDOWN);
+    assert_eq!(limits.repo_not_found_confirmation.as_secs(), 3_600);
+    assert_eq!(limits.repo_not_found_capacity, limits.cooldown_capacity);
     assert_eq!(limits.ops, 1_000);
     assert_eq!(limits.body_bytes, 16 * 1024 * 1024);
     assert_eq!(limits.values, 2_000_000);
@@ -2830,13 +3107,9 @@ async fn a_write_whose_deadline_has_passed_is_not_started_and_nothing_changes() 
             _ => (Arc::clone(&scene.host), scene.target(FAYE)),
         };
         if case == "a clear" {
-            host.script_pages(
-                FAYE,
-                vec![PageStep::Refused {
-                    status: 400,
-                    code: Some("RepoNotFound"),
-                }],
-            );
+            assert_eq!(answer_not_found(&scene, FAYE).await, NOT_FOUND);
+            scene.clock.advance(SPACE_REPO_NOT_FOUND_CONFIRMATION);
+            host.script_pages(FAYE, vec![not_found_page()]);
         }
         let clock = Arc::clone(&scene.clock);
         host.on_next_request(move || clock.advance(SPACE_TARGET_DEADLINE));

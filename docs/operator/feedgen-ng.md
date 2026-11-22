@@ -147,8 +147,17 @@ continue during it.
 
 A `RepoNotFound` answer with status 400 from the member's host clears that
 member's records in that space, and nothing else. The answer carries no MAC.
-The pinned TLS connection to the host that Stratos named is the only
-protection. Any other failure leaves the stored rows as they were.
+The pinned TLS connection to the host that Stratos named is its only
+protection, so one answer is not enough. The host must give the same answer for
+one hour (`SPACE_REPO_NOT_FOUND_CONFIRMATION`). Until then the member fails as
+`repo_not_found` and nothing is changed. When the answer came to a whole-repo
+read, the passes in the cooldown after it fail as `replacement_cooldown`
+instead. The first pass that gets the answer an hour or more after the first
+one clears the member and counts it as `cleared`. Any other end of that
+member's cycle, a good poll or another failure, starts the hour again. A pass
+that the cooldown turns away before it asks the host does not. The hour is
+kept in memory, so a restart starts it again. Any other failure leaves the
+stored rows as they were.
 
 A host answer of `RepoTakendown`, `RepoSuspended` or `RepoDeactivated` fails
 the member and deletes nothing. The cached posts of that member stay served.
@@ -225,7 +234,7 @@ The same counts are logged as `event=pds_space_sync_pass`. The members are
 | `promoted`           | Members whose ops were proven and written                                                                            |
 | `unchanged`          | Members already at the revision the host reports                                                                     |
 | `replaced`           | Members whose state a whole-repo read replaced                                                                       |
-| `cleared`            | Members whose records a `RepoNotFound` answer cleared                                                                |
+| `cleared`            | Members whose records were cleared because their host answered `RepoNotFound` for an hour                            |
 | `deferred`           | Members whose DID document lookup did not complete, or answered an error other than not found; no failure is counted |
 | `targetFailures`     | Members that failed                                                                                                  |
 
@@ -242,7 +251,7 @@ a log line.
 | Reason                                                                               | Meaning                                                                                                     |
 | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
 | `invalid_space_mac`, `invalid_space_uri`, `invalid_credential`, `bad_space_audience` | The host answered with that error name                                                                      |
-| `repo_not_found`                                                                     | The host answered `RepoNotFound` with a status other than 400                                               |
+| `repo_not_found`                                                                     | The host answered `RepoNotFound` with a status other than 400, or with status 400 for less than an hour     |
 | `repo_takendown`, `repo_suspended`, `repo_deactivated`                               | The host answered that account status. Nothing is deleted                                                   |
 | `invalid_cursor`                                                                     | The host answered `InvalidCursor` other than as a status 400 to a page                                      |
 | `mac`                                                                                | A response failed the MAC check, after the one retry                                                        |

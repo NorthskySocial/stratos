@@ -8,7 +8,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -19,7 +19,7 @@ use tokio::{sync::Semaphore, time::Instant};
 use crate::{
     config::{
         MAX_SPACE_CYCLE_VALUES, MAX_SPACE_POLL_BODY_BYTES, SPACE_REPLACEMENT_COOLDOWN,
-        SPACE_TARGET_DEADLINE,
+        SPACE_REPO_NOT_FOUND_CONFIRMATION, SPACE_TARGET_DEADLINE,
     },
     credential_manager::SpaceCredentialManager,
     lifecycle::ControlLifecycle,
@@ -58,7 +58,8 @@ pub enum VerifiedSyncOutcome {
     Promoted,
     /// The whole repo was read, proven and written in place of the held state.
     Replaced,
-    /// The host said the repo does not exist; the member's state was cleared.
+    /// The host kept saying for `SPACE_REPO_NOT_FOUND_CONFIRMATION` that the
+    /// repo does not exist; the member's state was cleared.
     Cleared,
     /// The author's key could not be found right now.
     Deferred,
@@ -311,7 +312,9 @@ struct SyncLimits {
     values: usize,
     deadline: Duration,
     cooldown: Duration,
+    repo_not_found_confirmation: Duration,
     cooldown_capacity: usize,
+    repo_not_found_capacity: usize,
 }
 
 impl Default for SyncLimits {
@@ -323,7 +326,9 @@ impl Default for SyncLimits {
             values: MAX_SPACE_CYCLE_VALUES,
             deadline: SPACE_TARGET_DEADLINE,
             cooldown: SPACE_REPLACEMENT_COOLDOWN,
+            repo_not_found_confirmation: SPACE_REPO_NOT_FOUND_CONFIRMATION,
             cooldown_capacity: MAX_TARGET_LOCKS,
+            repo_not_found_capacity: MAX_TARGET_LOCKS,
         }
     }
 }
@@ -335,7 +340,24 @@ pub struct PdsSpaceSynchronizer {
     limits: SyncLimits,
     target_locks: Arc<Mutex<BTreeMap<String, Arc<TargetLock>>>>,
     cooldowns: Mutex<BTreeMap<String, Instant>>,
+    repo_not_found: Mutex<BTreeMap<String, RepoNotFoundAnswers>>,
     replacement_slot: Semaphore,
+}
+
+/// When a target's host first gave the `RepoNotFound` answer that has not been
+/// interrupted since, and when it last gave it.
+struct RepoNotFoundAnswers {
+    first: Instant,
+    latest: Instant,
+}
+
+/// What a `RepoNotFound` answer comes to for a target.
+enum RepoNotFoundStanding {
+    /// The host has given it for the whole confirmation period.
+    Confirmed,
+    Remembered,
+    /// No answer could be remembered, so the period does not start.
+    NoRoom,
 }
 
 struct TargetLock {
@@ -378,7 +400,7 @@ enum PollEnd {
 
 /// How a failed read ends a cycle.
 enum ReadFailure {
-    Clear,
+    RepoNotFound,
     Deferred,
     Failed(FailureReason),
 }
@@ -410,6 +432,7 @@ impl PdsSpaceSynchronizer {
             limits: SyncLimits::default(),
             target_locks: Arc::new(Mutex::new(BTreeMap::new())),
             cooldowns: Mutex::new(BTreeMap::new()),
+            repo_not_found: Mutex::new(BTreeMap::new()),
             replacement_slot: Semaphore::new(1),
         }
     }
@@ -431,11 +454,20 @@ impl PdsSpaceSynchronizer {
             Ok(Err(reason)) => return VerifiedSyncOutcome::Failed(reason),
             Err(_) => return VerifiedSyncOutcome::Failed(FailureReason::Deadline),
         };
+        // Declared after the lease so that it is dropped while the target is
+        // still held, and never forgets an answer that the next cycle for the
+        // target has remembered.
+        let repo_not_found = RepoNotFoundWatch {
+            synchronizer: self,
+            key: Self::target_key(target),
+            kept: AtomicBool::new(false),
+        };
         let cycle = Cycle {
             synchronizer: self,
             lifecycle,
             target,
             retained_at,
+            repo_not_found: &repo_not_found,
             deadline,
             budget: ValueBudget::with_limit(self.limits.values),
             store_target: VerifiedSpaceTarget {
@@ -515,6 +547,44 @@ impl PdsSpaceSynchronizer {
             .insert(key, now + self.limits.cooldown);
     }
 
+    // Bounded like the cooldowns. An entry whose target has not given the
+    // answer for a whole period is stale and makes room; with no room the
+    // answer is not remembered, which delays a clear and never hastens one.
+    fn note_repo_not_found(&self, key: &str) -> RepoNotFoundStanding {
+        let now = self.clock.now();
+        let period = self.limits.repo_not_found_confirmation;
+        let mut answers = self
+            .repo_not_found
+            .lock()
+            .expect("repo-not-found answers poisoned");
+        if let Some(answer) = answers.get_mut(key) {
+            if now.saturating_duration_since(answer.first) >= period {
+                return RepoNotFoundStanding::Confirmed;
+            }
+            answer.latest = now;
+            return RepoNotFoundStanding::Remembered;
+        }
+        answers.retain(|_, answer| now.saturating_duration_since(answer.latest) < period);
+        if answers.len() >= self.limits.repo_not_found_capacity {
+            return RepoNotFoundStanding::NoRoom;
+        }
+        answers.insert(
+            key.to_owned(),
+            RepoNotFoundAnswers {
+                first: now,
+                latest: now,
+            },
+        );
+        RepoNotFoundStanding::Remembered
+    }
+
+    fn forget_repo_not_found(&self, key: &str) {
+        self.repo_not_found
+            .lock()
+            .expect("repo-not-found answers poisoned")
+            .remove(key);
+    }
+
     #[cfg(test)]
     fn with_limits(mut self, limits: SyncLimits) -> Self {
         self.limits = limits;
@@ -527,6 +597,7 @@ struct Cycle<'a> {
     lifecycle: &'a ControlLifecycle,
     target: &'a PdsPollTarget,
     retained_at: &'a str,
+    repo_not_found: &'a RepoNotFoundWatch<'a>,
     deadline: Instant,
     budget: ValueBudget,
     store_target: VerifiedSpaceTarget,
@@ -570,7 +641,15 @@ impl Cycle<'_> {
         let Some(base) = base.filter(|base| {
             base.host == self.target.host && base.generation == self.target.generation
         }) else {
-            return self.replace(reader.as_ref(), &credential).await;
+            let outcome = self.replace(reader.as_ref(), &credential).await;
+            // A `RepoNotFound` answer to an archive request starts the
+            // cooldown itself, and a cycle it turns away here has asked the
+            // host nothing. Were the answer forgotten, it could never last the
+            // confirmation period.
+            if outcome == VerifiedSyncOutcome::Failed(FailureReason::ReplacementCooldown) {
+                self.repo_not_found.keep();
+            }
+            return outcome;
         };
         match self.poll(reader.as_ref(), &credential, &base).await {
             PollEnd::Finished(outcome) => outcome,
@@ -786,6 +865,23 @@ impl Cycle<'_> {
         }
     }
 
+    // The answer carries no MAC, so the member's state is cleared only once the
+    // host has given it for the whole confirmation period.
+    fn clear_once_confirmed(&self) -> VerifiedSyncOutcome {
+        let unconfirmed = VerifiedSyncOutcome::Failed(FailureReason::RepoNotFound);
+        match self
+            .synchronizer
+            .note_repo_not_found(&self.repo_not_found.key)
+        {
+            RepoNotFoundStanding::Confirmed => self.clear(),
+            RepoNotFoundStanding::Remembered => {
+                self.repo_not_found.keep();
+                unconfirmed
+            }
+            RepoNotFoundStanding::NoRoom => unconfirmed,
+        }
+    }
+
     // The host said the repo does not exist: only the member's state in this
     // space is cleared, and only under the generation the cycle started with.
     fn clear(&self) -> VerifiedSyncOutcome {
@@ -822,7 +918,7 @@ impl Cycle<'_> {
 
     fn end_read(&self, failure: ReadFailure) -> VerifiedSyncOutcome {
         match failure {
-            ReadFailure::Clear => self.clear(),
+            ReadFailure::RepoNotFound => self.clear_once_confirmed(),
             ReadFailure::Deferred => VerifiedSyncOutcome::Deferred,
             ReadFailure::Failed(reason) => VerifiedSyncOutcome::Failed(reason),
         }
@@ -839,6 +935,29 @@ impl Drop for ReplacementAttempt<'_> {
     fn drop(&mut self) {
         if let Some(key) = self.key.take() {
             self.synchronizer.start_cooldown(key);
+        }
+    }
+}
+
+/// Forgets the target's remembered `RepoNotFound` answer when dropped, so that
+/// a cycle that ends any other way, by a deadline or an abort included, starts
+/// the confirmation period again.
+struct RepoNotFoundWatch<'a> {
+    synchronizer: &'a PdsSpaceSynchronizer,
+    key: String,
+    kept: AtomicBool,
+}
+
+impl RepoNotFoundWatch<'_> {
+    fn keep(&self) {
+        self.kept.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for RepoNotFoundWatch<'_> {
+    fn drop(&mut self) {
+        if !self.kept.load(Ordering::Acquire) {
+            self.synchronizer.forget_repo_not_found(&self.key);
         }
     }
 }
@@ -871,7 +990,7 @@ fn read_failure(error: AuthenticatedReadError) -> ReadFailure {
         AuthenticatedReadError::Host(SpaceHostError::Request {
             status: XRPC_ERROR_STATUS,
             code: Some(name),
-        }) if name == REPO_NOT_FOUND => ReadFailure::Clear,
+        }) if name == REPO_NOT_FOUND => ReadFailure::RepoNotFound,
         AuthenticatedReadError::Host(host) => ReadFailure::Failed(host_refusal_reason(&host)),
         AuthenticatedReadError::Authentication(_) => ReadFailure::Failed(FailureReason::Mac),
         AuthenticatedReadError::Archive(ArchiveRefusal::LimitExceeded(_))

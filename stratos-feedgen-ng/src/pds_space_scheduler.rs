@@ -885,14 +885,14 @@ mod tests {
                 promoted: 1,
                 unchanged: 1,
                 replaced: 0,
-                cleared: 1,
+                cleared: 0,
                 deferred: 0,
-                target_failures: 2,
+                target_failures: 3,
             }
         );
         assert_eq!(
             reasons.log_line().as_deref(),
-            Some("event=pds_space_target_failures other=1 repo_takendown=1")
+            Some("event=pds_space_target_failures other=1 repo_not_found=1 repo_takendown=1")
         );
         assert!(!pass_is_healthy(&second), "a failed target is unhealthy");
     }

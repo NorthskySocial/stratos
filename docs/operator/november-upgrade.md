@@ -605,12 +605,16 @@ Two behaviours of the new sync can remove or keep posts in ways you may not
 expect. Both are on [Run the feed generator](/operator/feedgen-ng#verified-sync-of-pds-members)
 and in [Known gaps](/architecture/supported-versions#known-gaps).
 
-- **`RepoNotFound` clears a member.** An answer of `RepoNotFound` with status
-  400 from a member's host clears that member's posts and interactions in that
-  space. The answer carries no MAC. The TLS connection to the host that Stratos
-  named is its only protection. A host gives the same answer when the account
-  does not exist there. So an enrollment that still names a host that deleted a
-  migrated account clears that member's posts.
+- **`RepoNotFound` for an hour clears a member.** An answer of `RepoNotFound`
+  with status 400 from a member's host clears that member's posts and
+  interactions in that space once the host has given it for one hour. For that
+  hour the member fails as `repo_not_found` and nothing is changed. Then the
+  next pass that gets the answer counts the member as `cleared`. Any other end
+  of the member's cycle starts the hour again, and so does a restart of the
+  feed generator. The answer carries no MAC. The TLS connection to the host
+  that Stratos named is its only protection. A host gives the same answer when
+  the account does not exist there. So an enrollment that still names a host
+  that deleted a migrated account clears that member's posts after an hour.
 - **Cached posts of a taken-down account stay served.** A host answer of
   `RepoTakendown`, `RepoSuspended` or `RepoDeactivated` fails the member and
   deletes nothing. The cached posts of that member stay in the feeds until a

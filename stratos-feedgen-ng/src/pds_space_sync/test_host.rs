@@ -787,6 +787,10 @@ impl StaticKemKeys {
         self.unavailable.store(true, Ordering::SeqCst);
     }
 
+    pub fn restore(&self) {
+        self.unavailable.store(false, Ordering::SeqCst);
+    }
+
     fn answer(&self) -> Result<AuthorKemKey, KemKeyLookupError> {
         if self.unavailable.load(Ordering::SeqCst) {
             return Err(KemKeyLookupError::Unavailable);

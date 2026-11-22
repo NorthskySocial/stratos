@@ -103,8 +103,11 @@ and Clubhouse use these interfaces.
   beside `title` and ignores it. See
   [the space type declaration](/operator/november-upgrade#the-space-type-declaration).
 - **`RepoNotFound` carries no MAC.** The pinned TLS connection to the host that
-  Stratos named is the only protection. A stale enrollment that points at a host
-  that deleted a migrated account clears that member's posts in the space.
+  Stratos named is the only protection. The feed generator clears a member only
+  after the host has given the answer for one hour, and fails the member as
+  `repo_not_found` until then. The hour is kept in memory, so a restart starts
+  it again. A stale enrollment that points at a host that deleted a migrated
+  account clears that member's posts in the space after that hour.
 - **`getRepo` is not a snapshot.** A write during the stream gives an archive
   whose set hash does not equal the commit's `data`. The member then fails as
   `digest` and gets no whole-repo read for 10 minutes, so a first sync can take

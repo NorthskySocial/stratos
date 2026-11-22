@@ -1900,7 +1900,7 @@
           "kind": "test",
           "file": "stratos-feedgen-ng/src/pds_space_scheduler.rs",
           "title": "a_pass_over_every_kind_of_outcome_counts_each_and_logs_one_reason_line",
-          "proves": "In one pass where two targets fail and one is cleared, another target still promotes and the pass counts each outcome."
+          "proves": "In one pass where three targets fail, one of them on a first RepoNotFound answer that clears nothing, another target still promotes and the pass counts each outcome."
         }
       ],
       "reason": "Replaced by the named Rust test: failing targets leave another target of the same pass to promote. Its failures are host refusals, not a budget overrun, which is what failed in the October run. Staging no longer exists, so the October assertion about stage accounting cannot pass on any current build."
