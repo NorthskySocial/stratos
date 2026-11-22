@@ -201,6 +201,10 @@ The moderation check returns the same message for every rejection. A caller
 cannot tell an unknown issuer from a wrong `lxm` claim. Stratos does not tell
 the caller why it rejected the request.
 
+A record subject names the record by its URI. A takedown applies to every
+version of the record. Stratos refuses a record subject that carries a `cid`
+with `SubjectCidNotSupported`, and it stores nothing.
+
 ### Reading labels with `queryLabels`
 
 `zone.stratos.moderation.queryLabels` accepts a moderation service. It also
@@ -336,6 +340,25 @@ One limit applies:
   its latest label is a takedown. The delete op still arrives. Consumers that
   apply labels by URI still refuse the new record. To hide it on the host, the
   moderation service repeats `createLabel`.
+
+### Moderation logs
+
+Stratos writes one `info` entry, `moderation label appended`, for each label it
+stores. The entry has these fields:
+
+- `seq`: the position of the label in the label log.
+- `neg`: `true` for a negation, `false` for a takedown.
+- `subjectKind`: `record` or `account`.
+- `callerDid`: the moderation service that sent the label.
+
+The subject DID, the record URI, a CID and the `ref` stay out of the logs of
+`createLabel` and `queryLabels`. This applies to accepted and refused requests.
+The request log leaves out the `subjects` parameter of `queryLabels`. To find
+the subject of a `seq`, read the label log with `queryLabels` as a moderation
+service.
+
+A refused request is logged with the message that the caller gets. If a subject
+is malformed, that message can quote the part that failed to parse.
 
 ## Write rate limiter
 

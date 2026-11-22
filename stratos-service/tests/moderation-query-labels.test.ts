@@ -19,6 +19,7 @@ import { Secp256k1Keypair } from '@atproto/crypto'
 import type { IdResolver } from '@atproto/identity'
 import { createServiceJwt, Server as XrpcServer } from '@atproto/xrpc-server'
 import {
+  RECORD_SUBJECT_TYPE,
   stratosLexicons,
   type BoundaryDefinition,
   type LabelSubjectKind,
@@ -58,6 +59,7 @@ import { SqliteAdminUserStore } from '../src/oauth/admin-user-store.js'
 import type { EnrollmentRecord } from '../src/oauth/index.js'
 import { createTestConfig } from './utils'
 import { makeSpaceUri } from './helpers/space-uri.js'
+import { expectNoEntryContains, logsDuring } from './helpers/log-capture.js'
 
 const SERVICE_DID = 'did:web:stratos.test'
 const QUERY_PATH = `/xrpc/${QUERY_LABELS_METHOD}`
@@ -771,17 +773,107 @@ describe('zone.stratos.moderation.queryLabels', () => {
   it('logs the caller, the returned count and the scanned count, and no subject', async () => {
     await append(recordUri('shared'), [TOKYO3])
     await append(recordUri('hidden'), [GEOFRONT])
+    await enroll(ASUKA_DID, [TOKYO3])
+    await appendAccount(ASUKA_DID)
+    const headers = await bearer(nerv)
 
-    await query(await bearer(nerv), { subjects: [recordUri('shared')] })
-    await query(await bearer(nerv))
+    const { result, entries } = await logsDuring(logger, () =>
+      query(headers, { subjects: [recordUri('shared'), ASUKA_DID], limit: 10 }),
+    )
+    await query(headers)
 
-    const entries = logger.debug.mock.calls
+    expect(result.data.labels).toHaveLength(2)
+    expectNoEntryContains(entries, [recordUri('shared'), ASUKA_DID, REI_DID])
+    const queried = logger.debug.mock.calls
       .filter(([, message]) => message === 'moderation labels queried')
       .map(([entry]) => entry)
-    expect(entries).toEqual([
-      { callerDid: nerv.did(), returned: 1, scanned: 1 },
-      { callerDid: nerv.did(), returned: 1, scanned: 2 },
+    expect(queried).toEqual([
+      { callerDid: nerv.did(), returned: 2, scanned: 2 },
+      { callerDid: nerv.did(), returned: 2, scanned: 3 },
     ])
+    const requestStart = logger.debug.mock.calls.find(
+      ([, message]) => message === 'handling request',
+    )
+    expect(requestStart?.[0]).toMatchObject({ params: { limit: 10 } })
+  })
+
+  it('logs no subject when a subjects query is refused', async () => {
+    await enroll(member.did(), [TOKYO3])
+    await append(recordUri('shared'), [TOKYO3])
+
+    const { result, entries } = await logsDuring(logger, async () =>
+      query(await bearer(member), {
+        subjects: [recordUri('shared'), ASUKA_DID],
+      }),
+    )
+
+    expect(result.status).toBe(401)
+    expectNoEntryContains(entries, [recordUri('shared'), ASUKA_DID, REI_DID])
+  })
+
+  it('logs no subject when auth refuses a subjects query', async () => {
+    const wrongLxm = await createServiceJwt({
+      iss: moderator.did(),
+      aud: SERVICE_DID,
+      lxm: 'zone.stratos.moderation.createLabel',
+      keypair: moderator,
+    })
+
+    const { result, entries } = await logsDuring(logger, () =>
+      query(
+        { authorization: `Bearer ${wrongLxm}` },
+        { subjects: [recordUri('shared'), ASUKA_DID] },
+      ),
+    )
+
+    expect(result.status).toBe(401)
+    expectNoEntryContains(entries, [recordUri('shared'), ASUKA_DID, REI_DID])
+  })
+
+  it('logs no subject when a subjects query carries a malformed subject', async () => {
+    const { result, entries } = await logsDuring(logger, async () =>
+      query(await bearer(moderator), {
+        subjects: [recordUri('fine'), ASUKA_DID, 'at://did:plc:rei-ayanami'],
+      }),
+    )
+
+    expect(result.status).toBe(400)
+    expectNoEntryContains(entries, [recordUri('fine'), ASUKA_DID])
+  })
+
+  it('serves a stored label whose subject carries a cid, and logs neither', async () => {
+    const cid = 'bafyreigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi'
+    const stored = await labelStore.appendIfLatest(null, {
+      subjectKey: recordUri('pinned'),
+      subjectKind: 'record',
+      cid,
+      val: '!takedown',
+      neg: false,
+      boundaries: [TOKYO3],
+      createdBy: moderator.did(),
+      createdAt: new Date().toISOString(),
+    })
+    if (stored.kind !== 'appended') throw new Error('seed append lost')
+
+    const { result, entries } = await logsDuring(logger, async () =>
+      query(await bearer(nerv), { subjects: [recordUri('pinned')] }),
+    )
+
+    expect(result.status).toBe(200)
+    expect(result.data.labels).toEqual([
+      {
+        seq: stored.label.seq,
+        subject: {
+          $type: RECORD_SUBJECT_TYPE,
+          uri: recordUri('pinned'),
+          cid,
+        },
+        val: '!takedown',
+        neg: false,
+        createdAt: stored.label.createdAt,
+      },
+    ])
+    expectNoEntryContains(entries, [recordUri('pinned'), cid])
   })
 
   describe('paging a scoped reader through the log', () => {

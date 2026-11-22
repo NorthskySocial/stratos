@@ -206,8 +206,10 @@ function defineCatalogWindowScenarios(getHarness: () => WriteHarness) {
 
       const response = await writeIn(harness, HARNESS_DESIGN, 'eva00')
 
+      // The check under the lock reads the store, which no longer lists a
+      // deactivating boundary for the member, so it answers as after the drain.
       expect(response.status).toBe(400)
-      expect(response.body).toMatchObject({ error: 'BoundaryNotFound' })
+      expect(response.body).toMatchObject({ error: 'ForbiddenBoundary' })
       expect(await snapshot(harness, 'eva00')).toEqual(before)
     })
 

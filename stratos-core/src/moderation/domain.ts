@@ -1,4 +1,3 @@
-import { parseCid } from '../atproto/index.js'
 import {
   AT_SCHEME,
   formatSpaceUri,
@@ -48,15 +47,6 @@ function invalidSubject(message: string, spaces?: SpacesError) {
   return fail('invalid-subject', message, spaces)
 }
 
-function isValidCid(value: string): boolean {
-  try {
-    parseCid(value)
-    return true
-  } catch {
-    return false
-  }
-}
-
 function parseHostedRecordUri(
   uri: string,
 ): ModerationResult<{ authorDid: string; collection: string; rkey: string }> {
@@ -82,11 +72,7 @@ function parseHostedRecordUri(
   return { ok: true, value: { authorDid, collection, rkey } }
 }
 
-function parseRecordSubject(
-  uri: string,
-  cid: string | undefined,
-): ModerationResult<ParsedLabelSubject> {
-  const pinned = cid === undefined ? {} : { cid }
+function parseRecordSubject(uri: string): ModerationResult<ParsedLabelSubject> {
   if (uri.startsWith(SPACE_URI_PREFIX)) {
     const record = parseRecordUri(uri)
     if (!record.ok) {
@@ -94,14 +80,14 @@ function parseRecordSubject(
     }
     return {
       ok: true,
-      value: { kind: 'space-record', uri, record: record.value, ...pinned },
+      value: { kind: 'space-record', uri, record: record.value },
     }
   }
   const hosted = parseHostedRecordUri(uri)
   if (!hosted.ok) return hosted
   return {
     ok: true,
-    value: { kind: 'hosted-record', uri, ...hosted.value, ...pinned },
+    value: { kind: 'hosted-record', uri, ...hosted.value },
   }
 }
 
@@ -120,10 +106,16 @@ export function parseLabelSubject(
   if (typeof input.uri !== 'string') {
     return invalidSubject('record subject must carry a uri')
   }
-  if (input.cid !== undefined && !isValidCid(input.cid)) {
-    return invalidSubject(`invalid cid: "${input.cid}"`)
+  const parsed = parseRecordSubject(input.uri)
+  // Enforcement and the label key go by URI, so a label naming one version
+  // would hide every version. Refuse the pin until per-version takedown exists.
+  if (parsed.ok && input.cid !== undefined) {
+    return fail(
+      'unsupported-cid',
+      'takedowns apply to every version of a record; send the subject without a cid',
+    )
   }
-  return parseRecordSubject(input.uri, input.cid)
+  return parsed
 }
 
 export function validateLabelValue(val: string): ModerationResult<string> {

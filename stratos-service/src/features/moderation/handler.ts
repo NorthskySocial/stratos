@@ -8,6 +8,7 @@ import {
   TAKEDOWN_VALUE,
   validateLabelValue,
   type LabelSubjectInput,
+  type ModerationError,
   type NewLabel,
   type ParsedLabelSubject,
   type StoredLabel,
@@ -83,7 +84,7 @@ async function handleCreateLabel(
   const value = validateLabelValue(input.val)
   if (!value.ok) throw new InvalidRequestError(value.error.message)
   const parsed = parseLabelSubject(input.subject)
-  if (!parsed.ok) throw new InvalidRequestError(parsed.error.message)
+  if (!parsed.ok) throw subjectRefused(parsed.error)
   const neg = input.neg === true
   switch (parsed.value.kind) {
     case 'hosted-record':
@@ -219,6 +220,12 @@ async function handleAccountLabel(
   return label ? { label: toWireLabel(label) } : {}
 }
 
+function subjectRefused(error: ModerationError): InvalidRequestError {
+  return error.code === 'unsupported-cid'
+    ? new InvalidRequestError(error.message, 'SubjectCidNotSupported')
+    : new InvalidRequestError(error.message)
+}
+
 function subjectAccountNotFound(): InvalidRequestError {
   return new InvalidRequestError('Subject account not found', 'SubjectNotFound')
 }
@@ -263,7 +270,7 @@ async function readStoredBoundaries(
   if (boundaries === null) throw notFound()
   if (boundaries.length === 0) {
     ctx.logger?.warn(
-      { subject: subject.uri },
+      { subjectKind: 'record' },
       'labelling a record with no stored boundaries',
     )
   }
@@ -278,6 +285,7 @@ async function writeLabel(
   request: LabelRequestContext,
 ): Promise<StoredLabel | undefined> {
   const { ctx, subject, subjectKey, callerDid, neg, ref, boundaries } = request
+  const subjectKind = subject.kind === 'account' ? 'account' : 'record'
   for (let attempt = 0; attempt < MAX_APPEND_ATTEMPTS; attempt++) {
     const latest = await ctx.labelStore.latestForSubject(subjectKey)
     const decision = decideLabelAction(latest, { neg, ref })
@@ -287,10 +295,7 @@ async function writeLabel(
     await request.beforeAppend?.()
     const newLabel: NewLabel = {
       subjectKey,
-      subjectKind: subject.kind === 'account' ? 'account' : 'record',
-      ...(subject.kind === 'account' || subject.cid === undefined
-        ? {}
-        : { cid: subject.cid }),
+      subjectKind,
       val: TAKEDOWN_VALUE,
       neg,
       ...(ref ? { ref } : {}),
@@ -303,21 +308,17 @@ async function writeLabel(
       newLabel,
     )
     if (result.kind === 'appended') {
+      // The subject and the ref name a moderation case, so the seq stands in
+      // for both. queryLabels resolves it.
       ctx.logger?.info(
-        {
-          subject: subjectKey,
-          callerDid,
-          neg,
-          ref: result.label.ref,
-          seq: result.label.seq,
-        },
+        { seq: result.label.seq, neg, subjectKind, callerDid },
         'moderation label appended',
       )
       return result.label
     }
   }
   ctx.logger?.warn(
-    { subject: subjectKey, attempts: MAX_APPEND_ATTEMPTS },
+    { subjectKind, callerDid, attempts: MAX_APPEND_ATTEMPTS },
     'moderation label append kept losing to concurrent appends',
   )
   throw new Error('Could not append label: too many concurrent updates')
@@ -350,7 +351,7 @@ async function reconcileMarker(
     await setMarker(ctx, subject, newest)
   }
   ctx.logger?.warn(
-    { subject: subjectKey },
+    { subjectKind: 'record', seq: latest?.seq },
     'moderation marker reconcile gave up while labels kept changing',
   )
 }

@@ -4,7 +4,7 @@ import {
   type StoredEnrollment,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context.js'
-import { authorizeBoundary } from './validation.js'
+import { assertBoundaryStillHeld } from './validation.js'
 
 export function assertStratosCustody(
   enrollment: Pick<StoredEnrollment, 'custody'> | null | undefined,
@@ -37,9 +37,10 @@ export function assertWritableEnrollment(
 /**
  * Re-reads the writer's standing once the repo lock is held, so a change that
  * lands after the up-front checks still stops the write. The lock is held per
- * instance. The enrollment is read live, so a hold from any instance is seen.
- * Boundaries come from the write cache: a removal on this instance clears it,
- * but a removal on another instance can take up to the cache's 60 seconds.
+ * instance, so both reads go to the store, never to a cache: a hold or a
+ * boundary removal made on any instance stops the write. The up-front check
+ * reads boundaries from the write cache; a stale entry there can only let a
+ * write reach this check, never past it.
  */
 export async function assertWriterStillAuthorized(
   ctx: AppContext,
@@ -49,5 +50,5 @@ export async function assertWriterStillAuthorized(
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
   assertWritableEnrollment(enrollment)
   assertStratosCustody(enrollment)
-  await authorizeBoundary(ctx, callerDid, boundary)
+  await assertBoundaryStillHeld(ctx, callerDid, boundary)
 }

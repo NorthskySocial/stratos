@@ -65,6 +65,7 @@ import {
   buildSqliteMembershipStores,
   catalogDefinition,
 } from './helpers/enrollment-holds.js'
+import { expectNoEntryContains, logsDuring } from './helpers/log-capture.js'
 
 const SERVICE_DID = 'did:web:stratos.test'
 const CREATE_LABEL_NSID = 'zone.stratos.moderation.createLabel'
@@ -401,22 +402,42 @@ describe('zone.stratos.moderation.createLabel', () => {
   })
 
   describe('subject cid', () => {
-    it('a hosted takedown stores the subject cid and returns it', async () => {
+    it('a hosted subject with a cid is refused and nothing is written', async () => {
       await seedRecord('cid-hosted', { stored: [ENGINEERING] })
       const cid = (await computeCid(bodyClaiming([ENGINEERING]))).toString()
 
       const res = await createLabel({
         subject: { ...subjectFor('cid-hosted'), cid },
         val: '!takedown',
+        ref: 'case-0020',
       })
 
-      expect(res.status).toBe(200)
-      expect(res.data.label.subject).toEqual({
-        $type: RECORD_SUBJECT_TYPE,
-        uri: recordUri('cid-hosted'),
-        cid,
+      expect(res.status).toBe(400)
+      expect(res.data.error).toBe('SubjectCidNotSupported')
+      expect(res.data.message).toContain('every version of a record')
+      expect(res.data.message).not.toContain(cid)
+      await expectNothingWritten('cid-hosted')
+      expect(await servedRecord('cid-hosted')).not.toBeNull()
+    })
+
+    it('a negation whose subject has a cid is refused and the takedown stays', async () => {
+      await seedRecord('cid-neg', { stored: [ENGINEERING] })
+      const cid = (await computeCid(bodyClaiming([ENGINEERING]))).toString()
+      await takedown('cid-neg', { ref: 'case-0021' })
+
+      const res = await createLabel({
+        subject: { ...subjectFor('cid-neg'), cid },
+        val: '!takedown',
+        neg: true,
       })
-      expect((await allLabels())[0].cid).toBe(cid)
+
+      expect(res.status).toBe(400)
+      expect(res.data.error).toBe('SubjectCidNotSupported')
+      expect(await allLabels()).toHaveLength(1)
+      expect(await marker('cid-neg')).toEqual({
+        applied: true,
+        ref: 'case-0021',
+      })
     })
 
     it('a hosted takedown without a cid stores and returns none', async () => {
@@ -671,8 +692,10 @@ describe('zone.stratos.moderation.createLabel', () => {
       expect(res.status).toBe(500)
       expect(alwaysStale).toHaveBeenCalledTimes(3)
       expect(logger.warn).toHaveBeenCalledTimes(1)
-      expect(logger.warn.mock.calls[0][0]).toMatchObject({
-        subject: recordUri('h3'),
+      expect(logger.warn.mock.calls[0][0]).toEqual({
+        subjectKind: 'record',
+        callerDid: moderator.did(),
+        attempts: 3,
       })
       expect(await allLabels()).toEqual([])
     })
@@ -747,18 +770,17 @@ describe('zone.stratos.moderation.createLabel', () => {
         .filter((entry) => 'callerDid' in entry)
     }
 
-    it('an append logs one event with the five fields', async () => {
+    it('an append logs one event with the seq, direction, subject kind and caller', async () => {
       await seedRecord('j', { stored: [ENGINEERING] })
 
       const res = await takedown('j', { ref: 'case-0010' })
 
       expect(appendEvents()).toEqual([
         {
-          subject: recordUri('j'),
-          callerDid: moderator.did(),
-          neg: false,
-          ref: 'case-0010',
           seq: res.data.label.seq,
+          neg: false,
+          subjectKind: 'record',
+          callerDid: moderator.did(),
         },
       ])
     })
@@ -784,6 +806,93 @@ describe('zone.stratos.moderation.createLabel', () => {
 
       expect(everything).not.toContain(SECRET_TEXT)
       expect(everything).not.toContain(moderatorToken)
+    })
+  })
+
+  describe('(j2) no log entry names the subject, a cid or the ref', () => {
+    const CASE_REF = 'case-nerv-hq-0451'
+
+    async function recordCid(): Promise<string> {
+      return (await computeCid(bodyClaiming([ENGINEERING]))).toString()
+    }
+
+    it('a record takedown', async () => {
+      await seedRecord('j4', { stored: [ENGINEERING] })
+
+      const { result, entries } = await logsDuring(logger, () =>
+        takedown('j4', { ref: CASE_REF }),
+      )
+
+      expect(result.status).toBe(200)
+      expectNoEntryContains(entries, [
+        recordUri('j4'),
+        AUTHOR_DID,
+        await recordCid(),
+        CASE_REF,
+      ])
+    })
+
+    it('a record negation', async () => {
+      await seedRecord('j5', { stored: [ENGINEERING] })
+      await takedown('j5', { ref: CASE_REF })
+
+      const { result, entries } = await logsDuring(logger, () =>
+        takedown('j5', { neg: true, ref: CASE_REF }),
+      )
+
+      expect(result.status).toBe(200)
+      expect(result.data.label.neg).toBe(true)
+      expectNoEntryContains(entries, [recordUri('j5'), AUTHOR_DID, CASE_REF])
+    })
+
+    it('an append refused for a caller that is not allowlisted', async () => {
+      await seedRecord('j6', { stored: [ENGINEERING] })
+
+      const { result, entries } = await logsDuring(logger, async () =>
+        createLabel(
+          { subject: subjectFor('j6'), val: '!takedown', ref: CASE_REF },
+          { authorization: `Bearer ${await jwt(stranger)}` },
+        ),
+      )
+
+      expect(result.status).toBe(401)
+      expectNoEntryContains(entries, [recordUri('j6'), AUTHOR_DID, CASE_REF])
+    })
+
+    it('an append refused for an unknown subject', async () => {
+      await seedRecord('j7', { stored: [ENGINEERING] })
+
+      const { result, entries } = await logsDuring(logger, () =>
+        takedown('j7-missing', { ref: CASE_REF }),
+      )
+
+      expect(result.data.error).toBe('SubjectNotFound')
+      expectNoEntryContains(entries, [
+        recordUri('j7-missing'),
+        AUTHOR_DID,
+        CASE_REF,
+      ])
+    })
+
+    it('an append refused for a subject with a cid', async () => {
+      await seedRecord('j8', { stored: [ENGINEERING] })
+      const cid = await recordCid()
+
+      const { result, entries } = await logsDuring(logger, () =>
+        createLabel({
+          subject: { ...subjectFor('j8'), cid },
+          val: '!takedown',
+          ref: CASE_REF,
+        }),
+      )
+
+      expect(result.data.error).toBe('SubjectCidNotSupported')
+      expectNoEntryContains(entries, [
+        recordUri('j8'),
+        AUTHOR_DID,
+        cid,
+        CASE_REF,
+      ])
     })
   })
 
@@ -859,7 +968,7 @@ describe('zone.stratos.moderation.createLabel', () => {
       expect(labels[0].boundaries).toEqual([])
       expect(await marker('l')).toEqual({ applied: true, ref: 'case-0016' })
       expect(logger.warn).toHaveBeenCalledTimes(1)
-      expect(JSON.stringify(logger.warn.mock.calls)).toContain(recordUri('l'))
+      expect(logger.warn.mock.calls[0][0]).toEqual({ subjectKind: 'record' })
     })
   })
 
@@ -894,7 +1003,8 @@ describe('zone.stratos.moderation.createLabel', () => {
       expect(res.data.label.ref).toBe('case-0100')
       expect(logger.warn).toHaveBeenCalledTimes(1)
       expect(logger.warn.mock.calls[0][0]).toEqual({
-        subject: recordUri('cap'),
+        subjectKind: 'record',
+        seq: expect.any(Number),
       })
     })
   })
@@ -1116,25 +1226,30 @@ describe('zone.stratos.moderation.createLabel', () => {
       expect(res.data.message).toContain('space is not owned by this service')
     })
 
-    it('a space takedown with a cid stores and returns it; without one, none', async () => {
+    it('a space subject with a cid is refused and changes nothing; without one, it appends', async () => {
       const cid = (await computeCid(bodyClaiming([TOKYO3_BOUNDARY]))).toString()
-      const withCid = spaceRecordUri({ rkey: 'with-cid' })
+      const enrollmentBefore = await members.getEnrollment(ASUKA_DID)
 
       const pinned = await createLabel({
-        subject: { $type: RECORD_SUBJECT_TYPE, uri: withCid, cid },
+        subject: {
+          $type: RECORD_SUBJECT_TYPE,
+          uri: spaceRecordUri({ rkey: 'with-cid' }),
+          cid,
+        },
         val: '!takedown',
       })
+
+      expect(pinned.status).toBe(400)
+      expect(pinned.data.error).toBe('SubjectCidNotSupported')
+      expect(await allLabels()).toEqual([])
+      expect(await members.getEnrollment(ASUKA_DID)).toEqual(enrollmentBefore)
+
       const bare = await spaceLabel(spaceRecordUri({ rkey: 'no-cid' }))
 
-      expect(pinned.status).toBe(200)
-      expect(pinned.data.label.subject).toEqual({
-        $type: RECORD_SUBJECT_TYPE,
-        uri: withCid,
-        cid,
-      })
+      expect(bare.status).toBe(200)
       expect(bare.data.label.subject).not.toHaveProperty('cid')
       const stored = await allLabels()
-      expect(stored.map((label) => label.cid)).toEqual([cid, undefined])
+      expect(stored.map((label) => label.cid)).toEqual([undefined])
     })
 
     it('(o) an unknown boundary is InvalidRequest and appends nothing', async () => {
@@ -1284,26 +1399,28 @@ describe('zone.stratos.moderation.createLabel', () => {
       it('logs one event per appended label and none for a repeat', async () => {
         const uri = spaceRecordUri()
 
-        const first = await spaceLabel(uri, { ref: 'case-0207' })
-        await spaceLabel(uri, { ref: 'case-0207' })
-        const negation = await spaceLabel(uri, { neg: true })
+        const { result, entries } = await logsDuring(logger, async () => {
+          const first = await spaceLabel(uri, { ref: 'case-0207' })
+          await spaceLabel(uri, { ref: 'case-0207' })
+          const negation = await spaceLabel(uri, { neg: true })
+          return { first, negation }
+        })
 
         expect(appendEvents()).toEqual([
           {
-            subject: uri,
-            callerDid: moderator.did(),
+            seq: result.first.data.label.seq,
             neg: false,
-            ref: 'case-0207',
-            seq: first.data.label.seq,
+            subjectKind: 'record',
+            callerDid: moderator.did(),
           },
           {
-            subject: uri,
-            callerDid: moderator.did(),
+            seq: result.negation.data.label.seq,
             neg: true,
-            ref: undefined,
-            seq: negation.data.label.seq,
+            subjectKind: 'record',
+            callerDid: moderator.did(),
           },
         ])
+        expectNoEntryContains(entries, [uri, ASUKA_DID, 'case-0207'])
       })
     })
 

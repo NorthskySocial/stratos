@@ -53,7 +53,7 @@ describe('parseLabelSubject', () => {
   })
 
   it('accepts a six-part URI with the author taken from part 4', () => {
-    const result = record(SPACE_URI, CID)
+    const result = record(SPACE_URI)
     expect(result.ok).toBe(true)
     if (!result.ok || result.value.kind !== 'space-record') {
       throw new Error('expected space-record')
@@ -61,7 +61,6 @@ describe('parseLabelSubject', () => {
     expect(result.value.record.spaceDid).toBe(SERVICE_DID)
     expect(result.value.record.authorDid).toBe(SPIKE_DID)
     expect(result.value.record.authorDid).not.toBe(result.value.record.spaceDid)
-    expect(result.value.cid).toBe(CID)
   })
 
   it('accepts an account subject', () => {
@@ -130,8 +129,24 @@ describe('parseLabelSubject', () => {
     )
   })
 
-  it('rejects an invalid cid', () => {
-    expectInvalidSubject(record(REPO_URI, 'not-a-cid'))
+  it.each([
+    ['a repo-form subject with a valid cid', REPO_URI, CID],
+    ['a space-form subject with a valid cid', SPACE_URI, CID],
+    ['a subject with an invalid cid', REPO_URI, 'not-a-cid'],
+  ])(
+    'refuses %s because a takedown covers every version',
+    (_name, uri, cid) => {
+      const result = record(uri, cid)
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.code).toBe('unsupported-cid')
+      expect(result.error.message).toContain('every version of a record')
+      expect(result.error.message).not.toContain(cid)
+    },
+  )
+
+  it('still rejects a malformed URI before looking at the cid', () => {
+    expectInvalidSubject(record('not-a-uri', CID))
   })
 })
 

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { decode } from '@atcute/cbor'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import {
+  ACCOUNT_SUBJECT_TYPE,
   computeCid,
   encodeRecord,
   parseCid,
@@ -45,6 +46,7 @@ import {
   type AccountLabelHarness,
   type HoldsBackend,
 } from './helpers/enrollment-holds.js'
+import { expectNoEntryContains, logsDuring } from './helpers/log-capture.js'
 
 const POST_COLLECTION = 'zone.stratos.feed.post'
 
@@ -288,10 +290,71 @@ describe('account subjects in createLabel on SQLite', () => {
       .mocked(harness.ctx.logger?.info as never as (...a: unknown[]) => void)
       .mock.calls.filter((call) => call[1] === 'moderation label appended')
     expect(appended).toHaveLength(2)
-    expect(appended[0][0]).toMatchObject({
-      subject: SPIKE_DID,
+    expect(appended[0][0]).toEqual({
+      seq: expect.any(Number),
       neg: false,
-      ref: 'case-0100',
+      subjectKind: 'account',
+      callerDid: harness.moderatorDid,
     })
+  })
+
+  describe('no log entry names the account or the ref', () => {
+    const CASE_REF = 'case-bebop-0042'
+
+    it('an account takedown', async () => {
+      await seedAccount(backend, { did: SPIKE_DID })
+
+      const { result, entries } = await logsDuring(harness.ctx.logger!, () =>
+        harness.takedown(SPIKE_DID, { ref: CASE_REF }),
+      )
+
+      expect(result.status).toBe(200)
+      expectNoEntryContains(entries, [SPIKE_DID, CASE_REF])
+    })
+
+    it('an account negation', async () => {
+      await seedAccount(backend, { did: SPIKE_DID })
+      await harness.takedown(SPIKE_DID, { ref: CASE_REF })
+
+      const { result, entries } = await logsDuring(harness.ctx.logger!, () =>
+        harness.negate(SPIKE_DID, { ref: CASE_REF }),
+      )
+
+      expect(result.status).toBe(200)
+      expect(result.data.label.neg).toBe(true)
+      expectNoEntryContains(entries, [SPIKE_DID, CASE_REF])
+    })
+
+    it('an append refused for an account with no enrollment', async () => {
+      const { result, entries } = await logsDuring(harness.ctx.logger!, () =>
+        harness.takedown(FAYE_DID, { ref: CASE_REF }),
+      )
+
+      expect(result.data.error).toBe('SubjectNotFound')
+      expectNoEntryContains(entries, [FAYE_DID, CASE_REF])
+    })
+  })
+
+  it('an account subject is untouched by the record cid refusal: a stray cid is ignored', async () => {
+    await seedAccount(backend, { did: SPIKE_DID })
+
+    const res = await harness.createLabel({
+      subject: {
+        $type: ACCOUNT_SUBJECT_TYPE,
+        did: SPIKE_DID,
+        cid: 'bafyreigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+      },
+      val: '!takedown',
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.data.label.subject).toEqual({
+      $type: ACCOUNT_SUBJECT_TYPE,
+      did: SPIKE_DID,
+    })
+    const labels = await harness.labels()
+    expect(labels).toHaveLength(1)
+    expect(labels[0].cid).toBeUndefined()
+    expect((await rowOf(backend, SPIKE_DID))?.active).toBe(false)
   })
 })

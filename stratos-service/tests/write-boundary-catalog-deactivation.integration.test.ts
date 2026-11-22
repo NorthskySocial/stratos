@@ -124,7 +124,8 @@ describe('Write authorization while a catalog boundary is being deactivated', ()
 
     getBoundariesFromStore.mockClear()
     await expect(writePost('sortie-four', ENGINEERING)).resolves.toBeDefined()
-    expect(getBoundariesFromStore).toHaveBeenCalledTimes(1)
+    // Once to refill the cleared cache, once under the repo lock.
+    expect(getBoundariesFromStore).toHaveBeenCalledTimes(2)
     await expect(writePost('sortie-five', DESIGN)).rejects.toMatchObject({
       error: 'InvalidRecord',
     })

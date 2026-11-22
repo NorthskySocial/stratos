@@ -24,6 +24,7 @@ import {
   stopPostgresContainer,
 } from './helpers/test-env.js'
 import {
+  asMember,
   startPostgresWriteHarness,
   startSqliteWriteHarness,
   type WriteHarness,
@@ -35,6 +36,9 @@ const DESIGN = `${SERVICE_DID}/design`
 const LEADERSHIP = `${SERVICE_DID}/leadership`
 const COLLECTION = 'zone.stratos.feed.post'
 const OWNER_DID = 'did:plc:misato-katsuragi'
+// The boundary write procedures check the lexicon, which needs a real CID.
+const LEXICON_VALID_CID =
+  'bafyreidfayvfuwqa7qlnopdjiqrxzs6blmoeu4rujcjtnci5beludirz2a'
 
 interface RawOp {
   action: string
@@ -272,7 +276,7 @@ function describeBoundaryRowsOnWrites(
         })
       })
 
-      it("a reply to a taken-down parent is not checked against the parent's boundary", async () => {
+      it("on the legacy path, a reply to a taken-down parent is not checked against the parent's boundary", async () => {
         await seed('leliel', bodyClaiming('Leliel', []), ENGINEERING)
         await takeDown('leliel')
 
@@ -281,10 +285,67 @@ function describeBoundaryRowsOnWrites(
         })
       })
 
-      it("a reply to a missing parent is not checked against the parent's boundary", async () => {
+      it("on the legacy path, a reply to a missing parent is not checked against the parent's boundary", async () => {
         await expect(reply('r5', DESIGN, 'ghost')).resolves.toMatchObject({
           uri: uriOf('r5'),
         })
+      })
+
+      function boundaryReply(
+        rkey: string,
+        boundary: string,
+        parentRkey: string,
+      ) {
+        return harness.write.call(
+          'zone.stratos.repo.createRecord',
+          asMember(OWNER_DID),
+          {
+            boundary,
+            repo: OWNER_DID,
+            collection: COLLECTION,
+            rkey,
+            record: {
+              ...bodyClaiming('Reply', []),
+              reply: {
+                parent: { uri: uriOf(parentRkey), cid: LEXICON_VALID_CID },
+                root: { uri: uriOf(parentRkey), cid: LEXICON_VALID_CID },
+              },
+            },
+          },
+        )
+      }
+
+      const refusedAsAnotherBoundary = {
+        status: 400,
+        body: {
+          error: 'InvalidRecord',
+          message: `Reply boundaries must be a subset of the parent's boundaries. Domains not in parent: ${DESIGN}`,
+        },
+      }
+
+      it('on the boundary write path, a reply to a taken-down parent is refused as a parent in another boundary', async () => {
+        await seed('leliel', bodyClaiming('Leliel', []), DESIGN)
+        await takeDown('leliel')
+
+        expect(await boundaryReply('r6', DESIGN, 'leliel')).toEqual(
+          refusedAsAnotherBoundary,
+        )
+        expect(await storedBoundaries('r6')).toEqual([])
+      })
+
+      it('on the boundary write path, a reply to a missing parent is refused as a parent in another boundary', async () => {
+        expect(await boundaryReply('r7', DESIGN, 'ghost')).toEqual(
+          refusedAsAnotherBoundary,
+        )
+        expect(await storedBoundaries('r7')).toEqual([])
+      })
+
+      it('on the boundary write path, a reply to a parent stored in another boundary gets the same refusal', async () => {
+        await seed('angel', bodyClaiming('Sachiel', []), ENGINEERING)
+
+        expect(await boundaryReply('r8', DESIGN, 'angel')).toEqual(
+          refusedAsAnotherBoundary,
+        )
       })
     })
   })

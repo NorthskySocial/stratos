@@ -265,9 +265,21 @@ and checks on every grant path. Boundary administration does not implement that
 feature. Keep a boundary's lifecycle separate from member suspension and from
 service-wide enrollment activation.
 
-Record write checks read a member's boundaries from a 60-second cache. A removal
-made on another instance can lag by up to 60 seconds. A change made on the same
-instance applies at once.
+A removal stops the member's writes into that boundary at once, on every
+instance that shares the store. Each write reads the member's boundaries from
+the store under the repo lock, after the other checks, so a removed boundary
+cannot take a write.
+
+The first boundary check, before the lock, reads a 60-second cache of each
+member's boundaries. A change made on another instance can lag there:
+
+- After a removal, the first check can still pass for up to 60 seconds. The
+  write is then refused under the lock with the same `ForbiddenBoundary`
+  error. The cache delays the refusal; it cannot admit the write.
+- After a grant, the first check can refuse writes into the new boundary for up
+  to 60 seconds, until the cache entry expires.
+
+A change made on the same instance clears the cache entry at once.
 
 ## See also
 
