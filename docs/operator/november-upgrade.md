@@ -123,14 +123,17 @@ audience and is refused after it. Delegations from the feed generator live 60
 seconds, and each is used once. An app that caches an attestation must drop it
 and make a new one for `<service did>#atproto_pds`.
 
-A credential minted before the upgrade keeps its shape until it expires. One
-bound to an HTTP-signature key works only when it is presented in the new
-scheme. A credential bound to an HTTP-signature key lives 600 seconds by
-default (`STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS`, at most 3,600). A
-credential bound to a DPoP key lives 7,200 seconds by default
-(`STRATOS_SPACE_CREDENTIAL_TTL_SECONDS`). The feed generator holds its
-credentials in memory and mints again after a restart. Nothing needs to be
-cleared.
+A credential minted before the upgrade names its space in the earlier
+spelling. The new service refuses it however it is presented, so every such
+credential must be replaced by a new one. The feed generator holds its
+credentials in memory and mints new ones after its restart in
+[step 10](#step-10). An app that caches credentials must drop them and mint
+again after the upgrade. An app that keeps an old credential is refused until
+it expires. One bound to an HTTP-signature key lives 600 seconds by default
+(`STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS`, at most 3,600). One bound to a
+DPoP key lives 7,200 seconds by default
+(`STRATOS_SPACE_CREDENTIAL_TTL_SECONDS`). This is read from the code of both
+builds. It was not run as a mixed pair.
 
 ## Before the window
 
@@ -488,7 +491,7 @@ These checks need no spaces PDS.
 | Check                                          | Command or place                                                                                                                        | Mark  |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----- |
 | The service answers                            | `curl -s -o /dev/null -w '%{http_code}\n' "<stratos origin>/health"` answers `200`                                                      | READY |
-| The service DID document offers `#atproto_pds` | `curl -s "<stratos origin>/.well-known/did.json" \| jq '.service[].id'` answers `"#stratos"` and `"#atproto_pds"`                       | READY |
+| The service DID document offers `#atproto_pds` | [Check the DID document](#check-the-did-document)                                                                                       | READY |
 | The service accepts repo update notices        | `curl -s -o /dev/null -w '%{http_code}\n' -X POST "<stratos origin>/xrpc/com.atproto.space.notifyRepoUpdate"` answers `401`, not `501`  | READY |
 | The feed generator is open                     | `curl -s -o /dev/null -w '%{http_code}\n' "<feed generator origin>/health"` answers `200`                                               | READY |
 | The new pass output is in use                  | `curl -s "<feed generator origin>/health" \| jq '.pdsSpaceSyncLastPass'` shows `unchanged`, `replaced` and `cleared`, and no `rejected` | READY |
@@ -504,6 +507,36 @@ answers `503`. That is expected after migration 10.
 
 With members who have `pds` custody, `pdsSpaceSyncHealthy` is `false` after the
 upgrade. That is expected. See [What cannot work yet](#what-cannot-work-yet).
+
+#### Check the DID document {#check-the-did-document}
+
+A member's PDS reads the document that the service DID resolves to. Check the
+entry there. The Stratos origin serves its own `/.well-known/did.json` whatever
+the DID method, so that route shows the entry even when the resolved document
+does not have it.
+
+For a `did:web` service DID, the document is at the host the DID names.
+`did:web:stratos.example.com` resolves to:
+
+```sh
+curl -s "https://stratos.example.com/.well-known/did.json" \
+  | jq '.service[] | select(.id | endswith("#atproto_pds")) | {type, serviceEndpoint}'
+```
+
+A `did:web` DID with a path, such as `did:web:example.com:stratos`, resolves to
+`https://example.com/stratos/did.json`.
+
+For a `did:plc` service DID, the document is in the PLC directory that the
+service reads (`PLC_DIRECTORY`, by default `https://plc.directory`):
+
+```sh
+curl -s "https://plc.directory/<service did>" \
+  | jq '.service[] | select(.id | endswith("#atproto_pds")) | {type, serviceEndpoint}'
+```
+
+You know it worked when the command answers `"type": "AtprotoPersonalDataServer"`
+and a `serviceEndpoint` equal to `<stratos origin>`. These commands were not
+run against a deployed service.
 
 ## The feed generator database
 
@@ -621,8 +654,10 @@ and in [Known gaps](/architecture/supported-versions#known-gaps).
   interactions in that space once the host has given it for one hour. For that
   hour the member fails as `repo_not_found` and nothing is changed. Then the
   next pass that gets the answer counts the member as `cleared`. Any other end
-  of the member's cycle starts the hour again, and so does a restart of the
-  feed generator. The answer carries no MAC. The TLS connection to the host
+  of the member's cycle starts the hour again. So do an answer from another
+  host, an answer after the member left the space and joined again, an answer
+  more than 20 minutes after the one before it, and a restart of the feed
+  generator. The answer carries no MAC. The TLS connection to the host
   that Stratos named is its only protection. A host gives the same answer when
   the account does not exist there. So an enrollment that still names a host
   that deleted a migrated account clears that member's posts after an hour.
@@ -701,8 +736,9 @@ cost of the loss below. Mark: **READY**, except step 6.
 5. Restore the earlier room-space setting. The pre-upgrade Clubhouse image
    already holds the value it was built with. If you rebuild Clubhouse instead,
    set `VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON` to the value from step 1. You know
-   it worked when a test member with `pds` custody opens each room and sees no
-   configuration alert.
+   it worked when the deployed Clubhouse image is the one from step 1, or the
+   rebuilt one was given that value. The service is still stopped, so the room
+   check comes in step 7.
 6. If you published a new declaration, publish the earlier one again. Rolling
    back the binaries does not unpublish it. Mark: **PENDING AUTHORIZATION**.
    You know it worked when the `getRecord` command in
@@ -710,14 +746,17 @@ cost of the loss below. Mark: **READY**, except step 6.
    record.
 7. Start the service, then the feed generator. You know it worked when both
    `/health` routes answer `200`. The feed generator's answers `200` only once
-   it is ready.
+   it is ready. Then a test member with `pds` custody signs in to Clubhouse and
+   opens each room, and sees no configuration alert. As in
+   [step 11](#step-11), no alert shows until the room status names `pds`
+   custody, so this check needs such a member who can sign in.
 8. If you added a `#atproto_pds` entry to the service DID document yourself,
    remove it. The pre-upgrade service answers
    `com.atproto.space.notifyRepoUpdate` with 501, so a member's PDS that finds
-   the entry has its notices refused. You know it worked when the `jq` command
-   in [step 13](#after-the-upgrade) answers only `"#stratos"`. A `did:web`
-   document that Stratos serves needs nothing: the older build serves it
-   without the entry.
+   the entry has its notices refused. You know it worked when the command for
+   your DID method in [Check the DID document](#check-the-did-document) answers
+   nothing. A `did:web` document that Stratos serves needs nothing: the older
+   build serves it without the entry, and the same command shows that.
 
 **What is lost.**
 
