@@ -24,7 +24,7 @@ RUN rm --force /etc/apt/sources.list.d/debian.sources \
         'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20261120T000000Z bookworm-security main' \
         > /etc/apt/sources.list \
     && apt-get -o Acquire::Check-Valid-Until=false update \
-    && apt-get install --yes --no-install-recommends libssl3=3.0.22-1~deb12u2 \
+    && apt-get install --yes --no-install-recommends libssl3 \
     && rm --recursive --force /var/lib/apt/lists/*
 
 COPY --from=builder /workspace/target/release/stratos-feedgen-ng /usr/local/bin/stratos-feedgen-ng
