@@ -149,7 +149,7 @@
     },
     {
       "path": "space-uri-conformance.json",
-      "sha256": "e93d3aee3a8c785f26a3ece5619dd0f1b500316d59561ee1e1a5504d5c425161",
+      "sha256": "5c2eb651c4ffc99ac1d715de3dd862773153e4a5db7057e126050b735ae86aca",
       "classification": "target-uri-conformance"
     },
     {

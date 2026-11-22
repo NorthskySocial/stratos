@@ -157,6 +157,16 @@
       "author": "did:plc:fayevalentine",
       "collection": "zone.stratos.feed.post",
       "rkey": "ed.ein_jet:vicious~julia-a"
+    },
+    {
+      "name": "a record in a collection whose middle segment starts with a digit",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/com.123.post/swordfish",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "crew",
+      "author": "did:plc:fayevalentine",
+      "collection": "com.123.post",
+      "rkey": "swordfish"
     }
   ],
   "repoRecords": [
@@ -180,6 +190,13 @@
       "author": "did:plc:spikespiegel",
       "collection": "zone.stratos.feed.like",
       "rkey": "ed"
+    },
+    {
+      "name": "a custody record in a collection whose middle segment starts with a digit",
+      "uri": "at://did:plc:x/com.123.post/r",
+      "author": "did:plc:x",
+      "collection": "com.123.post",
+      "rkey": "r"
     }
   ],
   "boundaries": [
@@ -440,6 +457,12 @@
     {
       "name": "an rkey that is two dots",
       "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/..",
+      "as": "record",
+      "legacy": false
+    },
+    {
+      "name": "a collection whose first segment starts with a digit",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/1com.example.post/swordfish",
       "as": "record",
       "legacy": false
     }

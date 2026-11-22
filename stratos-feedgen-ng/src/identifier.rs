@@ -251,31 +251,50 @@ fn validated_nsid(value: &str) -> Result<String, IdentifierError> {
     Ok(value.to_owned())
 }
 
+const MAX_NSID_BYTES: usize = 253 + 1 + 63;
+const MAX_NSID_SEGMENT_BYTES: usize = 63;
+
+/// The `@atproto/syntax` NSID grammar. Like a domain name, only the first
+/// segment and the name must start with a letter.
 pub(crate) fn is_valid_nsid(value: &str) -> bool {
-    if value.len() > 317 {
+    if value.len() > MAX_NSID_BYTES {
         return false;
     }
-    let labels: Vec<&str> = value.split('.').collect();
-    let Some((name, domain)) = labels.split_last() else {
+    let segments: Vec<&str> = value.split('.').collect();
+    let [first, middle @ .., name] = segments.as_slice() else {
         return false;
     };
-    domain.len() >= 2
-        && domain.iter().all(|label| is_valid_domain_label(label))
-        && !name.is_empty()
-        && name.len() <= 63
-        && name.as_bytes()[0].is_ascii_alphabetic()
-        && name.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    !middle.is_empty()
+        && starts_with_letter(first)
+        && is_valid_domain_segment(first)
+        && middle
+            .iter()
+            .all(|segment| is_valid_domain_segment(segment))
+        && is_valid_name_segment(name)
 }
 
-fn is_valid_domain_label(label: &str) -> bool {
-    let bytes = label.as_bytes();
+fn starts_with_letter(segment: &str) -> bool {
+    segment
+        .as_bytes()
+        .first()
+        .is_some_and(u8::is_ascii_alphabetic)
+}
+
+fn is_valid_domain_segment(segment: &str) -> bool {
+    let bytes = segment.as_bytes();
     !bytes.is_empty()
-        && bytes.len() <= 63
-        && bytes[0].is_ascii_alphabetic()
+        && bytes.len() <= MAX_NSID_SEGMENT_BYTES
+        && bytes[0].is_ascii_alphanumeric()
         && bytes[bytes.len() - 1].is_ascii_alphanumeric()
         && bytes
             .iter()
             .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+}
+
+fn is_valid_name_segment(segment: &str) -> bool {
+    segment.len() <= MAX_NSID_SEGMENT_BYTES
+        && starts_with_letter(segment)
+        && segment.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
 
 fn validated_space_key(value: &str) -> Result<String, IdentifierError> {
@@ -304,7 +323,7 @@ pub(crate) fn is_valid_record_key(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Did, IdentifierError, RecordUri, SpaceUri};
+    use super::{Did, IdentifierError, RecordUri, SpaceUri, is_valid_nsid};
 
     #[test]
     fn parses_repository_records_with_the_author_as_authority() {
@@ -437,5 +456,178 @@ mod tests {
             assert!(RecordUri::parse(&value).is_err(), "{value}");
             assert!(SpaceUri::parse(&value).is_err(), "{value}");
         }
+    }
+
+    // Copied from the upstream interop files nsid_syntax_valid.txt and
+    // nsid_syntax_invalid.txt, which @atproto/syntax is tested against.
+    const UPSTREAM_VALID_NSIDS: &[&str] = &[
+        "com.ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo.foo",
+        "com.example.ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+        "com.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.foo",
+        "com.example.fooBar",
+        "com.example.fooBarV2",
+        "net.users.bob.ping",
+        "a.b.c",
+        "m.xn--masekowski-d0b.pl",
+        "one.two.three",
+        "one.two.three.four-and.FiVe",
+        "one.2.three",
+        "a-0.b-1.c",
+        "a0.b1.cc",
+        "cn.8.lex.stuff",
+        "test.12345.record",
+        "a01.thing.record",
+        "a.0.c",
+        "xn--fiqs8s.xn--fiqa61au8b7zsevnm8ak20mc4a87e.record.two",
+        "a0.b1.c3",
+        "com.example.f00",
+        "onion.expyuzz4wqqyqhjn.spec.getThing",
+        "onion.g2zyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.lex.deleteThing",
+        "org.4chan.lex.getThing",
+        "cn.8.lex.stuff",
+        "onion.2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.lex.deleteThing",
+    ];
+    const UPSTREAM_INVALID_NSIDS: &[&str] = &[
+        "com.oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo.foo",
+        "com.example.oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+        "com.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.middle.foo",
+        "com.example.foo.*",
+        "com.example.foo.blah*",
+        "com.example.foo.*blah",
+        "com.exa💩ple.thing",
+        "a-0.b-1.c-3",
+        "a-0.b-1.c-o",
+        "1.0.0.127.record",
+        "0two.example.foo",
+        "example.com",
+        "com.example",
+        "a.",
+        ".one.two.three",
+        "one.two.three ",
+        "one.two..three",
+        "one .two.three",
+        " one.two.three",
+        "com.exa💩ple.thing",
+        "com.atproto.feed.p@st",
+        "com.atproto.feed.p_st",
+        "com.atproto.feed.p*st",
+        "com.atproto.feed.po#t",
+        "com.atproto.feed.p!ot",
+        "com.example-.foo",
+        "com.example.fooBar.2",
+    ];
+
+    #[test]
+    fn accepts_and_refuses_the_upstream_nsid_vectors() {
+        for value in UPSTREAM_VALID_NSIDS {
+            assert!(is_valid_nsid(value), "{value:?} is valid upstream");
+        }
+        for value in UPSTREAM_INVALID_NSIDS {
+            assert!(!is_valid_nsid(value), "{value:?} is invalid upstream");
+        }
+    }
+
+    #[test]
+    fn holds_the_nsid_length_and_name_limits() {
+        let segment = |byte: &str| byte.repeat(63);
+        let domain = [segment("a"), segment("b"), segment("c"), segment("d")].join(".");
+        assert!(is_valid_nsid(&format!("{domain}.{}", "e".repeat(61))));
+        assert!(!is_valid_nsid(&format!("{domain}.{}", "e".repeat(62))));
+        assert!(is_valid_nsid(&format!("com.example.{}", "e".repeat(63))));
+        assert!(!is_valid_nsid(&format!("com.example.{}", "e".repeat(64))));
+        for value in [
+            "com.example.2post",
+            "com.example.po-st",
+            "com.-example.post",
+            "1com.example.post",
+            "-com.example.post",
+        ] {
+            assert!(!is_valid_nsid(value), "{value}");
+        }
+        for value in ["com.123.post", "com.1-2.post", "COM.Example.Post"] {
+            assert!(is_valid_nsid(value), "{value}");
+        }
+    }
+
+    /// The procedural form of the upstream rules (`validateNsid`), so the
+    /// grammar is checked against a second, differently shaped reading of them.
+    fn upstream_validate_nsid(input: &str) -> bool {
+        if input.len() > 253 + 1 + 63 {
+            return false;
+        }
+        if !input
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-')
+        {
+            return false;
+        }
+        let segments: Vec<&str> = input.split('.').collect();
+        if segments.len() < 3 {
+            return false;
+        }
+        for segment in &segments {
+            if segment.is_empty() || segment.len() > 63 {
+                return false;
+            }
+            if segment.starts_with('-') || segment.ends_with('-') {
+                return false;
+            }
+        }
+        let starts_with_digit = |segment: &str| segment.as_bytes()[0].is_ascii_digit();
+        let name = segments[segments.len() - 1];
+        !starts_with_digit(segments[0]) && !starts_with_digit(name) && !name.contains('-')
+    }
+
+    fn every_string(alphabet: &[u8], max_len: usize) -> Vec<String> {
+        let mut all = vec![String::new()];
+        let mut frontier = vec![String::new()];
+        for _ in 0..max_len {
+            frontier = frontier
+                .iter()
+                .flat_map(|prefix| {
+                    alphabet.iter().map(move |byte| {
+                        let mut next = prefix.clone();
+                        next.push(char::from(*byte));
+                        next
+                    })
+                })
+                .collect();
+            all.extend(frontier.iter().cloned());
+        }
+        all
+    }
+
+    #[test]
+    fn agrees_with_the_upstream_rules_on_every_short_string() {
+        let short = every_string(b"a0-.", 9)
+            .into_iter()
+            .chain(every_string(b"aZ0-._", 6));
+        for value in short {
+            assert_eq!(
+                is_valid_nsid(&value),
+                upstream_validate_nsid(&value),
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_records_in_a_collection_whose_middle_segment_starts_with_a_digit() {
+        let repo = RecordUri::parse("at://did:plc:x/com.123.post/r").unwrap();
+        assert_eq!(
+            repo,
+            RecordUri::Repo {
+                author: Did::parse("did:plc:x").unwrap(),
+                collection: "com.123.post".to_owned(),
+                rkey: "r".to_owned(),
+            }
+        );
+        assert!(
+            RecordUri::parse(
+                "at:space/did:web:stratos.example/zone.stratos.space.feed/bebop/did:plc:fayevalentine/com.123.post/r"
+            )
+            .is_ok()
+        );
+        assert!(RecordUri::parse("at://did:plc:x/1com.example.post/r").is_err());
     }
 }
