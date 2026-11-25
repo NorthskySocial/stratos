@@ -1,8 +1,8 @@
 {
   "reference": {
     "repository": "https://github.com/bluesky-social/atproto",
-    "revision": "b5fd12fa57b10cf068efa879812f558780f37109",
-    "releaseAnchor": "d4def6e9f521896ed8222f576d54923d00b5fbeb",
+    "revision": "1f510f8e36a973f6fd055da349b586918805ae66",
+    "releaseAnchor": "f839c47e6523a1a7adb367ef70513a3c6688c38b",
     "prompts": {
       "prompt-11-12-26.md": {
         "sha256": "3ff5a4e5bd0511c717e9afab04ab8bf69e1b404593eac9afaa5d4e026784c770"
@@ -22,8 +22,7 @@
     "repository": "https://github.com/bluesky-social/proposals",
     "revision": "b54ec6853bab77edd4fd373804a480633094b324",
     "readmePath": "0016-permissioned-data/README.md",
-    "readmeSha256": null,
-    "readmeSha256Reason": "No local checkout of the proposals repository exists to hash the file from, and the file was deliberately not fetched."
+    "readmeSha256": "ee2c7a9340bb5c5b6bed866ac8eb86bc8416eb2e1c85e7aac94c3fa6071976e1"
   },
   "packages": [
     {
@@ -70,10 +69,24 @@
     }
   ],
   "targetUriFormat": "at:space/",
-  "referenceSupportsTargetUri": false,
+  "referenceSupportsTargetUri": true,
   "cutoverEvidence": {
-    "status": "unfulfilled",
-    "uriProbe": null
+    "status": "fulfilled",
+    "uriProbe": {
+      "artifactRevision": "1f510f8e36a973f6fd055da349b586918805ae66",
+      "imageDigest": "sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350",
+      "recordUri": "at:space/did:web:stratos-e2e.atmosbox.test/zone.stratos.space.feed/general/did:plc:uoamhgblsem4ldntnqco4e3k/zone.stratos.feed.post/verify1795648138766",
+      "credentialSubject": "at:space/did:web:stratos-e2e.atmosbox.test/zone.stratos.space.feed/general",
+      "receiptSha256": "f6f333b2e903319d995b3c6f664b1daf2325b3e83f084882a8f6fe5b4e185af3",
+      "expected": {
+        "authority": "did:web:stratos-e2e.atmosbox.test",
+        "spaceType": "zone.stratos.space.feed",
+        "spaceKey": "general",
+        "author": "did:plc:uoamhgblsem4ldntnqco4e3k",
+        "collection": "zone.stratos.feed.post",
+        "rkey": "verify1795648138766"
+      }
+    }
   },
   "legacyUriOnly": {
     "revisions": [
@@ -89,7 +102,10 @@
     "url": "https://github.com/bluesky-social/atproto.git",
     "dockerfile": "Dockerfile",
     "lockfile": "pnpm-lock.yaml",
-    "sha256": {}
+    "sha256": {
+      "Dockerfile": "661091e966d24d3fb9bcac38200c3e1abc13ef16a8007ccffb1fbf60f143e301",
+      "pnpm-lock.yaml": "9ec7f22274e92778e14c8fa7a494c844b6512c8a43857cf96722211d9bccf298"
+    }
   },
   "fixtures": [
     {
@@ -171,6 +187,44 @@
       "path": "token-audiences.json",
       "sha256": "a702791dc2168a57842d5161874647d8761ea36dbc2d6d8b4ae3a0ef47036d3f",
       "classification": "upstream-signed-target-uri"
+    }
+  ],
+  "releasePackages": [
+    {
+      "name": "@atproto/api",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-w4+7ykd7llj9YgzWOx1g43yvanIoMG4kuH4TWSLALt9hHz1cMzOHZ4v6MaQlIg7KbdkOnQKmppRxwkKwhBZh5w==",
+      "tarballSha256": "41e63afa8d6d3a612548ab86155b9fcebe6705c5f5b6515f7940d2bdc0c3d5a0"
+    },
+    {
+      "name": "@atproto/syntax",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-0gjf91VdMzZjWNaTdkLHTBVDGUUwds1usf1KyiyRe+eSolz/lBJp0zbJBTW6yY8ZLh9boS/IVIn3NAWhyuJ4OQ==",
+      "tarballSha256": "c2c4141c8620d2b1df86b93ff5f4b877b333f8e6c3cbd3d93a121cd8767093eb"
+    },
+    {
+      "name": "@atproto/oauth-scopes",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-9FUB61oNK8rYKVmi9Z+RSA7DtqWCD1QgmP3J8XAKWMuBcPCOT4HNiu+hYeaWa/Zz4/5ooH00EwrQr5bV9Bt6gA==",
+      "tarballSha256": "5bfdfeb8bec17fbb15e647dbb9a2c8f85e44e9689bbf04c2912fc6d5731c61a7"
+    },
+    {
+      "name": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-tC8uNL+RBNbuZMX9/2wieVsa7tzVazrF7FrJk9P57C9fVfM5FZKGCGv3okWmSNQ+q0jeOaPRGhklNeSm/71JWQ==",
+      "tarballSha256": "91503c952a6564c505e87e23c70be693d00106b4022539ecbe005583fb80278d"
+    },
+    {
+      "name": "@atproto/lexicon",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-lRoXbs68mZjU9x/8zulWqplI96SeZYJhJOkVI7Uc9mwfYgAvD4Y0ddRp/vrLmC1RS0JFOIrsIdVe0xP5kbu1QA==",
+      "tarballSha256": "c1bc34335518e80c195b3b9882e052e0e20b35bd2bd53e283108637cb68ea3f8"
+    },
+    {
+      "name": "@atproto/oauth-client-node",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-AiChp3sQaZAZ0W/Noep5na5ZoAtHeHCW7XGbWKx+WcMylEwuGh1HfkUetsaVkm+vm24P/o+j9QfttkDjbNxhbQ==",
+      "tarballSha256": "050b0daca19085643d9604164ac43296338bf0142dbb6a5a6215ad2d35c09389"
     }
   ]
 }

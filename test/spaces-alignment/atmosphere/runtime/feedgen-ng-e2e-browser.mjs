@@ -902,6 +902,230 @@ async function runOrdinaryCustody() {
   }
 }
 
+const novemberPositiveAssertions = [
+  'schema-grant',
+  'oauth-create',
+  'oauth-read',
+  'authorized-feed',
+  'credential-read',
+  'oauth-delete',
+]
+
+async function runNovemberPositive() {
+  const domain = required('SANDBOX_DOMAIN')
+  const account = await provisionAccount(domain)
+  const clubhouseUrl = 'https://clubhouse-e2e.atmosbox.internal'
+  const roomId = process.env.FEEDGEN_E2E_ROOM?.trim() || 'general'
+  assert.match(roomId, /^[a-z0-9-]+$/)
+  const space = spaceUriFromParts(`did:web:stratos-e2e.${domain}`, roomId)
+  await trustSandboxCa()
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage()
+    const writes = listenForPdsWrites(page)
+    const responses = listenForFeedResponses(page)
+    await signIn(page, account, clubhouseUrl)
+    await enterRoom(page, account, clubhouseUrl, roomId)
+    await assertSpaceLexiconPublished(domain)
+    await assertPdsGrantedSpaceScope(
+      domain,
+      `did:web:stratos-e2e.${domain}`,
+      account,
+    )
+    reach('schema-grant')
+    const text = `November positive journey ${randomUUID()}`
+    const create = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === pdsCreatePath &&
+        response.ok(),
+      { timeout: 45_000 },
+    )
+    await page.locator('#room-post').fill(text)
+    await page.getByRole('button', { name: 'Post topic' }).click()
+    const result = await (await create).json()
+    const { author, rkey } = assertSpaceRecordUri(result.uri, space)
+    assert.equal(assertPdsCustodyWrite(writes, text).repo, author)
+    assert.ok(result.cid)
+    reach('oauth-create')
+
+    await page.evaluate((value) => {
+      window.delegationScenarioDomain = value
+    }, domain)
+    await page.addScriptTag({ path: '/scenario/auth-client.iife.js' })
+    const record = await page.evaluate(
+      async ({ space, author, rkey, collection }) => {
+        await window.delegationScenarioAuth.init()
+        const session = window.delegationScenarioAuth.getSession()
+        if (!session || session.sub !== author)
+          throw new Error('OAuth author session unavailable')
+        const query = new URLSearchParams({
+          space,
+          repo: author,
+          collection,
+          rkey,
+        })
+        const response = await session.fetchHandler(
+          `/xrpc/com.atproto.space.getRecord?${query}`,
+        )
+        if (!response.ok)
+          throw new Error(`OAuth record read failed: ${response.status}`)
+        return response.json()
+      },
+      { space, author, rkey, collection: postCollection },
+    )
+    assert.equal(record.uri, result.uri)
+    assert.equal(record.cid, result.cid)
+    assert.equal(record.value?.text, text)
+    reach('oauth-read')
+
+    await waitForFeed(page, responses, text, result.uri)
+    reach('authorized-feed')
+    await page.evaluate((value) => {
+      window.delegationScenarioDomain = value
+    }, domain)
+    await page.addScriptTag({ path: '/scenario/auth-client.iife.js' })
+    await page.evaluate(async () => {
+      await window.delegationScenarioAuth.init()
+    })
+
+    const delegation = await page.evaluate(
+      async ({ space, pdsUrl }) => {
+        const session = window.delegationScenarioAuth.getSession()
+        if (!session) throw new Error('OAuth session unavailable')
+        const url = new URL(
+          '/xrpc/com.atproto.space.getDelegationToken',
+          pdsUrl,
+        )
+        url.searchParams.set('space', space)
+        const response = await session.fetchHandler(url.href)
+        if (!response.ok)
+          throw new Error(`Delegation failed: ${response.status}`)
+        return (await response.json()).token
+      },
+      { space, pdsUrl: accountPdsUrl(domain, account) },
+    )
+    assert.equal(typeof delegation, 'string')
+    const delegationClaims = JSON.parse(
+      Buffer.from(delegation.split('.')[1], 'base64url'),
+    )
+    assert.equal(delegationClaims.sub, space)
+    assert.equal(
+      delegationClaims.aud,
+      `did:web:stratos-e2e.${domain}#atproto_pds`,
+    )
+    const { proofKey, exchangeHeaders, presentationHeaders } =
+      await import('/scenario/driver.mjs')
+    const key = proofKey()
+    const exchange = await fetch(
+      `https://stratos-e2e.atmosbox.internal/xrpc/zone.stratos.space.getSpaceCredential`,
+      {
+        method: 'POST',
+        headers: {
+          ...exchangeHeaders(`Bearer ${delegation}`, key),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ space }),
+      },
+    )
+    assert.equal(exchange.status, 200, 'Stratos credential exchange failed')
+    const { credential } = await exchange.json()
+    assert.equal(typeof credential, 'string')
+    const claims = JSON.parse(
+      Buffer.from(credential.split('.')[1], 'base64url'),
+    )
+    assert.equal(claims.sub, space)
+    assert.equal(claims.iss, `did:web:stratos-e2e.${domain}`)
+    const expectedKey = /keyid="([^"]+)"/.exec(
+      exchangeHeaders(`Bearer ${delegation}`, key)['signature-input'],
+    )?.[1]
+    assert.equal(claims.cnf?.kid, expectedKey)
+    assert.ok(expectedKey)
+
+    assert.ok(author.startsWith('did:plc:'), 'Sandbox author DID is not PLC')
+    const didDocument = await requestJson(
+      `https://plc.${domain}/${author}`,
+      {},
+      'Member DID document',
+    )
+    assert.equal(didDocument.id, author)
+    const methods = didDocument.verificationMethod?.filter(
+      (method) =>
+        method.id === '#atproto_kem' || method.id === `${author}#atproto_kem`,
+    )
+    assert.equal(
+      methods?.length,
+      1,
+      'Member DID document lacks a unique KEM key',
+    )
+    assert.equal(methods[0].type, 'Multikey')
+    const kemKey = `did:key:${methods[0].publicKeyMultibase}`
+    const sdk = await import('/scenario/sdk.mjs')
+    const encapsulation = await sdk.encapsulate(kemKey)
+    const signedUrl = new URL(
+      `${accountPdsUrl(domain, account)}/xrpc/com.atproto.space.getRecord`,
+    )
+    for (const [name, value] of Object.entries({
+      space,
+      repo: author,
+      collection: postCollection,
+      rkey,
+    }))
+      signedUrl.searchParams.set(name, value)
+    const signedRead = await fetch(signedUrl, {
+      headers: {
+        ...presentationHeaders(credential, key, author),
+        'accept-signature': sdk.formatMacRequest(
+          'atproto-space-record',
+          encapsulation.keyShare,
+        ),
+      },
+    })
+    assert.equal(signedRead.status, 200, 'Credential-bound read failed')
+    const signedRecord = await signedRead.json()
+    assert.equal(signedRecord.uri, result.uri)
+    assert.equal(signedRecord.cid, result.cid)
+    assert.equal(signedRecord.value?.text, text)
+    sdk.verifyRecordMac(result.uri, result.cid, {
+      ...encapsulation,
+      headers: signedRead.headers,
+    })
+    reach('credential-read')
+    const post = page.locator('.post', { hasText: text }).first()
+    const deletion = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname ===
+          '/xrpc/com.atproto.space.deleteRecord',
+      { timeout: 45_000 },
+    )
+    await post.getByRole('button', { name: 'Delete', exact: true }).click()
+    await post.getByRole('button', { name: 'Delete now' }).click()
+    const deleted = await deletion
+    assert.ok(deleted.ok(), `PDS delete failed with HTTP ${deleted.status()}`)
+    const request = deleted.request().postDataJSON()
+    assert.deepEqual(request, {
+      space,
+      repo: author,
+      collection: postCollection,
+      rkey,
+    })
+    await waitForFeedWithout(page, responses, text, result.uri)
+    reach('oauth-delete')
+    console.log(
+      JSON.stringify({
+        suite: 'november-positive',
+        assertions: novemberPositiveAssertions.map((id) => ({
+          id,
+          status: 'passed',
+        })),
+      }),
+    )
+  } finally {
+    await browser.close()
+  }
+}
+
 const baselineAssertions = [
   'browser-oauth',
   'stratos-custody',
@@ -1006,6 +1230,7 @@ async function runBaseline() {
 const journeys = {
   baseline: runBaseline,
   'ordinary-custody': runOrdinaryCustody,
+  'november-positive': runNovemberPositive,
 }
 
 async function main() {

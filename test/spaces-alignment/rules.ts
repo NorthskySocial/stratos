@@ -42,6 +42,7 @@ export interface ScenarioContext {
  */
 export const STANDALONE_SUITE_IDS: ReadonlySet<string> = new Set([
   'ordinary-custody',
+  'november-positive',
 ])
 
 const SHA = /^[0-9a-f]{40}$/

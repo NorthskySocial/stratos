@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { formatRecordUri } from '@northskysocial/stratos-core'
 import {
   isWellFormedStrongRef,
+  validateIfKnown,
   withRepoFormUris,
 } from '../src/api/records/lexicon-validation.js'
 import { HOSTED_SPACE_TYPE } from '../src/shared/space-type-registry.js'
@@ -51,6 +52,32 @@ function leafUnder(value: unknown, levels: number): unknown {
 }
 
 describe('the repo-form copy the lexicon check reads', () => {
+  it('validates canonical nested reply and embed references without changing stored custody', () => {
+    const spaceRef = { uri: SPACE_URI, cid: POST_CID }
+    const repoRef = { uri: REPO_URI, cid: POST_CID }
+    const record = {
+      $type: POST,
+      text: 'See you, space cowboy',
+      createdAt: '2026-11-26T00:00:00.000Z',
+      reply: { root: spaceRef, parent: repoRef },
+      embed: { $type: 'app.bsky.embed.record', record: spaceRef },
+    }
+    const original = structuredClone(record)
+    expect(validateIfKnown(POST, record)).toBe('valid')
+    expect(record).toEqual(original)
+    expect(isWellFormedStrongRef(spaceRef)).toBe(true)
+    expect(isWellFormedStrongRef(repoRef)).toBe(true)
+    for (const uri of [`${SPACE_URI}/extra`, 'at:space/not-a-did/x/y']) {
+      expect(isWellFormedStrongRef({ uri, cid: POST_CID })).toBe(false)
+      expect(() =>
+        validateIfKnown(POST, {
+          ...record,
+          reply: { root: { uri, cid: POST_CID }, parent: repoRef },
+        }),
+      ).toThrow()
+    }
+  })
+
   it('rewrites a space-form uri held at the deepest rewritten level', () => {
     const record = nestedUnder(DEEPEST_REWRITTEN_LEVEL, { uri: SPACE_URI })
 

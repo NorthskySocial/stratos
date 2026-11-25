@@ -26,6 +26,8 @@ impl fmt::Display for Did {
     }
 }
 
+const MAX_DID_BYTES: usize = 2048;
+
 impl Did {
     pub fn parse(value: impl Into<String>) -> Result<Self, IdentifierError> {
         let value = value.into();
@@ -35,7 +37,8 @@ impl Did {
         else {
             return Err(IdentifierError::InvalidDid);
         };
-        if method.is_empty()
+        if value.len() > MAX_DID_BYTES
+            || method.is_empty()
             || identifier.is_empty()
             || !method.bytes().all(|byte| byte.is_ascii_lowercase())
             || identifier.ends_with(':')
@@ -324,6 +327,54 @@ pub(crate) fn is_valid_record_key(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{Did, IdentifierError, RecordUri, SpaceUri, is_valid_nsid};
+
+    #[test]
+    fn did_length_bound_applies_to_all_record_positions() {
+        for length in 2046..=2050 {
+            let did = format!("did:plc:{}", "a".repeat(length - 8));
+            let valid = length <= 2048;
+            assert_eq!(Did::parse(&did).is_ok(), valid, "length {length}");
+            assert_eq!(
+                RecordUri::parse(&format!("at://{did}/com.example.post/r")).is_ok(),
+                valid
+            );
+            assert_eq!(
+                SpaceUri::parse(&format!("at:space/{did}/com.example.space/key")).is_ok(),
+                valid
+            );
+            assert_eq!(
+                RecordUri::parse(&format!(
+                    "at:space/{did}/com.example.space/key/did:plc:spike/com.example.post/r"
+                ))
+                .is_ok(),
+                valid
+            );
+            assert_eq!(
+                RecordUri::parse(&format!(
+                    "at:space/did:plc:spike/com.example.space/key/{did}/com.example.post/r"
+                ))
+                .is_ok(),
+                valid
+            );
+        }
+    }
+
+    #[test]
+    fn did_limit_holds_for_multiple_methods_and_encoded_identifiers() {
+        for method in ["plc", "web", "example"] {
+            let prefix = format!("did:{method}:");
+            for length in 2000..=2100 {
+                let count = length - prefix.len();
+                let identifier = format!("{}{}", "%41".repeat(count / 3), "a".repeat(count % 3));
+                let did = format!("{prefix}{identifier}");
+                assert_eq!(
+                    Did::parse(did).is_ok(),
+                    length <= 2048,
+                    "method {method}, length {length}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn parses_repository_records_with_the_author_as_authority() {

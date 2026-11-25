@@ -149,7 +149,7 @@ describe('suite registry', () => {
     return modules.map((module) => module.suite)
   }
 
-  it('makes no suite but ordinary-custody standalone', async () => {
+  it('runs registered standalone suites independently', async () => {
     const suites = await registeredSuites()
     expect(suites.map((item) => item.id)).toContain('ordinary-custody')
     for (const item of suites) {
@@ -166,7 +166,7 @@ describe('suite registry', () => {
       suites
         .filter((item) => STANDALONE_SUITE_IDS.has(item.id))
         .map((i) => i.id),
-    ).toEqual(['ordinary-custody'])
+    ).toEqual(['november-positive', 'ordinary-custody'])
   })
 
   it('gives no suite but the baseline a name from the baseline', async () => {
@@ -210,7 +210,7 @@ describe('ordinary-custody driver', () => {
 
   it('selects the journey by suite id and refuses an unknown one', () => {
     expect(driverSource).toMatch(
-      /const journeys = \{\s*baseline: runBaseline,\s*'ordinary-custody': runOrdinaryCustody,\s*\}/,
+      /const journeys = \{\s*baseline: runBaseline,\s*'ordinary-custody': runOrdinaryCustody,\s*'november-positive': runNovemberPositive,\s*\}/,
     )
     expect(functionBody('main')).toContain(
       "assert.ok(Object.hasOwn(journeys, activeSuite), 'Unknown suite')",

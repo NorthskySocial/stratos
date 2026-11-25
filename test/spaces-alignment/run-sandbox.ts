@@ -32,6 +32,11 @@ import {
 } from './rules.js'
 import type { AssertionResult, ReviewReceipt, ScenarioSuite } from './rules.js'
 
+export const MEMBER_PDS_IMAGE =
+  'ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350'
+const AIA_B_PDS_IMAGE =
+  'ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:36ab29eb69af61d3beba8ada2d8d524921622b2b4fedc487f6e282634cc2b541'
+
 const harnessDirectory = dirname(fileURLToPath(import.meta.url))
 const referencePdsSuites = new Set([
   'standard-credential-transport',
@@ -45,6 +50,7 @@ const referencePdsSuites = new Set([
  */
 export const PREPARED_SUITE_IDS: ReadonlySet<string> = new Set([
   'november-interop',
+  'november-positive',
 ])
 const rustProbeSuites = new Set(['rust-production-interop'])
 interface SourcePins {
@@ -475,6 +481,17 @@ export async function installAtmosphereAssets(
   assets: string,
   atmosphere: string,
 ): Promise<Record<string, string>> {
+  const pdsPath = join(atmosphere, 'compose/pds.yaml')
+  const pdsTemplate = await readFile(pdsPath, 'utf8')
+  const oldCount = pdsTemplate.split(AIA_B_PDS_IMAGE).length - 1
+  const pinnedCount = pdsTemplate.split(MEMBER_PDS_IMAGE).length - 1
+  if (oldCount + pinnedCount !== 1)
+    throw new Error('Pinned AiaB spaces PDS image is missing or ambiguous')
+  if (oldCount === 1)
+    await writeFile(
+      pdsPath,
+      pdsTemplate.replace(AIA_B_PDS_IMAGE, MEMBER_PDS_IMAGE),
+    )
   const componentsPath = join(atmosphere, 'stacks/components.json')
   const componentsData = JSON.parse(
     await readFile(componentsPath, 'utf8'),
@@ -495,7 +512,9 @@ export async function installAtmosphereAssets(
   if (existingPreset !== undefined && !sameJson(existingPreset, feedgenPreset))
     throw new Error('AiaB preset ID conflicts with feedgen-ng-e2e')
 
-  const hashes: Record<string, string> = {}
+  const hashes: Record<string, string> = {
+    'compose/pds.yaml': await sha256File(pdsPath),
+  }
   for (const path of [
     'stacks/lexicon-authority.definition.json',
     'examples/lexicon-fixtures/zone.stratos.space.feed.json',
@@ -711,6 +730,35 @@ export async function runSandbox(
       workspace,
       pins,
     )
+    failedStep = 'detect-docker-security'
+    const securityOptions = JSON.parse(
+      (
+        await command(
+          'docker',
+          ['info', '--format', '{{json .SecurityOptions}}'],
+          atmosphere,
+          childEnvironment,
+        )
+      ).output,
+    ) as unknown
+    if (
+      !Array.isArray(securityOptions) ||
+      !securityOptions.every((item) => typeof item === 'string')
+    )
+      throw new Error('Docker security options are invalid')
+    if (securityOptions.some((item: string) => item === 'name=rootless')) {
+      const rendererPath = join(atmosphere, 'lib/components.mjs')
+      const renderer = await readFile(rendererPath, 'utf8')
+      const runnerUser =
+        'runner.user = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`'
+      if (renderer.split(runnerUser).length !== 2)
+        throw new Error('AiaB runner user setting is missing or ambiguous')
+      await writeFile(
+        rendererPath,
+        renderer.replace(runnerUser, "runner.user = '0:0'"),
+      )
+      templateHashes['lib/components.mjs'] = await sha256File(rendererPath)
+    }
     if (suites.some((suite) => referencePdsSuites.has(suite.id))) {
       failedStep = 'build-reference-pds'
       const referencePin = referenceHostPin(novemberSources)
@@ -720,13 +768,6 @@ export async function runSandbox(
         referencePin,
         referenceReport,
       )
-      if (
-        options.pdsImageDigest &&
-        referencePds.imageId !== options.pdsImageDigest
-      )
-        throw new Error(
-          'The built reference PDS image differs from --pds-image-digest',
-        )
     }
     if (rustProbeSuites.has(options.suite)) {
       failedStep = 'prepare-browser-dockerfile'
@@ -931,6 +972,53 @@ export async function runSandbox(
       'runner',
     ])
     await runStep('up', 'deno', ['task', 'sandbox', 'up', '--build'])
+    failedStep = 'verify-pds-images'
+    const inspectService = async (service: string, image: string) => {
+      const container = (
+        await command(
+          'docker',
+          [
+            'compose',
+            '--file',
+            composeFile,
+            '--project-name',
+            projectName,
+            '--project-directory',
+            atmosphere,
+            'ps',
+            '-q',
+            service,
+          ],
+          atmosphere,
+          childEnvironment,
+        )
+      ).output.trim()
+      if (!container)
+        throw new Error(`Missing running container for ${service}`)
+      const actual = (
+        await command(
+          'docker',
+          ['inspect', '--format', '{{.Image}}', container],
+          atmosphere,
+          childEnvironment,
+        )
+      ).output.trim()
+      const expected = (
+        await command(
+          'docker',
+          ['image', 'inspect', '--format', '{{.Id}}', image],
+          atmosphere,
+          childEnvironment,
+        )
+      ).output.trim()
+      if (!/^sha256:[0-9a-f]{64}$/.test(actual) || actual !== expected)
+        throw new Error(`Running ${service} image does not match ${image}`)
+      return actual
+    }
+    const memberImageId = await inspectService('pds-space1', MEMBER_PDS_IMAGE)
+    const referenceImageId = referencePds
+      ? await inspectService('feedgen-e2e-pds-reference', referencePds.imageId)
+      : undefined
     await runStep('seed', 'deno', ['task', 'sandbox', 'seed'])
     failedStep = 'prepare-browser-accounts'
     const state = JSON.parse(
@@ -1000,11 +1088,16 @@ export async function runSandbox(
       templateHashes,
       referencePds,
       pdsServices: {
-        primary: { service: 'pds-space1' },
+        primary: {
+          service: 'pds-space1',
+          image: MEMBER_PDS_IMAGE,
+          imageId: memberImageId,
+        },
         ...(referencePds
           ? {
               reference: {
                 service: 'feedgen-e2e-pds-reference',
+                imageId: referenceImageId,
                 build: referencePds,
               },
             }

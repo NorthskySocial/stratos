@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import * as cacheEvidence from '../scenarios/november-cache.driver.js'
+import { suite as positive } from '../scenarios/november-positive.js'
 import { suite as baseline } from '../scenarios/baseline.js'
 import { suite as clientCustody } from '../scenarios/client-custody.js'
 import { suite as credentialLifetime } from '../scenarios/credential-lifetime.js'
@@ -626,17 +628,59 @@ describe('november-interop suite', () => {
         expect(known.has(id), `${journey.id}: ${id}`).toBe(true)
   })
 
-  it('refuses to run while the November manifest is not ready', async () => {
-    await expect(
-      novemberInterop.run({
-        sandboxDirectory: '/tmp/faye-sandbox',
-        composeFile: '/tmp/faye-sandbox/compose.yaml',
-        projectName: 'faye-test',
-        scratchDirectory: '/tmp/faye-report',
-        runCommand: async () => {
-          throw new Error('nothing may run')
-        },
-      }),
-    ).rejects.toThrow('refuses to run until the November manifest is ready')
+  it('reports only journeys actually executed when the full suite remains incomplete', async () => {
+    const positiveRun = vi
+      .spyOn(positive, 'run')
+      .mockResolvedValue(
+        positive.requiredAssertions.map((id) => ({
+          id,
+          status: 'passed' as const,
+        })),
+      )
+    const ordinaryRun = vi
+      .spyOn(ordinaryCustody, 'run')
+      .mockResolvedValue(
+        ordinaryCustody.requiredAssertions.map((id) => ({
+          id,
+          status: 'passed' as const,
+        })),
+      )
+    const cacheRun = vi
+      .spyOn(cacheEvidence, 'runNovemberCacheEvidence')
+      .mockResolvedValue({ test: 'migration', endpointBacked: false })
+    try {
+      const failure = await novemberInterop
+        .run({
+          sandboxDirectory: '/sandbox',
+          composeFile: '/sandbox/compose.yaml',
+          projectName: 'test',
+          scratchDirectory: '/scratch',
+          runCommand: async () => {
+            throw new Error('unexpected command')
+          },
+        })
+        .catch((error: unknown) => error)
+      expect(failure).toMatchObject({
+        suiteId: 'november-interop',
+        reachedAssertions: [
+          'canonical-uri-at-each-boundary',
+          'schema-resolution-and-explicit-grants',
+          'ordinary-custody-create-feed-delete',
+          'post-uri-and-text-in-real-feed-response',
+        ],
+      })
+      expect(failure.message).not.toContain(
+        'ordinary-custody-create-feed-delete',
+      )
+      expect(failure.message).toContain(
+        'mixed-cache-migration-preserves-custody',
+      )
+      expect(positiveRun).toHaveBeenCalledOnce()
+      expect(cacheRun).toHaveBeenCalledOnce()
+    } finally {
+      positiveRun.mockRestore()
+      ordinaryRun.mockRestore()
+      cacheRun.mockRestore()
+    }
   })
 })

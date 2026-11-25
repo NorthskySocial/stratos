@@ -84,7 +84,7 @@ mod tests {
         let like = InteractionKind::Like.collection();
         let long_but_valid_subject = format!(
             "at://did:plc:{}/{POST_COLLECTION}/bang",
-            "a".repeat(MAX_SUBJECT_URI_BYTES - 8)
+            "a".repeat(2048 - "did:plc:".len())
         );
         assert!(crate::identifier::RecordUri::parse(&long_but_valid_subject).is_ok());
         assert!(long_but_valid_subject.len() > MAX_SUBJECT_URI_BYTES);

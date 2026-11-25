@@ -1,9 +1,9 @@
 # Interop checklist
 
 For the person who runs the sandbox suites. It covers what to run today, and
-what to do, in order, the day an upstream PDS accepts the `at:space/` record
-and space spelling. No part of the November contract has been run against a
-host: the PDS images the sandbox pins refuse the new spelling.
+what to run against the published PDS that accepts the `at:space/` record
+and space spelling. The November 26 probe and its URI receipt record a successful
+dotted-authority journey; other acceptance journeys remain outstanding.
 
 Every runner command below (`pnpm exec tsx test/spaces-alignment/run-sandbox.ts`)
 runs from the repository root, needs rootless Docker, a clean checkout at a
@@ -44,21 +44,17 @@ pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
   --report-dir <new directory>
 ```
 
-The baseline is a diagnostic here, never acceptance. Eight of its ten
-assertions touch PDS custody, which the pinned hosts cannot serve in the new
-spelling, so it is expected to fail. The driver prints each assertion name when
+The baseline is a diagnostic here, never acceptance. The earlier pinned host
+refused the new spelling; the November 26 published-host probe succeeded for
+the dotted authority. Run the baseline to measure the selected candidate. The driver prints each assertion name when
 the step that proves it ends, and `failure.json` lists those names under
 `assertionsReached`. The steps run in this order: `browser-oauth`,
 `pds-custody`, `publication-feed`, `space-lexicon`, `pds-space-grant`,
 `public-private-blob-denied`, `authenticated-space-blob`, `stratos-custody`,
 `unrelated-boundary-denied`, `boundary-isolation`.
 
-- Expected: the run stops at or before `pds-custody`, the first assertion that
-  needs a PDS-custody write in the new spelling. `browser-oauth` may stop it
-  earlier, because sign-in asks the spaces PDS for the space scope and the
-  pinned hosts refuse a space declaration without `name`.
-- Not reached on a stop there: every assertion after the one reached.
-- Unknown: where exactly it stops. Read `assertionsReached` and record it.
+- If a step fails, read `assertionsReached` to identify the completed steps;
+  later steps are not evidence of acceptance.
 
 ## Not covered by any test today
 
@@ -72,10 +68,10 @@ exists.
   `health-answers-while-a-sync-writes`. A test would hold a store write open,
   request `/health`, and require the answer within that bound.
 
-## 2. The day a host accepts the new spelling
+## 2. Repeating the published-host checks
 
 Do these in order. Stop at the first step that fails and keep its output. No
-command in this section has been run: each is marked not verified. Where a
+command in this section must be verified against the selected artifact. Where a
 command calls an upstream method, it names the lexicon its parameters come
 from, at the November reference revision
 `b5fd12fa57b10cf068efa879812f558780f37109`. Check the same path at the revision
@@ -117,9 +113,7 @@ you pin before you rely on it.
    default, is `pds`.
 
    The last line prints `sha256:` and 64 hex digits. That is the local image ID
-   that `docker build --iidfile` writes, not a registry digest. It is the value
-   for `uriProbe.imageDigest` and for `--pds-image-digest`. Write the revision,
-   the package versions and the image ID down before anything else.
+   that `docker build --iidfile` writes, not a registry digest. Record this as the locally built image ID. It is distinct from the published registry digest in `uriProbe.imageDigest`; the November 26 probe used the published image, not this build.
 
 2. **Fill the manifest** `test/spaces-alignment/november/sources.json`:
    `reference.revision` and `reference.releaseAnchor` (neither may be a revision
@@ -127,9 +121,7 @@ you pin before you rely on it.
    `tarballSha256`, and `referenceHost.sha256` with the SHA-256 of `Dockerfile`
    and `pnpm-lock.yaml` at that revision. The runner refuses to build the
    reference host while those two hashes are empty or the revision is on the
-   legacy-only list or is the revision the October file pins. The values come
-   from these commands, one package at a time. Not verified: these commands
-   have not been run.
+   legacy-only list or is the revision the October file pins. The pinned build inputs and published package metadata were verified for the November 26 release. The release package metadata is separate from the installed dependency selections. The following commands can repeat those checks.
 
    ```sh
    git -C <upstream checkout> show <revision>:Dockerfile | sha256sum
@@ -266,18 +258,15 @@ you pin before you rely on it.
    node -e "console.log(JSON.parse(Buffer.from(process.argv[1].split('.')[1], 'base64url')).sub)" '<credential>'
    ```
 
-   `<credential>` is the `credential` that `authorizeSpaceSync` returns; the
-   last command prints its `sub`. Save the four answers of `createRecord`,
-   `getRecord`, `getDelegationToken` and `authorizeSpaceSync` in one receipt
-   file. The probe holds when the space, the record URI and the credential
-   `sub` all start with `at:space/`, and the record read back has the same URI.
-   Fill `cutoverEvidence.uriProbe`: `artifactRevision`, `imageDigest` (the image
-   ID from step 1), `packageVersions`, `recordUri` (from `createRecord`),
-   `credentialSubject` (the credential `sub`) and `receiptSha256` (`sha256sum`
-   of the receipt file). Then set `referenceSupportsTargetUri` to `true` and
-   `cutoverEvidence.status` to `fulfilled`.
-   `test/spaces-alignment/november/november-sources.test.ts` rejects a ready
-   manifest whose probe is partial or names a legacy-only artifact.
+   The checked-in `uri-probe-receipt.json` is a projection of the November 26
+   run against the published image. Its source receipt SHA-256 is
+   `14df3afee935aba074f5ce9ab27519a46a08bbb929ec089c56d88f931178f7c6`; the
+   source receipt also records the migration rehearsal and its feed-count
+   failure. Readiness checks the receipt hash, published image
+   digest, exact configured dotted authority and record URI, credential
+   subject, and matching create/read CID. It does not claim that a locally built
+   image has the published image digest, or that the release SDKs are installed.
+   A passing URI probe does not close that failure.
 
 4. **Run the upstream migrations on a disposable database.** The PDS applies
    its own migrations when it starts. Start the image of step 1 once against an
@@ -492,6 +481,24 @@ pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
   --pds-image-digest sha256:<digest>
 ```
 
+### Positive PDS-custody journey
+
+`november-positive` independently exercises OAuth create and read, a Stratos-bound
+credential read with the published SDK record-MAC verifier, feed delivery, and
+OAuth delete. Its receipt is not full interop acceptance. The dated URI probe
+above records a prior successful published-host run; a new runner receipt records
+only what that run actually executes.
+
+```sh
+pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
+  --sandbox-dir <sandbox checkout> \
+  --source "$(git rev-parse --show-toplevel)" \
+  --suite november-positive \
+  --pds-image-digest <published image digest> \
+  --review-receipt <receipt file> \
+  --report-dir <new directory>
+```
+
 ## The journeys
 
 The `november-interop` suite names one assertion per journey. Each item says the
@@ -504,8 +511,8 @@ save. Walk them in this order.
 - Closes: A pinned upstream build accepts the new space spelling: a record created on it comes back in that spelling, and a credential for it names the same space.
 - Proves: Create a record on the reference host, read back the URI it returns, read the record at that URI, and mint a credential: the URI, the record address and the credential subject all use the at:space/ spelling.
 - Expected: Stratos recognises only the at:space/ spelling and converts nothing, so a host that returns the new spelling should round-trip.
-- Unknown: Whether the build you pinned returns the new spelling from create and read. Nothing has been observed from any host.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Observed: The November 26 published PDS returned the dotted-authority URI and a matching credential subject; see `uri-probe-receipt.json`.
+- Command: Run `november-positive` for the positive journey; the complete suite still requires all journeys.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 2. `ordinary-custody-create-feed-delete`
@@ -567,7 +574,7 @@ save. Walk them in this order.
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: A credential minted by Stratos, as space authority, reads a member's record from the reference host.
 - Expected: The credential names the authority as issuer and the space as subject, binds the presentation key in cnf.kid, carries no aud, and is signed with the authority key; the #atproto_pds audience is on the delegation it was exchanged for. The receiver checks the signature against the authority DID document and calls no Stratos method.
-- Unknown: Whether a November host accepts a credential minted by a foreign authority. An August probe of an earlier alpha build reported that it did; the repository keeps its commit message, not its output.
+- Observed: The November 26 published PDS accepted a Stratos-minted credential and returned a record with a verified MAC; see `uri-probe-receipt.json`.
 - Command: Run `standard-credential-transport` (command below); it carries this journey in a ported form, as do `rust-production-interop`.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
@@ -639,7 +646,7 @@ save. Walk them in this order.
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: The exact new post URI and text appear in a real feed HTTP response, not only on a rendered page.
 - Expected: The feed response carries the URI the write returned: at:space/ for a PDS-custody post, at:// for a Stratos-custody post.
-- Unknown: The URI the host returns for a created record.
+- Observed: The November 26 published host returned the exact dotted-authority URI recorded in `uri-probe-receipt.json`.
 - Command: Run `baseline` (command below); it carries this journey in a ported form, as do `ordinary-custody`.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 

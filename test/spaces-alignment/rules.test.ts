@@ -209,8 +209,11 @@ describe('suite gate', () => {
 })
 
 describe('standalone suites', () => {
-  it('names ordinary-custody as the only standalone suite', () => {
-    expect([...STANDALONE_SUITE_IDS]).toEqual(['ordinary-custody'])
+  it('names standalone suites', () => {
+    expect([...STANDALONE_SUITE_IDS]).toEqual([
+      'ordinary-custody',
+      'november-positive',
+    ])
   })
 
   it('runs a standalone suite without the baseline before it', () => {

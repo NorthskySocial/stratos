@@ -14,29 +14,11 @@ import { suite as baseline } from './scenarios/baseline.js'
 import { suite as novemberInterop } from './scenarios/november-interop.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const DIGEST = `sha256:${'c'.repeat(64)}`
-const REVISION = '0123456789abcdef0123456789abcdef01234567'
+const DIGEST =
+  'sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350'
 
-function readySources(imageDigest = DIGEST): NovemberSources {
-  const sources = structuredClone(loadNovemberSources())
-  sources.reference.revision = REVISION
-  sources.reference.releaseAnchor = '89abcdef0123456789abcdef0123456789abcdef'
-  for (const entry of sources.packages) entry.version = '1.2.3'
-  sources.referenceSupportsTargetUri = true
-  sources.cutoverEvidence = {
-    status: 'fulfilled',
-    uriProbe: {
-      artifactRevision: REVISION,
-      imageDigest,
-      packageVersions: ['1.2.3'],
-      recordUri:
-        'at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:faye/zone.stratos.feed.post/swordfish',
-      credentialSubject:
-        'at:space/did:web:bebop.example/zone.stratos.space.feed/crew',
-      receiptSha256: 'a'.repeat(64),
-    },
-  }
-  return sources
+function readySources(): NovemberSources {
+  return structuredClone(loadNovemberSources())
 }
 
 describe('the prepared november-interop suite', () => {
@@ -53,11 +35,10 @@ describe('the prepared november-interop suite', () => {
 
   it('refuses a named digest while the November manifest is not ready', () => {
     expect(() =>
-      requirePreparedRunConditions(
-        novemberInterop.id,
-        DIGEST,
-        loadNovemberSources(),
-      ),
+      requirePreparedRunConditions(novemberInterop.id, DIGEST, {
+        ...loadNovemberSources(),
+        referenceSupportsTargetUri: false,
+      }),
     ).toThrow('the November manifest is not ready')
   })
 

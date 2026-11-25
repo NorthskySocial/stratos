@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { PdsSourcePin } from '../build-alpha-pds.js'
+import {
+  parseSpaceUri,
+  parseSpaceRecordUri,
+} from '../../../stratos-client/src/space-uri.js'
 
 const SOURCES_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -13,26 +18,27 @@ const OCTOBER_SOURCES_PATH = resolve(
   '../sources.json',
 )
 
-const TARGET_URI_FORMAT = 'at:space/'
 const HEX_40 = /^[0-9a-f]{40}$/
 const HEX_64 = /^[0-9a-f]{64}$/
 const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/
-
 // Held here as well as in the manifest so that editing the manifest cannot
 // shrink the list of artifacts that only serialize the earlier spelling.
 const LEGACY_REVISIONS = [
   'b5fd12fa57b10cf068efa879812f558780f37109',
   'd4def6e9f521896ed8222f576d54923d00b5fbeb',
 ]
-const LEGACY_PACKAGE_VERSIONS = [
-  '0.0.0-spaces-alpha-20261117141222',
-  '0.0.0-spaces-alpha-20261112204144',
-]
 
 export interface UriProbe {
   artifactRevision?: string
   imageDigest?: string
-  packageVersions?: string[]
+  expected?: {
+    authority: string
+    spaceType: string
+    spaceKey: string
+    author: string
+    collection: string
+    rkey: string
+  }
   recordUri?: string
   credentialSubject?: string
   receiptSha256?: string
@@ -81,47 +87,84 @@ function legacyRevisions(sources: NovemberSources): string[] {
   ]
 }
 
-function legacyVersions(sources: NovemberSources): string[] {
-  return [
-    ...new Set([
-      ...LEGACY_PACKAGE_VERSIONS,
-      ...sources.legacyUriOnly.packageVersions,
-    ]),
-  ]
-}
-
 function probeProblems(
   probe: UriProbe | null,
   sources: NovemberSources,
 ): string[] {
-  if (probe === null || typeof probe !== 'object')
-    return ['uriProbe must be an object']
+  if (!probe || typeof probe !== 'object') return ['uriProbe must be an object']
   const problems: string[] = []
-  if (!HEX_40.test(probe.artifactRevision ?? ''))
-    problems.push('uriProbe.artifactRevision')
-  else if (probe.artifactRevision !== sources.reference.revision)
-    problems.push('uriProbe.artifactRevision must equal reference.revision')
-  if (probe.imageDigest !== undefined && !IMAGE_DIGEST.test(probe.imageDigest))
-    problems.push('uriProbe.imageDigest')
-  const versions = probe.packageVersions
-  const manifestVersions = [
-    ...new Set(sources.packages.map((entry) => entry.version)),
-  ].sort()
-  if (!Array.isArray(versions) || versions.length === 0)
-    problems.push('uriProbe.packageVersions')
-  else if (
-    JSON.stringify([...new Set(versions)].sort()) !==
-    JSON.stringify(manifestVersions)
+  if (
+    !HEX_40.test(probe.artifactRevision ?? '') ||
+    probe.artifactRevision !== sources.reference.revision
   )
-    problems.push(
-      'uriProbe.packageVersions must equal the manifest package versions',
-    )
-  if (!(probe.recordUri ?? '').startsWith(TARGET_URI_FORMAT))
-    problems.push('uriProbe.recordUri must start with at:space/')
-  if (!nonEmpty(probe.credentialSubject))
-    problems.push('uriProbe.credentialSubject')
+    problems.push('uriProbe.artifactRevision must equal reference.revision')
+  if (!IMAGE_DIGEST.test(probe.imageDigest ?? ''))
+    problems.push('uriProbe.imageDigest')
   if (!HEX_64.test(probe.receiptSha256 ?? ''))
     problems.push('uriProbe.receiptSha256')
+  try {
+    const bytes = readFileSync(
+      resolve(dirname(SOURCES_PATH), 'uri-probe-receipt.json'),
+    )
+    if (
+      createHash('sha256').update(bytes).digest('hex') !== probe.receiptSha256
+    )
+      problems.push('uriProbe.receiptSha256 does not match receipt')
+    const receipt = JSON.parse(bytes.toString()) as {
+      publishedPdsDigest: string
+      dottedAuthority: Array<{
+        test: string
+        uri?: string
+        cid?: string
+        space?: string
+      }>
+    }
+    if (receipt.publishedPdsDigest !== probe.imageDigest)
+      problems.push('uriProbe.imageDigest does not match receipt')
+    const create = receipt.dottedAuthority.find(
+      (row) => row.test === 'OAuth create and read returned exact URI and CID',
+    )
+    const credential = receipt.dottedAuthority.find(
+      (row) =>
+        row.test === 'Stratos minted bound credential for exact dotted space',
+    )
+    const read = receipt.dottedAuthority.find(
+      (row) =>
+        row.test ===
+        'Published PDS accepted Stratos credential and returned a verified record MAC',
+    )
+    const expected = probe.expected
+    if (!expected || !Object.values(expected).every(nonEmpty)) {
+      problems.push('uriProbe.expected')
+      return problems
+    }
+    const expectedSubject = `at:space/${expected.authority}/${expected.spaceType}/${expected.spaceKey}`
+    const expectedUri = `${expectedSubject}/${expected.author}/${expected.collection}/${expected.rkey}`
+    if (
+      !parseSpaceUri(expectedSubject).ok ||
+      !parseSpaceRecordUri(expectedUri).ok
+    )
+      problems.push('uriProbe.expected contains invalid identifiers')
+    if (
+      probe.credentialSubject !== expectedSubject ||
+      credential?.space !== expectedSubject
+    )
+      problems.push(
+        'uriProbe.credentialSubject must match the configured space and receipt',
+      )
+    if (
+      probe.recordUri !== expectedUri ||
+      create?.uri !== expectedUri ||
+      read?.uri !== expectedUri ||
+      !create.cid ||
+      create.cid !== read?.cid
+    )
+      problems.push(
+        'uriProbe.recordUri must match the configured record and create/read receipt',
+      )
+  } catch {
+    problems.push('uriProbe receipt is missing or invalid')
+  }
   return problems
 }
 
@@ -135,19 +178,12 @@ export function manifestReadinessProblems(sources: NovemberSources): string[] {
     return ['the reference host is not recorded as accepting at:space/']
   const problems: string[] = []
   const badRevisions = legacyRevisions(sources)
-  const badVersions = legacyVersions(sources)
   for (const revision of [
     sources.reference.revision,
     sources.reference.releaseAnchor,
   ]) {
     if (badRevisions.includes(revision))
       problems.push(`legacy-only revision cannot be URI-ready: ${revision}`)
-  }
-  for (const entry of sources.packages) {
-    if (badVersions.includes(entry.version))
-      problems.push(
-        `legacy-only package cannot be URI-ready: ${entry.name}@${entry.version}`,
-      )
   }
   if (sources.cutoverEvidence.status !== 'fulfilled')
     problems.push('cutoverEvidence.status is not fulfilled')

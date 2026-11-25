@@ -30,6 +30,8 @@
     "test:integration:appview": "pnpm e2etestappview"
   },
   "devDependencies": {
+    "@atproto/crypto": "0.0.0-spaces-alpha-20261124235736",
+    "@atproto/space": "0.0.0-spaces-alpha-20261124235736",
     "@eslint/js": "^10.0.1",
     "@stryker-mutator/core": "^10.1.1",
     "@stryker-mutator/vitest-runner": "^10.1.1",
@@ -40,6 +42,7 @@
     "concurrently": "^10.0.7",
     "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.8",
+    "fast-check": "4.10.3",
     "globals": "^17.14.0",
     "jsdom": "^31.0.1",
     "prettier": "^3.10.1",

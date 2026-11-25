@@ -1526,7 +1526,7 @@ mod tests {
 
         let path = old_build_encrypted_file("verified-sync");
         let survivors_before = survivors_of_file(&path);
-        let mut store = EncryptedStore::open(&path, key()).unwrap();
+        let store = EncryptedStore::open(&path, key()).unwrap();
         assert_eq!(version_of(&store.connection), 12);
         assert_eq!(
             survivors(&store.connection),
@@ -1545,6 +1545,10 @@ mod tests {
             foreign_keys, 1,
             "the store's connection enforces foreign keys"
         );
+        drop(store);
+        let mut store = EncryptedStore::open(&path, key()).unwrap();
+        assert_eq!(survivors(&store.connection), survivors_before);
+        assert_eq!(version_of(&store.connection), 12);
         store
             .replace_pds_space_members(
                 BOUNDARY,
@@ -1625,6 +1629,23 @@ mod tests {
             "the purged post is not"
         );
         drop(lifecycle);
+        let reopened = EncryptedStore::open(&path, key()).unwrap();
+        assert_eq!(count(&reopened.connection, "space_repo_state"), 1);
+        assert_eq!(count(&reopened.connection, "space_repo_record"), 2);
+        for uri in [
+            FAYE_POST.to_owned(),
+            format!("{SPACE}/{JET}/{POST}/see-you"),
+            format!("{SPACE}/{JET}/{POST}/bebop"),
+        ] {
+            let rows: i64 = reopened
+                .connection
+                .query_row("SELECT COUNT(*) FROM post WHERE uri = ?1", [&uri], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(rows, 1, "{uri} survives reopen");
+        }
+        drop(reopened);
         fs::remove_file(path).unwrap();
     }
 

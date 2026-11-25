@@ -24,6 +24,7 @@ export interface Journey {
   proves: string
   expected: string
   unknown: string
+  observed?: string
   /** Runner suites that carry this journey in a ported form; empty when no driver exists yet. */
   carriedBy: readonly string[]
 }
@@ -38,6 +39,8 @@ export const JOURNEYS: readonly Journey[] = [
       'Stratos recognises only the at:space/ spelling and converts nothing, so a host that returns the new spelling should round-trip.',
     unknown:
       'Whether the build you pinned returns the new spelling from create and read. Nothing has been observed from any host.',
+    observed:
+      'The November 26 published PDS returned the dotted-authority URI and a matching credential subject; see `uri-probe-receipt.json`.',
     carriedBy: [],
   },
   {
@@ -113,6 +116,8 @@ export const JOURNEYS: readonly Journey[] = [
       'The credential names the authority as issuer and the space as subject, binds the presentation key in cnf.kid, carries no aud, and is signed with the authority key; the #atproto_pds audience is on the delegation it was exchanged for. The receiver checks the signature against the authority DID document and calls no Stratos method.',
     unknown:
       'Whether a November host accepts a credential minted by a foreign authority. An August probe of an earlier alpha build reported that it did; the repository keeps its commit message, not its output.',
+    observed:
+      'The November 26 published PDS accepted a Stratos-minted credential and returned a record with a verified MAC; see `uri-probe-receipt.json`.',
     carriedBy: ['standard-credential-transport', 'rust-production-interop'],
   },
   {
@@ -199,6 +204,8 @@ export const JOURNEYS: readonly Journey[] = [
     expected:
       'The feed response carries the URI the write returned: at:space/ for a PDS-custody post, at:// for a Stratos-custody post.',
     unknown: 'The URI the host returns for a created record.',
+    observed:
+      'The November 26 published host returned the exact dotted-authority URI recorded in `uri-probe-receipt.json`.',
     carriedBy: ['baseline', 'ordinary-custody'],
   },
   {
@@ -349,23 +356,29 @@ export function renderJourneyChecklist(
   return journeys
     .map((journey, index) => {
       const carrier = journey.carriedBy[0]
-      const command = carrier
-        ? `Run \`${carrier}\` (command below); it carries this journey in a ported form${
-            journey.carriedBy.length > 1
-              ? `, as do ${journey.carriedBy
-                  .slice(1)
-                  .map((id) => `\`${id}\``)
-                  .join(' and ')}`
-              : ''
-          }.`
-        : 'No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.'
+      const command =
+        journey.id === 'canonical-uri-at-each-boundary'
+          ? 'Run `november-positive` for the positive journey; the complete suite still requires all journeys.'
+          : carrier
+            ? `Run \`${carrier}\` (command below); it carries this journey in a ported form${
+                journey.carriedBy.length > 1
+                  ? `, as do ${journey.carriedBy
+                      .slice(1)
+                      .map((id) => `\`${id}\``)
+                      .join(' and ')}`
+                  : ''
+              }.`
+            : 'No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.'
       return [
         `### ${index + 1}. \`${journey.id}\``,
         '',
         `- Closes: ${ACCEPTANCE_ROWS[journey.acceptanceRow]}`,
         `- Proves: ${journey.proves}`,
         `- Expected: ${journey.expected}`,
-        `- Unknown: ${journey.unknown}`,
+        journey.observed
+          ? `- Observed: ${journey.observed}`
+          : `- Unknown: ${journey.unknown}`,
+
         `- Command: ${command}`,
         '- Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.',
       ].join('\n')

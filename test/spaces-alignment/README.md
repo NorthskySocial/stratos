@@ -83,7 +83,7 @@ status without copying child stderr, account passwords, or environment values.
 If cleanup fails, the gate fails and preserves the private generated Compose
 file at the recorded recovery path rather than deleting the only recovery config.
 
-The AiaB checkout must be clean at v0.7.2 (`6e9a39a94c102e4d42fa5868bd90b881bb5be695`). If absent, the runner clones, fetches, and checks out that exact SHA. Repo-owned `atmosphere/` assets are installed only in the disposable export. The baseline uses AiaB's digest-pinned `pds-space1`, alongside ordinary `pds1`; it does not build a primary PDS. The suites that need the reference PDS build it as a separate image and the receipt records, and the runner cleans up, that image.
+The AiaB checkout must be clean at v0.7.2 (`6e9a39a94c102e4d42fa5868bd90b881bb5be695`). If absent, the runner clones, fetches, and checks out that exact SHA. Repo-owned `atmosphere/` assets are installed only in the disposable export. The disposable export pins `pds-space1` to `ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350`, alongside ordinary `pds1`; it does not build a primary PDS. The Deno test Compose file uses the same pin. The receipt records the running containers' local image IDs after checking them against their configured images. The registry digest and local image ID are different identities. When Docker reports a rootless engine, the exported AiaB runner uses container UID 0 to read its private state. The suites that need the reference PDS build it as a separate image and the receipt records, and the runner cleans up, that image.
 
 The integration is one generic application with native Compose build arguments. Its identity Dockerfile/script and browser Dockerfile originated at historical AiaB commit `ecf52fac4abaa681717f2ed2ce2afc2253d1a366`; the stack and browser driver incorporate the reviewed Stratos templates. The Stratos space lexicon fixture and authority definition are retained as readable assets. The reference PDS template is `templates/reference-pds.yaml` with `templates/reference-pds.definition.json`.
 
@@ -218,3 +218,5 @@ strictly validate the Stratos-specific post record type: its record validator
 only knows built-in lexicons. The blob fixture therefore uses the PDS's default
 best-effort validation path, without disabling validation, and verifies that
 the scoped record write and private blob retrieval both succeed.
+
+The `--pds-image-digest` value identifies the image used in the URI probe. The source-built reference PDS is a separate image; its build receipt and running local image ID are recorded independently.

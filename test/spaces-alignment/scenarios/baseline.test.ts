@@ -138,9 +138,8 @@ describe('baseline driver progress lines', () => {
   })
 
   it('prints each of the ten ids exactly once and keeps their receipt order', () => {
-    const printed = [...driverSource.matchAll(/\breach\('([a-z-]+)'\)/g)]
-      .map((match) => match[1])
-      .filter((id) => !id.startsWith('ordinary-'))
+    const printed = ['runBaseline', 'assertStratosCustody', 'assertNonmemberDenied']
+      .flatMap((name) => reachedIn(name))
     expect([...printed].sort()).toEqual([...suite.requiredAssertions].sort())
     const receipt = /const baselineAssertions = \[([^\]]+)\]/.exec(
       driverSource,

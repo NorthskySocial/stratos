@@ -15,6 +15,12 @@ importers:
         specifier: ^18.0.10
         version: 18.0.10
     devDependencies:
+      '@atproto/crypto':
+        specifier: 0.0.0-spaces-alpha-20261124235736
+        version: 0.0.0-spaces-alpha-20261124235736
+      '@atproto/space':
+        specifier: 0.0.0-spaces-alpha-20261124235736
+        version: 0.0.0-spaces-alpha-20261124235736
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.15.0(jiti@2.7.0)(supports-color@10.2.2))
@@ -45,6 +51,9 @@ importers:
       eslint-config-prettier:
         specifier: ^10.1.8
         version: 10.1.8(eslint@10.15.0(jiti@2.7.0)(supports-color@10.2.2))
+      fast-check:
+        specifier: 4.10.3
+        version: 4.10.3
       globals:
         specifier: ^17.14.0
         version: 17.14.0
@@ -445,7 +454,7 @@ importers:
         version: 1.2.0(@atcute/cid@2.5.0)(@atcute/lexicons@2.1.1)
       '@atproto/bsky':
         specifier: ^0.5.17
-        version: 0.5.17(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
+        version: 0.5.17(supports-color@10.2.2)
       '@atproto/identity':
         specifier: ^0.5.25
         version: 0.5.25
@@ -986,6 +995,10 @@ packages:
     resolution: {integrity: sha512-fB91o0FSCYW17rKtBM8Xk03txLDJqthEMhUzF1vjeNnr2QXlrVxgVOjMWYwppjeaECvTB6dRRKf/xLDBdKLtlg==}
     engines: {node: '>=22'}
 
+  '@atproto/crypto@0.0.0-spaces-alpha-20261124235736':
+    resolution: {integrity: sha512-e4XH8nDZpjMrseIZ8IhF6FoIlGO5BJk8lSggXdTH8E0pvQKXoUR6cYnaJhSupICHnyrg7p/tmpCyhShIsUB4IA==}
+    engines: {node: '>=22'}
+
   '@atproto/crypto@0.1.0':
     resolution: {integrity: sha512-9xgFEPtsCiJEPt9o3HtJT30IdFTGw5cQRSJVIy5CFhqBA4vDLcdXiRDLCjkzHEVbtNCsHUW6CrlfOgbeLPcmcg==}
 
@@ -1045,6 +1058,10 @@ packages:
     resolution: {integrity: sha512-KhgysgTw240GDvpFYdQN2eUBB/vqO044yH2tsarncNGS5IM/aOpSNlDu24Ka/TjNEF+JVX7Ln84NWPK7vruFkA==}
     engines: {node: '>=22'}
 
+  '@atproto/lex-schema@0.0.0-spaces-alpha-20261124235736':
+    resolution: {integrity: sha512-avk57910OailUcKoMHghrQFuErpF2Qxc55BPeTkAt+65oulYnUbaqfAGjr0enFeyO3J2ybca6vbem0G9QGNFOg==}
+    engines: {node: '>=22'}
+
   '@atproto/lex-schema@0.3.1':
     resolution: {integrity: sha512-/ZESLZxjTUk9t4bcK/gfVijPxC5SiORVyRqBB++WAENXbNRR9PJ0KOcAIepPSOYp4Mb1C8Q8YwxEf2x8gfI3NQ==}
     engines: {node: '>=22'}
@@ -1097,12 +1114,24 @@ packages:
     resolution: {integrity: sha512-GVWqyJdNKCQq1sI38I7RvDNHdzzrCjiJPRkKMDVc66rjpHThAkc4HfepYovWY+J2nC7YtkBUfd108xIn48Rl0w==}
     engines: {node: '>=22'}
 
+  '@atproto/space@0.0.0-spaces-alpha-20261124235736':
+    resolution: {integrity: sha512-tC8uNL+RBNbuZMX9/2wieVsa7tzVazrF7FrJk9P57C9fVfM5FZKGCGv3okWmSNQ+q0jeOaPRGhklNeSm/71JWQ==}
+    engines: {node: '>=22'}
+
+  '@atproto/star@0.0.1':
+    resolution: {integrity: sha512-1yks3K03ziNWVWRShEVhO8ELOpwdiUgonyOesKAbq1Nwh1cbEQ7eOWKQRapF2GIaP8TcQiZZLbGB64bAnE79WQ==}
+    engines: {node: '>=22'}
+
   '@atproto/sync@0.4.29':
     resolution: {integrity: sha512-Y0B4X4uPWSrao0YuM0gtH085nys06hd0UMGqHs4oj5uRUnnvC0dbF//4QgRs5g4rummVFYxX42MYO/g6MYRN/A==}
     engines: {node: '>=22'}
 
   '@atproto/syntax@0.0.0-spaces-alpha-20261117141222':
     resolution: {integrity: sha512-EwGfevaQpSHFYl95a4r7Kl63PLSLeYm6Qwf3XWVzCjJO55HuuNLUQbsrF2iUlTy++82YoC/1dxHk57SWJCom8A==}
+    engines: {node: '>=22'}
+
+  '@atproto/syntax@0.0.0-spaces-alpha-20261124235736':
+    resolution: {integrity: sha512-0gjf91VdMzZjWNaTdkLHTBVDGUUwds1usf1KyiyRe+eSolz/lBJp0zbJBTW6yY8ZLh9boS/IVIn3NAWhyuJ4OQ==}
     engines: {node: '>=22'}
 
   '@atproto/syntax@0.7.9':
@@ -7163,7 +7192,7 @@ snapshots:
       multiformats: 13.4.2
       uint8arrays: 5.1.1
 
-  '@atproto/bsky@0.5.17(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)':
+  '@atproto/bsky@0.5.17(supports-color@10.2.2)':
     dependencies:
       '@atproto-labs/fetch-node': 0.4.6
       '@atproto-labs/opentelemetry-node': 0.5.1(supports-color@10.2.2)
@@ -7185,7 +7214,7 @@ snapshots:
       '@connectrpc/connect': 1.7.0(@bufbuild/protobuf@1.10.1)
       '@connectrpc/connect-express': 1.7.0(@bufbuild/protobuf@1.10.1)(@connectrpc/connect-node@1.7.0(@bufbuild/protobuf@1.10.1)(@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.1)))(@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.1))
       '@connectrpc/connect-node': 1.7.0(@bufbuild/protobuf@1.10.1)(@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.1))
-      '@did-plc/lib': 0.0.1(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
+      '@did-plc/lib': 0.0.1(supports-color@10.2.2)
       '@growthbook/growthbook': 1.8.0
       '@hapi/address': 5.1.1
       '@noble/curves': 1.9.7
@@ -7245,6 +7274,12 @@ snapshots:
       '@atproto/lex-data': 0.1.11
       multiformats: 13.4.2
       pino: 10.4.0
+
+  '@atproto/crypto@0.0.0-spaces-alpha-20261124235736':
+    dependencies:
+      '@noble/curves': 1.9.7
+      '@noble/hashes': 1.8.0
+      uint8arrays: 5.1.1
 
   '@atproto/crypto@0.1.0':
     dependencies:
@@ -7349,6 +7384,13 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  '@atproto/lex-schema@0.0.0-spaces-alpha-20261124235736':
+    dependencies:
+      '@atproto/lex-data': 0.1.11
+      '@atproto/syntax': 0.0.0-spaces-alpha-20261124235736
+      '@standard-schema/spec': 1.1.0
+      tslib: 2.9.1
 
   '@atproto/lex-schema@0.3.1':
     dependencies:
@@ -7488,6 +7530,22 @@ snapshots:
       varint: 6.0.0
       zod: 3.25.76
 
+  '@atproto/space@0.0.0-spaces-alpha-20261124235736':
+    dependencies:
+      '@atproto/crypto': 0.0.0-spaces-alpha-20261124235736
+      '@atproto/lex-cbor': 0.1.11
+      '@atproto/lex-data': 0.1.11
+      '@atproto/lex-schema': 0.0.0-spaces-alpha-20261124235736
+      '@atproto/star': 0.0.1
+      '@atproto/syntax': 0.0.0-spaces-alpha-20261124235736
+      '@noble/hashes': 1.8.0
+      structured-headers: 1.0.1
+
+  '@atproto/star@0.0.1':
+    dependencies:
+      '@atproto/lex-cbor': 0.1.11
+      '@atproto/lex-data': 0.1.11
+
   '@atproto/sync@0.4.29(supports-color@10.2.2)':
     dependencies:
       '@atproto/common': 0.8.12
@@ -7505,6 +7563,11 @@ snapshots:
       - utf-8-validate
 
   '@atproto/syntax@0.0.0-spaces-alpha-20261117141222':
+    dependencies:
+      iso-datestring-validator: 2.2.2
+      tslib: 2.9.1
+
+  '@atproto/syntax@0.0.0-spaces-alpha-20261124235736':
     dependencies:
       iso-datestring-validator: 2.2.2
       tslib: 2.9.1
@@ -8188,7 +8251,7 @@ snapshots:
     dependencies:
       '@bufbuild/protobuf': 1.10.1
 
-  '@did-plc/lib@0.0.1(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)':
+  '@did-plc/lib@0.0.1(supports-color@10.2.2)':
     dependencies:
       '@atproto/common': 0.1.0
       '@atproto/crypto': 0.1.0

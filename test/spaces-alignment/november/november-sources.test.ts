@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import {
+  loadNovemberSources,
+  manifestReadinessProblems,
+} from './reference-host.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const MANIFEST_PATH = resolve(HERE, 'sources.json')
@@ -125,97 +130,6 @@ function shapeProblems(manifest: SourceManifest): string[] {
   return problems
 }
 
-function probeProblems(
-  probe: UriProbe | null,
-  manifest: SourceManifest,
-): string[] {
-  if (probe === null || typeof probe !== 'object')
-    return ['uriProbe must be an object']
-  const problems: string[] = []
-  if (!HEX_40.test(probe.artifactRevision ?? ''))
-    problems.push('uriProbe.artifactRevision')
-  else if (probe.artifactRevision !== manifest.reference.revision)
-    problems.push('uriProbe.artifactRevision must equal reference.revision')
-  if (
-    probe.imageDigest !== undefined &&
-    !/^sha256:[0-9a-f]{64}$/.test(probe.imageDigest)
-  )
-    problems.push('uriProbe.imageDigest')
-  const versions = probe.packageVersions
-  if (
-    !Array.isArray(versions) ||
-    versions.length === 0 ||
-    !versions.every((version) => EXACT_VERSION.test(version))
-  )
-    problems.push('uriProbe.packageVersions')
-  else if (!sameVersions(versions, manifestVersions(manifest)))
-    problems.push(
-      'uriProbe.packageVersions must equal the manifest package versions',
-    )
-  for (const named of [probe.artifactRevision, ...(versions ?? [])]) {
-    if (
-      typeof named === 'string' &&
-      (LEGACY_REVISIONS.includes(named) ||
-        LEGACY_PACKAGE_VERSIONS.includes(named))
-    )
-      problems.push(`uriProbe names a legacy-only artifact: ${named}`)
-  }
-  if (!(probe.recordUri ?? '').startsWith(TARGET_URI_FORMAT))
-    problems.push('uriProbe.recordUri must start with at:space/')
-  if (!nonEmpty(probe.credentialSubject))
-    problems.push('uriProbe.credentialSubject')
-  if (!HEX_64.test(probe.receiptSha256 ?? ''))
-    problems.push('uriProbe.receiptSha256')
-  return problems
-}
-
-function manifestVersions(manifest: SourceManifest): string[] {
-  return manifest.packages.map((entry) => entry.version)
-}
-
-function sameVersions(left: string[], right: string[]): boolean {
-  const distinct = (versions: string[]) => [...new Set(versions)].sort()
-  return JSON.stringify(distinct(left)) === JSON.stringify(distinct(right))
-}
-
-function legacyArtifactsInUse(manifest: SourceManifest): string[] {
-  const used: string[] = []
-  if (
-    LEGACY_REVISIONS.includes(manifest.reference.revision) ||
-    LEGACY_REVISIONS.includes(manifest.reference.releaseAnchor)
-  )
-    used.push(`reference ${manifest.reference.revision}`)
-  for (const entry of manifest.packages) {
-    if (LEGACY_PACKAGE_VERSIONS.includes(entry.version))
-      used.push(`${entry.name}@${entry.version}`)
-  }
-  return used
-}
-
-// Evidence about a different artifact is not evidence about this one, so the
-// probe's revision and package versions must equal the manifest's, and neither
-// the manifest nor the probe may name a legacy-only artifact.
-function readinessProblems(manifest: SourceManifest): string[] {
-  const { referenceSupportsTargetUri, cutoverEvidence } = manifest
-  if (referenceSupportsTargetUri === false) {
-    const problems: string[] = []
-    if (cutoverEvidence.status !== 'unfulfilled')
-      problems.push('false requires cutoverEvidence.status unfulfilled')
-    if (cutoverEvidence.uriProbe !== null)
-      problems.push('false requires a null uriProbe')
-    return problems
-  }
-  if (referenceSupportsTargetUri !== true)
-    return ['referenceSupportsTargetUri must be a boolean']
-  const problems = legacyArtifactsInUse(manifest).map(
-    (artifact) => `legacy-only artifact cannot be URI-ready: ${artifact}`,
-  )
-  if (cutoverEvidence.status !== 'fulfilled')
-    problems.push('true requires cutoverEvidence.status fulfilled')
-  problems.push(...probeProblems(cutoverEvidence.uriProbe, manifest))
-  return problems
-}
-
 interface LedgerPromptFields {
   promptSection: string
   decision: string
@@ -261,35 +175,48 @@ function withChanges(
   return copy
 }
 
-const COMPLETE_PROBE: UriProbe = {
-  artifactRevision: '0123456789abcdef0123456789abcdef01234567',
-  packageVersions: ['1.2.3'],
-  recordUri:
-    'at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:faye/zone.stratos.feed.post/swordfish',
-  credentialSubject:
-    'at:space/did:web:bebop.example/zone.stratos.space.feed/crew',
-  receiptSha256: 'a'.repeat(64),
-}
-
-function readyManifestOnNewArtifact(): SourceManifest {
-  return withChanges((manifest) => {
-    manifest.reference.revision = '0123456789abcdef0123456789abcdef01234567'
-    manifest.reference.releaseAnchor =
-      '89abcdef0123456789abcdef0123456789abcdef'
-    for (const entry of manifest.packages) entry.version = '1.2.3'
-    manifest.referenceSupportsTargetUri = true
-    manifest.cutoverEvidence = {
-      status: 'fulfilled',
-      uriProbe: structuredClone(COMPLETE_PROBE),
-    }
-  })
-}
-
 describe('november source manifest', () => {
   const manifest = loadManifest()
 
   it('has well-formed revisions, hashes, integrities and exact versions', () => {
     expect(shapeProblems(manifest)).toEqual([])
+  })
+
+  it('records all six inspected release packages independently of installed selections', () => {
+    const raw = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as {
+      releasePackages: Array<{
+        name: string
+        version: string
+        integrity: string
+        tarballSha256: string
+      }>
+    }
+    expect(raw.releasePackages.map((entry) => entry.name).sort()).toEqual(
+      [...PACKAGE_NAMES].sort(),
+    )
+    for (const entry of raw.releasePackages) {
+      expect(entry.version).toBe('0.0.0-spaces-alpha-20261124235736')
+      expect(entry.integrity).toMatch(SHA512_INTEGRITY)
+      expect(entry.tarballSha256).toMatch(HEX_64)
+    }
+    expect(
+      manifest.packages.find((entry) => entry.name === '@atproto/oauth-scopes')
+        ?.version,
+    ).toBe('0.0.0-spaces-alpha-20261117141222')
+  })
+
+  it('verifies every fixture against its recorded hash', () => {
+    const raw = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as {
+      fixtures: Array<{ path: string; sha256: string }>
+    }
+    expect(raw.fixtures.length).toBeGreaterThan(0)
+    for (const fixture of raw.fixtures) {
+      const bytes = readFileSync(resolve(HERE, 'fixtures', fixture.path))
+      expect(
+        createHash('sha256').update(bytes).digest('hex'),
+        fixture.path,
+      ).toBe(fixture.sha256)
+    }
   })
 
   it('targets exactly the at:space/ form', () => {
@@ -316,145 +243,38 @@ describe('november source manifest', () => {
   })
 
   it('does not claim the reference serializes the target uri without proof', () => {
-    expect(readinessProblems(manifest)).toEqual([])
+    expect(manifestReadinessProblems(loadNovemberSources())).toEqual([])
   })
 
-  it('records the reference as legacy-only with unfulfilled cutover evidence', () => {
-    expect(manifest.referenceSupportsTargetUri).toBe(false)
-    expect(manifest.cutoverEvidence).toEqual({
-      status: 'unfulfilled',
-      uriProbe: null,
-    })
-    expect(legacyArtifactsInUse(manifest).length).toBeGreaterThan(0)
+  it('records evidence of the published reference host', () => {
+    expect(manifest.referenceSupportsTargetUri).toBe(true)
+    expect(manifest.cutoverEvidence.status).toBe('fulfilled')
   })
 })
 
-describe('november uri readiness rule', () => {
-  it('rejects true with no evidence', () => {
-    const claimed = withChanges((m) => {
-      m.referenceSupportsTargetUri = true
-    })
-    expect(readinessProblems(claimed)).not.toEqual([])
+describe('november URI readiness rule', () => {
+  it.each(LEGACY_REVISIONS)('rejects legacy revision %s', (revision) => {
+    const sources = loadNovemberSources()
+    sources.reference.revision = revision
+    expect(manifestReadinessProblems(sources)).not.toEqual([])
   })
-
-  it('rejects true for a legacy-only artifact whatever the probe says', () => {
-    const claimed = withChanges((m) => {
-      m.referenceSupportsTargetUri = true
-      m.cutoverEvidence = {
-        status: 'fulfilled',
-        uriProbe: structuredClone(COMPLETE_PROBE),
-      }
-    })
-    const problems = readinessProblems(claimed)
-    expect(problems.some((p) => p.startsWith('legacy-only artifact'))).toBe(
-      true,
-    )
-  })
-
-  it.each(LEGACY_PACKAGE_VERSIONS)(
-    'rejects true when a package is at legacy version %s',
-    (version) => {
-      const claimed = readyManifestOnNewArtifact()
-      claimed.packages[0]!.version = version
-      expect(readinessProblems(claimed)).not.toEqual([])
-    },
-  )
-
-  it.each(LEGACY_REVISIONS)(
-    'rejects true when the reference is at legacy revision %s',
-    (revision) => {
-      const claimed = readyManifestOnNewArtifact()
-      claimed.reference.revision = revision
-      expect(readinessProblems(claimed)).not.toEqual([])
-    },
-  )
-
-  it('accepts true on a different artifact with a complete probe', () => {
-    expect(readinessProblems(readyManifestOnNewArtifact())).toEqual([])
-  })
-
-  it('rejects true on a different artifact with a partial probe', () => {
-    const fields: Array<keyof UriProbe> = [
+  it('rejects missing evidence and mismatched identities', () => {
+    for (const field of [
+      'artifactRevision',
+      'imageDigest',
       'recordUri',
       'credentialSubject',
       'receiptSha256',
-      'packageVersions',
-    ]
-    for (const field of fields) {
-      const claimed = readyManifestOnNewArtifact()
-      delete claimed.cutoverEvidence.uriProbe![field]
-      expect(readinessProblems(claimed), field).not.toEqual([])
+    ] as const) {
+      const sources = loadNovemberSources()
+      delete sources.cutoverEvidence.uriProbe![field]
+      expect(manifestReadinessProblems(sources), field).not.toEqual([])
     }
-    const noArtifact = readyManifestOnNewArtifact()
-    delete noArtifact.cutoverEvidence.uriProbe!.artifactRevision
-    expect(readinessProblems(noArtifact)).not.toEqual([])
   })
-
-  it('rejects a probe that ran against a different revision than the manifest', () => {
-    const claimed = readyManifestOnNewArtifact()
-    claimed.cutoverEvidence.uriProbe!.artifactRevision =
-      'fedcba9876543210fedcba9876543210fedcba98'
-    expect(readinessProblems(claimed)).toContain(
-      'uriProbe.artifactRevision must equal reference.revision',
-    )
-  })
-
-  it('rejects a probe whose package versions differ from the manifest', () => {
-    const otherVersion = readyManifestOnNewArtifact()
-    otherVersion.cutoverEvidence.uriProbe!.packageVersions = ['1.2.4']
-    expect(readinessProblems(otherVersion)).toContain(
-      'uriProbe.packageVersions must equal the manifest package versions',
-    )
-    const extraVersion = readyManifestOnNewArtifact()
-    extraVersion.cutoverEvidence.uriProbe!.packageVersions = ['1.2.3', '1.2.4']
-    expect(readinessProblems(extraVersion)).toContain(
-      'uriProbe.packageVersions must equal the manifest package versions',
-    )
-  })
-
-  it.each(LEGACY_REVISIONS)(
-    'rejects a probe naming the legacy-only revision %s',
-    (revision) => {
-      const claimed = readyManifestOnNewArtifact()
-      claimed.cutoverEvidence.uriProbe!.artifactRevision = revision
-      expect(readinessProblems(claimed)).toContain(
-        `uriProbe names a legacy-only artifact: ${revision}`,
-      )
-    },
-  )
-
-  it.each(LEGACY_PACKAGE_VERSIONS)(
-    'rejects a probe naming the legacy-only package version %s',
-    (version) => {
-      const claimed = readyManifestOnNewArtifact()
-      claimed.cutoverEvidence.uriProbe!.packageVersions = ['1.2.3', version]
-      expect(readinessProblems(claimed)).toContain(
-        `uriProbe names a legacy-only artifact: ${version}`,
-      )
-    },
-  )
-
-  it('rejects a probe whose record uri is in the legacy form', () => {
-    const claimed = readyManifestOnNewArtifact()
-    claimed.cutoverEvidence.uriProbe!.recordUri =
-      'at://did:web:bebop.example/space/zone.stratos.space.feed/crew/did:plc:faye/zone.stratos.feed.post/swordfish'
-    expect(readinessProblems(claimed)).not.toEqual([])
-  })
-
-  it('rejects true while the evidence is unfulfilled', () => {
-    const claimed = readyManifestOnNewArtifact()
-    claimed.cutoverEvidence.status = 'unfulfilled'
-    expect(readinessProblems(claimed)).not.toEqual([])
-  })
-
-  it('rejects false with fulfilled evidence', () => {
-    const contradictory = withChanges((m) => {
-      m.cutoverEvidence = {
-        status: 'fulfilled',
-        uriProbe: structuredClone(COMPLETE_PROBE),
-      }
-    })
-    expect(readinessProblems(contradictory)).not.toEqual([])
+  it('rejects an unfulfilled probe', () => {
+    const sources = loadNovemberSources()
+    sources.cutoverEvidence.status = 'unfulfilled'
+    expect(manifestReadinessProblems(sources)).not.toEqual([])
   })
 })
 

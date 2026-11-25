@@ -18,6 +18,7 @@ import {
   command,
   enforceReportContents,
   ensureSeparatePaths,
+  installAtmosphereAssets,
   parseOptions,
   pinnedCheckout,
   resolveEvidence,
@@ -43,34 +44,14 @@ async function directory(): Promise<string> {
   return path
 }
 
-const REFERENCE_REVISION = 'c'.repeat(40)
+const REFERENCE_REVISION = '1f510f8e36a973f6fd055da349b586918805ae66'
+const PROBED_DIGEST =
+  'sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350'
 
 // A manifest that names a different artifact and carries complete cutover
 // evidence, so the runner can be exercised past its refusal.
 function readyNovemberSources(): NovemberSources {
-  const sources = structuredClone(loadNovemberSources())
-  sources.reference.revision = REFERENCE_REVISION
-  sources.reference.releaseAnchor = 'e'.repeat(40)
-  for (const entry of sources.packages) entry.version = '1.2.3'
-  sources.referenceSupportsTargetUri = true
-  sources.cutoverEvidence = {
-    status: 'fulfilled',
-    uriProbe: {
-      artifactRevision: REFERENCE_REVISION,
-      imageDigest: `sha256:${'c'.repeat(64)}`,
-      packageVersions: ['1.2.3'],
-      recordUri:
-        'at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:faye/zone.stratos.feed.post/swordfish',
-      credentialSubject:
-        'at:space/did:web:bebop.example/zone.stratos.space.feed/crew',
-      receiptSha256: 'a'.repeat(64),
-    },
-  }
-  sources.referenceHost.sha256 = {
-    [sources.referenceHost.dockerfile]: 'a'.repeat(64),
-    [sources.referenceHost.lockfile]: 'b'.repeat(64),
-  }
-  return sources
+  return structuredClone(loadNovemberSources())
 }
 
 async function temporaryAiaBSources(): Promise<string[]> {
@@ -81,6 +62,7 @@ async function temporaryAiaBSources(): Promise<string[]> {
 
 afterEach(async () => {
   process.env.PATH = originalPath
+  delete process.env.RUNNER_TEST_WRONG_IMAGE
   delete process.env.RUNNER_TEST_FAIL_STEP
   delete process.env.RUNNER_TEST_REACHED_FAILURE
   delete process.env.RUNNER_TEST_EMPTY_ASSERTIONS
@@ -470,6 +452,16 @@ describe('sandbox preflight', () => {
 
     await mkdir(join(sandboxRepo, 'stacks'))
     await mkdir(join(sandboxRepo, 'runtime'))
+    await mkdir(join(sandboxRepo, 'compose'))
+    await mkdir(join(sandboxRepo, 'lib'))
+    await writeFile(
+      join(sandboxRepo, 'lib/components.mjs'),
+      'runner.user = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`',
+    )
+    await writeFile(
+      join(sandboxRepo, 'compose/pds.yaml'),
+      'services:\n  pds-space:\n    image: ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:36ab29eb69af61d3beba8ada2d8d524921622b2b4fedc487f6e282634cc2b541\n',
+    )
     await writeFile(join(sandboxRepo, 'deno.json'), '{}\n')
     await writeFile(join(sandboxRepo, 'deno.lock'), '{}\n')
     await writeFile(
@@ -498,6 +490,17 @@ describe('sandbox preflight', () => {
     )
     await writeFile(join(sandboxRepo, 'stacks/components.json'), '[]')
     await writeFile(join(sandboxRepo, 'stacks/presets.json'), '{}')
+    const installFixture = join(root, 'install-fixture')
+    await cp(sandboxRepo, installFixture, { recursive: true })
+    const assets = new URL('./atmosphere', import.meta.url).pathname
+    const installed = await installAtmosphereAssets(assets, installFixture)
+    expect(await installAtmosphereAssets(assets, installFixture)).toEqual(
+      installed,
+    )
+    await writeFile(join(installFixture, 'compose/pds.yaml'), 'unrelated drift')
+    await expect(
+      installAtmosphereAssets(assets, installFixture),
+    ).rejects.toThrow('missing or ambiguous')
     git(sandboxRepo, 'add', '.')
     git(sandboxRepo, 'commit', '-qm', 'Pin sandbox')
     const revision = git(sandboxRepo, 'rev-parse', 'HEAD')
@@ -512,7 +515,14 @@ describe('sandbox preflight', () => {
         url: sandboxRepo,
         revision,
         sha256: { 'deno.json': manifestHash, 'deno.lock': lockHash },
-        archivePaths: ['deno.json', 'deno.lock', 'stacks', 'runtime'],
+        archivePaths: [
+          'deno.json',
+          'deno.lock',
+          'stacks',
+          'runtime',
+          'compose',
+          'lib',
+        ],
       },
       spacesPds: {
         url: '/tmp/unused',
@@ -597,6 +607,7 @@ if (args[1] === 'sandbox' && args[2] === 'create') {
   assert.match(args.at(-3), /^stratos-[0-9a-f]{12}$/)
   assert.deepEqual(args.slice(-2), ['--subnet', 'auto'])
   const components = JSON.parse(fs.readFileSync('stacks/components.json', 'utf8'))
+  assert.ok(fs.readFileSync('compose/pds.yaml', 'utf8').includes('sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350'))
   assert.ok(components.some(component => component.application === 'feedgen-ng-e2e'))
   assert.equal(components.filter(component => component.application === 'feedgen-ng-e2e').length, 1)
   const presets = JSON.parse(fs.readFileSync('stacks/presets.json', 'utf8'))
@@ -626,7 +637,7 @@ if (args[1] === 'sandbox' && args[2] === 'check') {
   if (stack.includes('feedgen-e2e-pds-reference:')) {
     assert.deepEqual(origins, ${JSON.stringify(referenceOrigins)})
     const reference = fs.readFileSync('../stratos/test/spaces-alignment/templates/reference-pds.yaml', 'utf8')
-      .replace('\${REFERENCE_PDS_IMAGE_ID}', 'sha256:${'c'.repeat(64)}')
+      .replace('\${REFERENCE_PDS_IMAGE_ID}', stack.includes('sha256:${'b'.repeat(64)}') ? 'sha256:${'b'.repeat(64)}' : 'sha256:${'c'.repeat(64)}')
       .split('\\n')
       .map(line => line ? '  ' + line : line)
       .join('\\n')
@@ -674,6 +685,7 @@ assert.ok(process.env.DOCKER_CONFIG?.startsWith(process.env.RUNNER_TEST_DOCKER_C
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 assert.equal(process.env.COMPOSE_FILE, undefined)
 assert.equal(process.env.COMPOSE_PROJECT_NAME, undefined)
+if (args[0] === 'info') console.log(JSON.stringify(['name=rootless']))
 if (args.includes('build')) {
   assert.ok(args.includes('--progress'))
   assert.ok(args.includes('plain'))
@@ -683,7 +695,13 @@ if (args.includes('build')) {
     process.exit(11)
   }
 }
-if (args.includes('ps')) {
+if (args.includes('ps') && args.includes('-q')) {
+  console.log(args.at(-1))
+} else if (args[0] === 'inspect') {
+  console.log(args.at(-1) === 'pds-space1' ? 'sha256:' + (process.env.RUNNER_TEST_WRONG_IMAGE ? 'd' : 'a').repeat(64) : fs.readFileSync('compose.yaml', 'utf8').match(/image: (sha256:[a-f0-9]{64})/)[1])
+} else if (args[0] === 'image' && args[1] === 'inspect') {
+  console.log(args.at(-1).startsWith('ghcr.io/') ? 'sha256:' + 'a'.repeat(64) : args.at(-1))
+} else if (args.includes('ps')) {
   assert.ok(args.includes('--all'))
   assert.ok(args.includes('--format'))
   assert.ok(args.includes('json'))
@@ -1003,6 +1021,19 @@ if (args[0] === 'image' && args[1] === 'rm') {
     delete process.env.GITHUB_ACTIONS
     delete process.env.GITHUB_BASE_SHA
 
+    process.env.RUNNER_TEST_WRONG_IMAGE = '1'
+    await expect(
+      runSandbox(
+        { ...options, reportDirectory: join(root, 'wrong-image') },
+        dependencies,
+      ),
+    ).rejects.toThrow('Running pds-space1 image does not match')
+    delete process.env.RUNNER_TEST_WRONG_IMAGE
+
+    const unbuildableSources = readyNovemberSources()
+    delete unbuildableSources.referenceHost.sha256[
+      unbuildableSources.referenceHost.dockerfile
+    ]
     await expect(
       runSandbox(
         {
@@ -1010,7 +1041,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
           suite: 'standard-credential-transport',
           reportDirectory: join(root, 'unready-reference-manifest'),
         },
-        dependencies,
+        { ...dependencies, novemberSources: unbuildableSources },
       ),
     ).rejects.toThrow('Reference PDS is not buildable')
     const referenceSources = readyNovemberSources()
@@ -1048,7 +1079,10 @@ if (args[0] === 'image' && args[1] === 'rm') {
       const dual = JSON.parse(
         await readFile(join(dualReport, 'receipt.json'), 'utf8'),
       )
-      expect(dual.pdsServices.primary).toEqual({ service: 'pds-space1' })
+      expect(dual.pdsServices.primary).toMatchObject({
+        service: 'pds-space1',
+        imageId: `sha256:${'a'.repeat(64)}`,
+      })
       expect(dual.pdsServices.reference.build.sourceSha).toBe(
         REFERENCE_REVISION,
       )
@@ -1081,15 +1115,17 @@ if (args[0] === 'image' && args[1] === 'rm') {
         dependencies,
       ),
     ).rejects.toThrow('runs only with --pds-image-digest')
+    const unreadySources = readyNovemberSources()
+    unreadySources.cutoverEvidence.status = 'unfulfilled'
     await expect(
       runSandbox(
         {
           ...options,
           suite: 'november-interop',
-          pdsImageDigest: `sha256:${'c'.repeat(64)}`,
+          pdsImageDigest: PROBED_DIGEST,
           reportDirectory: preparedReport,
         },
-        dependencies,
+        { ...dependencies, novemberSources: unreadySources },
       ),
     ).rejects.toThrow('the November manifest is not ready')
     expect(existsSync(preparedReport)).toBe(false)
@@ -1109,7 +1145,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
       {
         ...options,
         suite: 'november-interop',
-        pdsImageDigest: `sha256:${'c'.repeat(64)}`,
+        pdsImageDigest: PROBED_DIGEST,
         reportDirectory: preparedReport,
       },
       {
@@ -1119,7 +1155,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
           return {
             ...(await dependencies.buildPds()),
             sourceSha: pin.revision,
-            imageId: `sha256:${'c'.repeat(64)}`,
+            imageId: `sha256:${'b'.repeat(64)}`,
           }
         },
       },

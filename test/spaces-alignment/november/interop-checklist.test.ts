@@ -51,12 +51,12 @@ describe('the interop checklist', () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions)
   })
 
-  it('says plainly that the baseline is a diagnostic today and nothing has run against a host', () => {
+  it('distinguishes the diagnostic baseline from the recorded host probe', () => {
     expect(checklist).toContain(
       'The baseline is a diagnostic here, never acceptance',
     )
     expect(checklist.replace(/\s+/g, ' ')).toContain(
-      'No part of the November contract has been run against a host',
+      'The November 26 probe and its URI receipt record a successful dotted-authority journey',
     )
   })
 
