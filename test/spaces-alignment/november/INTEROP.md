@@ -70,22 +70,22 @@ exists.
 
 ## 2. Repeating the published-host checks
 
-Do these in order. Stop at the first step that fails and keep its output. No
-command in this section must be verified against the selected artifact. Where a
-command calls an upstream method, it names the lexicon its parameters come
-from, at the November reference revision
-`b5fd12fa57b10cf068efa879812f558780f37109`. Check the same path at the revision
-you pin before you rely on it.
+These steps describe how to repeat the checks. Stop at the first failure and
+keep its output. The published PDS image used on November 26 has digest
+`sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350`
+and reports source revision `1f510f8e36a973f6fd055da349b586918805ae66`.
+The checked-in URI probe records an exact dotted-authority create and read on
+that image. The reference build uses that source revision; the migration guide
+has its own release anchor in the manifest. Verify method paths again if either
+pin changes.
 
-1. **Pin the artifact.** Choose one upstream commit and one set of npm package
-   versions whose syntax package, validators and PDS accept `at:space/`. Neither
-   revision the manifest names today does: both serialize the earlier spelling.
-   Build the PDS image of that commit as the runner does
-   (`buildAlphaPds` in `test/spaces-alignment/build-alpha-pds.ts`), on the
-   machine that will run the suites, so the runner's rebuild there can reuse
-   the layer cache. `<the daemon's socket URL>` is what
-   `docker context inspect rootless --format '{{.Endpoints.docker.Host}}'`
-   prints. Not verified: these commands have not been run.
+1. **Build the reference source.** The manifest pins a reference source and
+   build inputs. To repeat the source build locally as the runner does
+   (`buildAlphaPds` in `test/spaces-alignment/build-alpha-pds.ts`), obtain
+   `<the daemon's socket URL>` from
+   `docker context inspect rootless --format '{{.Endpoints.docker.Host}}'`.
+   These example build commands have not been verified as a reproduction of the
+   published image.
 
    ```sh
    git clone https://github.com/bluesky-social/atproto.git <upstream checkout>
@@ -288,70 +288,44 @@ you pin before you rely on it.
    place of `<empty directory>`. A 200 answer from `_health` means the PDS
    started on that database; keep the logs either way. Under rootless Docker
    the image's `node` user may not be able to write a directory you created; if
-   the PDS cannot write `/app/data`, add `--user 0:0`. At the November
-   reference revision the account manager's migrations end at `009-spaces` and
-   the actor store's at `002-spaces`
-   (`packages/pds/src/account-manager/db/migrations/` and
-   `packages/pds/src/actor-store/db/migrations/`). Read both lists at the
-   revision you pinned. Whether that revision migrates a database an earlier
-   build wrote is not known. When this step ends, stop the PLC and the probe
-   PDS and remove the network:
+   the PDS cannot write `/app/data`, add `--user 0:0`. The November 26
+   rehearsal used the published image against copies of older stores and
+   recorded account migration 013 and actor migrations 010 and 011. It also
+   found a downstream feed projection failure; see the source receipt cited by
+   `uri-probe-receipt.json`. Repeat the rehearsal on disposable copies for the
+   candidate under review. When this step ends, stop the PLC and probe PDS and
+   remove the network:
 
    ```sh
    docker stop stratos-reference-pds-probe stratos-reference-plc
    docker network rm stratos-reference-probe
    ```
 
-5. **Repin the sandbox's spaces PDS and settle the declaration fixture.** The
-   baseline and every suite after it run against the sandbox's `pds-space1`,
-   so this comes before them.
-   - The sandbox pins AiaB at the revision in
-     `test/spaces-alignment/sources.json`, and that AiaB pins a `pds-space1`
-     image that refuses the new spelling. Move the AiaB pin, with the SHA-256
-     of its `deno.json` and `deno.lock`, to a release whose `pds-space1`
-     accepts it. Not verified: whether such an AiaB release exists, and
-     whether AiaB exposes the PDS image as a setting at the pinned version.
-   - The Deno suite's `pds-spaces` service in `test/docker-compose.test.yml`
-     pins the same kind of image. Point it at the same digest and drop the
-     comment there that says it refuses the spelling.
-   - The sandbox declaration fixture
-     `test/spaces-alignment/atmosphere/examples/lexicon-fixtures/zone.stratos.space.feed.json`
-     carries `name` and `title` because the hosts pinned today refuse a
-     declaration without `name`. Read `lexSpace` in
-     `packages/lexicon/src/types.ts` at the revision you pinned; at the
-     November reference revision it has `title` and no `name`. If the new host
-     accepts `title` alone, remove `name` from the fixture and change the two
-     tests in `stratos-core/tests/space-type-declaration.test.ts` that hold the
-     fixture's `name`. Otherwise keep it.
+5. **Check the sandbox pin and declaration fixture.** The disposable sandbox
+   overrides `pds-space1` with the published digest recorded above, and the
+   Deno suite pins the same published image. The reference PDS is built
+   separately from the manifest source. If either pin changes, repeat the URI
+   probe and migration rehearsal, and check whether the declaration fixture's
+   `name` and `title` fields remain compatible with that host.
 
 6. **Commit, and get the review receipt for that commit.** Steps 2, 3 and 5
    edit the checkout, and the runner needs a clean checkout at a committed SHA and a
    receipt (or `--ci-evidence`) for that same SHA
    (`test/spaces-alignment/README.md`).
 
-7. **Know how the runner builds the reference host.** The runner builds it from
-   the upstream repository root `Dockerfile` at `reference.revision` whenever a
-   suite that needs it is selected, and refuses to if step 2 or 3 is incomplete.
-   `uriProbe.imageDigest` is optional to that check, so
-   `standard-credential-transport` and `rust-production-interop` build and run a
-   reference host with no digest named. `november-interop` needs
-   `--pds-image-digest`, equal to `uriProbe.imageDigest`. Whenever
-   `--pds-image-digest` is given, the runner also requires its own build's image
-   ID to equal it. A rebuild from source need not reproduce the ID of step 1: a
-   changed base image or a build without the layer cache gives a new one. If
-   the IDs differ, the run stops with the error
-   `The built reference PDS image differs from --pds-image-digest`, removes the
-   image it built, and does not report that image's ID. That is why step 1 runs
-   on the machine that runs the suites: the runner's build can then reuse the
-   layer cache. If the IDs still differ, this artifact cannot be run as
-   `november-interop`; record that and keep the reports. The service definition
-   is `test/spaces-alignment/templates/reference-pds.yaml`. At the November
-   reference revision its command and data paths match the `pds` stage of the
-   `Dockerfile` (`index.ts` in the stage's working directory, data under
-   `/app/data`). Compare them again at the revision you pin.
+7. **Know how the runner identifies each host.** Suites that need a reference
+   host build it from the pinned upstream root `Dockerfile`; the build validates
+   the manifest readiness and the Dockerfile and lockfile hashes. The runner
+   records that build's local image ID and checks the reference container against
+   it. The member PDS uses the published image digest independently; the runner
+   checks its running local image ID against its configured image. For
+   `november-interop`, `--pds-image-digest` must equal the digest in the URI
+   probe and the pinned published member image. It is not compared with the
+   separate source build's local image ID. The reference service definition is
+   `test/spaces-alignment/templates/reference-pds.yaml`.
 
 8. **Run the baseline.** All ten assertions must pass; the receipt is
-   acceptance only for the baseline. Not verified: no run is recorded.
+   acceptance only for the baseline. The November 26 verification records a successful baseline against the published image; a new candidate still needs its own run.
 
 ```sh
 pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
@@ -466,7 +440,7 @@ pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
 ```
 
 10. **Run `november-interop`.** It starts only with `--pds-image-digest` naming
-    the image from step 1, and only when the manifest is ready and its probe
+    the published member image, and only when the manifest is ready and its probe
     records the same digest. It has no driver for some journeys yet (see the
     journey list); until each has one the run stops with the names it lacks.
     Not verified: it has never run.

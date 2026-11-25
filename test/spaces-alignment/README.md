@@ -100,30 +100,26 @@ the private authority PDS.
 
 ## Suites
 
-| Suite                                                                                                               | Needs                                                                               | Runs today                                                                                                             |
-| ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `ordinary-custody`                                                                                                  | The ordinary PDS only; runs without the baseline before it                          | Nothing blocks it. No run is recorded                                                                                  |
-| `baseline`                                                                                                          | A spaces PDS that accepts the `at:space/` spelling and a declaration without `name` | No. The pinned spaces PDS refuses both; a run is a diagnostic                                                          |
-| `delegation-transport`, `credential-lifetime`, `client-custody`, `space-delete`, `feed-errors`, `service-admission` | The baseline's stack; the runner runs the baseline first                            | No, for the baseline's reason                                                                                          |
-| `standard-credential-transport`, `rust-production-interop`                                                          | The baseline's stack and the reference PDS built from the November manifest         | No. The manifest is not ready, so the runner refuses to build the reference PDS                                        |
-| `november-interop`                                                                                                  | A ready November manifest and `--pds-image-digest`                                  | Prepared, never run: it refuses without the option naming a PDS image digest and again while the manifest is not ready |
+| Suite                                                                                                               | Needs                                                                       | Runs today                                                           |
+| ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `ordinary-custody`                                                                                                  | The ordinary PDS only; runs without the baseline before it                  | November 26 verification recorded a pass; rerun for the candidate    |
+| `baseline`                                                                                                          | The published spaces PDS and ordinary PDS                                   | November 26 verification recorded a pass; rerun for the candidate    |
+| `delegation-transport`, `credential-lifetime`, `client-custody`, `space-delete`, `feed-errors`, `service-admission` | The baseline's stack; the runner runs the baseline first                    | Require a candidate run                                              |
+| `standard-credential-transport`, `rust-production-interop`                                                          | The baseline's stack and the reference PDS built from the November manifest | The manifest permits a build; require a candidate run                |
+| `november-interop`                                                                                                  | A ready November manifest and `--pds-image-digest`                          | Prepared suite; requires the published digest and candidate evidence |
 
-Nothing here has run against a host that accepts the new spelling. The person
-who runs a suite on the day one exists follows `november/INTEROP.md`.
+The November 26 published-host verification and its limits are described in
+`november/INTEROP.md`.
 
 ## Baseline and ordinary custody
 
-The baseline needs a spaces PDS that accepts the `at:space/` URI spelling and a
-space-type declaration without `name`. The PDS images the sandbox pins are
-older: they refuse the new spelling and require `name` in a declaration, so on
-this branch the baseline cannot pass against them. Eight of its ten assertions
-touch PDS custody. Do not read a failed baseline run as a regression in the
-driver. The run prints each assertion name as the step that proves it ends, and
-`failure.json` lists the names reached (`assertionsReached`, by suite).
+The baseline checks the published spaces PDS and the ordinary PDS. The
+November 26 verification recorded a passing baseline; run it again for the
+candidate. Each completed assertion is printed, and `failure.json` records the
+names reached (`assertionsReached`, by suite).
 
 The sandbox declaration fixture carries `name` and `title` with the same text
-and the same collections as `lexicons-spaces/zone/stratos/space/feed.json`,
-because those pinned hosts refuse a declaration without `name`.
+and the same collections as `lexicons-spaces/zone/stratos/space/feed.json`.
 
 `ordinary-custody` is the one suite the runner runs without the baseline before
 it (`STANDALONE_SUITE_IDS` in `rules.ts`). It signs one user of the ordinary PDS
@@ -145,7 +141,7 @@ pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
   --report-dir /tmp/new-ordinary-custody-report
 ```
 
-Use `--suite baseline` for the baseline diagnostic. Both runs need rootless
+Use `--suite baseline` for the baseline. Both runs need rootless
 Docker, a clean candidate checkout at a committed SHA, a new report directory,
 and either the two-review receipt or GitHub Actions with `--ci-evidence`.
 
@@ -174,8 +170,9 @@ passes on a host that accepts the new spelling.
 
 `november-interop` is prepared and never runs by default. The runner starts it
 only with `--pds-image-digest sha256:<digest>`, only when the manifest records
-complete cutover evidence including that digest, and fails if the built image
-differs. Its assertions are the journeys in `november/interop-journeys.ts`, each
+complete cutover evidence including that digest, and the pinned published member
+image matches it. The separate source-built reference image is checked against
+its own recorded local image ID. Its assertions are the journeys in `november/interop-journeys.ts`, each
 naming the acceptance row it closes. It has no driver for some journeys yet. The
 workflow that runs on every pull request does not name it.
 
