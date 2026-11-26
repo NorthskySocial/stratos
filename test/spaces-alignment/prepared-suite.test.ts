@@ -167,6 +167,7 @@ describe('the prepared november-interop suite', () => {
           'november-own-inspector',
           'november-snapshot-inspector',
           'november-membership-control',
+          'november-reference-reads',
           'client-attestation-fixture',
           'encrypted-cache-migration',
           'terminal-set-hash-mismatch-never-promoted',

@@ -1575,6 +1575,16 @@ async function runNovemberMembershipControl() {
   }
 }
 
+async function runNovemberReferenceReads() {
+  required('SANDBOX_DOMAIN')
+  const { runReferenceReadControls } = await import('/scenario/driver.mjs')
+  await runReferenceReadControls(reach)
+  writeBrowserReceipt([
+    'reference-mint-read-verified',
+    'both-reference-owners-read',
+  ])
+}
+
 function writeBrowserReceipt(ids) {
   console.log(
     JSON.stringify({
@@ -1693,6 +1703,7 @@ const journeys = {
   'november-own-inspector': runNovemberOwnInspector,
   'november-snapshot-inspector': runNovemberSnapshotInspector,
   'november-membership-control': runNovemberMembershipControl,
+  'november-reference-reads': runNovemberReferenceReads,
 }
 
 async function main() {

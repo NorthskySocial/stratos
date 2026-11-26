@@ -516,7 +516,70 @@ export async function prepareAccount(browser, name) {
   await page.evaluate(async () => {
     await window.delegationScenarioAuth.init()
   })
-  return { account, page }
+  return { account, page, seed }
+}
+
+export async function runReferenceReadControls(reach) {
+  const browser = await openBrowser()
+  try {
+    const first = await prepareAccount(browser, 'faye')
+    const key = proofKey()
+    const { credential, claims } = await credentialLifetime(
+      await standardExchange(await acquireDelegation(first.page), key),
+    )
+    assert.ok(
+      claims.iss === authorityDid &&
+        claims.sub === space &&
+        claims.cnf?.kid === keyId(key) &&
+        claims.aud === undefined,
+      'Reference credential issuer, subject or key differs from the requested credential',
+    )
+    await assertSeedRead(first)
+    reach('reference-mint-read-verified')
+
+    const second = await prepareAccount(browser, 'edward')
+    assert.notEqual(first.account.did, second.account.did)
+    await assertSeedRead(second)
+    reach('both-reference-owners-read')
+
+    async function assertSeedRead({ account, seed }) {
+      const prefix = `${space}/${account.did}/${postCollection}/`
+      assert.ok(
+        seed.uri.startsWith(prefix),
+        'The reference PDS returned an address for a different owner',
+      )
+      const rkey = seed.uri.slice(prefix.length)
+      assert.ok(
+        rkey.length > 0 && !rkey.includes('/'),
+        'The reference PDS returned an invalid record key',
+      )
+      const url = recordsUrl(account.did)
+      assert.equal(url.origin, pds)
+      const response = await fetch(url, {
+        headers: presentationHeaders(credential, key, account.did),
+        signal: AbortSignal.timeout(30_000),
+      })
+      assert.equal(
+        response.status,
+        200,
+        'Reference PDS rejected the valid credential',
+      )
+      const { records } = await response.json()
+      assert.ok(
+        Array.isArray(records) &&
+          records.some(
+            (record) =>
+              record.collection === postCollection &&
+              record.rkey === rkey &&
+              record.cid === seed.cid &&
+              record.value?.text === account.seedText,
+          ),
+        'Reference read omitted the exact seeded record',
+      )
+    }
+  } finally {
+    await browser.close()
+  }
 }
 
 export async function removeMember(page) {

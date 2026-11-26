@@ -67,6 +67,15 @@ const membershipControl: ScenarioSuite = {
   run: (context) => runNovemberBrowserScenario(context, membershipControl),
 }
 
+const referenceReads: ScenarioSuite = {
+  id: 'november-reference-reads',
+  requiredAssertions: [
+    'reference-mint-read-verified',
+    'both-reference-owners-read',
+  ],
+  run: (context) => runNovemberBrowserScenario(context, referenceReads),
+}
+
 const positiveJourneys = [
   {
     id: 'canonical-uri-at-each-boundary',
@@ -193,6 +202,27 @@ export const suite: ScenarioSuite = {
             evidence,
           ),
       })),
+      {
+        name: referenceReads.id,
+        run: () =>
+          observeCarrier(
+            context,
+            referenceReads,
+            [
+              {
+                id: 'custom-mint-reads-from-reference-pds',
+                assertions: ['reference-mint-read-verified'],
+              },
+              {
+                id: 'two-authors-on-one-host',
+                assertions: referenceReads.requiredAssertions,
+                remainingHostQuestion:
+                  'Both successful reads are observed. The receiver rejection remains outstanding.',
+              },
+            ],
+            evidence,
+          ),
+      },
       {
         name: 'client-attestation-fixture',
         async run() {

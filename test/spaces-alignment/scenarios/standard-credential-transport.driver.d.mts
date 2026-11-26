@@ -5,6 +5,7 @@ export function prepareAccount(
 ): Promise<{
   account: { username: string; password: string; did: string; seedText: string }
   page: unknown
+  seed: { uri: string; cid: string }
 }>
 export function spaceUriFromParts(authorityDid: string, skey: string): string
 export function presentationAuthorization(credential: string): string

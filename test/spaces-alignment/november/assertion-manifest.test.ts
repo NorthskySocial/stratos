@@ -715,6 +715,7 @@ describe('november-interop suite', () => {
           'november-own-inspector',
           'november-snapshot-inspector',
           'november-membership-control',
+          'november-reference-reads',
           'client-attestation-fixture',
         ],
         evidence: expect.arrayContaining([

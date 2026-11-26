@@ -411,6 +411,7 @@ describe('real standard browser adapter bodies', () => {
           seedText: fixture.text(),
         },
         page: fixture.page,
+        seed: fixture.seed,
       })
       expect(fixture.text()).toMatch(/^Bebop did:plc:faye [0-9a-f-]{36}$/)
       expect(fetch).toHaveBeenCalledTimes(join ? 3 : 1)

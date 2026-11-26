@@ -210,7 +210,7 @@ describe('ordinary-custody driver', () => {
 
   it('selects the journey by suite id and refuses an unknown one', () => {
     expect(driverSource).toMatch(
-      /const journeys = \{\s*baseline: runBaseline,\s*'ordinary-custody': runOrdinaryCustody,\s*'november-positive': runNovemberPositive,\s*'november-upstream-mint': runNovemberUpstreamMint,\s*'november-own-inspector': runNovemberOwnInspector,\s*'november-snapshot-inspector': runNovemberSnapshotInspector,\s*'november-membership-control': runNovemberMembershipControl,\s*\}/,
+      /const journeys = \{\s*baseline: runBaseline,\s*'ordinary-custody': runOrdinaryCustody,\s*'november-positive': runNovemberPositive,\s*'november-upstream-mint': runNovemberUpstreamMint,\s*'november-own-inspector': runNovemberOwnInspector,\s*'november-snapshot-inspector': runNovemberSnapshotInspector,\s*'november-membership-control': runNovemberMembershipControl,\s*'november-reference-reads': runNovemberReferenceReads,\s*\}/,
     )
     expect(functionBody('main')).toContain(
       "assert.ok(Object.hasOwn(journeys, activeSuite), 'Unknown suite')",
