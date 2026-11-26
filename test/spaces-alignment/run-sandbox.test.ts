@@ -649,7 +649,11 @@ if (args[1] === 'sandbox' && args[2] === 'check') {
   assert.ok(!stack.includes('SPACES_PDS_IMAGE_ID'))
   const origins = stack.match(/IDENTITY_PRIVATE_ORIGINS: (.+)/)[1].split(',')
   if (stack.includes('feedgen-e2e-pds-reference:')) {
-    assert.deepEqual(origins, ${JSON.stringify(referenceOrigins)})
+    assert.deepEqual(origins, [
+      ...${JSON.stringify(referenceOrigins.slice(0, 5))},
+      ...(stack.includes('feedgen-e2e-webapp:') ? ['https://user1.pds-space1.atmosbox.test'] : []),
+      ...${JSON.stringify(referenceOrigins.slice(5))}
+    ])
     const reference = fs.readFileSync('../stratos/test/spaces-alignment/templates/reference-pds.yaml', 'utf8')
       .replace('\${REFERENCE_PDS_IMAGE_ID}', stack.includes('sha256:${'b'.repeat(64)}') ? 'sha256:${'b'.repeat(64)}' : 'sha256:${'c'.repeat(64)}')
       .split('\\n')
@@ -680,6 +684,8 @@ if (process.argv.includes('seed')) {
   fs.mkdirSync('state', { recursive: true })
   fs.writeFileSync('state/accounts.json', JSON.stringify({ accounts: {
     'user1.pds1.atmosbox.test': { did: 'did:plc:faye', password: 'synthetic-one' },
+    'user1.pds-space1.atmosbox.test': { did: 'did:plc:motoko', password: 'synthetic-alpha', phase: 'ready' },
+    'user2.pds-space1.atmosbox.test': { did: 'did:plc:batou', password: 'synthetic-unused-alpha' },
     ...(process.env.RUNNER_TEST_MISSING_ACCOUNT ? {} : {
     'user2.pds1.atmosbox.test': { did: process.env.RUNNER_TEST_INVALID_ACCOUNT ? '' : 'did:plc:ed', password: 'synthetic-two' }
     }),
@@ -736,7 +742,15 @@ if (args.includes('run')) {
   } else {
     assert.equal(fs.statSync('state/browser-accounts.json').mode & 0o777, 0o444)
     const accounts = JSON.parse(fs.readFileSync('state/browser-accounts.json', 'utf8')).accounts
-    assert.equal(Object.keys(accounts).length, 2)
+    const hasInspector = fs.readFileSync(composeFile, 'utf8').includes('feedgen-e2e-webapp')
+    assert.equal(Object.keys(accounts).length, hasInspector ? 3 : 2)
+    if (hasInspector) {
+      assert.deepEqual(accounts['user1.pds-space1.atmosbox.test'], {
+        did: 'did:plc:motoko',
+        password: 'synthetic-alpha'
+      })
+    }
+    assert.equal(accounts['user2.pds-space1.atmosbox.test'], undefined)
     assert.equal(accounts['user1.pds1.atmosbox.test'].password, 'synthetic-one')
     assert.equal(accounts['user2.pds1.atmosbox.test'].password, 'synthetic-two')
     console.log('browser-ok')

@@ -416,30 +416,21 @@ async function provisionAccount(
   return { username, password }
 }
 
-async function ordinaryAccount(domain) {
+async function seededBrowserAccount(username) {
   const state = JSON.parse(
     await readFile('/sandbox-state/accounts.json', 'utf8'),
   )
-  const username = `user1.pds1.${domain}`
   const account = state.accounts?.[username]
-  assert.ok(
-    account?.password && account?.did,
-    'Ordinary PDS account was not seeded',
-  )
+  assert.ok(account?.password && account?.did, 'Browser account was not seeded')
   return { username, password: account.password, did: account.did }
 }
 
+async function ordinaryAccount(domain) {
+  return await seededBrowserAccount(`user1.pds1.${domain}`)
+}
+
 async function unjoinedOrdinaryAccount(domain) {
-  const state = JSON.parse(
-    await readFile('/sandbox-state/accounts.json', 'utf8'),
-  )
-  const username = `user2.pds1.${domain}`
-  const account = state.accounts?.[username]
-  assert.ok(
-    account?.password && account?.did,
-    'Unjoined PDS account was not seeded',
-  )
-  return { username, password: account.password, did: account.did }
+  return await seededBrowserAccount(`user2.pds1.${domain}`)
 }
 
 const pdsSessions = new Map()
@@ -1507,7 +1498,8 @@ async function runNovemberOwnInspector() {
   await trustSandboxCa()
   const browser = await chromium.launch({ headless: true })
   try {
-    const account = await provisionAccount(domain, 'batou')
+    // The webapp resolver reaches the alpha handle through the sandbox inventory.
+    const account = await seededBrowserAccount(`user1.pds-space1.${domain}`)
     const seed = await seedInspectorPost(browser, domain, account)
     reach('inspector-owner-fixture-written')
     const context = await browser.newContext({ serviceWorkers: 'block' })

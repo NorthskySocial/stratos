@@ -48,6 +48,8 @@ const referencePdsSuites = new Set([
   'rust-production-interop',
   'november-interop',
 ])
+const NOVEMBER_INSPECTOR_OWNER_HANDLE = 'user1.pds-space1.atmosbox.test'
+
 /**
  * Suites that are written but never run by default: each refuses to start
  * until the caller names the reference PDS image by digest and the November
@@ -847,7 +849,12 @@ export async function runSandbox(
         .join('\n')
       await writeFile(
         stackPath,
-        stack.replace('\nvolumes:\n', `\n${service}\n\nvolumes:\n`),
+        stack
+          .replace('\nvolumes:\n', `\n${service}\n\nvolumes:\n`)
+          .replace(
+            'IDENTITY_PRIVATE_ORIGINS: ',
+            `IDENTITY_PRIVATE_ORIGINS: https://${NOVEMBER_INSPECTOR_OWNER_HANDLE},`,
+          ),
       )
 
       const definitionPath = join(
@@ -1110,12 +1117,20 @@ export async function runSandbox(
     ) {
       throw new Error('AiaB did not seed both ordinary PDS accounts')
     }
+    const accounts = { ...ordinaryAccounts }
+    if (options.suite === 'november-interop') {
+      const owner = state.accounts?.[NOVEMBER_INSPECTOR_OWNER_HANDLE]
+      if (!owner?.did || !owner.password)
+        throw new Error('AiaB did not seed the alpha PDS inspector owner')
+      accounts[NOVEMBER_INSPECTOR_OWNER_HANDLE] = {
+        did: owner.did,
+        password: owner.password,
+      }
+    }
     const browserAccounts = join(atmosphere, 'state/browser-accounts.json')
-    await writeFile(
-      browserAccounts,
-      JSON.stringify({ accounts: ordinaryAccounts }),
-      { mode: 0o444 },
-    )
+    await writeFile(browserAccounts, JSON.stringify({ accounts }), {
+      mode: 0o444,
+    })
     await chmod(browserAccounts, 0o444)
     for (const suite of suites) {
       failedStep = `suite:${suite.id}`
