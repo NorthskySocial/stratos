@@ -39,8 +39,6 @@ import type {
 
 export const MEMBER_PDS_IMAGE =
   'ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350'
-const AIA_B_PDS_IMAGE =
-  'ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:36ab29eb69af61d3beba8ada2d8d524921622b2b4fedc487f6e282634cc2b541'
 
 const harnessDirectory = dirname(fileURLToPath(import.meta.url))
 const referencePdsSuites = new Set([
@@ -492,15 +490,8 @@ export async function installAtmosphereAssets(
 ): Promise<Record<string, string>> {
   const pdsPath = join(atmosphere, 'compose/pds.yaml')
   const pdsTemplate = await readFile(pdsPath, 'utf8')
-  const oldCount = pdsTemplate.split(AIA_B_PDS_IMAGE).length - 1
-  const pinnedCount = pdsTemplate.split(MEMBER_PDS_IMAGE).length - 1
-  if (oldCount + pinnedCount !== 1)
+  if (pdsTemplate.split(MEMBER_PDS_IMAGE).length !== 2)
     throw new Error('Pinned AiaB spaces PDS image is missing or ambiguous')
-  if (oldCount === 1)
-    await writeFile(
-      pdsPath,
-      pdsTemplate.replace(AIA_B_PDS_IMAGE, MEMBER_PDS_IMAGE),
-    )
   const componentsPath = join(atmosphere, 'stacks/components.json')
   const componentsData = JSON.parse(
     await readFile(componentsPath, 'utf8'),
@@ -571,51 +562,6 @@ async function labelContainerFiles(
     return
   }
   await command('chcon', ['-t', 'container_file_t', ...paths], cwd)
-}
-
-async function initializeSpacePdsData(
-  composeFile: string,
-  projectName: string,
-  atmosphere: string,
-  env: NodeJS.ProcessEnv,
-): Promise<void> {
-  try {
-    await command(
-      'docker',
-      [
-        'compose',
-        '--file',
-        composeFile,
-        '--project-name',
-        projectName,
-        '--project-directory',
-        atmosphere,
-        'run',
-        '--rm',
-        '--no-deps',
-        '--user',
-        '0:0',
-        '--entrypoint',
-        'sh',
-        'pds-space1',
-        '-ec',
-        `owner=$(stat -c %u:%g /data)
-test "$owner" = 0:0
-contents=$(find /data -mindepth 1 -maxdepth 1 -print -quit)
-test -z "$contents"
-chmod 0750 /data
-chown 1000:1000 /data`,
-      ],
-      atmosphere,
-      env,
-    )
-  } catch (error) {
-    throw new Error(
-      `Space PDS volume initialization failed: ${
-        error instanceof Error ? error.message : 'unknown error'
-      }`,
-    )
-  }
 }
 
 /**
@@ -1008,13 +954,6 @@ export async function runSandbox(
     await labelContainerFiles(
       [join(atmosphere, 'state/browser-pds-admin'), ...applicationSecrets],
       atmosphere,
-    )
-    failedStep = 'initialize-space-pds'
-    await initializeSpacePdsData(
-      composeFile,
-      projectName,
-      atmosphere,
-      childEnvironment,
     )
     await runStep('check', 'deno', ['task', 'sandbox', 'check'])
     await runStep('build-tools', 'docker', [

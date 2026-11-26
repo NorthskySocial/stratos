@@ -298,7 +298,7 @@ pin changes.
    ```
 
 5. **Check the sandbox pin and declaration fixture.** The disposable sandbox
-   overrides `pds-space1` with the published digest recorded above, and the
+   verifies that AiaB pins `pds-space1` to the published digest recorded above, and the
    Deno suite pins the same published image. The reference PDS is built
    separately from the manifest source. If either pin changes, repeat the URI
    probe and migration rehearsal, and check whether the declaration fixture's
