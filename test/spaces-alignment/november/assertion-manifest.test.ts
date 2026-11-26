@@ -15,7 +15,7 @@ import { suite as rustProductionInterop } from '../scenarios/rust-production-int
 import { suite as serviceAdmission } from '../scenarios/service-admission.js'
 import { suite as spaceDelete } from '../scenarios/space-delete.js'
 import { suite as standardCredentialTransport } from '../scenarios/standard-credential-transport.js'
-import { validateSuite } from '../rules.js'
+import { SuiteFailure, validateSuite } from '../rules.js'
 import type { ScenarioSuite } from '../rules.js'
 import { ACCEPTANCE_ROWS, JOURNEYS } from './interop-journeys.js'
 
@@ -656,6 +656,8 @@ describe('november-interop suite', () => {
           },
         })
         .catch((error: unknown) => error)
+      if (!(failure instanceof SuiteFailure))
+        throw new Error('Expected SuiteFailure')
       expect(failure).toMatchObject({
         suiteId: 'november-interop',
         reachedAssertions: [

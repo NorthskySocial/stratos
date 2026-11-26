@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   createRecordMacHeaders,
+  encapsulate,
+  serializeRecord,
   formatMacRequest,
   parseMacRequest,
   verifyRecordMac,
@@ -59,17 +61,25 @@ describe('November positive credential read', () => {
     }
   })
 
-  it('rejects a record MAC for a different URI or CID', () => {
+  it('rejects a record MAC for a different URI or CID', async () => {
     const uri =
       'at:space/did:web:stratos.example/zone.stratos.space.feed/general/did:plc:alice/zone.stratos.feed.post/one'
-    const cid = 'bafyreifwy2br6pte2mnzpfru7wmklqwe34ribjh53ccnuje65hq3onzori'
-    const keyShare = 'did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi'
-    const sharedSecret = new Uint8Array(32).fill(7)
+    const { cid } = await serializeRecord('zone.stratos.feed.post', 'one', {
+      text: 'first',
+    })
+    const { cid: otherCid } = await serializeRecord(
+      'zone.stratos.feed.post',
+      'two',
+      { text: 'second' },
+    )
+    const { keyShare, sharedSecret } = await encapsulate(
+      'did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi',
+    )
     const request = parseMacRequest(
       formatMacRequest('atproto-space-record', keyShare),
       'atproto-space-record',
     )!
-    const { headers } = createRecordMacHeaders(uri, cid as never, {
+    const { headers } = createRecordMacHeaders(uri, cid, {
       ...request,
       sharedSecret,
     })
@@ -78,17 +88,13 @@ describe('November positive credential read', () => {
       sharedSecret,
       headers: new Headers(headers),
     }
-    expect(() => verifyRecordMac(uri, cid as never, verification)).not.toThrow()
-    expect(() =>
-      verifyRecordMac(`${uri}2`, cid as never, verification),
-    ).toThrow()
-    expect(() =>
-      verifyRecordMac(uri, 'different' as never, verification),
-    ).toThrow()
+    expect(() => verifyRecordMac(uri, cid, verification)).not.toThrow()
+    expect(() => verifyRecordMac(`${uri}2`, cid, verification)).toThrow()
+    expect(() => verifyRecordMac(uri, otherCid, verification)).toThrow()
     verification.headers.set(
       'signature',
       'mac=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:',
     )
-    expect(() => verifyRecordMac(uri, cid as never, verification)).toThrow()
+    expect(() => verifyRecordMac(uri, cid, verification)).toThrow()
   })
 })
