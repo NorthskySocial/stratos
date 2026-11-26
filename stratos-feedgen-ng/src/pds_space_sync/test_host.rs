@@ -238,6 +238,7 @@ pub(crate) enum PageStep {
     },
     /// An honest page whose commit is signed over other data.
     WrongDigest([u8; 32]),
+    InvalidCommitMac,
     /// A page of no ops whose body carries this JSON text as its `commit`
     /// member; the headers sign the commit the host holds.
     CommitText(String),
@@ -576,6 +577,12 @@ impl RepoOpsTransport for TestHost {
                 PageStep::HonestThen(hook) => {
                     let response = honest(member, &member.repo.digest());
                     hook(&mut member.repo);
+                    Served::Now(response)
+                }
+                PageStep::InvalidCommitMac => {
+                    let mut response = honest(member, &member.repo.digest());
+                    response.headers.signature =
+                        vec![format!("mac=:{}:", STANDARD.encode([0; 32]))];
                     Served::Now(response)
                 }
                 PageStep::WrongDigest(data) => Served::Now(honest(member, &data)),

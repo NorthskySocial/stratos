@@ -631,7 +631,7 @@ save. Walk them in this order.
 - Proves: A page with a corrupted commit MAC that is not the terminal page promotes nothing.
 - Expected: The feed generator promotes only after every page MAC and the terminal set hash verify.
 - Unknown: Needs a way to corrupt one page in transit, for example a proxy in front of the host.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 18. `terminal-set-hash-mismatch-never-promoted`

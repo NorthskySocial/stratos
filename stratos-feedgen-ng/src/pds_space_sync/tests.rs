@@ -678,6 +678,45 @@ async fn a_record_takedown_removes_a_like_that_was_already_promoted() {
 }
 
 #[tokio::test]
+async fn an_invalid_mac_on_a_nonterminal_page_preserves_both_members() {
+    let scene = with_faye_and_jet_served().await;
+    scene.host.set_page_size(1);
+    scene.host.edit(FAYE, |repo| {
+        repo.put(4, POST, "redtail", post("Cowboy Bebop"));
+        repo.put(5, POST, "hammerhead", post("Bang"));
+    });
+    let original = scene.snapshot();
+    let original_feed = scene.served();
+    let peer = scene.base(JET);
+    scene
+        .host
+        .script_pages(FAYE, vec![PageStep::InvalidCommitMac]);
+
+    assert_eq!(
+        scene.cycle(FAYE).await,
+        VerifiedSyncOutcome::Failed(FailureReason::Mac)
+    );
+    assert_eq!(pages_of(&scene, FAYE), [(Some(tid(3)), None)]);
+    assert_eq!(scene.host.archives_requested(), 2);
+    assert_eq!(scene.snapshot(), original);
+    assert_eq!(scene.served(), original_feed);
+
+    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Promoted);
+    assert_eq!(
+        pages_of(&scene, FAYE),
+        [
+            (Some(tid(3)), None),
+            (Some(tid(3)), None),
+            (Some(tid(3)), Some("1".to_owned())),
+            (Some(tid(3)), Some("2".to_owned())),
+        ]
+    );
+    assert_eq!(scene.base_rev(FAYE), Some(tid(5)));
+    assert_eq!(scene.base_digest(FAYE), scene.host_digest(FAYE));
+    assert_eq!(scene.base(JET), peer);
+}
+
+#[tokio::test]
 async fn a_tampered_page_that_is_not_the_last_fails_and_nothing_is_written() {
     let scene = Scene::with_a_base().await;
     scene.host.set_page_size(2);

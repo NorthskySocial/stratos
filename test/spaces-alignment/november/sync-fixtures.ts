@@ -11,6 +11,16 @@ export const syncFixtures = [
       'The rejection and archive exchange were exercised at the in-process host seam.',
   },
   {
+    id: 'nonterminal-mac-tamper-never-promoted',
+    tests: [
+      'pds_space_sync::tests::an_invalid_mac_on_a_nonterminal_page_preserves_both_members',
+    ],
+    observation:
+      'A fixed invalid MAC on the first page preserved both checkpoints and their feed. The same pages with valid MACs promoted the terminal revision.',
+    remainingHostQuestion:
+      'The pinned-host transport is outside this in-process fixture.',
+  },
+  {
     id: 'non-post-record-contributes-to-integrity',
     tests: [
       'pds_space_sync::tests::a_missing_value_on_a_post_path_leads_to_a_replacement_and_on_another_collection_promotes',
