@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runAttestationFixture } from './november-attestation.driver.js'
 import type { ScenarioContext } from '../rules.js'
@@ -27,19 +28,36 @@ describe('November attestation evidence', () => {
 
   function context(
     rows: typeof assertions,
-    path = fixturePath,
+    paths = [fixturePath],
   ): ScenarioContext {
     return {
       scratchDirectory,
       sandboxDirectory: '/sandbox',
       composeFile: '/sandbox/compose.yaml',
       projectName: 'attestation',
-      async runCommand(_file, args, cwd) {
-        const report = args[args.indexOf('--outputFile') + 1]
+      async runCommand(file, args, cwd) {
+        const source = fileURLToPath(new URL('../../../', import.meta.url))
+        const report = join(scratchDirectory, 'attestation-verifier.json')
+        expect(cwd).toBe(source)
+        expect(file).toBe(join(source, 'node_modules/.bin/vitest'))
+        expect(args).toEqual([
+          'run',
+          '--project',
+          'stratos-service',
+          fixturePath,
+          '-t',
+          expect.stringContaining('listed client with valid attestation'),
+          '--reporter=json',
+          '--outputFile',
+          report,
+        ])
         await writeFile(
           report,
           JSON.stringify({
-            testResults: [{ name: join(cwd, path), assertionResults: rows }],
+            testResults: paths.map((path) => ({
+              name: join(cwd, path),
+              assertionResults: rows,
+            })),
           }),
         )
         return ''
@@ -54,7 +72,10 @@ describe('November attestation evidence', () => {
       id: 'current-delegation-and-client-attestation-accepted',
       tier: 'in-process',
       artifact: fixturePath,
-      remainingHostQuestion: expect.any(String),
+      observation: expect.stringMatching(
+        /accepted a valid allow-listed client/,
+      ),
+      remainingHostQuestion: expect.stringMatching(/HTTPS metadata origin/),
     })
   })
 
@@ -63,6 +84,7 @@ describe('November attestation evidence', () => {
     assertions.slice(0, 2),
     [...assertions.slice(0, 2), { ...assertions[2], status: 'skipped' }],
     [...assertions.slice(0, 2), assertions[0]],
+    [...assertions, { title: 'unrelated fixture check', status: 'passed' }],
   ])('refuses omitted, skipped or substituted assertions', async (...rows) => {
     await expect(runAttestationFixture(context(rows))).rejects.toThrow(
       'did not report every selected test as passed',
@@ -71,7 +93,15 @@ describe('November attestation evidence', () => {
 
   it('refuses the same titles from a different source file', async () => {
     await expect(
-      runAttestationFixture(context(assertions, 'another.test.ts')),
+      runAttestationFixture(context(assertions, ['another.test.ts'])),
     ).rejects.toThrow('did not report every selected test as passed')
   })
+  it.each([[], [fixturePath, 'another.test.ts']])(
+    'requires exactly one result file even if the selected assertions match',
+    async (...paths) => {
+      await expect(
+        runAttestationFixture(context(assertions, paths)),
+      ).rejects.toThrow('did not report every selected test as passed')
+    },
+  )
 })
