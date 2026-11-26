@@ -94,6 +94,10 @@ export class CommitVerifier {
       return { ok: false, reason: 'unsupported-version', transient: false }
     }
 
+    if (decoded.ikm.length < sha256.outputLen) {
+      return { ok: false, reason: 'malformed-commit', transient: false }
+    }
+
     const resolvedKey = await this.resolveKey(authorDid)
     if (!resolvedKey.ok) return resolvedKey
 

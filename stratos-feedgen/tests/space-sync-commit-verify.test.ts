@@ -124,9 +124,9 @@ function buildVerifier(
 }
 
 describe('CommitVerifier', () => {
-  it('accepts a validly signed commit', async () => {
+  it('accepts a validly signed commit with 32 bytes of ikm', async () => {
     const keypair = await Secp256k1Keypair.create({ exportable: true })
-    const commit = await signTestCommit(keypair)
+    const commit = await signTestCommit(keypair, { ikm: randomBytes(32) })
     const verifier = buildVerifier(stubResolver(async () => keypair.did()))
 
     const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
@@ -326,6 +326,14 @@ describe('CommitVerifier', () => {
     [
       'ikm not bytes, other fields valid',
       { ...validCommitFields(), ikm: 'not-bytes' },
+    ],
+    [
+      'empty ikm',
+      { ...validCommitFields(), ikm: bytesField(new Uint8Array(0)) },
+    ],
+    [
+      '31-byte ikm',
+      { ...validCommitFields(), ikm: bytesField(new Uint8Array(31)) },
     ],
     [
       'mac not bytes, other fields valid',
