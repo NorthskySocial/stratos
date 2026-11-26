@@ -144,6 +144,12 @@ not 404 and not 403. Check the `error` name. Do not tell the user that the
 record was deleted.
 :::
 
+A record that a moderation service took down reads as missing too. So does
+every record of an account that a moderation service took down. `getRecord`
+answers `RecordNotFound`, a list leaves the record out, a batch hydration lists
+it in `notFound`, and its blobs answer `BlobBlocked`. The record reads again
+once the takedown is lifted.
+
 ## List records
 
 ```typescript

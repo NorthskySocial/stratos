@@ -383,6 +383,13 @@ export class StratosServer {
             type: 'StratosService',
             serviceEndpoint,
           },
+          // A member's PDS reads this entry of the space DID's document to
+          // find where to send `com.atproto.space.notifyRepoUpdate`.
+          {
+            id: '#atproto_pds',
+            type: 'AtprotoPersonalDataServer',
+            serviceEndpoint,
+          },
         ],
       })
     })
@@ -469,6 +476,7 @@ export class StratosServer {
       dpopVerifier: ctx.dpopVerifier,
       profileRecordWriter: ctx.profileRecordWriter,
       repoWriteLocks: ctx.repoWriteLocks,
+      pdsSyncWorker: ctx.pdsSyncWorker,
       initRepo: async (did: string) => {
         await ctx.actorStore.create(did)
         await ctx.actorStore.transact(did, async (store) => {

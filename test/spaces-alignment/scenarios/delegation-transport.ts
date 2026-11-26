@@ -57,7 +57,8 @@ try {
   if (!domain || !/^[a-z0-9.-]+$/.test(domain)) throw Error('InvalidDomain')
   const authorityDid = 'did:web:stratos-e2e.' + domain
   const issuerDid = 'did:web:feedgen-e2e.' + domain
-  const space = 'at://' + authorityDid + '/space/zone.stratos.space.feed/general'
+  const spaceType = 'zone.stratos.space.feed'
+  const space = ['at:space', authorityDid, spaceType, 'general'].join('/')
   const signingKey = (await Deno.readTextFile('/run/sandbox-secrets/feedgen-signing-key')).trim()
   const keypair = await Secp256k1Keypair.import(signingKey)
   const admittedToken = await serviceJwt(keypair, issuerDid, authorityDid, 'zone.stratos.space.listRepos')

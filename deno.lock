@@ -30,7 +30,7 @@
     "npm:@atproto/oauth-client-browser@~0.5.17": "0.5.17",
     "npm:@atproto/oauth-client-node@~0.5.19": "0.5.19",
     "npm:@atproto/oauth-provider@~0.27.1": "0.27.1",
-    "npm:@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953": "0.0.0-spaces-alpha-20260818163953",
+    "npm:@atproto/oauth-scopes@0.0.0-spaces-alpha-20261117141222": "0.0.0-spaces-alpha-20261117141222",
     "npm:@atproto/oauth-types@0.8": "0.8.0",
     "npm:@atproto/repo@~0.11.7": "0.11.7",
     "npm:@atproto/syntax@~0.7.9": "0.7.9",
@@ -247,7 +247,7 @@
         "@atproto-labs/pipe",
         "@atproto-labs/simple-store",
         "@atproto-labs/simple-store-memory",
-        "@atproto/did",
+        "@atproto/did@0.5.6",
         "zod@3.25.76"
       ]
     },
@@ -273,7 +273,7 @@
       "dependencies": [
         "@atproto-labs/fetch-node",
         "@atproto-labs/handle-resolver",
-        "@atproto/did"
+        "@atproto/did@0.5.6"
       ]
     },
     "@atproto-labs/handle-resolver@0.4.11": {
@@ -281,7 +281,7 @@
       "dependencies": [
         "@atproto-labs/simple-store",
         "@atproto-labs/simple-store-memory",
-        "@atproto/did",
+        "@atproto/did@0.5.6",
         "zod@3.25.76"
       ]
     },
@@ -369,7 +369,7 @@
         "@atproto/api",
         "@atproto/common@0.8.12",
         "@atproto/crypto@0.5.8",
-        "@atproto/did",
+        "@atproto/did@0.5.6",
         "@atproto/identity",
         "@atproto/lex-client",
         "@atproto/lex-data",
@@ -461,6 +461,12 @@
         "@noble/curves",
         "@noble/hashes",
         "uint8arrays@5.1.1"
+      ]
+    },
+    "@atproto/did@0.0.0-spaces-alpha-20261117141222": {
+      "integrity": "sha512-osWjQoQWRXKAYzm5MnQhc3D6lzKMsq7vNTnaTG7nrC5w9vGOBPMHPMxyWMhUWkRhHIrDSKPQnscNlfwYQ0bNHA==",
+      "dependencies": [
+        "zod@3.25.76"
       ]
     },
     "@atproto/did@0.5.6": {
@@ -588,7 +594,7 @@
         "@atproto-labs/did-resolver",
         "@atproto-labs/handle-resolver",
         "@atproto-labs/simple-store",
-        "@atproto/did",
+        "@atproto/did@0.5.6",
         "@atproto/jwk",
         "@atproto/jwk-webcrypto",
         "@atproto/oauth-client",
@@ -602,7 +608,7 @@
         "@atproto-labs/did-resolver",
         "@atproto-labs/handle-resolver-node",
         "@atproto-labs/simple-store",
-        "@atproto/did",
+        "@atproto/did@0.5.6",
         "@atproto/jwk",
         "@atproto/jwk-jose",
         "@atproto/jwk-webcrypto",
@@ -619,7 +625,7 @@
         "@atproto-labs/identity-resolver",
         "@atproto-labs/simple-store",
         "@atproto-labs/simple-store-memory",
-        "@atproto/did",
+        "@atproto/did@0.5.6",
         "@atproto/jwk",
         "@atproto/oauth-resolver",
         "@atproto/oauth-types",
@@ -653,7 +659,7 @@
         "@atproto-labs/simple-store",
         "@atproto-labs/simple-store-memory",
         "@atproto/common@0.8.12",
-        "@atproto/did",
+        "@atproto/did@0.5.6",
         "@atproto/jwk",
         "@atproto/jwk-jose",
         "@atproto/lex-document",
@@ -684,29 +690,29 @@
         "@atproto-labs/identity-resolver",
         "@atproto-labs/simple-store",
         "@atproto-labs/simple-store-memory",
-        "@atproto/did",
+        "@atproto/did@0.5.6",
         "@atproto/oauth-types",
         "zod@3.25.76"
       ]
     },
-    "@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953": {
-      "integrity": "sha512-bQz4BwNk/FAPd8bXGO3EyhlIKu/UJzN5XIgmNeiZXtJbhbe30J78A3WnvBuA+SILiGFw7/M9hfgq9FcJKCzjCw==",
+    "@atproto/oauth-scopes@0.0.0-spaces-alpha-20261117141222": {
+      "integrity": "sha512-7crBfEPSaXsROwMzrgCSVd2+2PJB2scUjlUXpC3pO8NmoJLt/2S6NdP9iaIVTVa6H5sBNmFwurTtloSjgqUWzQ==",
       "dependencies": [
-        "@atproto/did",
+        "@atproto/did@0.0.0-spaces-alpha-20261117141222",
         "@atproto/syntax@0.0.0-spaces-alpha-20261117141222"
       ]
     },
     "@atproto/oauth-scopes@0.5.16": {
       "integrity": "sha512-Tt3eeoy3UA9INFmid0XOAPvtOsjUUuvH+KXTjNteBFMag5HGCClOp8vrQURG2YnQNe/Foo9ITMqGCCIcaxfPvw==",
       "dependencies": [
-        "@atproto/did",
+        "@atproto/did@0.5.6",
         "@atproto/syntax@0.7.9"
       ]
     },
     "@atproto/oauth-types@0.8.0": {
       "integrity": "sha512-+N96r3o0/lBbuHhATsQ3K6vjyd7l1XA5oRUOPjXn3iCzY1H87DAf2TTGyZv4qyg3cwDtFeKKha/OErMBq1jkwg==",
       "dependencies": [
-        "@atproto/did",
+        "@atproto/did@0.5.6",
         "@atproto/jwk",
         "zod@3.25.76"
       ]
@@ -8793,7 +8799,7 @@
             "npm:@atproto/lexicon@~0.7.21",
             "npm:@atproto/oauth-client-node@~0.5.19",
             "npm:@atproto/oauth-provider@~0.27.1",
-            "npm:@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953",
+            "npm:@atproto/oauth-scopes@0.0.0-spaces-alpha-20261117141222",
             "npm:@atproto/oauth-types@0.8",
             "npm:@atproto/syntax@~0.7.9",
             "npm:@atproto/xrpc-server@~0.13.15",

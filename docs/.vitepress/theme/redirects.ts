@@ -6,6 +6,11 @@ export const REDIRECTS: Record<string, string> = {
   '/guide/errors': '/reference/errors',
   '/client/api-reference': '/reference/api',
   '/indexer-architecture': '/architecture/appview-indexer',
+  '/architecture/october-writer-sync-contract':
+    '/history/october-writer-sync-contract',
+  '/architecture/credential-revocation-contract':
+    '/history/credential-revocation-contract',
+  '/operator/upgrades/october-spaces': '/history/october-spaces',
 }
 
 export function findRedirect(href: string): string | undefined {

@@ -1,12 +1,6 @@
 import type { Agent } from '@atproto/api'
 import type { OAuthSession } from '@atproto/oauth-client-browser'
-import {
-  formatSpaceUri,
-  isSyntacticDid,
-  isValidNsidStr,
-  isValidRkey,
-  parseRecordUri,
-} from '@northskysocial/stratos-core/spaces'
+import { parseRecordAddress } from '@northskysocial/stratos-client'
 
 interface FeedViewPost {
   post?: {
@@ -17,6 +11,8 @@ interface FeedViewPost {
     author?: { did: string; handle: string }
     boundaries?: unknown
     blobs?: { cid: string; url: string; mimeType?: string }[]
+    likeCount?: unknown
+    viewer?: unknown
   }
   reason?: unknown
 }
@@ -86,7 +82,17 @@ export interface FeedPost {
   isPrivate: boolean
   feedgenBlobs?: { cid: string; url: string; mimeType?: string }[]
   loadFeedgenBlob?: (cid: string) => Promise<Blob | undefined>
+  likeCount?: number
+  /** URIs of the viewer's own like and repost of this post. */
+  viewer?: { like?: string; repost?: string }
   reply: ReplyRef | null
+  /**
+   * The record exactly as the feed answer carried it. Absent for entries from a
+   * repository listing, which is the author's own repo and carries no feed answer.
+   */
+  record?: Record<string, unknown>
+  /** When the feed indexed the post, as served. Absent when the source gives none. */
+  indexedAt?: string
   embed?: {
     $type: string
     images?: Array<{
@@ -186,14 +192,14 @@ export interface PostDeleteTarget {
 }
 
 /**
- * Extracts the author DID from an At Protocol URI.
- * @param uri - The At Protocol URI.
- * @returns The author DID.
+ * Extracts the author DID from a space record URI or a three-part custody
+ * record URI. Any other string has no author and gives an empty string.
+ * @param uri - The record URI.
+ * @returns The author DID, or an empty string.
  */
 export function authorFromUri(uri: string): string {
-  const spaceRecord = parseRecordUri(uri)
-  if (spaceRecord.ok) return spaceRecord.value.authorDid
-  return uri.replace('at://', '').split('/')[0] ?? ''
+  const address = parseRecordAddress(uri)
+  return address.ok ? address.value.author : ''
 }
 
 /**
@@ -203,35 +209,19 @@ export function authorFromUri(uri: string): string {
  * records use the standard repository URI shape.
  */
 export function postDeleteTargetFromUri(uri: string): PostDeleteTarget | null {
-  const spaceRecord = parseRecordUri(uri)
-  if (spaceRecord.ok) {
-    const space = formatSpaceUri(spaceRecord.value)
-    if (!space.ok) return null
-    return {
-      repo: spaceRecord.value.authorDid,
-      collection: spaceRecord.value.collection,
-      rkey: spaceRecord.value.rkey,
-      space: space.value,
-    }
+  const address = parseRecordAddress(uri)
+  if (!address.ok) return null
+  const { author, collection, rkey } = address.value
+  if (address.value.kind === 'custody') {
+    return { repo: author, collection, rkey }
   }
-
-  const parts = uri.startsWith('at://')
-    ? uri.slice('at://'.length).split('/')
-    : []
-  if (parts.length !== 3) return null
-
-  const [repo, collection, rkey] = parts
-  if (
-    !repo ||
-    !collection ||
-    !rkey ||
-    !isSyntacticDid(repo) ||
-    !isValidNsidStr(collection) ||
-    !isValidRkey(rkey)
-  ) {
-    return null
+  const { authority, spaceType, skey } = address.value
+  return {
+    repo: author,
+    collection,
+    rkey,
+    space: `at:space/${authority}/${spaceType}/${skey}`,
   }
-  return { repo, collection, rkey }
 }
 
 /**
@@ -274,21 +264,51 @@ function boundariesFromRecord(record: Record<string, unknown>): string[] {
     .filter((v): v is string => typeof v === 'string')
 }
 
+/** The viewer's like and repost URIs, or undefined when the post carries neither. */
+function viewerState(viewer: unknown): FeedPost['viewer'] | undefined {
+  if (!viewer || typeof viewer !== 'object') return undefined
+  const { like, repost } = viewer as Record<string, unknown>
+  const state = {
+    ...(typeof like === 'string' ? { like } : {}),
+    ...(typeof repost === 'string' ? { repost } : {}),
+  }
+  return Object.keys(state).length > 0 ? state : undefined
+}
+
+// An entry with no author cannot be shown or attributed, so it is left out;
+// the count, never the entry, is logged so the loss stays visible.
+function reportEntriesWithoutAuthor(operation: string, count: number): void {
+  if (count === 0) return
+  console.warn(
+    { operation, droppedCount: count },
+    'Feed entries without an author were left out',
+  )
+}
+
 /**
  * Maps a FeedViewPost to a FeedPost.
  * @param feed - The FeedViewPost to map.
  * @param isPrivate - Whether the post is private.
+ * @param operation - The feed request the entries came from, for the log line.
  * @returns The mapped FeedPost, or an empty array if the post is invalid.
  */
 function mapFeedViewPosts(
   feed: FeedViewPost[],
   isPrivate: boolean,
+  operation: string,
 ): FeedPost[] {
-  return feed.flatMap((item) => {
+  let withoutAuthor = 0
+  const posts = feed.flatMap((item) => {
     if (!item.post || item.reason) return []
 
     const val = item.post.record ?? {}
+    const servedRecord = item.post.record
+    const indexedAt = item.post.indexedAt
     const did = item.post.author?.did ?? authorFromUri(item.post.uri)
+    if (!did) {
+      withoutAuthor += 1
+      return []
+    }
     const handle = item.post.author?.handle ?? ''
     const responseBoundaries = item.post.boundaries
     const boundaries = Array.isArray(responseBoundaries)
@@ -307,12 +327,24 @@ function mapFeedViewPosts(
         reply: parseReplyRef(val),
         embed: val.embed as FeedPost['embed'],
         ...(item.post.blobs ? { feedgenBlobs: item.post.blobs } : {}),
+        ...(typeof item.post.likeCount === 'number'
+          ? { likeCount: item.post.likeCount }
+          : {}),
+        ...(viewerState(item.post.viewer)
+          ? { viewer: viewerState(item.post.viewer) }
+          : {}),
+        ...(servedRecord && typeof servedRecord === 'object'
+          ? { record: servedRecord }
+          : {}),
+        ...(typeof indexedAt === 'string' ? { indexedAt } : {}),
         author: did,
         authorHandle: handle !== did ? handle : '',
         boundaries,
       },
     ]
   })
+  reportEntriesWithoutAuthor(operation, withoutAuthor)
+  return posts
 }
 
 function isFeedgenItem(value: unknown): value is FeedViewPost {
@@ -410,7 +442,11 @@ export async function fetchPublicPosts(
       filter: 'posts_with_replies',
       limit: 50,
     })
-    return mapFeedViewPosts(res.data.feed as FeedViewPost[], false)
+    return mapFeedViewPosts(
+      res.data.feed as FeedViewPost[],
+      false,
+      'bsky.getAuthorFeed',
+    )
   } catch {
     return []
   }
@@ -432,21 +468,31 @@ export async function fetchStratosPosts(
       collection: 'zone.stratos.feed.post',
       limit: 50,
     })
-    return res.data.records.map((r) => {
-      const val = r.value as Record<string, unknown>
-      return {
-        uri: r.uri,
-        cid: r.cid,
-        text: val.text as string,
-        createdAt: val.createdAt as string,
-        isPrivate: true,
-        reply: parseReplyRef(val),
-        embed: val.embed as FeedPost['embed'],
-        author: authorFromUri(r.uri),
-        authorHandle: '',
-        boundaries: boundariesFromRecord(val),
+    let withoutAuthor = 0
+    const posts = res.data.records.flatMap((r) => {
+      const author = authorFromUri(r.uri)
+      if (!author) {
+        withoutAuthor += 1
+        return []
       }
+      const val = r.value as Record<string, unknown>
+      return [
+        {
+          uri: r.uri,
+          cid: r.cid,
+          text: val.text as string,
+          createdAt: val.createdAt as string,
+          isPrivate: true,
+          reply: parseReplyRef(val),
+          embed: val.embed as FeedPost['embed'],
+          author,
+          authorHandle: '',
+          boundaries: boundariesFromRecord(val),
+        },
+      ]
     })
+    reportEntriesWithoutAuthor('stratos.listRecords', withoutAuthor)
+    return posts
   } catch {
     return []
   }
@@ -479,7 +525,7 @@ export async function fetchAppviewStratosPosts(
     const body = (await res.json()) as StratosTimelineResponse
     console.log(`[stratos] getTimeline: ${body.feed?.length ?? 0} posts`)
     return {
-      posts: mapFeedViewPosts(body.feed ?? [], true),
+      posts: mapFeedViewPosts(body.feed ?? [], true, 'stratos.getTimeline'),
       cursor: body.cursor,
     }
   } catch (err) {
@@ -577,23 +623,25 @@ export async function fetchFeedgenPosts(
     )
     return {
       ok: true,
-      posts: mapFeedViewPosts(timeline.feed ?? [], true).map((post) => ({
-        ...post,
-        loadFeedgenBlob: async (cid: string): Promise<Blob | undefined> => {
-          if (!post.feedgenBlobs?.some((blob) => blob.cid === cid))
-            return undefined
-          const parameters = new URLSearchParams({ uri: post.uri, cid })
-          const response = await session.fetchHandler(
-            `/xrpc/zone.stratos.feedgen.getBlob?${parameters}`,
-            {
-              method: 'GET',
-              headers: { 'atproto-proxy': `${feedgenDid}#stratos_feedgen` },
-            },
-          )
-          if (!response.ok) throw new Error('Private image is unavailable')
-          return response.blob()
-        },
-      })),
+      posts: mapFeedViewPosts(timeline.feed ?? [], true, 'feedgen.getFeed').map(
+        (post) => ({
+          ...post,
+          loadFeedgenBlob: async (cid: string): Promise<Blob | undefined> => {
+            if (!post.feedgenBlobs?.some((blob) => blob.cid === cid))
+              return undefined
+            const parameters = new URLSearchParams({ uri: post.uri, cid })
+            const response = await session.fetchHandler(
+              `/xrpc/zone.stratos.feedgen.getBlob?${parameters}`,
+              {
+                method: 'GET',
+                headers: { 'atproto-proxy': `${feedgenDid}#stratos_feedgen` },
+              },
+            )
+            if (!response.ok) throw new Error('Private image is unavailable')
+            return response.blob()
+          },
+        }),
+      ),
       cursor: timeline.cursor,
     }
   } catch {

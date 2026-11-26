@@ -23,6 +23,7 @@ import {
   waitForPdsBoundaries,
 } from './lib/admin.ts'
 import { adminLogin } from './lib/admin-login.ts'
+import { spacesPdsRequested } from './lib/phases.ts'
 import { enrollmentStatus } from './lib/stratos.ts'
 import { loadState, type UserState } from './lib/state.ts'
 import { assert, fail, finish, info, section } from './lib/log.ts'
@@ -38,6 +39,27 @@ function sameSet(a: string[], b: string[]): boolean {
   return b.every((v) => set.has(v))
 }
 
+async function assertPdsCustodyMemberListed(
+  sessionCookie: string,
+  pdsFixture: UserState,
+): Promise<void> {
+  const pdsMembers = await adminList(
+    'zone.stratos.admin.listEnrollments?custody=pds',
+    sessionCookie,
+  )
+  const pdsMembersBody = pdsMembers.body as {
+    enrollments?: Array<{ did?: string; custody?: string }>
+  }
+  assert(
+    pdsMembers.status === 200 &&
+      (pdsMembersBody.enrollments?.length ?? 0) === 1 &&
+      pdsMembersBody.enrollments?.[0]?.did === pdsFixture.did &&
+      pdsMembersBody.enrollments?.[0]?.custody === 'pds',
+    'listEnrollments returns the one PDS-custody fixture',
+    `status=${pdsMembers.status}, returned=${pdsMembersBody.enrollments?.length ?? 0}`,
+  )
+}
+
 async function run(): Promise<void> {
   section('Admin API: Boundary Management')
 
@@ -45,10 +67,11 @@ async function run(): Promise<void> {
   const operator = state.users[ADMIN_OPERATOR_KEY]
   const target = state.users[ADMIN_TARGET_KEY]
 
-  if (!operator || !target) {
+  const pdsFixture = state.mixedMode?.member
+  if (!operator || !target || (spacesPdsRequested() && !pdsFixture)) {
     fail(
       'Missing operator/target user state',
-      `operator=${ADMIN_OPERATOR_KEY}, target=${ADMIN_TARGET_KEY} — run setup.ts first`,
+      `operator=${ADMIN_OPERATOR_KEY}, target=${ADMIN_TARGET_KEY} — run setup.ts first (with --spaces-pds when this run asks for a spaces PDS)`,
     )
     Deno.exit(1)
   }
@@ -87,10 +110,10 @@ async function run(): Promise<void> {
   assert(
     sessionCookie,
     'Captured admin session cookie from OAuth login',
-    sessionCookie ? 'cookie present' : 'no cookie — STOP-worthy per plan 003',
+    sessionCookie ? 'cookie present' : 'no cookie — stop here',
   )
   if (!sessionCookie) {
-    // Per plan 003 STOP condition: do not fall back to a Bearer shortcut.
+    // A Bearer shortcut would skip the OAuth session this script exists to test.
     finish()
   }
 
@@ -127,22 +150,9 @@ async function run(): Promise<void> {
     `status=${unauthList.status}`,
   )
 
-  const pdsFixture = state.mixedMode?.member
-  const pdsMembers = await adminList(
-    'zone.stratos.admin.listEnrollments?custody=pds',
-    sessionCookie,
-  )
-  const pdsMembersBody = pdsMembers.body as {
-    enrollments?: Array<{ did?: string; custody?: string }>
+  if (spacesPdsRequested() && pdsFixture) {
+    await assertPdsCustodyMemberListed(sessionCookie, pdsFixture)
   }
-  assert(
-    pdsMembers.status === 200 &&
-      (pdsMembersBody.enrollments?.length ?? 0) === 1 &&
-      pdsMembersBody.enrollments?.[0]?.did === pdsFixture?.did &&
-      pdsMembersBody.enrollments?.[0]?.custody === 'pds',
-    'listEnrollments returns the one PDS-custody fixture',
-    `status=${pdsMembers.status}, returned=${pdsMembersBody.enrollments?.length ?? 0}`,
-  )
 
   // 2. addBoundary via the admin API.
   const add = await adminFetch(

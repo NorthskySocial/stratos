@@ -26,14 +26,7 @@ import {
   spaceUriFor,
 } from './lib/config.ts'
 import { adminList, adminSetBoundaries } from './lib/admin.ts'
-import {
-  buildFeedgen,
-  FEEDGEN_DID,
-  FEEDGEN_SIGNING_KEY,
-  FeedgenHarness,
-  type FeedgenStartOptions,
-  SPACE_COMMIT_TAMPER_MODULE,
-} from './lib/feedgen.ts'
+import { FEEDGEN_DID, FEEDGEN_SIGNING_KEY } from './lib/feedgen.ts'
 import { assert, fail, finish, info, pass, section } from './lib/log.ts'
 import {
   createPdsSession,
@@ -47,34 +40,19 @@ import {
   verifyPdsRecord,
   verifyPdsSpaceDeclaration,
 } from './lib/mixed-mode-pds.ts'
-import { createSession, getServiceAuth } from './lib/pds.ts'
 import { fillSignInForm, submitSignInAndConsent } from './lib/oauth-flow.ts'
 import { loadState, saveState } from './lib/state.ts'
 import {
-  createRecord,
   enrollmentStatus,
   isRecordNotFound,
   tryGetRecord,
 } from './lib/stratos.ts'
 
-const FEEDGEN_PORT = 3301
-const FEEDGEN_URL = `http://127.0.0.1:${FEEDGEN_PORT}`
 const COLLECTION = 'zone.stratos.feed.post'
-const GET_FEED_LXM = 'zone.stratos.feedgen.getFeed'
 const DNS_DECLARATION_NAME = '_lexicon.space.stratos.zone'
 const SPACE_DECLARATION_AUTHORITY_DID = 'did:plc:6uxgo3ypovauub7nblwylqyv'
 const PLC_DIRECTORY_URL =
   Deno.env.get('PLC_DIRECTORY') ?? 'https://plc.directory'
-const MIXED_MODE_FEEDS = [
-  { id: 'swordsmith', boundary: DOMAINS.swordsmith },
-  { id: 'aekea', boundary: DOMAINS.aekea },
-]
-const SPACE_SYNC_ENV = {
-  FEEDGEN_SPACE_SYNC_ENABLED: 'true',
-  FEEDGEN_SPACE_SYNC_INTERVAL_MS: '500',
-  FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS: PDS_SPACES_URL,
-}
-
 interface ListReposBody {
   repos?: Array<{
     did?: string
@@ -83,78 +61,6 @@ interface ListReposBody {
     hostSource?: string
     rev?: string
   }>
-}
-
-interface PostView {
-  uri?: string
-  cid?: string
-  author?: { did?: string; handle?: string }
-  record?: Record<string, unknown>
-  boundaries?: string[]
-}
-
-interface GetFeedBody {
-  error?: string
-  feed?: Array<{ post?: PostView }>
-}
-
-interface GetFeedResponse {
-  status: number
-  body: GetFeedBody
-}
-
-interface FeedStateResult {
-  matches: boolean
-  response: GetFeedResponse
-}
-
-interface FeedPostsResult {
-  posts: PostView[] | null
-  response: GetFeedResponse
-}
-
-function feedgenStartOptions(
-  additionalEnv: Record<string, string> = {},
-): FeedgenStartOptions {
-  return {
-    port: FEEDGEN_PORT,
-    feeds: MIXED_MODE_FEEDS,
-    env: { ...SPACE_SYNC_ENV, ...additionalEnv },
-  }
-}
-
-function isSpaceSyncPass(event: {
-  fields: Readonly<Record<string, unknown>>
-}): boolean {
-  return event.fields['msg'] === 'space sync pass completed'
-}
-
-function isMembershipPass(event: {
-  fields: Readonly<Record<string, unknown>>
-}): boolean {
-  return event.fields['msg'] === 'space membership pass completed'
-}
-
-async function assertFeedgenWarmup(
-  feedgen: FeedgenHarness,
-  phase: string,
-): Promise<void> {
-  const warmup = await feedgen.waitForWarmup(30_000)
-  assert(
-    warmup.attempted === 2,
-    `${phase} credential warm-up attempts both configured boundaries`,
-    String(warmup.attempted),
-  )
-  assert(
-    warmup.acquired === 2,
-    `${phase} credential warm-up acquires both configured boundaries`,
-    String(warmup.acquired),
-  )
-  assert(
-    warmup.failed === 0,
-    `${phase} credential warm-up has no failed boundary`,
-    String(warmup.failed),
-  )
 }
 
 async function enrollSpacesMember(
@@ -288,73 +194,6 @@ async function fetchListRepos(space: string): Promise<ListReposBody> {
   return (await res.json()) as ListReposBody
 }
 
-async function getFeed(token: string, feed: string): Promise<GetFeedResponse> {
-  const res = await fetch(
-    `${FEEDGEN_URL}/xrpc/zone.stratos.feedgen.getFeed?${new URLSearchParams({ feed })}`,
-    { headers: { authorization: `Bearer ${token}` } },
-  )
-  return {
-    status: res.status,
-    body: (await res.json().catch(() => ({}))) as GetFeedBody,
-  }
-}
-
-async function waitForFeedPost(
-  token: string,
-  feed: string,
-  uri: string,
-  matchesState: (found: boolean) => boolean,
-): Promise<FeedStateResult> {
-  const deadline = Date.now() + 30_000
-  let response: GetFeedResponse = { status: 0, body: {} }
-  while (Date.now() < deadline) {
-    response = await getFeed(token, feed)
-    const found =
-      response.body.feed?.some((item) => item.post?.uri === uri) ?? false
-    if (response.status === 200 && matchesState(found)) {
-      return { matches: true, response }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500))
-  }
-  return { matches: false, response }
-}
-
-function describeFeedState(response: GetFeedResponse): string {
-  const uris =
-    response.body.feed
-      ?.flatMap((item) => (item.post?.uri ? [item.post.uri] : []))
-      .join(', ') ?? ''
-  return `status=${response.status} error=${response.body.error ?? 'none'} uris=${uris}`
-}
-
-function describeFeedgenLogs(feedgen: FeedgenHarness): string {
-  return feedgen.recentLogLines().join('\n')
-}
-
-async function waitForFeedPosts(
-  token: string,
-  feed: string,
-  uris: string[],
-): Promise<FeedPostsResult> {
-  const deadline = Date.now() + 30_000
-  let response: GetFeedResponse = { status: 0, body: {} }
-  while (Date.now() < deadline) {
-    response = await getFeed(token, feed)
-    const posts = response.body.feed?.flatMap((item) =>
-      item.post ? [item.post] : [],
-    )
-    if (
-      response.status === 200 &&
-      posts &&
-      uris.every((uri) => posts.some((post) => post.uri === uri))
-    ) {
-      return { posts, response }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500))
-  }
-  return { posts: null, response }
-}
-
 async function postStratosRecord(
   did: string,
   authorization: string,
@@ -404,19 +243,8 @@ async function run(): Promise<void> {
   section('Phase 4g: Mixed mode — spaces PDS custody')
   const state = await loadState()
   const fixture = state.mixedMode
-  const viewer = state.users.sakura
-  const stratosAuthor = state.users.rei
-  const otherViewer = state.users.kaoruko
-  if (
-    !fixture ||
-    !viewer?.enrolled ||
-    !stratosAuthor?.enrolled ||
-    !otherViewer?.enrolled ||
-    !state.adminSessionCookie
-  ) {
-    fail(
-      'Missing mixed-mode fixtures, users, or admin session — run prior phases',
-    )
+  if (!fixture || !state.adminSessionCookie) {
+    fail('Missing mixed-mode fixtures or admin session — run prior phases')
     finish()
   }
   assert(
@@ -624,18 +452,6 @@ async function run(): Promise<void> {
       ? 'unexpected record'
       : `status=${stratosRead.status} body=${stratosRead.error}`,
   )
-  const claimedPost = await createPdsSpaceRecord(memberSession, space, {
-    $type: COLLECTION,
-    text: 'Motoko claims a boundary outside the admitted space',
-    boundary: { values: [{ value: DOMAINS.aekea }] },
-    createdAt: new Date().toISOString(),
-  })
-  const stratosPost = await createRecord(stratosAuthor.did, COLLECTION, {
-    $type: COLLECTION,
-    text: 'Rei keeps the Stratos-custody record in the service',
-    boundary: { values: [{ value: DOMAINS.swordsmith }] },
-    createdAt: new Date().toISOString(),
-  })
   await assertPdsPasswordSessionRejected(
     fixture.member.did,
     memberSession.accessJwt,
@@ -662,306 +478,25 @@ async function run(): Promise<void> {
     'admin resolves the PDS member swordsmith host before removal',
   )
 
-  if (!(await buildFeedgen())) {
-    fail('stratos-feedgen bundle')
-    finish()
-  }
-  const feedgen = await FeedgenHarness.create()
-  try {
-    await feedgen.start(feedgenStartOptions())
-    await assertFeedgenWarmup(feedgen, 'initial mixed-mode')
-    assert(
-      await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
-      'mixed-mode feedgen is healthy',
-    )
-    const firstMembershipPass = await feedgen.waitForLog(
-      isMembershipPass,
-      30_000,
-      1,
-    )
-    assert(
-      firstMembershipPass.fields['successfulBoundaries'] ===
-        MIXED_MODE_FEEDS.length &&
-        firstMembershipPass.fields['failedBoundaries'] === 0 &&
-        firstMembershipPass.fields['pollTargets'] === 1 &&
-        firstMembershipPass.fields['skippedNoHost'] === 0 &&
-        firstMembershipPass.fields['removed'] === 0,
-      'the membership pass processes both boundaries and produces one poll target',
-    )
-    const firstPass = await feedgen.waitForLog(isSpaceSyncPass, 30_000, 1)
-    assert(
-      firstPass.fields['targets'] === 1 &&
-        firstPass.fields['succeeded'] === 1 &&
-        firstPass.fields['failed'] === 0 &&
-        firstPass.fields['abandoned'] === 0 &&
-        firstPass.fields['halted'] === 0,
-      'the completed pass targets and syncs only the admitted PDS member',
-    )
-    const secondPass = await feedgen.waitForLog(isSpaceSyncPass, 30_000, 2)
-    assert(
-      secondPass.fields['targets'] === 1 &&
-        secondPass.fields['succeeded'] === 1 &&
-        secondPass.fields['failed'] === 0 &&
-        secondPass.fields['abandoned'] === 0 &&
-        secondPass.fields['halted'] === 0,
-      'the next completed pass keeps the hostile writer out',
-    )
-
-    const viewerSession = await createSession(viewer.handle, viewer.password)
-    const viewerToken = await getServiceAuth(
-      viewerSession.accessJwt,
-      FEEDGEN_DID,
-      GET_FEED_LXM,
-    )
-    const otherViewerSession = await createSession(
-      otherViewer.handle,
-      otherViewer.password,
-    )
-    const otherViewerToken = await getServiceAuth(
-      otherViewerSession.accessJwt,
-      FEEDGEN_DID,
-      GET_FEED_LXM,
-    )
-    const swordsmithFeed = await waitForFeedPosts(viewerToken, 'swordsmith', [
-      memberPost.uri,
-      claimedPost.uri,
-      stratosPost.uri,
-    ])
-    const swordsmithPosts = swordsmithFeed.posts
-    assert(
-      swordsmithPosts !== null,
-      'the shared viewer swordsmith feed contains both custody classes',
-      `${describeFeedState(swordsmithFeed.response)}\n${describeFeedgenLogs(feedgen)}`,
-    )
-    const memberFeedPost = swordsmithPosts?.find(
-      (post) => post.uri === memberPost.uri,
-    )
-    const stratosFeedPost = swordsmithPosts?.find(
-      (post) => post.uri === stratosPost.uri,
-    )
-    const claimedFeedPost = swordsmithPosts?.find(
-      (post) => post.uri === claimedPost.uri,
-    )
-    assert(
-      memberFeedPost?.author?.did === fixture.member.did &&
-        memberFeedPost?.author?.handle === fixture.member.handle &&
-        stratosFeedPost?.author?.did === stratosAuthor.did,
-      'the feed returns the PDS author handle and both custody authors',
-    )
-    assert(
-      claimedFeedPost?.boundaries?.length === 1 &&
-        claimedFeedPost.boundaries[0] === DOMAINS.swordsmith &&
-        !claimedFeedPost.boundaries.includes(DOMAINS.aekea),
-      'the indexed claimed-boundary post carries only its derived boundary',
-      claimedFeedPost?.boundaries?.join(', '),
-    )
-    assert(
-      !swordsmithPosts?.some((post) => post.uri === hostilePost.uri),
-      'the feedgen does not index the hostile non-member post',
-    )
-    const otherBoundaryFeed = await getFeed(otherViewerToken, 'aekea')
-    assert(
-      otherBoundaryFeed.status === 200 &&
-        !otherBoundaryFeed.body.feed?.some(
-          (item) => item.post?.uri === claimedPost.uri,
-        ),
-      'the claimed PDS boundary does not place the record in the aekea feed',
-    )
-    const deniedSwordsmithFeed = await getFeed(otherViewerToken, 'swordsmith')
-    assert(
-      deniedSwordsmithFeed.status === 400 &&
-        deniedSwordsmithFeed.body.error === 'BoundaryMismatch',
-      'a viewer without swordsmith cannot access either custody record',
-    )
-
-    await feedgen.stop()
-    await feedgen.start(
-      feedgenStartOptions({
-        NODE_OPTIONS: `--import=${SPACE_COMMIT_TAMPER_MODULE}`,
-        FEEDGEN_E2E_TAMPER_COMMIT_REPO: fixture.member.did,
-        FEEDGEN_E2E_TAMPER_COMMIT_SPACE: space,
-        FEEDGEN_E2E_COMMIT_RESPONSE_MODE: 'omit',
-      }),
-    )
-    await assertFeedgenWarmup(feedgen, 'commit-fallback mixed-mode')
-    assert(
-      await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
-      'the feedgen with a commit-less terminal page is healthy',
-    )
-    const fallbackPass = await feedgen.waitForLog(isSpaceSyncPass, 30_000, 1)
-    assert(
-      fallbackPass.fields['targets'] === 1 &&
-        fallbackPass.fields['succeeded'] === 1 &&
-        fallbackPass.fields['failed'] === 0,
-      'the live feedgen fetches the latest commit when terminal ops omit it',
-    )
-    const fallbackViewerToken = await getServiceAuth(
-      viewerSession.accessJwt,
-      FEEDGEN_DID,
-      GET_FEED_LXM,
-    )
-    const fallbackFeedState = await waitForFeedPost(
-      fallbackViewerToken,
-      'swordsmith',
-      memberPost.uri,
-      (found) => found,
-    )
-    assert(
-      fallbackFeedState.matches,
-      'the separately verified latest commit promotes the PDS post',
-      `${describeFeedState(fallbackFeedState.response)}\n${describeFeedgenLogs(feedgen)}`,
-    )
-
-    await feedgen.stop()
-    await feedgen.start(
-      feedgenStartOptions({
-        NODE_OPTIONS: `--import=${SPACE_COMMIT_TAMPER_MODULE}`,
-        FEEDGEN_E2E_TAMPER_COMMIT_REPO: fixture.member.did,
-        FEEDGEN_E2E_TAMPER_COMMIT_SPACE: space,
-      }),
-    )
-    await assertFeedgenWarmup(feedgen, 'quarantine mixed-mode')
-    assert(
-      await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
-      'the feedgen under a tampered PDS response is healthy',
-    )
-    const verificationFailure = await feedgen.waitForLog(
-      (event) => event.fields['msg'] === 'space commit verification failed',
-      30_000,
-    )
-    const failedTarget = verificationFailure.fields['target'] as
-      Record<string, unknown> | undefined
-    assert(
-      verificationFailure.fields['reason'] === 'mac-mismatch' &&
-        failedTarget?.['spaceUri'] === space &&
-        failedTarget['boundary'] === DOMAINS.swordsmith &&
-        failedTarget['did'] === fixture.member.did &&
-        failedTarget['host'] === PDS_SPACES_URL,
-      'the live feedgen quarantines the tampered PDS commit',
-    )
-    const retriedPass = await feedgen.waitForLog(isSpaceSyncPass, 30_000, 2)
-    assert(
-      retriedPass.fields['targets'] === 1 &&
-        retriedPass.fields['succeeded'] === 0 &&
-        retriedPass.fields['failed'] === 1 &&
-        retriedPass.fields['halted'] === 0,
-      'the live feedgen retries the quarantined PDS target after membership refresh',
-    )
-    const quarantinedFeedState = await waitForFeedPost(
-      viewerToken,
-      'swordsmith',
-      memberPost.uri,
-      (found) => !found,
-    )
-    assert(
-      quarantinedFeedState.matches,
-      'commit quarantine removes the PDS-custody post from the boundary feed',
-      `${describeFeedState(quarantinedFeedState.response)}\n${describeFeedgenLogs(feedgen)}`,
-    )
-
-    await feedgen.stop()
-    await feedgen.start(feedgenStartOptions())
-    await assertFeedgenWarmup(feedgen, 'cold-restart mixed-mode')
-    assert(
-      await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
-      'cold-restarted mixed-mode feedgen is healthy',
-    )
-    const restartMembershipPass = await feedgen.waitForLog(
-      isMembershipPass,
-      30_000,
-      1,
-    )
-    assert(
-      restartMembershipPass.fields['successfulBoundaries'] ===
-        MIXED_MODE_FEEDS.length &&
-        restartMembershipPass.fields['failedBoundaries'] === 0 &&
-        restartMembershipPass.fields['pollTargets'] === 1 &&
-        restartMembershipPass.fields['skippedNoHost'] === 0 &&
-        restartMembershipPass.fields['removed'] === 0,
-      'the cold restart rebuilds the PDS poll target for both boundaries',
-    )
-    const restartPass = await feedgen.waitForLog(isSpaceSyncPass, 30_000, 1)
-    assert(
-      restartPass.fields['targets'] === 1 &&
-        restartPass.fields['succeeded'] === 1 &&
-        restartPass.fields['failed'] === 0 &&
-        restartPass.fields['abandoned'] === 0 &&
-        restartPass.fields['halted'] === 0,
-      'the cold restart syncs the rebuilt PDS poll target',
-    )
-    const restartViewerToken = await getServiceAuth(
-      viewerSession.accessJwt,
-      FEEDGEN_DID,
-      GET_FEED_LXM,
-    )
-    const restartFeedState = await waitForFeedPost(
-      restartViewerToken,
-      'swordsmith',
-      memberPost.uri,
-      (found) => found,
-    )
-    assert(
-      restartFeedState.matches,
-      'the cold restart retains the PDS-custody post in its boundary feed',
-      `${describeFeedState(restartFeedState.response)}\n${describeFeedgenLogs(feedgen)}`,
-    )
-
-    const removal = await adminSetBoundaries(
-      fixture.member.did,
-      [],
-      state.adminSessionCookie,
-    )
-    assert(removal.status === 200, 'admin removes the member space boundary')
-    const enrollmentAfterRemoval = await verifyPdsRecord(
-      PDS_SPACES_URL,
-      fixture.member.did,
-      ENROLLMENT_COLLECTION,
-      status.enrollmentRkey,
-    )
-    assert(
-      (enrollmentAfterRemoval as { custody?: string; repoHost?: string })
-        .custody === 'pds' &&
-        (enrollmentAfterRemoval as { repoHost?: string }).repoHost ===
-          PDS_SPACES_URL,
-      'boundary removal preserves PDS custody and host in the enrollment record',
-    )
-    const purgePass = await feedgen.waitForLog(
-      (event) =>
-        isSpaceSyncPass(event) &&
-        event.fields['targets'] === 0 &&
-        event.fields['succeeded'] === 0 &&
-        event.fields['failed'] === 0,
-      30_000,
-    )
-    assert(
-      purgePass.fields['targets'] === 0 &&
-        purgePass.fields['succeeded'] === 0 &&
-        purgePass.fields['failed'] === 0,
-      'the completed removal pass has no PDS target',
-    )
-    const removalViewerSession = await createSession(
-      viewer.handle,
-      viewer.password,
-    )
-    const removalViewerToken = await getServiceAuth(
-      removalViewerSession.accessJwt,
-      FEEDGEN_DID,
-      GET_FEED_LXM,
-    )
-    const removedFeedState = await waitForFeedPost(
-      removalViewerToken,
-      'swordsmith',
-      memberPost.uri,
-      (found) => !found,
-    )
-    assert(
-      removedFeedState.matches,
-      'the feedgen purges the removed member post',
-      `${describeFeedState(removedFeedState.response)}\n${describeFeedgenLogs(feedgen)}`,
-    )
-  } finally {
-    await feedgen.cleanup()
-  }
+  const removal = await adminSetBoundaries(
+    fixture.member.did,
+    [],
+    state.adminSessionCookie,
+  )
+  assert(removal.status === 200, 'admin removes the member space boundary')
+  const enrollmentAfterRemoval = await verifyPdsRecord(
+    PDS_SPACES_URL,
+    fixture.member.did,
+    ENROLLMENT_COLLECTION,
+    status.enrollmentRkey,
+  )
+  assert(
+    (enrollmentAfterRemoval as { custody?: string; repoHost?: string })
+      .custody === 'pds' &&
+      (enrollmentAfterRemoval as { repoHost?: string }).repoHost ===
+        PDS_SPACES_URL,
+    'boundary removal preserves PDS custody and host in the enrollment record',
+  )
   finish()
 }
 

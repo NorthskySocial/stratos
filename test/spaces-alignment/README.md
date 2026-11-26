@@ -74,7 +74,7 @@ not upload sandbox state, Compose files, browser traces, logs, or account data.
 The runner performs its own project-scoped cleanup. The job has a 60-minute
 budget; do not extend it by weakening assertions or skipping the real sandbox.
 
-The report directory must not exist. The runner exports the pinned AiaB source and the exact candidate into a unique private directory. It overlays only reviewed templates from this checkout, builds the pinned alpha PDS from source, creates one ordinary PDS with two synthetic users, runs the selected suite, and removes its unique Compose project and volumes. It never modifies the supplied AiaB checkout. The output `receipt.json` contains source pins, image ID, evidence mode, review references when present, commands, and assertion counts. Archive files and image metadata stay private with the report.
+The report directory must not exist. The runner exports the pinned AiaB source and the exact candidate into a unique private directory. It overlays only reviewed templates from this checkout, creates one ordinary PDS with two synthetic users, builds the reference PDS from source only for a suite that needs it (see Reference PDS suites), runs the selected suite, and removes its unique Compose project and volumes. It never modifies the supplied AiaB checkout. The output `receipt.json` contains source pins, image ID, evidence mode, review references when present, commands, and assertion counts. Archive files and image metadata stay private with the report.
 Each run uses a disposable private Docker client config and clears inherited
 `COMPOSE_*` overrides. Browser and cleanup commands select the generated
 `compose.yaml` explicitly. The successful receipt records a passed cleanup.
@@ -83,9 +83,9 @@ status without copying child stderr, account passwords, or environment values.
 If cleanup fails, the gate fails and preserves the private generated Compose
 file at the recorded recovery path rather than deleting the only recovery config.
 
-The AiaB checkout must be clean at v0.7.2 (`6e9a39a94c102e4d42fa5868bd90b881bb5be695`). If absent, the runner clones, fetches, and checks out that exact SHA. Repo-owned `atmosphere/` assets are installed only in the disposable export. The baseline uses AiaB's digest-pinned `pds-space1`, alongside ordinary `pds1`; it does not build a primary PDS. October suites retain their separate source-built PDS and cleanup receipts.
+The AiaB checkout must be clean at v0.7.2 (`6e9a39a94c102e4d42fa5868bd90b881bb5be695`). If absent, the runner clones, fetches, and checks out that exact SHA. Repo-owned `atmosphere/` assets are installed only in the disposable export. The disposable export pins `pds-space1` to `ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350`, alongside ordinary `pds1`; it does not build a primary PDS. The Deno test Compose file uses the same pin. The receipt records the running containers' local image IDs after checking them against their configured images. The registry digest and local image ID are different identities. When Docker reports a rootless engine, the exported AiaB runner uses container UID 0 to read its private state. The suites that need the reference PDS build it as a separate image and the receipt records, and the runner cleans up, that image.
 
-The integration is one generic application with native Compose build arguments. Its identity Dockerfile/script and browser Dockerfile originated at historical AiaB commit `ecf52fac4abaa681717f2ed2ce2afc2253d1a366`; the stack and browser driver incorporate the reviewed Stratos templates. The Stratos space lexicon fixture and authority definition are retained as readable assets. Legacy templates remain for later non-baseline suite migration; those suites are not claimed as runtime-verified by this baseline slice.
+The integration is one generic application with native Compose build arguments. Its identity Dockerfile/script and browser Dockerfile originated at historical AiaB commit `ecf52fac4abaa681717f2ed2ce2afc2253d1a366`; the stack and browser driver incorporate the reviewed Stratos templates. The Stratos space lexicon fixture and authority definition are retained as readable assets. The reference PDS template is `templates/reference-pds.yaml` with `templates/reference-pds.definition.json`.
 
 The runner writes each AiaB phase and command to standard output. It prints bounded, sanitized output for install, create, check, the local tools-image prebuild, and up, including a failed command's stdout and stderr. Before `up`, it builds AiaB's local `runner` image because dependent Dockerfiles use it as their base image. After an `up` failure, it replays only the generated Compose build with plain progress and reports Compose status. Seed command output remains suppressed because it can contain generated account credentials. The receipt or failure artifact remains the only uploaded report and does not contain command output.
 
@@ -98,100 +98,110 @@ stack. Private transport grants name only these sandbox origins, and
 `schemas.authority.atmosbox.test` account, which the baseline queries through
 the private authority PDS.
 
-## October primary PDS
+## Suites
 
-The primary spaces PDS is pinned to `79d6307e19908f3af406838ea0e5fae42847f182`.
-The builder checks the upstream Dockerfile and lockfile hashes in `sources.json`
-before pulling base images. Source identity does not attest a running image;
-the build receipt records the immutable image ID separately.
+| Suite                                                                                                               | Needs                                                                       | Runs today                                                           |
+| ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `ordinary-custody`                                                                                                  | The ordinary PDS only; runs without the baseline before it                  | November 26 verification recorded a pass; rerun for the candidate    |
+| `baseline`                                                                                                          | The published spaces PDS and ordinary PDS                                   | November 26 verification recorded a pass; rerun for the candidate    |
+| `delegation-transport`, `credential-lifetime`, `client-custody`, `space-delete`, `feed-errors`, `service-admission` | The baseline's stack; the runner runs the baseline first                    | Require a candidate run                                              |
+| `standard-credential-transport`, `rust-production-interop`                                                          | The baseline's stack and the reference PDS built from the November manifest | The manifest permits a build; require a candidate run                |
+| `november-interop`                                                                                                  | A ready November manifest and `--pds-image-digest`                          | Prepared suite; requires the published digest and candidate evidence |
 
-Select `--suite rust-production-interop` for the mandatory ten-assertion baseline
-followed by the same real OAuth, PDS publication, and Rust feed delivery checks
-with Batou as a second owner on the same host. Both runs require the exact new
-post URI and text in a successful feed HTTP response, not just a rendered page.
-The suite also reuses the October OAuth driver with an in-memory Rust
-probe built in the browser image from the pinned Rust builder and linked to the actual feedgen library. It requires Rust-signed exchange,
-seeded-record reads for two owners, wrong-owner/key denial, identical-header
-reuse, fresh-key renewal, and renewal denial after member removal. The probe
-receives tokens through pipes, not command arguments or files. Browser OAuth
-obtains delegation; Rust constructs every exchange and presentation signature.
-The Rust suite configures a ten-second standard credential lifetime. Its probe also
-uses the production HTTP issuer and credential manager with the existing sandbox
-service identity, verifies cached-key reuse, waits for real expiry, and requires a
-rotated key and a successful foreign-PDS read. No test clock or explicit cache
-invalidation triggers this refresh. The runtime scheduler itself is unchanged. The separate `standard-credential-transport` suite retains its
-TypeScript transport assertions. Neither suite is certified until its reviewed
-sandbox run passes.
+The November 26 published-host verification and its limits are described in
+`november/INTEROP.md`.
 
-## Combined October cutover gate
+## Baseline and ordinary custody
 
-Select `--suite october-interop` for the mandatory baseline followed by all 15
-standard transport assertions and all 11 Rust assertions. Standard fixtures use
-Faye and Edward; Rust fixtures use Rustfaye and Rustedward on the same October
-host. The runner executes the ten mandatory baseline assertions once with Motoko.
-The Rust ingestion check deliberately reuses that driver with Batou on the primary
-PDS. This is a distinct second-owner scope, not another mandatory baseline receipt:
-it requires Batou's own new post URI and text in the Rust feed response before
-emitting `rust-second-owner-ingestion`. The combined suite then calls the separate
-Rust signing probe, not the standalone Rust suite. Both combined and standalone
-runs preserve the Batou check. These accounts are distinct because the standard
-scenario removes its first member.
+The baseline checks the published spaces PDS and the ordinary PDS. The
+November 26 verification recorded a passing baseline; run it again for the
+candidate. Each completed assertion is printed, and `failure.json` records the
+names reached (`assertionsReached`, by suite).
 
-The combined suite first checks the default 600-second standard lifetime.
-It then recreates only the disposable authority with a ten-second TTL and waits
-for it to become healthy before the Rust expiry-refresh checks. It does not
-weaken or replace either suite's assertions. Both source-built PDS identities,
-the Rust probe build, private TLS, and cleanup remain required.
+The sandbox declaration fixture carries `name` and `title` with the same text
+and the same collections as `lexicons-spaces/zone/stratos/space/feed.json`.
 
-After exact-candidate independent Standards and Spec approvals, use a new
-private receipt and a nonexistent report path for each run:
+`ordinary-custody` is the one suite the runner runs without the baseline before
+it (`STANDALONE_SUITE_IDS` in `rules.ts`). It signs one user of the ordinary PDS
+(`pds1`) in through the enrollment flow, posts through the service as a
+Stratos-custody member, requires that post in the feed from the Rust feed
+generator, checks that a user of another boundary gets an empty or refused feed,
+then deletes the post and requires it gone. Its receipt says it covers ordinary
+custody only. It does not replace the baseline and shares no assertion name
+with it. The sandbox still creates the spaces PDS and Clubhouse resolves handles
+through it, so the stack must start, but no account, scope or record of that PDS
+is part of the journey.
 
 ```sh
 pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
   --sandbox-dir /home/evelyn/git/northsky/ops/sandbox/atmosphereinabox \
   --source "$(git rev-parse --show-toplevel)" \
-  --suite october-interop \
-  --review-receipt "$REVIEW_RECEIPT" \
-  --report-dir "$NEW_REPORT_DIR"
+  --suite ordinary-custody \
+  --review-receipt /tmp/private-standards-and-spec.json \
+  --report-dir /tmp/new-ordinary-custody-report
 ```
 
-Repeat `delegation-transport`, `credential-lifetime`, `client-custody`,
-`space-delete`, `feed-errors`, and `baseline` as separate sandbox runs. Each run
+Use `--suite baseline` for the baseline. Both runs need rootless
+Docker, a clean candidate checkout at a committed SHA, a new report directory,
+and either the two-review receipt or GitHub Actions with `--ci-evidence`.
+
+## Reference PDS suites
+
+`standard-credential-transport`, `rust-production-interop` and `november-interop`
+need a reference PDS that the runner builds from the upstream repository root
+`Dockerfile`. The revision comes from `november/sources.json`
+(`reference.revision`) and the file hashes from its `referenceHost.sha256`. The
+runner refuses to build while the manifest does not record cutover evidence,
+while either hash is empty, and when the revision is on the manifest's
+legacy-only list or is the revision the October `sources.json` pins. The builder
+checks the Dockerfile and lockfile hashes before pulling base images. The build
+receipt records the immutable image ID; source identity does not attest a
+running image.
+
+`standard-credential-transport` exchanges and presents credentials in the
+tagged HTTP-signature form against that host and the service. `rust-production-interop`
+repeats the real OAuth, publication and Rust feed delivery checks with a second
+owner on the same host, then drives an in-memory Rust probe, built in the
+browser image from the pinned Rust builder and linked to the feed generator
+library, through the production credential issuer and manager with a ten-second
+credential lifetime. Both require the exact post URI and text in a successful
+feed HTTP response, not just a rendered page. Neither is certified until a run
+passes on a host that accepts the new spelling.
+
+`november-interop` is prepared and never runs by default. The runner starts it
+only with `--pds-image-digest sha256:<digest>`, only when the manifest records
+complete cutover evidence including that digest, and the pinned published member
+image matches it. The separate source-built reference image is checked against
+its own recorded local image ID. Its assertions are the journeys in `november/interop-journeys.ts`, each
+naming the acceptance row it closes. It has no driver for some journeys yet. The
+workflow that runs on every pull request does not name it.
+
+`november/assertion-manifest.json` maps every assertion of every suite that
+existed when the series began to `retained`, `renamed`, `superseded` or
+`uncovered`. `uncovered` means no current test proves it and only a journey of
+the prepared suite carries it; `november/INTEROP.md` lists those. Every named
+test carries a `proves` sentence that says what its body establishes.
+`november/assertion-manifest.test.ts` fails when an assertion has no entry, a
+named test does not exist or has no `proves` sentence, or an uncovered entry
+names a test. Whether a named test proves the same thing as the assertion it
+replaces is a reviewer's judgement; the test cannot check it.
+
+## Running the other suites
+
+Run `delegation-transport`, `credential-lifetime`, `client-custody`,
+`space-delete`, `feed-errors`, `standard-credential-transport`,
+`rust-production-interop` and `baseline` as separate sandbox runs. Each run
 has fresh accounts and its own new report directory. Do not combine their
-shared Motoko fixtures after a removal or OAuth revocation. Delegated transport
-and the foreign lifetime checks now use standard HTTP signatures against the
-October primary PDS. The authority lifetime checks retain legacy compatibility
-coverage. OAuth browser proofs are unchanged. Unit-test receipts are not runtime
-acceptance, and predecessor receipts do not certify this combined candidate.
-
-## Writer-sync design probe
-
-Select `--suite writer-sync-contract` after exact-candidate independent review.
-The mandatory baseline runs first. The suite provisions a disposable upstream
-simplespace authority on the pinned October Spaces alpha PDS, using Faye and
-Edward's real accounts. It checks actual commit `rev`, standard writer metadata,
-short-page cursors, exclusive/opaque cursor behavior, repeated writers, equal and
-older update idempotence, issuer/audience/future-revision denial, current write
-policy removal, and Stratos's unsupported standard routes. This is real upstream
-authority behavior, not Stratos standard-authority support. No fake authority
-server substitutes for the PDS.
-
-`writer-sync-contract.model.test.ts` separately exercises a synthetic reference
-model for durable-processing crash boundaries, coalescing, ordering and bounded
-backoff. Those tests do not prove actual storage atomicity, retry durability,
-forwarding delivery, or generation fencing. The live probe explicitly delivers
-the real signed head through real service authentication to avoid depending on
-immediate automatic-notification timing. It does not certify the retry worker or
-notification fanout. See the [design and follow-ups](../../docs/architecture/october-writer-sync-contract.md).
-A reviewed clean-candidate runtime receipt remains required; unit tests alone
-are not acceptance.
+shared Motoko fixtures after a removal or OAuth revocation. Unit-test receipts
+are not runtime acceptance, and predecessor receipts do not certify this
+combined candidate.
 
 ## Suite API
 
-Each tracked `scenarios/<suite>.ts` exports `suite: ScenarioSuite` with `id`, nonempty `requiredAssertions`, and an async `run(context)` returning one result for each named assertion. Import `ScenarioSuite` from `../rules.js`. The runner discovers modules from the candidate checkout and runs `baseline` before any additional suite. A missing, skipped, failed, or duplicate assertion fails the gate. Add a new suite in its own scenario module. Suites that need the additional October
-PDS must be named in the runner's October capability set. Both standard transport
-and Rust production interoperability provision that PDS and its explicit identity
-origins, and record and clean up both source-built PDS images.
+Each tracked `scenarios/<suite>.ts` exports `suite: ScenarioSuite` with `id`, nonempty `requiredAssertions`, and an async `run(context)` returning one result for each named assertion. Import `ScenarioSuite` from `../rules.js`. The runner discovers modules from the candidate checkout and runs `baseline` before any additional suite, except a standalone suite named in `rules.ts`. A missing, skipped, failed, or duplicate assertion fails the gate. Add a new suite in its own scenario module. Suites that need the reference PDS must be named in the runner's
+`referencePdsSuites` set; the runner then provisions that PDS and its explicit
+identity origins, and records and cleans up its image. A suite that must never
+run by default is also named in `PREPARED_SUITE_IDS`.
 
 Mock child processes only in runner unit tests. Acceptance requires the real private sandbox with production authorization gates and the complete baseline assertion receipt. A health check or zero-test filter is not acceptance evidence.
 
@@ -206,29 +216,4 @@ only knows built-in lexicons. The blob fixture therefore uses the PDS's default
 best-effort validation path, without disabling validation, and verifies that
 the scoped record write and private blob retrieval both succeed.
 
-## Credential revocation design probe
-
-Select `--suite credential-revocation-contract` for the mandatory baseline and
-13 assertions against the actual pinned October Spaces alpha PDS receiver and unchanged Stratos
-unsupported route. This is not the future Stratos `credential-revocation`
-enforcement suite. See [the revocation contract](../../docs/architecture/credential-revocation-contract.md#bounded-design-probe)
-for every required assertion and exact typed denial.
-
-The probe uses Faye's real OAuth/exchange fixture, two distinct grants, the
-seeded record, and the existing disposable authority identity loader. A private
-peer signs notifications without exporting its key. Grants and presentation
-headers travel through pipes between Compose peers; only the final assertion
-receipt reaches the report. Restart targets only `feedgen-e2e-pds-october` and
-waits for its health check. Every Compose operation selects the generated file.
-No new authority server, production endpoint, migration, or enforcement is added.
-
-Cross-space isolation revokes B's ID in `other` and reads `general`. Duplicate
-coverage observes successful retries and unchanged read outcomes, not database
-row counts or expiry extension. Retained inactive-account behavior, a separately
-controlled foreign issuer, concurrency, storage failure, and full 3,610-second
-cleanup retention remain unverified future gates. The design probe neither
-silently skips them nor claims complete Stratos enforcement coverage.
-
-The clean-candidate and independent-review receipt gates still apply. Unit tests
-and source inspection are not runtime acceptance, and no predecessor receipt
-certifies a new candidate.
+The `--pds-image-digest` value identifies the image used in the URI probe. The source-built reference PDS is a separate image; its build receipt and running local image ID are recorded independently.

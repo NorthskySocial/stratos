@@ -4,14 +4,14 @@
   "defs": {
     "main": {
       "type": "query",
-      "description": "List the known repos that hold data in a space (the writer set), with each repo's current rev and resolved repo host. Spec-shaped mirror of com.atproto.space.listRepos (atproto#5187), extended with the `host` and `hostSource` fields upstream has no answer for: an authority-recorded override, or else the member's DID-document #atproto_pds endpoint. This is a membership oracle, not a member-facing read: callable with inter-service auth (a syncing service, admitted by its own enrolled boundaries) or with a space credential for that space, never with a plain user session.",
+      "description": "List the known repos that hold data in a space (the writer set), each with its DID and custody. A stratos-custody repo also carries its current rev, which this service stores. A pds-custody repo also carries a `host` and `hostSource` when its host can be resolved: an authority-recorded override, or else the member's DID-document #atproto_pds endpoint; both are omitted when neither is found. This is the membership oracle for a space, answered from this service's active enrollments in the space's boundary. It is a Stratos method, not the upstream com.atproto.space.listWriters, and does not take or return what that method does. It is not a member-facing read: callable with inter-service auth (a syncing service, admitted by its own enrolled boundaries) or with a space credential for that space, never with a plain user session.",
       "parameters": {
         "type": "params",
         "required": ["space"],
         "properties": {
           "space": {
             "type": "string",
-            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
+            "description": "The space's URI (at:space/{did}/{type}/{skey}). This is a space URI in the form above; upstream's space-ref format (atproto#5187) is expected to adopt it. Declared as a plain string until @atproto/lexicon supports a matching format. Its space DID must equal this service's DID."
           },
           "limit": {
             "type": "integer",
@@ -80,7 +80,7 @@
         },
         "host": {
           "type": "string",
-          "description": "The Stratos convention's resolved repo host for this member, if resolvable. Absent when neither an override nor a DID-document PDS endpoint could be found."
+          "description": "The Stratos convention's resolved repo host for a pds-custody member, if resolvable. Absent for a stratos-custody member, and when neither an override nor a DID-document PDS endpoint could be found."
         },
         "hostSource": {
           "type": "string",

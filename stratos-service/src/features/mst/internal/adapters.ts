@@ -6,7 +6,7 @@ import type {
 } from '@northskysocial/stratos-core'
 import type { ActorSignFn } from '../../../infra/signing/actor-signer.js'
 import { ActorTransactor } from '../../../actor-store-types.js'
-import { sequenceChange, SequenceTrace } from '../../../api'
+import { opBoundary, sequenceChange, SequenceTrace } from '../../../api'
 
 /**
  * Adapter that satisfies the core {@link SigningService} from a bound
@@ -63,6 +63,7 @@ export class ActorStoreSequencingService implements SequencingService {
         uri: `at://${_did}/${write.collection}/${write.rkey}`,
         cid: write.cid?.toString(),
         record: write.record,
+        boundary: write.boundary ? opBoundary(write.boundary) : undefined,
         commitCid: commitCid.toString(),
         rev,
         trace: this.trace,

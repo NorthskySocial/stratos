@@ -1,3 +1,6 @@
+import { parseSpaceUri } from '@northskysocial/stratos-client'
+import { emptyDictionary } from './dictionary'
+
 /** Public deployment settings injected by Vite at build time. */
 export interface ClubhouseConfig {
   serviceUrl?: string
@@ -9,6 +12,10 @@ export interface ClubhouseConfig {
   plcDirectoryUrl?: string
   /** Deployment-owned authority-space URIs keyed by public room ID. */
   pdsSpaceUriByRoom: Readonly<Record<string, string>>
+  /** Why a room's configured space was refused, keyed by public room ID. */
+  pdsSpaceProblemByRoom?: Readonly<Record<string, string>>
+  /** Why the whole room spaces setting could not be read; absent when it can be, or is not set. */
+  pdsSpaceSettingProblem?: string
 }
 
 /** Return the public app origin used in OAuth metadata and service redirects. */
@@ -51,22 +58,43 @@ function optionalUrl(value: string | undefined): string | undefined {
   return value.replace(/\/+$/, '')
 }
 
+function spaceProblem(roomId: string): string {
+  return `Posting is not set up for the room "${roomId}": the space it was given is not a valid space address. Ask whoever runs this Clubhouse to correct it.`
+}
+
+const UNREADABLE_SPACE_SETTING =
+  'Posting is not set up because the room spaces setting could not be read; ask whoever runs this Clubhouse to correct it.'
+
 function parseSpaceUris(
   value: string | undefined,
-): Readonly<Record<string, string>> {
-  if (!value) return {}
+): Pick<
+  ClubhouseConfig,
+  'pdsSpaceUriByRoom' | 'pdsSpaceProblemByRoom' | 'pdsSpaceSettingProblem'
+> {
+  const none = {
+    pdsSpaceUriByRoom: emptyDictionary<string>(),
+    pdsSpaceProblemByRoom: emptyDictionary<string>(),
+  }
+  if (!value) return none
+  const unreadable = {
+    ...none,
+    pdsSpaceSettingProblem: UNREADABLE_SPACE_SETTING,
+  }
   try {
     const parsed: unknown = JSON.parse(value)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
-      return {}
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, string] =>
-          typeof entry[1] === 'string' && entry[1].startsWith('at://'),
-      ),
-    )
+      return unreadable
+    const spaces = emptyDictionary<string>()
+    const problems = emptyDictionary<string>()
+    // `JSON.parse` gives a `__proto__` key as an own property, so it is read
+    // here as the room of that name.
+    for (const [roomId, uri] of Object.entries(parsed)) {
+      if (typeof uri === 'string' && parseSpaceUri(uri).ok) spaces[roomId] = uri
+      else problems[roomId] = spaceProblem(roomId)
+    }
+    return { pdsSpaceUriByRoom: spaces, pdsSpaceProblemByRoom: problems }
   } catch {
-    return {}
+    return unreadable
   }
 }
 
@@ -112,8 +140,6 @@ export function loadClubhouseConfig(
     publicOrigin: optionalUrl(environment.VITE_CLUBHOUSE_URL),
     roomStatusEndpoint: optionalUrl(environment.VITE_CLUBHOUSE_ROOM_STATUS_URL),
     plcDirectoryUrl: optionalUrl(environment.VITE_PLC_DIRECTORY),
-    pdsSpaceUriByRoom: parseSpaceUris(
-      environment.VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON,
-    ),
+    ...parseSpaceUris(environment.VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON),
   }
 }

@@ -9,8 +9,7 @@ import {
 const SPIKE = 'did:plc:spikespiegel'
 const FAYE = 'did:plc:fayevalentine'
 const CREW_BOUNDARY = 'did:web:stratos.test/crew'
-const CREW_SPACE =
-  'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+const CREW_SPACE = 'at:space/did:web:stratos.test/zone.stratos.space.feed/crew'
 
 interface Deferred<T> {
   promise: Promise<T>

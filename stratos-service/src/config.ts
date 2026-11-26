@@ -224,6 +224,7 @@ const envSchema = z
 
     // Admin auth: comma-separated list of admin DIDs (OAuth-authorized operators)
     STRATOS_ADMIN_DIDS: z.string().optional(),
+    STRATOS_MODERATION_SERVICE_DIDS: commaListSchema,
     // Optional comma-separated list of origins the enrollment flow may redirect
     // back to. Only needed for a client that publishes no client metadata
     // document; a client that publishes one proves its own redirect target.
@@ -388,6 +389,7 @@ export interface StratosServiceConfig {
     level: string
   }
   adminDids: string[]
+  moderationServiceDids: string[]
   allowedRedirectOrigins: string[]
   dpop: {
     requireNonce: boolean
@@ -774,6 +776,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
       .split(',')
       .map((d) => d.trim())
       .filter((d) => d.length > 0),
+    moderationServiceDids: env.STRATOS_MODERATION_SERVICE_DIDS,
     allowedRedirectOrigins: parseAllowedRedirectOrigins(
       env.STRATOS_ALLOWED_REDIRECT_ORIGINS,
     ),

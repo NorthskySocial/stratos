@@ -1,11 +1,23 @@
 import { EventEmitter } from 'node:events'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { inspect } from 'node:util'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import express from 'express'
 import type { AppContext } from '../src'
 import type { EnrollmentEventEmitter } from '../src/context-types.js'
+import {
+  closeServiceDb,
+  createServiceDb,
+  migrateServiceDb,
+  type ServiceDb,
+} from '../src/db/index.js'
+import { SqliteLabelStore } from '../src/features/moderation/index.js'
 import type { EnrollmentStore } from '../src/oauth'
 import { registerEnrollmentHandlers } from '../src/features'
+import { RepoWriteLocks } from '../src/shared/repo-write-lock.js'
+import { SqliteEnrollmentStore } from '../src/storage/sqlite/enrollment-store.js'
 
 interface MockResponse {
   statusCode: number
@@ -54,29 +66,36 @@ function invokePostRoute(
   })
 }
 
-function createCtx(opts: {
-  enrollmentStore?: Partial<EnrollmentStore>
+const cleanups: Array<() => Promise<void> | void> = []
+
+afterEach(async () => {
+  while (cleanups.length > 0) await cleanups.pop()?.()
+})
+
+async function createCtx(opts: {
+  seed?: { active: boolean; operatorHold: boolean } | null
   adminAuthFails?: boolean
-}): { app: express.Application; enrollmentStore: EnrollmentStore } {
-  const enrollmentStore = {
-    isEnrolled: vi.fn(async () => true),
-    getEnrollment: vi.fn(async () => ({
+}): Promise<{ app: express.Application; enrollmentStore: EnrollmentStore }> {
+  const tmp = mkdtempSync(join(tmpdir(), 'stratos-set-active-'))
+  const dbPath = join(tmp, 'service.sqlite')
+  const db: ServiceDb = createServiceDb(dbPath)
+  await migrateServiceDb(db)
+  cleanups.push(async () => {
+    await closeServiceDb(db)
+    rmSync(tmp, { recursive: true, force: true })
+  })
+  const enrollmentStore = new SqliteEnrollmentStore(db)
+  const seed =
+    opts.seed === undefined ? { active: true, operatorHold: false } : opts.seed
+  if (seed) {
+    await enrollmentStore.enroll({
       did: 'did:plc:usagi',
       enrolledAt: '2026-01-01T00:00:00.000Z',
       signingKeyDid: 'did:key:zSailorMoon',
-      active: true,
-    })),
-    enroll: vi.fn(async () => {}),
-    unenroll: vi.fn(async () => {}),
-    updateEnrollment: vi.fn(async () => {}),
-    getBoundaries: vi.fn(async () => []),
-    setBoundaries: vi.fn(async () => {}),
-    addBoundary: vi.fn(async () => {}),
-    removeBoundary: vi.fn(async () => {}),
-    listEnrollments: vi.fn(async () => []),
-    enrollmentCount: vi.fn(async () => 0),
-    ...opts.enrollmentStore,
-  } as unknown as EnrollmentStore
+      active: seed.active,
+      operatorHold: seed.operatorHold,
+    })
+  }
 
   const app = express()
   const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
@@ -85,8 +104,10 @@ function createCtx(opts: {
     app,
     enrollmentStore,
     enrollmentEvents,
+    labelStore: new SqliteLabelStore(db, dbPath),
+    repoWriteLocks: new RepoWriteLocks(),
     enrollmentService: {
-      isEnrolled: enrollmentStore.isEnrolled,
+      isEnrolled: (did: string) => enrollmentStore.isEnrolled(did),
       getEnrollment: vi.fn(),
     },
     boundaryResolver: { getBoundaries: vi.fn(async () => []) },
@@ -117,9 +138,17 @@ function createCtx(opts: {
 
 const ROUTE = '/xrpc/zone.stratos.admin.setActive'
 
+const USAGI = 'did:plc:usagi'
+
+async function storedState(store: EnrollmentStore, did: string) {
+  const row = await store.getEnrollment(did)
+  return row && { active: row.active, operatorHold: row.operatorHold }
+}
+
 describe('POST /xrpc/zone.stratos.admin.setActive', () => {
   it('rejects unauthenticated callers', async () => {
-    const { app, enrollmentStore } = createCtx({ adminAuthFails: true })
+    const { app, enrollmentStore } = await createCtx({ adminAuthFails: true })
+    const before = await enrollmentStore.getEnrollment(USAGI)
 
     const res = await invokePostRoute(app, ROUTE, {
       did: 'did:plc:usagi',
@@ -127,11 +156,11 @@ describe('POST /xrpc/zone.stratos.admin.setActive', () => {
     })
 
     expect(res.statusCode).toBe(401)
-    expect(enrollmentStore.updateEnrollment).not.toHaveBeenCalled()
+    expect(await enrollmentStore.getEnrollment(USAGI)).toEqual(before)
   })
 
   it('deactivates an active member', async () => {
-    const { app, enrollmentStore } = createCtx({})
+    const { app, enrollmentStore } = await createCtx({})
 
     const res = await invokePostRoute(app, ROUTE, {
       did: 'did:plc:usagi',
@@ -140,22 +169,15 @@ describe('POST /xrpc/zone.stratos.admin.setActive', () => {
 
     expect(res.statusCode).toBe(200)
     expect(res.body).toEqual({ did: 'did:plc:usagi', active: false })
-    expect(enrollmentStore.updateEnrollment).toHaveBeenCalledWith(
-      'did:plc:usagi',
-      { active: false },
-    )
+    expect(await storedState(enrollmentStore, USAGI)).toEqual({
+      active: false,
+      operatorHold: true,
+    })
   })
 
   it('reactivates a deactivated member', async () => {
-    const { app, enrollmentStore } = createCtx({
-      enrollmentStore: {
-        getEnrollment: vi.fn(async () => ({
-          did: 'did:plc:usagi',
-          enrolledAt: '2026-01-01T00:00:00.000Z',
-          signingKeyDid: 'did:key:zSailorMoon',
-          active: false,
-        })),
-      } as unknown as Partial<EnrollmentStore>,
+    const { app, enrollmentStore } = await createCtx({
+      seed: { active: false, operatorHold: true },
     })
 
     const res = await invokePostRoute(app, ROUTE, {
@@ -164,14 +186,15 @@ describe('POST /xrpc/zone.stratos.admin.setActive', () => {
     })
 
     expect(res.statusCode).toBe(200)
-    expect(enrollmentStore.updateEnrollment).toHaveBeenCalledWith(
-      'did:plc:usagi',
-      { active: true },
-    )
+    expect(await storedState(enrollmentStore, USAGI)).toEqual({
+      active: true,
+      operatorHold: false,
+    })
   })
 
   it('is a no-op when the member is already in the requested state', async () => {
-    const { app, enrollmentStore } = createCtx({})
+    const { app, enrollmentStore } = await createCtx({})
+    const before = await enrollmentStore.getEnrollment(USAGI)
 
     const res = await invokePostRoute(app, ROUTE, {
       did: 'did:plc:usagi',
@@ -179,15 +202,11 @@ describe('POST /xrpc/zone.stratos.admin.setActive', () => {
     })
 
     expect(res.statusCode).toBe(200)
-    expect(enrollmentStore.updateEnrollment).not.toHaveBeenCalled()
+    expect(await enrollmentStore.getEnrollment(USAGI)).toEqual(before)
   })
 
   it('returns 404 for a DID that is not enrolled', async () => {
-    const { app, enrollmentStore } = createCtx({
-      enrollmentStore: {
-        getEnrollment: vi.fn(async () => null),
-      } as unknown as Partial<EnrollmentStore>,
-    })
+    const { app, enrollmentStore } = await createCtx({ seed: null })
 
     const res = await invokePostRoute(app, ROUTE, {
       did: 'did:plc:nobody',
@@ -195,7 +214,7 @@ describe('POST /xrpc/zone.stratos.admin.setActive', () => {
     })
 
     expect(res.statusCode).toBe(404)
-    expect(enrollmentStore.updateEnrollment).not.toHaveBeenCalled()
+    expect(await enrollmentStore.getEnrollment('did:plc:nobody')).toBeNull()
   })
 
   it.each([
@@ -206,22 +225,20 @@ describe('POST /xrpc/zone.stratos.admin.setActive', () => {
     [{ did: 'not-a-did', active: false }],
     [{ did: { did: 'did:plc:usagi' }, active: false }],
   ])('rejects a malformed body (%o)', async (body) => {
-    const { app, enrollmentStore } = createCtx({})
+    const { app, enrollmentStore } = await createCtx({})
+    const before = await enrollmentStore.getEnrollment(USAGI)
 
     const res = await invokePostRoute(app, ROUTE, body)
 
     expect(res.statusCode).toBe(400)
-    expect(enrollmentStore.updateEnrollment).not.toHaveBeenCalled()
+    expect(await enrollmentStore.getEnrollment(USAGI)).toEqual(before)
   })
 
   it('reports a store failure as an internal error', async () => {
-    const { app } = createCtx({
-      enrollmentStore: {
-        updateEnrollment: vi.fn(async () => {
-          throw new Error('database is on fire')
-        }),
-      } as unknown as Partial<EnrollmentStore>,
-    })
+    const { app, enrollmentStore } = await createCtx({})
+    vi.spyOn(enrollmentStore, 'updateEnrollment').mockRejectedValue(
+      new Error('database is on fire'),
+    )
 
     const res = await invokePostRoute(app, ROUTE, {
       did: 'did:plc:usagi',

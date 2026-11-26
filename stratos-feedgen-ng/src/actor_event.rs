@@ -8,12 +8,15 @@ use serde_json::{Map as JsonMap, Value as JsonValue};
 
 use crate::{
     authority::normalize_boundary,
+    config::MAX_ACTOR_FRAME_BYTES,
     identifier::{Did, RecordUri},
-    store::{ActorPage, ProjectionPost, is_utc_timestamp},
+    store::{
+        ActorPage, InteractionChanges, InteractionKind, MAX_SUBJECT_URI_BYTES,
+        ProjectionInteraction, ProjectionPost, is_utc_timestamp,
+    },
 };
 
 const POST_COLLECTION: &str = "zone.stratos.feed.post";
-const MAX_ACTOR_FRAME_BYTES: usize = 32 * 1024;
 const MAX_BOUNDARIES: usize = 128;
 const MAX_BOUNDARY_BYTES: usize = 256;
 const MAX_BLOB_REFS: usize = 128;
@@ -37,6 +40,11 @@ impl std::error::Error for ActorEventError {}
 /// Decodes one actor-scoped commit and keeps only posts authorized by the
 /// actor's current authority enrollment. Empty authorization becomes a delete
 /// in the same durable cursor transaction, preventing stale post retention.
+///
+/// A post's boundary comes from the operation when it has one: the authority
+/// sets that field, while the body boundary is only the author's claim. The
+/// body is read solely for operations recorded before the authority set the
+/// operation boundary. A null operation boundary counts as absent.
 pub fn parse_actor_commit(
     frame: &[u8],
     service_did: &str,
@@ -68,10 +76,30 @@ pub fn parse_actor_commit(
         return Err(ActorEventError::InvalidFrame);
     }
 
+    let context = InteractionContext {
+        service_did,
+        actor_did,
+        authorized_boundaries,
+        indexed_at: &commit.time,
+        retained_at,
+    };
     let mut mutations = BTreeMap::new();
+    let mut interaction_mutations = BTreeMap::new();
+    let mut skipped_interactions = 0_usize;
     for operation in commit.ops {
         let path = operation.path.trim_start_matches('/');
         let Some(record_key) = path.strip_prefix(&format!("{POST_COLLECTION}/")) else {
+            if let Some((kind, record_key)) = interaction_route(path) {
+                match interaction_mutation(&operation, kind, record_key, &context) {
+                    Some((uri, mutation)) => {
+                        interaction_mutations.insert(uri, mutation);
+                    }
+                    None => skipped_interactions += 1,
+                }
+            } else if operation_action(&operation).is_none() {
+                // Only likes and reposts may carry an unreadable action.
+                return Err(ActorEventError::InvalidFrame);
+            }
             continue;
         };
         if record_key.is_empty() {
@@ -85,11 +113,11 @@ pub fn parse_actor_commit(
             _ => return Err(ActorEventError::InvalidFrame),
         }
 
-        match operation.action.as_str() {
-            "delete" => {
+        match operation_action(&operation) {
+            Some("delete") => {
                 mutations.insert(uri, PostMutation::Delete);
             }
-            "create" | "update" => {
+            Some("create" | "update") => {
                 let record = operation.record.ok_or(ActorEventError::InvalidFrame)?;
                 if record_type(&record) != Some(POST_COLLECTION) {
                     return Err(ActorEventError::InvalidFrame);
@@ -100,7 +128,11 @@ pub fn parse_actor_commit(
                         .as_ref()
                         .ok_or(ActorEventError::InvalidFrame)?,
                 )?;
-                let boundaries = match map_field(&record, "boundary") {
+                let boundary = operation
+                    .boundary
+                    .as_ref()
+                    .or_else(|| map_field(&record, "boundary"));
+                let boundaries = match boundary {
                     Some(boundary) => {
                         current_boundaries(boundary, service_did, authorized_boundaries)?
                     }
@@ -140,14 +172,100 @@ pub fn parse_actor_commit(
             PostMutation::Delete => deletes.push(uri),
         }
     }
+    let mut interactions = InteractionChanges::default();
+    for (uri, mutation) in interaction_mutations {
+        match mutation {
+            InteractionMutation::Upsert(interaction) => interactions.upserts.push(*interaction),
+            InteractionMutation::Delete => interactions.deletes.push(uri),
+        }
+    }
+    if skipped_interactions > 0 {
+        eprintln!("event=actor_interaction_skipped count={skipped_interactions}");
+    }
     Ok(Some(ActorPage {
         authority_did: service_did.to_owned(),
         actor_did: actor_did.to_owned(),
         sequence: commit.seq,
         upserts,
         deletes,
+        interactions,
         updated_at: commit.time,
     }))
+}
+
+struct InteractionContext<'a> {
+    service_did: &'a str,
+    actor_did: &'a str,
+    authorized_boundaries: &'a BTreeSet<String>,
+    indexed_at: &'a str,
+    retained_at: &'a str,
+}
+
+fn interaction_route(path: &str) -> Option<(InteractionKind, &str)> {
+    let (collection, record_key) = path.split_once('/')?;
+    let kind = InteractionKind::from_collection(collection)?;
+    Some((kind, record_key))
+}
+
+/// A like or repost that cannot be read is skipped rather than failing the
+/// frame, so one bad record cannot stall an actor's stream or its posts.
+fn interaction_mutation(
+    operation: &RawOperation,
+    kind: InteractionKind,
+    record_key: &str,
+    context: &InteractionContext<'_>,
+) -> Option<(String, InteractionMutation)> {
+    let uri = format!(
+        "at://{}/{}/{record_key}",
+        context.actor_did,
+        kind.collection()
+    );
+    match RecordUri::parse(&uri) {
+        Ok(RecordUri::Repo {
+            author, collection, ..
+        }) if author.as_str() == context.actor_did && collection == kind.collection() => {}
+        _ => return None,
+    }
+    let mutation = match operation_action(operation)? {
+        "delete" => InteractionMutation::Delete,
+        "create" | "update" => {
+            let record = operation.record.as_ref()?;
+            if record_type(record) != Some(kind.collection()) {
+                return None;
+            }
+            let subject_uri = map_field(record, "subject")
+                .and_then(|subject| map_field(subject, "uri"))
+                .and_then(text_value)
+                .filter(|subject_uri| subject_uri.len() <= MAX_SUBJECT_URI_BYTES)?;
+            RecordUri::parse(subject_uri).ok()?;
+            let boundary = operation
+                .boundary
+                .as_ref()
+                .or_else(|| map_field(record, "boundary"));
+            let boundaries = match boundary {
+                Some(boundary) => {
+                    current_boundaries(boundary, context.service_did, context.authorized_boundaries)
+                        .ok()?
+                }
+                None => Vec::new(),
+            };
+            match <[String; 1]>::try_from(boundaries) {
+                Ok([boundary]) => InteractionMutation::Upsert(Box::new(ProjectionInteraction {
+                    uri: uri.clone(),
+                    actor_did: context.actor_did.to_owned(),
+                    kind,
+                    subject_uri: subject_uri.to_owned(),
+                    boundary,
+                    indexed_at: context.indexed_at.to_owned(),
+                    retained_at: context.retained_at.to_owned(),
+                })),
+                Err(boundaries) if boundaries.is_empty() => InteractionMutation::Delete,
+                Err(_) => return None,
+            }
+        }
+        _ => return None,
+    };
+    Some((uri, mutation))
 }
 
 #[derive(Deserialize)]
@@ -165,12 +283,24 @@ struct RawCommit {
     ops: Vec<RawOperation>,
 }
 
+// The action is read as any value so that one like or repost with an
+// unreadable action is skipped instead of failing the whole commit.
 #[derive(Deserialize)]
 struct RawOperation {
-    action: String,
+    action: Option<CborValue>,
     path: String,
     cid: Option<CborValue>,
     record: Option<CborValue>,
+    boundary: Option<CborValue>,
+}
+
+fn operation_action(operation: &RawOperation) -> Option<&str> {
+    operation.action.as_ref().and_then(text_value)
+}
+
+enum InteractionMutation {
+    Upsert(Box<ProjectionInteraction>),
+    Delete,
 }
 
 enum PostMutation {
@@ -371,7 +501,10 @@ mod tests {
     use serde::Serialize;
     use serde_cbor::Value as CborValue;
 
-    use super::{ActorEventError, POST_COLLECTION, created_at, parse_actor_commit};
+    use super::{
+        ActorEventError, MAX_SUBJECT_URI_BYTES, POST_COLLECTION, created_at, parse_actor_commit,
+    };
+    use crate::store::{InteractionChanges, InteractionKind, ProjectionInteraction};
 
     #[derive(Serialize)]
     struct Header<'a> {
@@ -386,6 +519,23 @@ mod tests {
         time: &'static str,
         rev: &'static str,
         ops: Vec<Operation>,
+    }
+
+    #[derive(Serialize)]
+    struct CommitWithoutBoundaryKeys {
+        seq: u64,
+        did: &'static str,
+        time: &'static str,
+        rev: &'static str,
+        ops: Vec<OperationWithoutBoundaryKey>,
+    }
+
+    #[derive(Serialize)]
+    struct OperationWithoutBoundaryKey {
+        action: &'static str,
+        path: &'static str,
+        cid: Option<CborValue>,
+        record: Option<CborValue>,
     }
 
     #[derive(Serialize)]
@@ -415,7 +565,11 @@ mod tests {
     }
 
     fn record(created_at: &str, boundaries: &[&str]) -> CborValue {
-        CborValue::Map(BTreeMap::from([
+        record_with_body_boundary(created_at, Some(boundary(boundaries)))
+    }
+
+    fn record_with_body_boundary(created_at: &str, body_boundary: Option<CborValue>) -> CborValue {
+        let mut fields = BTreeMap::from([
             (
                 CborValue::Text("$type".to_owned()),
                 CborValue::Text(POST_COLLECTION.to_owned()),
@@ -424,8 +578,18 @@ mod tests {
                 CborValue::Text("createdAt".to_owned()),
                 CborValue::Text(created_at.to_owned()),
             ),
-            (CborValue::Text("boundary".to_owned()), boundary(boundaries)),
-        ]))
+        ]);
+        if let Some(body_boundary) = body_boundary {
+            fields.insert(CborValue::Text("boundary".to_owned()), body_boundary);
+        }
+        CborValue::Map(fields)
+    }
+
+    fn boundary_values_not_an_array() -> CborValue {
+        CborValue::Map(BTreeMap::from([(
+            CborValue::Text("values".to_owned()),
+            CborValue::Text("bebop".to_owned()),
+        )]))
     }
 
     fn frame(ops: Vec<Operation>) -> Vec<u8> {
@@ -496,13 +660,312 @@ mod tests {
         .unwrap();
 
         assert_eq!(parsed.sequence, 7);
-        assert_eq!(parsed.upserts.len(), 0);
+        assert_eq!(parsed.upserts.len(), 1);
+        assert_eq!(
+            parsed.upserts[0].uri,
+            "at://did:plc:faye/zone.stratos.feed.post/ed"
+        );
+        assert_eq!(
+            parsed.upserts[0].boundaries,
+            ["did:web:stratos.example.test/bebop"]
+        );
         assert_eq!(
             parsed.deletes,
-            [
-                "at://did:plc:faye/zone.stratos.feed.post/ed",
-                "at://did:plc:faye/zone.stratos.feed.post/see-you"
-            ]
+            ["at://did:plc:faye/zone.stratos.feed.post/see-you"]
+        );
+    }
+
+    const SERVICE: &str = "did:web:stratos.example.test";
+    const BEBOP: &str = "did:web:stratos.example.test/bebop";
+    const CREATED_AT: &str = "1998-04-02T00:00:00.000Z";
+
+    fn create_op(record: CborValue, op_boundary: Option<CborValue>) -> Operation {
+        Operation {
+            action: "create",
+            path: "zone.stratos.feed.post/ed",
+            cid: Some(CborValue::Text("bafyreie".to_owned())),
+            record: Some(record),
+            boundary: op_boundary,
+        }
+    }
+
+    fn parse_one(
+        op: Operation,
+        authorized: &BTreeSet<String>,
+    ) -> Result<crate::store::ActorPage, ActorEventError> {
+        parse_actor_commit(
+            &frame(vec![op]),
+            SERVICE,
+            "did:plc:faye",
+            authorized,
+            "1998-05-03T00:00:00.000Z",
+        )
+        .map(|page| page.unwrap())
+    }
+
+    fn authorized_for(boundaries: &[&str]) -> BTreeSet<String> {
+        boundaries.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    fn only_upsert_boundaries(page: &crate::store::ActorPage) -> Vec<String> {
+        assert_eq!(page.upserts.len(), 1);
+        assert!(page.deletes.is_empty());
+        page.upserts[0].boundaries.clone()
+    }
+
+    #[test]
+    fn takes_the_boundary_from_the_operation_when_the_body_has_none() {
+        let page = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, None),
+                Some(boundary(&["bebop"])),
+            ),
+            &authorized(),
+        )
+        .unwrap();
+
+        assert_eq!(only_upsert_boundaries(&page), [BEBOP]);
+        assert_eq!(
+            page.upserts[0].uri,
+            "at://did:plc:faye/zone.stratos.feed.post/ed"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_body_boundary_when_the_operation_has_none() {
+        let body_only = record(CREATED_AT, &["bebop"]);
+        let mut absent_key = serde_cbor::to_vec(&Header { kind: "#commit" }).unwrap();
+        absent_key.extend(
+            serde_cbor::to_vec(&CommitWithoutBoundaryKeys {
+                seq: 7,
+                did: "did:plc:faye",
+                time: "1998-04-03T00:00:00.000Z",
+                rev: "3jzfcijpj2z2a",
+                ops: vec![OperationWithoutBoundaryKey {
+                    action: "create",
+                    path: "zone.stratos.feed.post/ed",
+                    cid: Some(CborValue::Text("bafyreie".to_owned())),
+                    record: Some(body_only.clone()),
+                }],
+            })
+            .unwrap(),
+        );
+        let from_absent_key = parse_actor_commit(
+            &absent_key,
+            SERVICE,
+            "did:plc:faye",
+            &authorized(),
+            "1998-05-03T00:00:00.000Z",
+        )
+        .unwrap()
+        .unwrap();
+        let from_null = parse_one(create_op(body_only, None), &authorized()).unwrap();
+
+        for page in [&from_absent_key, &from_null] {
+            assert_eq!(only_upsert_boundaries(page), [BEBOP]);
+            let post = &page.upserts[0];
+            assert_eq!(post.uri, "at://did:plc:faye/zone.stratos.feed.post/ed");
+            assert_eq!(post.cid, "bafyreie");
+            assert_eq!(post.sort_at, CREATED_AT);
+            assert_eq!(post.indexed_at, "1998-04-03T00:00:00.000Z");
+        }
+        assert_eq!(
+            from_absent_key.upserts[0].record_json,
+            from_null.upserts[0].record_json
+        );
+    }
+
+    fn parse_with_absent_operation_boundary_key(body: CborValue) -> crate::store::ActorPage {
+        let mut bytes = serde_cbor::to_vec(&Header { kind: "#commit" }).unwrap();
+        bytes.extend(
+            serde_cbor::to_vec(&CommitWithoutBoundaryKeys {
+                seq: 7,
+                did: "did:plc:faye",
+                time: "1998-04-03T00:00:00.000Z",
+                rev: "3jzfcijpj2z2a",
+                ops: vec![OperationWithoutBoundaryKey {
+                    action: "create",
+                    path: "zone.stratos.feed.post/ed",
+                    cid: Some(CborValue::Text("bafyreie".to_owned())),
+                    record: Some(body),
+                }],
+            })
+            .unwrap(),
+        );
+        parse_actor_commit(
+            &bytes,
+            SERVICE,
+            "did:plc:faye",
+            &authorized(),
+            "1998-05-03T00:00:00.000Z",
+        )
+        .unwrap()
+        .unwrap()
+    }
+
+    #[test]
+    fn the_body_fallback_is_still_limited_to_current_enrollment() {
+        let ed = "at://did:plc:faye/zone.stratos.feed.post/ed";
+        let bodies = [("crew", vec!["crew"]), ("mixed", vec!["bebop", "crew"])];
+        for (label, claimed) in bodies {
+            let body = record(CREATED_AT, &claimed);
+            let pages = [
+                parse_with_absent_operation_boundary_key(body.clone()),
+                parse_one(create_op(body, None), &authorized()).unwrap(),
+            ];
+            for page in pages {
+                if label == "crew" {
+                    assert!(page.upserts.is_empty());
+                    assert_eq!(page.deletes, [ed]);
+                } else {
+                    assert_eq!(only_upsert_boundaries(&page), [BEBOP]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_operation_boundary_without_usable_values_is_a_delete_and_the_body_is_not_read() {
+        let map_without_values = CborValue::Map(BTreeMap::from([(
+            CborValue::Text("note".to_owned()),
+            CborValue::Text("bebop".to_owned()),
+        )]));
+        let not_a_map = CborValue::Text("bebop".to_owned());
+        for op_boundary in [map_without_values, not_a_map] {
+            let page = parse_one(
+                create_op(record(CREATED_AT, &["bebop"]), Some(op_boundary)),
+                &authorized(),
+            )
+            .unwrap();
+            assert!(page.upserts.is_empty());
+            assert_eq!(
+                page.deletes,
+                ["at://did:plc:faye/zone.stratos.feed.post/ed"]
+            );
+        }
+    }
+
+    #[test]
+    fn the_operation_boundary_wins_over_a_disagreeing_body_claim() {
+        let operation_authorized = parse_one(
+            create_op(record(CREATED_AT, &["crew"]), Some(boundary(&["bebop"]))),
+            &authorized(),
+        )
+        .unwrap();
+        assert_eq!(only_upsert_boundaries(&operation_authorized), [BEBOP]);
+
+        let operation_unauthorized = parse_one(
+            create_op(record(CREATED_AT, &["bebop"]), Some(boundary(&["crew"]))),
+            &authorized(),
+        )
+        .unwrap();
+        assert!(operation_unauthorized.upserts.is_empty());
+        assert_eq!(
+            operation_unauthorized.deletes,
+            ["at://did:plc:faye/zone.stratos.feed.post/ed"]
+        );
+    }
+
+    #[test]
+    fn the_operation_boundary_is_still_limited_to_current_enrollment() {
+        let mixed = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, None),
+                Some(boundary(&["bebop", "crew"])),
+            ),
+            &authorized(),
+        )
+        .unwrap();
+        assert_eq!(only_upsert_boundaries(&mixed), [BEBOP]);
+
+        let unauthorized_only = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, None),
+                Some(boundary(&["crew"])),
+            ),
+            &authorized(),
+        )
+        .unwrap();
+        assert!(unauthorized_only.upserts.is_empty());
+        assert_eq!(unauthorized_only.deletes.len(), 1);
+    }
+
+    #[test]
+    fn rejects_a_malformed_operation_boundary() {
+        let too_many = vec!["bebop"; super::MAX_BOUNDARIES + 1];
+        let oversized = "a".repeat(super::MAX_BOUNDARY_BYTES + 1);
+        let malformed = [
+            boundary_values_not_an_array(),
+            boundary(&too_many),
+            boundary(&[""]),
+            boundary(&[oversized.as_str()]),
+            boundary(&["bébop"]),
+        ];
+        for op_boundary in malformed {
+            let result = parse_one(
+                create_op(record(CREATED_AT, &["bebop"]), Some(op_boundary)),
+                &authorized(),
+            );
+            assert!(matches!(result, Err(ActorEventError::InvalidFrame)));
+        }
+    }
+
+    #[test]
+    fn does_not_read_the_body_boundary_when_the_operation_has_one() {
+        let page = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, Some(boundary_values_not_an_array())),
+                Some(boundary(&["bebop"])),
+            ),
+            &authorized(),
+        )
+        .unwrap();
+
+        assert_eq!(only_upsert_boundaries(&page), [BEBOP]);
+    }
+
+    #[test]
+    fn drops_operation_boundaries_that_belong_to_another_service() {
+        let other_service = "did:web:other.example.test/bebop";
+        let enrolled = authorized_for(&[BEBOP, other_service]);
+
+        let mixed = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, None),
+                Some(boundary(&[other_service, "bebop"])),
+            ),
+            &enrolled,
+        )
+        .unwrap();
+        assert_eq!(only_upsert_boundaries(&mixed), [BEBOP]);
+
+        let foreign_only = parse_one(
+            create_op(
+                record_with_body_boundary(CREATED_AT, None),
+                Some(boundary(&[other_service])),
+            ),
+            &enrolled,
+        )
+        .unwrap();
+        assert!(foreign_only.upserts.is_empty());
+        assert_eq!(foreign_only.deletes.len(), 1);
+    }
+
+    #[test]
+    fn a_delete_with_an_operation_boundary_still_deletes() {
+        let scoped_removal = Operation {
+            action: "delete",
+            path: "zone.stratos.feed.post/ed",
+            cid: None,
+            record: None,
+            boundary: Some(boundary(&["crew"])),
+        };
+        let page = parse_one(scoped_removal, &authorized()).unwrap();
+
+        assert!(page.upserts.is_empty());
+        assert_eq!(
+            page.deletes,
+            ["at://did:plc:faye/zone.stratos.feed.post/ed"]
         );
     }
 
@@ -631,5 +1094,539 @@ mod tests {
             ),
             Err(ActorEventError::InvalidFrame)
         ));
+    }
+
+    const FAYE_LIKE_SUBJECT: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+    const FAYE_SPACE_SUBJECT: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+    const LEGACY_SPACE_SUBJECT: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+    const LIKE: &str = "app.bsky.feed.like";
+    const REPOST: &str = "app.bsky.feed.repost";
+    const CREW: &str = "did:web:stratos.example.test/crew";
+
+    fn text(value: &str) -> CborValue {
+        CborValue::Text(value.to_owned())
+    }
+
+    fn subject_ref(uri: CborValue) -> CborValue {
+        CborValue::Map(BTreeMap::from([
+            (text("uri"), uri),
+            (text("cid"), text("bafyreib")),
+        ]))
+    }
+
+    fn interaction_body(
+        collection: &str,
+        subject: Option<CborValue>,
+        body_boundary: Option<CborValue>,
+    ) -> CborValue {
+        let mut fields = BTreeMap::from([
+            (text("$type"), text(collection)),
+            (text("createdAt"), text(CREATED_AT)),
+        ]);
+        if let Some(subject) = subject {
+            fields.insert(text("subject"), subject);
+        }
+        if let Some(body_boundary) = body_boundary {
+            fields.insert(text("boundary"), body_boundary);
+        }
+        CborValue::Map(fields)
+    }
+
+    fn valid_body(collection: &str) -> CborValue {
+        interaction_body(collection, Some(subject_ref(text(FAYE_LIKE_SUBJECT))), None)
+    }
+
+    fn interaction_op(
+        action: &'static str,
+        path: &'static str,
+        record: Option<CborValue>,
+        op_boundary: Option<CborValue>,
+    ) -> Operation {
+        Operation {
+            action,
+            path,
+            cid: Some(text("bafyreie")),
+            record,
+            boundary: op_boundary,
+        }
+    }
+
+    fn two_boundaries() -> BTreeSet<String> {
+        authorized_for(&[BEBOP, CREW])
+    }
+
+    fn faye_uri(collection: &str, rkey: &str) -> String {
+        format!("at://did:plc:faye/{collection}/{rkey}")
+    }
+
+    fn expected_interaction(
+        collection: &str,
+        rkey: &str,
+        subject: &str,
+        boundary: &str,
+    ) -> ProjectionInteraction {
+        ProjectionInteraction {
+            uri: faye_uri(collection, rkey),
+            actor_did: "did:plc:faye".to_owned(),
+            kind: if collection == LIKE {
+                InteractionKind::Like
+            } else {
+                InteractionKind::Repost
+            },
+            subject_uri: subject.to_owned(),
+            boundary: boundary.to_owned(),
+            indexed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            retained_at: "1998-05-03T00:00:00.000Z".to_owned(),
+        }
+    }
+
+    enum Outcome {
+        Upsert(ProjectionInteraction),
+        Delete(String),
+        Skipped,
+    }
+
+    #[test]
+    fn reads_likes_and_reposts_by_collection_and_skips_what_is_malformed() {
+        let overlong_subject = format!(
+            "at://did:plc:{}/zone.stratos.feed.post/swordfish",
+            "a".repeat(MAX_SUBJECT_URI_BYTES)
+        );
+        let cases: Vec<(&str, Operation, Outcome)> = vec![
+            (
+                "like create with an operation boundary",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Upsert(expected_interaction(LIKE, "one", FAYE_LIKE_SUBJECT, BEBOP)),
+            ),
+            (
+                "repost create with an operation boundary",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.repost/two",
+                    Some(valid_body(REPOST)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Upsert(expected_interaction(
+                    REPOST,
+                    "two",
+                    FAYE_LIKE_SUBJECT,
+                    BEBOP,
+                )),
+            ),
+            (
+                "update behaves as create",
+                interaction_op(
+                    "update",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Upsert(expected_interaction(LIKE, "one", FAYE_LIKE_SUBJECT, BEBOP)),
+            ),
+            (
+                "body boundary when the operation has none",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text(FAYE_LIKE_SUBJECT))),
+                        Some(boundary(&["bebop"])),
+                    )),
+                    None,
+                ),
+                Outcome::Upsert(expected_interaction(LIKE, "one", FAYE_LIKE_SUBJECT, BEBOP)),
+            ),
+            (
+                "the operation boundary wins over the body claim",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text(FAYE_LIKE_SUBJECT))),
+                        Some(boundary(&["crew"])),
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Upsert(expected_interaction(LIKE, "one", FAYE_LIKE_SUBJECT, BEBOP)),
+            ),
+            (
+                "a subject in the space form",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text(FAYE_SPACE_SUBJECT))),
+                        None,
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Upsert(expected_interaction(LIKE, "one", FAYE_SPACE_SUBJECT, BEBOP)),
+            ),
+            (
+                "a subject in the previous space spelling is skipped like any unparseable subject",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text(LEGACY_SPACE_SUBJECT))),
+                        None,
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "an unauthorized boundary becomes a delete",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["swordfish"])),
+                ),
+                Outcome::Delete(faye_uri(LIKE, "one")),
+            ),
+            (
+                "no boundary at all becomes a delete",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    None,
+                ),
+                Outcome::Delete(faye_uri(LIKE, "one")),
+            ),
+            (
+                "two boundaries are skipped",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop", "crew"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a wrong $type",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(REPOST)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a missing subject",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(LIKE, None, None)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a subject uri that is not text",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(CborValue::Integer(7))),
+                        None,
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "an overlong subject uri",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text(&overlong_subject))),
+                        None,
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "an unparseable subject uri",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(interaction_body(
+                        LIKE,
+                        Some(subject_ref(text("https://example.test/gaghiel"))),
+                        None,
+                    )),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a boundary body that is not usable",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary_values_not_an_array()),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a create without a record",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    None,
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "an unknown action",
+                interaction_op(
+                    "bogus",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "an empty record key",
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+            (
+                "a delete",
+                interaction_op("delete", "app.bsky.feed.repost/two", None, None),
+                Outcome::Delete(faye_uri(REPOST, "two")),
+            ),
+            (
+                "another collection stays ignored",
+                interaction_op(
+                    "create",
+                    "app.bsky.graph.follow/three",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                Outcome::Skipped,
+            ),
+        ];
+
+        for (name, operation, outcome) in cases {
+            let page = parse_one(operation, &two_boundaries())
+                .unwrap_or_else(|_| panic!("case {name} failed the frame"));
+            assert!(page.upserts.is_empty(), "case {name} changed posts");
+            assert!(page.deletes.is_empty(), "case {name} deleted posts");
+            match outcome {
+                Outcome::Upsert(expected) => {
+                    assert_eq!(page.interactions.upserts, [expected], "case {name}");
+                    assert!(page.interactions.deletes.is_empty(), "case {name}");
+                }
+                Outcome::Delete(uri) => {
+                    assert!(page.interactions.upserts.is_empty(), "case {name}");
+                    assert_eq!(page.interactions.deletes, [uri], "case {name}");
+                }
+                Outcome::Skipped => {
+                    assert_eq!(
+                        page.interactions,
+                        InteractionChanges::default(),
+                        "case {name}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_malformed_like_never_changes_the_posts_of_the_same_commit() {
+        let page = parse_actor_commit(
+            &frame(vec![
+                create_op(record(CREATED_AT, &["bebop"]), None),
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(REPOST)),
+                    Some(boundary(&["bebop"])),
+                ),
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.repost/two",
+                    Some(valid_body(REPOST)),
+                    Some(boundary(&["bebop"])),
+                ),
+            ]),
+            SERVICE,
+            "did:plc:faye",
+            &authorized(),
+            "1998-05-03T00:00:00.000Z",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(only_upsert_boundaries(&page), [BEBOP]);
+        assert_eq!(
+            page.interactions.upserts,
+            [expected_interaction(
+                REPOST,
+                "two",
+                FAYE_LIKE_SUBJECT,
+                BEBOP
+            )]
+        );
+        assert!(page.interactions.deletes.is_empty());
+    }
+
+    #[derive(Serialize)]
+    struct CommitOfValues {
+        seq: u64,
+        did: &'static str,
+        time: &'static str,
+        rev: &'static str,
+        ops: Vec<CborValue>,
+    }
+
+    fn frame_of_values(ops: Vec<CborValue>) -> Vec<u8> {
+        let mut frame = serde_cbor::to_vec(&Header { kind: "#commit" }).unwrap();
+        frame.extend(
+            serde_cbor::to_vec(&CommitOfValues {
+                seq: 7,
+                did: "did:plc:faye",
+                time: "1998-04-03T00:00:00.000Z",
+                rev: "3jzfcijpj2z2a",
+                ops,
+            })
+            .unwrap(),
+        );
+        frame
+    }
+
+    fn with_action(operation: Operation, action: Option<CborValue>) -> CborValue {
+        let CborValue::Map(mut fields) = serde_cbor::value::to_value(&operation).unwrap() else {
+            unreachable!();
+        };
+        match action {
+            Some(action) => fields.insert(text("action"), action),
+            None => fields.remove(&text("action")),
+        };
+        CborValue::Map(fields)
+    }
+
+    fn parse_values(ops: Vec<CborValue>) -> Result<crate::store::ActorPage, ActorEventError> {
+        parse_actor_commit(
+            &frame_of_values(ops),
+            SERVICE,
+            "did:plc:faye",
+            &authorized(),
+            "1998-05-03T00:00:00.000Z",
+        )
+        .map(|page| page.unwrap())
+    }
+
+    fn valid_like(path: &'static str, collection: &str) -> Operation {
+        interaction_op(
+            "create",
+            path,
+            Some(valid_body(collection)),
+            Some(boundary(&["bebop"])),
+        )
+    }
+
+    #[test]
+    fn a_like_or_repost_with_an_unreadable_action_is_skipped_and_the_post_beside_it_is_kept() {
+        let page = parse_values(vec![
+            with_action(
+                create_op(record(CREATED_AT, &["bebop"]), None),
+                Some(text("create")),
+            ),
+            with_action(
+                valid_like("app.bsky.feed.like/one", LIKE),
+                Some(CborValue::Integer(7)),
+            ),
+            with_action(valid_like("app.bsky.feed.like/two", LIKE), None),
+            with_action(
+                valid_like("app.bsky.feed.repost/three", REPOST),
+                Some(CborValue::Null),
+            ),
+        ])
+        .unwrap();
+
+        assert_eq!(only_upsert_boundaries(&page), [BEBOP]);
+        assert_eq!(page.interactions, InteractionChanges::default());
+    }
+
+    #[test]
+    fn an_unreadable_action_outside_likes_and_reposts_still_fails_the_frame() {
+        let post = || create_op(record(CREATED_AT, &["bebop"]), None);
+        let follow = || valid_like("app.bsky.graph.follow/three", LIKE);
+        let unreadable_actions = [Some(CborValue::Integer(7)), None, Some(CborValue::Null)];
+        for action in unreadable_actions {
+            for operation in [post(), follow()] {
+                assert_eq!(
+                    parse_values(vec![with_action(operation, action.clone())]).err(),
+                    Some(ActorEventError::InvalidFrame)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_unreadable_path_still_fails_the_frame() {
+        let CborValue::Map(mut like) = with_action(
+            valid_like("app.bsky.feed.like/one", LIKE),
+            Some(text("create")),
+        ) else {
+            unreachable!();
+        };
+        like.insert(text("path"), CborValue::Integer(7));
+
+        assert_eq!(
+            parse_values(vec![CborValue::Map(like)]).err(),
+            Some(ActorEventError::InvalidFrame)
+        );
+    }
+
+    #[test]
+    fn the_last_operation_on_one_interaction_wins() {
+        let page = parse_actor_commit(
+            &frame(vec![
+                interaction_op(
+                    "create",
+                    "app.bsky.feed.like/one",
+                    Some(valid_body(LIKE)),
+                    Some(boundary(&["bebop"])),
+                ),
+                interaction_op("delete", "app.bsky.feed.like/one", None, None),
+            ]),
+            SERVICE,
+            "did:plc:faye",
+            &authorized(),
+            "1998-05-03T00:00:00.000Z",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(page.interactions.upserts.is_empty());
+        assert_eq!(page.interactions.deletes, [faye_uri(LIKE, "one")]);
     }
 }

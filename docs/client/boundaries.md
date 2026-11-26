@@ -39,7 +39,7 @@ const boundary = {
 `values` is an array for wire compatibility. It holds exactly one entry.
 
 A boundary is also a space. The value above maps to
-`at://did:web:stratos.example.com/space/zone.stratos.space.feed/general`.
+`at:space/did:web:stratos.example.com/zone.stratos.space.feed/general`.
 See [Permissioned Spaces](/architecture/permissioned-spaces).
 
 ## Visibility rules

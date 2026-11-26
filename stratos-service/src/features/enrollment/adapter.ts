@@ -103,6 +103,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       isService: record.isService ?? false,
       custody: record.custody,
       repoHost: record.repoHost,
+      operatorHold: record.operatorHold,
     }
   }
 
@@ -155,7 +156,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       enrolledAt: now.toISOString(),
       pdsEndpoint: existing?.pdsEndpoint,
       signingKeyDid,
-      active: true,
+      active: existing?.active ?? true,
       custody: existing?.custody,
       repoHost: existing?.repoHost,
       capabilityVerdict: existing?.capabilityVerdict,
@@ -202,7 +203,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       enrolledAt: now,
       pdsEndpoint: existing?.pdsEndpoint ?? '',
       signingKeyDid,
-      active: true,
+      active: existing?.active ?? true,
       custody: existing?.custody,
       repoHost: existing?.repoHost,
     }

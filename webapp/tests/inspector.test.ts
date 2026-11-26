@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
-  parseAtUri,
   resolvePdsEndpoint,
   fetchPdsStub,
   fetchHydratedRecord,
@@ -13,24 +12,6 @@ describe('inspector logic', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     global.fetch = vi.fn() as unknown as typeof fetch
-  })
-
-  describe('parseAtUri', () => {
-    it('parses valid AT URIs', () => {
-      expect(parseAtUri('at://did:plc:123/app.bsky.feed.post/456')).toEqual({
-        did: 'did:plc:123',
-        collection: 'app.bsky.feed.post',
-        rkey: '456',
-      })
-    })
-
-    it('handles incomplete URIs', () => {
-      expect(parseAtUri('at://did:plc:123')).toEqual({
-        did: 'did:plc:123',
-        collection: '',
-        rkey: '',
-      })
-    })
   })
 
   describe('resolvePdsEndpoint', () => {

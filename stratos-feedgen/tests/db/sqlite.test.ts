@@ -363,14 +363,14 @@ describe('SQLite-specific behavior', () => {
         '2026-01-01T00:00:00.000Z',
       )
       await store.upsertSpaceCursor(
-        'at://did:plc:nerv/space/zone.stratos.feed/post/did:plc:asukanoryu',
+        'at:space/did:plc:nerv/zone.stratos.feed/post/did:plc:asukanoryu',
         'did:plc:asukanoryu',
         'next',
         '2026-01-01T00:00:00.000Z',
       )
       await store.stageSpaceSyncPage({
         spaceUri:
-          'at://did:plc:nerv/space/zone.stratos.feed/post/did:plc:asukanoryu',
+          'at:space/did:plc:nerv/zone.stratos.feed/post/did:plc:asukanoryu',
         did: 'did:plc:asukanoryu',
         boundary: 'nerv',
         mutations: [
@@ -402,7 +402,7 @@ describe('SQLite-specific behavior', () => {
       expect(await store.getCursor('did:plc:asukanoryu')).toBeNull()
       expect(
         await store.getSpaceCursor(
-          'at://did:plc:nerv/space/zone.stratos.feed/post/did:plc:asukanoryu',
+          'at:space/did:plc:nerv/zone.stratos.feed/post/did:plc:asukanoryu',
           'did:plc:asukanoryu',
         ),
       ).toBeNull()
@@ -430,7 +430,7 @@ describe('SQLite-specific behavior', () => {
 
       expect(
         await store.getSpaceCursor(
-          'at://did:web:example.test/space/zone.stratos.space.feed/engineering',
+          'at:space/did:web:example.test/zone.stratos.space.feed/engineering',
           'did:plc:motokokusanagi',
         ),
       ).toBeNull()
@@ -692,7 +692,7 @@ describe('SQLite-specific behavior', () => {
     await migrateSqliteDb(db)
     const store = new SqliteFeedgenStore(db)
     const authorityDid = 'did:web:stratos.bebop.test'
-    const spaceUri = `at://${authorityDid}/space/zone.stratos.space.feed/bounty-hunters`
+    const spaceUri = `at:space/${authorityDid}/zone.stratos.space.feed/bounty-hunters`
     const members = [
       'did:plc:spikespiegel',
       'did:plc:fayevalentine',

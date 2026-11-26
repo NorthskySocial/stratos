@@ -624,3 +624,76 @@ describe('room loading', () => {
     },
   )
 })
+
+describe('joining a room named like an inherited property', () => {
+  it.each([
+    'constructor',
+    'toString',
+    'hasOwnProperty',
+    'valueOf',
+    '__proto__',
+  ])(
+    'says access is unavailable for the room %s when the status answer leaves it out',
+    async (roomId) => {
+      render(
+        {
+          initialize: vi.fn().mockResolvedValue(rei),
+          getRoomStates: vi.fn().mockResolvedValue({}),
+          getFeed: vi.fn().mockResolvedValue({ posts: [] }),
+        },
+        `/rooms/${encodeURIComponent(roomId)}`,
+        vi.fn().mockResolvedValue([
+          {
+            id: roomId,
+            displayName: 'Bebop',
+            description: 'The crew lounge',
+            available: true,
+          },
+        ]),
+      )
+      await vi.waitFor(() =>
+        expect(document.body.textContent).toContain(
+          'Room access status is unavailable.',
+        ),
+      )
+    },
+  )
+
+  it.each([
+    'constructor',
+    'toString',
+    'hasOwnProperty',
+    'valueOf',
+    '__proto__',
+  ])('shows the join request for the room %s as pending', async (roomId) => {
+    const requestJoin = vi.fn().mockResolvedValue('pending')
+    render(
+      {
+        initialize: vi.fn().mockResolvedValue(rei),
+        getRoomStates: vi
+          .fn()
+          .mockResolvedValue(Object.fromEntries([[roomId, 'unjoined']])),
+        getFeed: vi.fn().mockResolvedValue({ posts: [] }),
+        requestJoin,
+      },
+      `/rooms/${encodeURIComponent(roomId)}`,
+      vi.fn().mockResolvedValue([
+        {
+          id: roomId,
+          displayName: 'Bebop',
+          description: 'The crew lounge',
+          available: true,
+        },
+      ]),
+    )
+    await vi.waitFor(() => expect(button('Join room').disabled).toBe(false))
+
+    button('Join room').click()
+    await vi.waitFor(() => expect(requestJoin).toHaveBeenCalledWith(roomId))
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain(
+        'Your join request is pending.',
+      ),
+    )
+  })
+})

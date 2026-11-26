@@ -1,0 +1,230 @@
+{
+  "reference": {
+    "repository": "https://github.com/bluesky-social/atproto",
+    "revision": "1f510f8e36a973f6fd055da349b586918805ae66",
+    "releaseAnchor": "f839c47e6523a1a7adb367ef70513a3c6688c38b",
+    "prompts": {
+      "prompt-11-12-26.md": {
+        "sha256": "3ff5a4e5bd0511c717e9afab04ab8bf69e1b404593eac9afaa5d4e026784c770"
+      },
+      "prompt-11-5-26.md": {
+        "sha256": "f48104e63052b5905a634a0002adddcc60df55c51a7f7c1c72bf6d59431e0db1"
+      },
+      "prompt-10-29-26.md": {
+        "sha256": "11d6b58d9ea910210bed2338f377abba881676a52e1694bd9728a88f01cf0fe9"
+      },
+      "prompt-10-22-26.md": {
+        "sha256": "0590ad28cef834b845c4680f498a4b9a533a5e274b8cec38fcf78569997088d6"
+      }
+    }
+  },
+  "proposal": {
+    "repository": "https://github.com/bluesky-social/proposals",
+    "revision": "b54ec6853bab77edd4fd373804a480633094b324",
+    "readmePath": "0016-permissioned-data/README.md",
+    "readmeSha256": "ee2c7a9340bb5c5b6bed866ac8eb86bc8416eb2e1c85e7aac94c3fa6071976e1"
+  },
+  "packages": [
+    {
+      "name": "@atproto/api",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-3ob7Y/2pGTrRPs3ihj1HwqnMQY6Q4ZDbUODCCVA0QVUJKxFIeLHwbXob8f4w/HOZb5T6EGSye9QsdZP+jY8t1A==",
+      "tarballSha256": "935d36a3407741d61e053bfbdc50cce3479d980b9b600689ca9a710b49083f02",
+      "selection": "inspected-not-selected"
+    },
+    {
+      "name": "@atproto/syntax",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-EwGfevaQpSHFYl95a4r7Kl63PLSLeYm6Qwf3XWVzCjJO55HuuNLUQbsrF2iUlTy++82YoC/1dxHk57SWJCom8A==",
+      "tarballSha256": "03519e77f6d9eadde2b25865da3bd0b3fd9e7d5f1927cfa6d57785e72859eb37",
+      "selection": "inspected-not-selected"
+    },
+    {
+      "name": "@atproto/oauth-scopes",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-7crBfEPSaXsROwMzrgCSVd2+2PJB2scUjlUXpC3pO8NmoJLt/2S6NdP9iaIVTVa6H5sBNmFwurTtloSjgqUWzQ==",
+      "tarballSha256": "bcc03c4d1129f17c23319fde60f829a341a6b2ab05824d849ec99a53c0abf389",
+      "selection": "selected"
+    },
+    {
+      "name": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-AasGxXJz1htNRNNR1JL/2v4EV45VvC4UrbY1x/w/cFH0avOHFxhDV0MQMMegVYhSi7DtnkJ1smwDxO6K/W402g==",
+      "tarballSha256": "40d1fcad2caaf35c26b8de58557bfab0206d5ea74a62faa58b5ce66c0969f9fd",
+      "selection": "inspected-not-selected"
+    },
+    {
+      "name": "@atproto/lexicon",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-BAa5bPR1y70+JLP1lalXsOjpSYO7yvJN2DVjwaa+PK3L6bmXgD5wHcaiC0Q+KxIpjQQ+ZtCAcocAdvlsgTGAug==",
+      "tarballSha256": "d3683106093777f6d92eeaa3f0770086f2fb1c5c9287a429df034f56b820799b",
+      "selection": "inspected-not-selected"
+    },
+    {
+      "name": "@atproto/oauth-client-node",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-7EofLSwe/dCrtau86LjWdPEtJIXjt5OL83+seuNpEvif6jc7h/k3Vcu8ELrHVW0Oqn77IQJKeB/0BALy3O/mpg==",
+      "tarballSha256": "d6ef987fbfe10730f9be0e1fcf472d30435d6073c0c74279a3afdb3ee7e49152",
+      "selection": "inspected-not-selected"
+    }
+  ],
+  "targetUriFormat": "at:space/",
+  "referenceSupportsTargetUri": true,
+  "cutoverEvidence": {
+    "status": "fulfilled",
+    "uriProbe": {
+      "artifactRevision": "1f510f8e36a973f6fd055da349b586918805ae66",
+      "imageDigest": "sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350",
+      "recordUri": "at:space/did:web:stratos-e2e.atmosbox.test/zone.stratos.space.feed/general/did:plc:uoamhgblsem4ldntnqco4e3k/zone.stratos.feed.post/verify1795648138766",
+      "credentialSubject": "at:space/did:web:stratos-e2e.atmosbox.test/zone.stratos.space.feed/general",
+      "receiptSha256": "f6f333b2e903319d995b3c6f664b1daf2325b3e83f084882a8f6fe5b4e185af3",
+      "expected": {
+        "authority": "did:web:stratos-e2e.atmosbox.test",
+        "spaceType": "zone.stratos.space.feed",
+        "spaceKey": "general",
+        "author": "did:plc:uoamhgblsem4ldntnqco4e3k",
+        "collection": "zone.stratos.feed.post",
+        "rkey": "verify1795648138766"
+      }
+    }
+  },
+  "legacyUriOnly": {
+    "revisions": [
+      "b5fd12fa57b10cf068efa879812f558780f37109",
+      "d4def6e9f521896ed8222f576d54923d00b5fbeb"
+    ],
+    "packageVersions": [
+      "0.0.0-spaces-alpha-20261117141222",
+      "0.0.0-spaces-alpha-20261112204144"
+    ]
+  },
+  "referenceHost": {
+    "url": "https://github.com/bluesky-social/atproto.git",
+    "dockerfile": "Dockerfile",
+    "lockfile": "pnpm-lock.yaml",
+    "sha256": {
+      "Dockerfile": "661091e966d24d3fb9bcac38200c3e1abc13ef16a8007ccffb1fbf60f143e301",
+      "pnpm-lock.yaml": "9ec7f22274e92778e14c8fa7a494c844b6512c8a43857cf96722211d9bccf298"
+    }
+  },
+  "fixtures": [
+    {
+      "path": "blob-url-space-record.json",
+      "sha256": "d420e8d0b0105fa926fe11f4aaf6c49a2856ef7ed88431b3fa2d2649b16054dc",
+      "classification": "target-uri-conformance"
+    },
+    {
+      "path": "commit-and-ops.json",
+      "sha256": "d97132e4f9fc4b694055ad603936228090acd4f1607f158b6d30a47fbec699a3",
+      "classification": "upstream-legacy-uri"
+    },
+    {
+      "path": "commit-mac.json",
+      "sha256": "bf4f1ebd160d2374c2a62da7b9c8ea507255f65ee88b3a17ac66f293af86b9c0",
+      "classification": "upstream-signed-target-uri"
+    },
+    {
+      "path": "credential-signature.json",
+      "sha256": "69d2f7b619226235899bfe3831b6efdb68644fa166f5988d4657564aabffee2d",
+      "classification": "upstream-uri-free"
+    },
+    {
+      "path": "hpke-export-oracle.json",
+      "sha256": "ec5e77491f7efc15fa0a6a71c85abd965602ca884d451259f3e2c27f53119d38",
+      "classification": "upstream-uri-free"
+    },
+    {
+      "path": "hpke-export-rfc.json",
+      "sha256": "14f28372a8ab66ca535fc18e0a2fd1c2f974f16cb1daa9ce133e2ecd0a3dda53",
+      "classification": "rfc"
+    },
+    {
+      "path": "kem-keys.json",
+      "sha256": "4a621d662834ffff3309fa907764612d81a93044785d5d12bf5d5d5dcd06da2b",
+      "classification": "upstream-uri-free"
+    },
+    {
+      "path": "lthash.json",
+      "sha256": "eb88a9de3427e4ae0123ac790ed5c716f77baac50f160fb51863715a3ca3b854",
+      "classification": "upstream-uri-free"
+    },
+    {
+      "path": "op-pages.json",
+      "sha256": "3f126e0f0e6c7d4dd210e88a3e9579106df202767ea8dedaa5bacb5544e17e4c",
+      "classification": "upstream-signed-target-uri"
+    },
+    {
+      "path": "record-cid.json",
+      "sha256": "59452e7634b536a142ef656838caf8a0e3640ea3fc2c7268c44f025f40bce50a",
+      "classification": "upstream-uri-free"
+    },
+    {
+      "path": "repo-archive.json",
+      "sha256": "064b1d9fadc077fcdfdced1e45153abd225f4c5e82ca2df9a20e3ece3e08de8d",
+      "classification": "upstream-signed-target-uri"
+    },
+    {
+      "path": "space-uri-conformance.json",
+      "sha256": "5c2eb651c4ffc99ac1d715de3dd862773153e4a5db7057e126050b735ae86aca",
+      "classification": "target-uri-conformance"
+    },
+    {
+      "path": "star-framing.json",
+      "sha256": "3219c1890ddc4e7069b9256fdca69cc2a1aa7bd1bd2cea90d342e89f5e983b15",
+      "classification": "upstream-legacy-uri"
+    },
+    {
+      "path": "stratos-produced.json",
+      "sha256": "b303cd71fb2d6a3149e6a3f290a4e7a26e4a80ccde5d2c0d8682b89ea07d4701",
+      "classification": "upstream-signed-target-uri"
+    },
+    {
+      "path": "target-uri-cases.json",
+      "sha256": "6ad5fda8007406e4ce632b5d759adf82f6ef7becec82cd3a3160b16500162d19",
+      "classification": "target-uri-synthetic"
+    },
+    {
+      "path": "token-audiences.json",
+      "sha256": "a702791dc2168a57842d5161874647d8761ea36dbc2d6d8b4ae3a0ef47036d3f",
+      "classification": "upstream-signed-target-uri"
+    }
+  ],
+  "releasePackages": [
+    {
+      "name": "@atproto/api",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-w4+7ykd7llj9YgzWOx1g43yvanIoMG4kuH4TWSLALt9hHz1cMzOHZ4v6MaQlIg7KbdkOnQKmppRxwkKwhBZh5w==",
+      "tarballSha256": "41e63afa8d6d3a612548ab86155b9fcebe6705c5f5b6515f7940d2bdc0c3d5a0"
+    },
+    {
+      "name": "@atproto/syntax",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-0gjf91VdMzZjWNaTdkLHTBVDGUUwds1usf1KyiyRe+eSolz/lBJp0zbJBTW6yY8ZLh9boS/IVIn3NAWhyuJ4OQ==",
+      "tarballSha256": "c2c4141c8620d2b1df86b93ff5f4b877b333f8e6c3cbd3d93a121cd8767093eb"
+    },
+    {
+      "name": "@atproto/oauth-scopes",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-9FUB61oNK8rYKVmi9Z+RSA7DtqWCD1QgmP3J8XAKWMuBcPCOT4HNiu+hYeaWa/Zz4/5ooH00EwrQr5bV9Bt6gA==",
+      "tarballSha256": "5bfdfeb8bec17fbb15e647dbb9a2c8f85e44e9689bbf04c2912fc6d5731c61a7"
+    },
+    {
+      "name": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-tC8uNL+RBNbuZMX9/2wieVsa7tzVazrF7FrJk9P57C9fVfM5FZKGCGv3okWmSNQ+q0jeOaPRGhklNeSm/71JWQ==",
+      "tarballSha256": "91503c952a6564c505e87e23c70be693d00106b4022539ecbe005583fb80278d"
+    },
+    {
+      "name": "@atproto/lexicon",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-lRoXbs68mZjU9x/8zulWqplI96SeZYJhJOkVI7Uc9mwfYgAvD4Y0ddRp/vrLmC1RS0JFOIrsIdVe0xP5kbu1QA==",
+      "tarballSha256": "c1bc34335518e80c195b3b9882e052e0e20b35bd2bd53e283108637cb68ea3f8"
+    },
+    {
+      "name": "@atproto/oauth-client-node",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-AiChp3sQaZAZ0W/Noep5na5ZoAtHeHCW7XGbWKx+WcMylEwuGh1HfkUetsaVkm+vm24P/o+j9QfttkDjbNxhbQ==",
+      "tarballSha256": "050b0daca19085643d9604164ac43296338bf0142dbb6a5a6215ad2d35c09389"
+    }
+  ]
+}

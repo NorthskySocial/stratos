@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use crate::{
     actor_event::{ActorEventError, parse_actor_commit},
@@ -8,13 +11,17 @@ use crate::{
     },
     feeds::FeedRegistry,
     identifier::{Did, RecordUri},
+    label_scope::LabelScope,
+    moderation_label::{LabelPage, LabelSubject},
     readiness::{FeedReadinessGate, ReconciliationOutcome},
     service::ProjectionReader,
     service_event::{EnrollmentAction, EnrollmentEvent},
-    space_sync::{PreparedSpacePage, SpaceSyncError, SpaceSyncTarget},
+    space_mac::MacVerifiedCommit,
+    space_ops::ChangeSet,
     store::{
-        ActorEnrollment, ActorPage, ActorSyncState, EnrollmentReconciliation, PdsSpaceMember,
-        StoreError, StoreInterrupt,
+        ActorEnrollment, ActorPage, ActorSyncState, EnrollmentReconciliation, LabelPageEffects,
+        LabelScopeAlignment, PdsSpaceMember, StoreError, StoreInterrupt, VerifiedSpaceBase,
+        VerifiedSpaceRecord, VerifiedSpaceTarget,
     },
     telemetry::FeedTelemetry,
 };
@@ -47,6 +54,7 @@ pub struct ControlLifecycle {
     interrupt: StoreInterrupt,
     authority_did: Option<String>,
     telemetry: Arc<FeedTelemetry>,
+    labels_caught_up_at: Mutex<Option<Instant>>,
 }
 
 impl ControlLifecycle {
@@ -106,11 +114,12 @@ impl ControlLifecycle {
             interrupt,
             authority_did,
             telemetry,
+            labels_caught_up_at: Mutex::new(None),
         }
     }
 
     #[cfg(test)]
-    fn read<T>(&self, action: impl FnOnce(&ProjectionReader) -> T) -> T {
+    pub(crate) fn read<T>(&self, action: impl FnOnce(&ProjectionReader) -> T) -> T {
         let projection = self.projection.lock().expect("projection lock poisoned");
         action(&projection)
     }
@@ -242,15 +251,212 @@ impl ControlLifecycle {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
         let mut projection = self.projection.lock().expect("projection lock poisoned");
-        let ready = readiness.complete_reconciliation(generation, outcome);
-        if ready {
+        let accepted = readiness.complete_reconciliation(generation, outcome);
+        if readiness.is_ready() {
             projection.establish_session();
             self.telemetry.mark_ready();
         } else {
             projection.close_session();
             self.telemetry.mark_unready();
         }
-        ready
+        accepted
+    }
+
+    pub fn label_cursor(&self) -> Result<u64, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .label_cursor(authority_did)
+    }
+
+    /// Records the scope the label cursor is read under from now on. When the
+    /// cursor goes back to the start of the log, reads close until the replay
+    /// reaches the head, so a boundary new to the scope serves nothing first.
+    pub fn align_label_scope(
+        &self,
+        scope: &LabelScope,
+        updated_at: &str,
+    ) -> Result<LabelScopeAlignment, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let alignment = self
+            .projection
+            .lock()
+            .expect("projection lock poisoned")
+            .align_label_scope(authority_did, scope, updated_at)?;
+        if matches!(alignment, LabelScopeAlignment::Restarted { .. }) {
+            self.withdraw_labels_locked();
+        }
+        Ok(alignment)
+    }
+
+    pub fn apply_label_page(
+        &self,
+        page: &LabelPage,
+        updated_at: &str,
+    ) -> Result<LabelPageEffects, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let effects = self
+            .projection
+            .lock()
+            .expect("projection lock poisoned")
+            .apply_label_page(authority_did, page, updated_at)?;
+        for subject in &effects.taken_down {
+            let LabelSubject::Account { did } = subject else {
+                continue;
+            };
+            if self.revoke_viewer_authorization_locked(did) {
+                self.projection
+                    .lock()
+                    .expect("projection lock poisoned")
+                    .invalidate_viewer(did);
+            }
+        }
+        Ok(effects)
+    }
+
+    pub fn reinstating_accounts(&self, limit: u16) -> Result<Vec<(String, u32)>, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .reinstating_accounts(authority_did, limit)
+    }
+
+    pub fn is_account_taken_down(&self, did: &str) -> Result<bool, StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .is_account_taken_down(did)
+    }
+
+    pub fn is_actor_enrolled(&self, did: &str) -> Result<bool, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .actor_sync_state(authority_did, did)
+            .map(|state| state.is_some())
+    }
+
+    pub fn reinstating_records(&self, limit: u16) -> Result<Vec<String>, StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .reinstating_records(authority_did, limit)
+    }
+
+    pub fn reset_actor_cursor(&self, did: &str) -> Result<(), StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .reset_actor_cursor(authority_did, did)
+    }
+
+    pub fn reset_pds_member_space_state(
+        &self,
+        boundary: &str,
+        did: &str,
+    ) -> Result<(), StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .reset_pds_member_space_state(boundary, did)
+    }
+
+    pub fn finish_reinstatement(&self, subject_key: &str) -> Result<(), StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .finish_reinstatement(authority_did, subject_key)
+    }
+
+    pub fn record_reinstatement_attempt(&self, subject_key: &str) -> Result<(), StoreError> {
+        let authority_did = self.label_authority()?;
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .record_reinstatement_attempt(authority_did, subject_key)
+    }
+
+    pub fn mark_labels_current(&self) {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
+        let mut projection = self.projection.lock().expect("projection lock poisoned");
+        *self
+            .labels_caught_up_at
+            .lock()
+            .expect("label freshness lock poisoned") = Some(Instant::now());
+        let changed = readiness.mark_labels_current();
+        if changed && readiness.is_ready() {
+            projection.establish_session();
+            self.telemetry.mark_ready();
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_labels_stale(&self) {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.withdraw_labels_locked();
+    }
+
+    /// Closes reads once the label log has not been read to its head within
+    /// `max_staleness`. Returns whether this call closed them, so an outage is
+    /// reported once.
+    pub fn withdraw_stale_labels(&self, now: Instant, max_staleness: Duration) -> bool {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let caught_up_at = *self
+            .labels_caught_up_at
+            .lock()
+            .expect("label freshness lock poisoned");
+        let overdue =
+            caught_up_at.is_some_and(|at| now.saturating_duration_since(at) >= max_staleness);
+        if overdue {
+            self.withdraw_labels_locked();
+        }
+        overdue
+    }
+
+    /// When reads close unless the log is read to its head again first. `None`
+    /// means they are already closed for want of a catch-up.
+    pub fn labels_fresh_until(&self, max_staleness: Duration) -> Option<Instant> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.labels_caught_up_at
+            .lock()
+            .expect("label freshness lock poisoned")
+            .map(|at| at + max_staleness)
+    }
+
+    fn withdraw_labels_locked(&self) {
+        let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
+        let mut projection = self.projection.lock().expect("projection lock poisoned");
+        *self
+            .labels_caught_up_at
+            .lock()
+            .expect("label freshness lock poisoned") = None;
+        readiness.mark_labels_stale();
+        projection.close_session();
+        self.telemetry.mark_unready();
+    }
+
+    fn label_authority(&self) -> Result<&str, StoreError> {
+        self.authority_did
+            .as_deref()
+            .ok_or(StoreError::InvalidProjectionMutation)
     }
 
     pub fn mark_unavailable(&self) {
@@ -304,19 +510,25 @@ impl ControlLifecycle {
             .compact_projection(as_of, maximum_retained_at, max_bytes, limit)
     }
 
-    pub fn compact_projection_with_budget(
+    pub fn compact_projection_with_reserve(
         &self,
         as_of: &str,
         maximum_retained_at: &str,
         max_bytes: u64,
         limit: u16,
-        budget: &crate::config::SpaceStageBudget,
+        space_write_reserve_bytes: u64,
     ) -> Result<crate::store::ProjectionCompaction, StoreError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         self.projection
             .lock()
             .expect("projection lock poisoned")
-            .compact_projection_with_budget(as_of, maximum_retained_at, max_bytes, limit, budget)
+            .compact_projection_with_reserve(
+                as_of,
+                maximum_retained_at,
+                max_bytes,
+                limit,
+                space_write_reserve_bytes,
+            )
     }
 
     pub fn actor_sync_state(
@@ -426,100 +638,80 @@ impl ControlLifecycle {
             .replace_pds_space_members_at_generation(boundary, members, reconciled_at, generation)
     }
 
-    pub fn pds_space_target(
+    /// The checkpoint a verified promotion builds on. A caller holding a
+    /// generation that is no longer the member's current one is refused before
+    /// it reads anything.
+    pub fn verified_space_base_at_generation(
         &self,
-        space_uri: impl Into<String>,
-        boundary: impl Into<String>,
-        actor_did: impl Into<String>,
-    ) -> Result<SpaceSyncTarget, SpaceSyncError> {
-        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .pds_space_target(space_uri, boundary, actor_did)
-    }
-    pub fn pds_space_target_at_generation(
-        &self,
-        space_uri: impl Into<String>,
-        boundary: impl Into<String>,
-        actor_did: impl Into<String>,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
         generation: u64,
-    ) -> Result<SpaceSyncTarget, SpaceSyncError> {
+    ) -> Result<Option<VerifiedSpaceBase>, StoreError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .pds_space_target_at_generation(space_uri, boundary, actor_did, generation)
+        let projection = self.projection.lock().expect("projection lock poisoned");
+        if projection.pds_member_generation(boundary, actor_did)? != Some(generation) {
+            return Err(StoreError::UnauthorizedSpaceMember);
+        }
+        projection.verified_space_base(space_uri, actor_did)
     }
 
-    pub fn pds_space_cursor(
+    pub fn promote_verified_space_repo(
         &self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
-    ) -> Result<Option<String>, StoreError> {
-        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .space_sync_cursor(boundary, space_uri, actor_did)
-    }
-
-    pub fn stage_pds_space_page(&self, page: PreparedSpacePage) -> Result<(), SpaceSyncError> {
-        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .stage_pds_space_page(page)
-    }
-
-    pub fn promote_pds_space_stage(
-        &self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
-        retained_at: &str,
-    ) -> Result<(), StoreError> {
-        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
-        self.projection
-            .lock()
-            .expect("projection lock poisoned")
-            .promote_pds_space_stage(boundary, space_uri, actor_did, retained_at)
-    }
-    pub fn promote_pds_space_stage_at_generation(
-        &self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
+        target: &VerifiedSpaceTarget,
+        base_rev: Option<&str>,
+        commit: &MacVerifiedCommit,
+        change_set: &ChangeSet,
         retained_at: &str,
         observed_at: &str,
-        generation: u64,
     ) -> Result<(), StoreError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         self.projection
             .lock()
             .expect("projection lock poisoned")
-            .promote_pds_space_stage_at_generation(
-                boundary,
-                space_uri,
-                actor_did,
+            .promote_verified_space_repo(
+                target,
+                base_rev,
+                commit,
+                change_set,
                 retained_at,
                 observed_at,
-                generation,
             )
     }
 
-    pub fn discard_pds_space_stage(
+    pub fn replace_verified_space_repo(
         &self,
-        boundary: &str,
-        space_uri: &str,
-        actor_did: &str,
+        target: &VerifiedSpaceTarget,
+        commit: &MacVerifiedCommit,
+        records: &[VerifiedSpaceRecord],
+        retained_at: &str,
+        observed_at: &str,
     ) -> Result<(), StoreError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         self.projection
             .lock()
             .expect("projection lock poisoned")
-            .discard_pds_space_stage(boundary, space_uri, actor_did)
+            .replace_verified_space_repo(target, commit, records, retained_at, observed_at)
+    }
+
+    pub fn clear_verified_space_repo(
+        &self,
+        target: &VerifiedSpaceTarget,
+        observed_at: &str,
+    ) -> Result<(), StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .clear_verified_space_repo(target, observed_at)
+    }
+
+    pub fn pds_member_boundaries(&self, did: &str) -> Result<Vec<String>, StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .pds_member_boundaries(did)
     }
 
     pub fn reconcile_actor_enrollment(
@@ -575,6 +767,19 @@ impl ControlLifecycle {
     ) -> Result<(), AuthorizationError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         let mut projection = self.projection.lock().expect("projection lock poisoned");
+        // An answer resolved before the takedown, or by a Stratos process whose
+        // cache is still stale, must not grant access while the takedown stands.
+        let takedown_refusal = match projection.is_account_taken_down(&authorization.did) {
+            Ok(false) => None,
+            Ok(true) => Some(AuthorizationError::AccountTakenDown),
+            Err(_) => Some(AuthorizationError::TakedownStateUnavailable),
+        };
+        if let Some(refusal) = takedown_refusal {
+            if self.revoke_viewer_authorization_locked(&authorization.did) {
+                projection.invalidate_viewer(&authorization.did);
+            }
+            return Err(refusal);
+        }
         let result = self
             .authorizations
             .lock()
@@ -613,7 +818,7 @@ mod tests {
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         service::{ProjectionReader, ReadRequest},
         service_event::{EnrollmentAction, EnrollmentEvent},
-        store::{ActorPage, EncryptedStore, ProjectionPost, StorageKey},
+        store::{ActorEnrollment, ActorPage, EncryptedStore, ProjectionPost, StorageKey},
         telemetry::FeedTelemetry,
     };
 
@@ -640,6 +845,7 @@ mod tests {
         );
 
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         assert!(lifecycle.read(|projection| projection.prepare(request()).unwrap().is_none()));
 
         let generation = lifecycle.begin_reconciliation();
@@ -721,6 +927,7 @@ mod tests {
             readiness,
         );
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -777,6 +984,7 @@ mod tests {
                 }],
                 deletes: Vec::new(),
                 updated_at: "1998-04-03T00:00:02.000Z".to_owned(),
+                interactions: crate::store::InteractionChanges::default(),
             })
             .unwrap();
         let lifecycle = ControlLifecycle::new(ProjectionReader::new(store), readiness);
@@ -798,6 +1006,7 @@ mod tests {
             )
             .unwrap();
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -821,7 +1030,7 @@ mod tests {
             .prepare_viewer_blob(
                 "did:plc:faye",
                 &feeds,
-                "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spike/zone.stratos.feed.post/see-you",
+                "at:space/did:web:stratos.example/zone.stratos.space.feed/bebop/did:plc:spike/zone.stratos.feed.post/see-you",
                 1,
                 "1998-04-03T00:00:00.000Z",
             )
@@ -853,6 +1062,7 @@ mod tests {
             Arc::new(FeedTelemetry::disabled()),
         );
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -901,6 +1111,7 @@ mod tests {
         )
         .unwrap();
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -954,6 +1165,7 @@ mod tests {
             )
             .unwrap();
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -1008,6 +1220,7 @@ mod tests {
             })
             .unwrap();
         lifecycle.session_established();
+        lifecycle.mark_labels_current();
         let generation = lifecycle.begin_reconciliation();
         assert!(lifecycle.complete_reconciliation(
             generation,
@@ -1144,5 +1357,1038 @@ mod tests {
             ),
             Ok(ActorFrameResult::NotEnrolled)
         ));
+    }
+
+    #[test]
+    fn serves_a_post_whose_boundary_is_only_on_the_operation_to_viewers_in_that_boundary() {
+        let authority = "did:web:stratos.example.test";
+        let bebop = "did:web:stratos.example.test/bebop";
+        let swordfish = "did:web:stratos.example.test/swordfish";
+        let lifecycle = ControlLifecycle::for_authority(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            authority,
+        )
+        .unwrap();
+        lifecycle
+            .reconcile_actor_enrollment(
+                "did:plc:faye",
+                "1998-04-03T00:00:00.000Z",
+                Some(crate::store::ActorEnrollment {
+                    did: "did:plc:faye".to_owned(),
+                    boundaries: vec![bebop.to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        for (viewer, boundary) in [
+            ("did:plc:spikespiegel", bebop),
+            ("did:plc:jetblack", swordfish),
+        ] {
+            lifecycle
+                .apply_viewer_authorization(
+                    ViewerAuthorization {
+                        did: viewer.to_owned(),
+                        boundaries: vec![boundary.to_owned()],
+                        expires_at: 100,
+                    },
+                    1,
+                )
+                .unwrap();
+        }
+        lifecycle.session_established();
+        lifecycle.mark_labels_current();
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+
+        let header = serde_cbor::to_vec(&serde_json::json!({"t":"#commit"})).unwrap();
+        let body = serde_cbor::to_vec(&serde_json::json!({
+            "seq":7,
+            "did":"did:plc:faye",
+            "time":"1998-04-03T00:00:00.000Z",
+            "rev":"3jzfcijpj2z2a",
+            "ops":[{
+                "action":"create",
+                "path":"zone.stratos.feed.post/see-you",
+                "cid":"bafyreia",
+                "record":{"$type":"zone.stratos.feed.post","createdAt":"1998-04-03T00:00:00.000Z","text":"see you space cowboy"},
+                "boundary":{"values":[{"value":"bebop"}]}
+            }]
+        }))
+        .unwrap();
+        let mut frame = header;
+        frame.extend(body);
+        assert!(matches!(
+            lifecycle.apply_actor_frame(
+                &frame,
+                authority,
+                "did:plc:faye",
+                "1998-05-03T00:00:00.000Z",
+            ),
+            Ok(ActorFrameResult::Applied)
+        ));
+
+        let feeds = FeedRegistry::new([
+            FeedDescription {
+                id: "bebop".to_owned(),
+                boundary: bebop.to_owned(),
+                display_name: None,
+                description: None,
+            },
+            FeedDescription {
+                id: "swordfish".to_owned(),
+                boundary: swordfish.to_owned(),
+                display_name: None,
+                description: None,
+            },
+        ])
+        .unwrap();
+        let query = |feed_id| crate::feed_service::FeedQuery {
+            feed_id,
+            cursor: None,
+            limit: 50,
+            now: 2,
+            as_of: "1998-04-03T00:00:00.000Z",
+            blob_base_url: "https://feedgen.example.test",
+        };
+
+        let (served, served_count) = lifecycle
+            .serve_viewer_feed("did:plc:spikespiegel", &feeds, query("bebop"))
+            .unwrap();
+        assert_eq!(served_count, 1);
+        let served: serde_json::Value = serde_json::from_slice(&served).unwrap();
+        assert_eq!(
+            served["feed"][0]["post"]["uri"],
+            "at://did:plc:faye/zone.stratos.feed.post/see-you"
+        );
+        assert_eq!(
+            served["feed"][0]["post"]["boundaries"],
+            serde_json::json!([bebop])
+        );
+
+        assert!(matches!(
+            lifecycle.serve_viewer_feed("did:plc:jetblack", &feeds, query("bebop")),
+            Err(crate::feed_service::FeedServiceError::BoundaryMismatch)
+        ));
+        let (_, other_boundary_count) = lifecycle
+            .serve_viewer_feed("did:plc:jetblack", &feeds, query("swordfish"))
+            .unwrap();
+        assert_eq!(other_boundary_count, 0);
+    }
+
+    fn lifecycle_with_telemetry() -> (
+        ControlLifecycle,
+        Arc<Mutex<FeedReadinessGate>>,
+        Arc<FeedTelemetry>,
+    ) {
+        let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+        let telemetry = Arc::new(FeedTelemetry::disabled());
+        let lifecycle = ControlLifecycle::for_authority_with_telemetry(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::clone(&readiness),
+            "did:plc:spike",
+            Arc::clone(&telemetry),
+        )
+        .unwrap();
+        (lifecycle, readiness, telemetry)
+    }
+
+    fn reconcile_cleanly(lifecycle: &ControlLifecycle) {
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+    }
+
+    #[test]
+    fn reads_stay_closed_until_labels_and_reconciliation_are_both_current() {
+        let (lifecycle, readiness, telemetry) = lifecycle_with_telemetry();
+        lifecycle.session_established();
+        reconcile_cleanly(&lifecycle);
+        assert!(!readiness.lock().unwrap().is_ready());
+        assert!(!telemetry.is_ready());
+
+        lifecycle.mark_labels_current();
+        assert!(readiness.lock().unwrap().is_ready());
+        assert!(telemetry.is_ready());
+
+        let (lifecycle, readiness, telemetry) = lifecycle_with_telemetry();
+        lifecycle.mark_labels_current();
+        assert!(!readiness.lock().unwrap().is_ready());
+        assert!(!telemetry.is_ready());
+        lifecycle.session_established();
+        reconcile_cleanly(&lifecycle);
+        assert!(readiness.lock().unwrap().is_ready());
+        assert!(telemetry.is_ready());
+    }
+
+    #[test]
+    fn stale_labels_close_reads_until_the_log_catches_up_again() {
+        let (lifecycle, readiness, telemetry) = lifecycle_with_telemetry();
+        lifecycle.mark_labels_current();
+        lifecycle.session_established();
+        reconcile_cleanly(&lifecycle);
+        assert!(telemetry.is_ready());
+
+        lifecycle.mark_labels_stale();
+        assert!(!readiness.lock().unwrap().is_ready());
+        assert!(!telemetry.is_ready());
+
+        lifecycle.mark_labels_current();
+        assert!(readiness.lock().unwrap().is_ready());
+        assert!(telemetry.is_ready());
+    }
+
+    #[test]
+    fn a_service_reconnect_reopens_without_relearning_label_currency() {
+        let (lifecycle, readiness, _telemetry) = lifecycle_with_telemetry();
+        lifecycle.mark_labels_current();
+        lifecycle.session_established();
+        reconcile_cleanly(&lifecycle);
+        assert!(readiness.lock().unwrap().is_ready());
+
+        lifecycle.mark_unavailable();
+        assert!(!readiness.lock().unwrap().is_ready());
+
+        lifecycle.session_established();
+        reconcile_cleanly(&lifecycle);
+        assert!(readiness.lock().unwrap().is_ready());
+    }
+
+    #[test]
+    fn an_account_takedown_revokes_that_accounts_viewer_authorization() {
+        let (lifecycle, _readiness, _telemetry) = lifecycle_with_telemetry();
+        for did in ["did:plc:spike", "did:plc:faye"] {
+            lifecycle
+                .apply_viewer_authorization(
+                    ViewerAuthorization {
+                        did: did.to_owned(),
+                        boundaries: vec!["bebop".to_owned()],
+                        expires_at: 100,
+                    },
+                    1,
+                )
+                .unwrap();
+        }
+
+        lifecycle
+            .apply_label_page(
+                &crate::moderation_label::LabelPage {
+                    cursor: 1,
+                    labels: vec![crate::moderation_label::ModerationLabel {
+                        seq: 1,
+                        subject: crate::moderation_label::LabelSubject::Account {
+                            did: "did:plc:spike".to_owned(),
+                        },
+                        neg: false,
+                    }],
+                    skipped_subjects: 0,
+                },
+                "2026-11-01T00:00:00.000Z",
+            )
+            .unwrap();
+
+        assert!(!lifecycle.has_current_viewer_authorization("did:plc:spike", 2));
+        assert!(lifecycle.has_current_viewer_authorization("did:plc:faye", 2));
+    }
+
+    const BEBOP_AUTHORITY: &str = "did:web:stratos.example.test";
+    const SPIKESPIEGEL: &str = "did:plc:spikespiegel";
+    const SPIKE_BLOB_POST: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/bebop1";
+    const SPIKE_ENROLLED_AT: &str = "1998-04-03T00:00:00.000Z";
+    const BEFORE_RETENTION_ENDS: &str = "1998-04-03T12:00:00.000Z";
+    const TAKEDOWN_RECORDED_AT: &str = "2026-11-01T00:00:00.000Z";
+
+    fn bebop_feeds() -> FeedRegistry {
+        FeedRegistry::new([FeedDescription {
+            id: "bebop".to_owned(),
+            boundary: "bebop".to_owned(),
+            display_name: None,
+            description: None,
+        }])
+        .unwrap()
+    }
+
+    fn account_label_page(
+        cursor: u64,
+        sequence: u64,
+        negated: bool,
+    ) -> crate::moderation_label::LabelPage {
+        crate::moderation_label::LabelPage {
+            cursor,
+            labels: vec![crate::moderation_label::ModerationLabel {
+                seq: sequence,
+                subject: crate::moderation_label::LabelSubject::Account {
+                    did: SPIKESPIEGEL.to_owned(),
+                },
+                neg: negated,
+            }],
+            skipped_subjects: 0,
+        }
+    }
+
+    fn lifecycle_serving_a_member_with_a_blob_post() -> ControlLifecycle {
+        let lifecycle = ControlLifecycle::for_authority(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            BEBOP_AUTHORITY,
+        )
+        .unwrap();
+        lifecycle
+            .reconcile_actor_enrollment(
+                SPIKESPIEGEL,
+                SPIKE_ENROLLED_AT,
+                Some(ActorEnrollment {
+                    did: SPIKESPIEGEL.to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    observed_at: SPIKE_ENROLLED_AT.to_owned(),
+                }),
+            )
+            .unwrap();
+        lifecycle
+            .apply_actor_page(ActorPage {
+                authority_did: BEBOP_AUTHORITY.to_owned(),
+                actor_did: SPIKESPIEGEL.to_owned(),
+                sequence: 1,
+                upserts: vec![ProjectionPost {
+                    uri: SPIKE_BLOB_POST.to_owned(),
+                    author_did: SPIKESPIEGEL.to_owned(),
+                    cid: "bafyrecord".to_owned(),
+                    sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                    indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
+                    retained_at: "1998-04-04T00:00:00.000Z".to_owned(),
+                    record_json: b"{}".to_vec(),
+                    blob_refs_json: serde_json::to_vec(&serde_json::json!([
+                        { "cid": "bafkreiswordfish", "mimeType": "image/png" }
+                    ]))
+                    .unwrap(),
+                    boundaries: vec!["bebop".to_owned()],
+                }],
+                deletes: Vec::new(),
+                updated_at: "1998-04-03T00:00:02.000Z".to_owned(),
+                interactions: crate::store::InteractionChanges::default(),
+            })
+            .unwrap();
+        lifecycle
+            .apply_viewer_authorization(
+                ViewerAuthorization {
+                    did: "did:plc:faye".to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    expires_at: 100,
+                },
+                1,
+            )
+            .unwrap();
+        lifecycle.session_established();
+        lifecycle.mark_labels_current();
+        reconcile_cleanly(&lifecycle);
+        lifecycle
+    }
+
+    fn blob_route_serves(lifecycle: &ControlLifecycle) -> bool {
+        lifecycle
+            .prepare_viewer_blob(
+                "did:plc:faye",
+                &bebop_feeds(),
+                SPIKE_BLOB_POST,
+                1,
+                BEFORE_RETENTION_ENDS,
+            )
+            .unwrap()
+            .is_some()
+    }
+
+    #[test]
+    fn the_blob_route_serves_no_post_of_a_taken_down_account() {
+        let lifecycle = lifecycle_serving_a_member_with_a_blob_post();
+        assert!(blob_route_serves(&lifecycle));
+
+        lifecycle
+            .apply_label_page(&account_label_page(1, 1, false), TAKEDOWN_RECORDED_AT)
+            .unwrap();
+
+        assert!(!blob_route_serves(&lifecycle));
+    }
+
+    fn viewer_account_label_page(cursor: u64, negated: bool) -> crate::moderation_label::LabelPage {
+        crate::moderation_label::LabelPage {
+            cursor,
+            labels: vec![crate::moderation_label::ModerationLabel {
+                seq: cursor,
+                subject: crate::moderation_label::LabelSubject::Account {
+                    did: FAYE.to_owned(),
+                },
+                neg: negated,
+            }],
+            skipped_subjects: 0,
+        }
+    }
+
+    fn enrolled_answer_for_faye(lifecycle: &ControlLifecycle) -> Result<(), AuthorizationError> {
+        lifecycle.apply_viewer_authorization(
+            ViewerAuthorization {
+                did: FAYE.to_owned(),
+                boundaries: vec!["bebop".to_owned()],
+                expires_at: 100,
+            },
+            1,
+        )
+    }
+
+    fn faye_feed(
+        lifecycle: &ControlLifecycle,
+    ) -> Result<(), crate::feed_service::FeedServiceError> {
+        lifecycle
+            .serve_viewer_feed(
+                FAYE,
+                &bebop_feeds(),
+                crate::feed_service::FeedQuery {
+                    feed_id: "bebop",
+                    cursor: None,
+                    limit: 50,
+                    now: 1,
+                    as_of: BEFORE_RETENTION_ENDS,
+                    blob_base_url: "https://feedgen.example.test",
+                },
+            )
+            .map(|_| ())
+    }
+
+    #[test]
+    fn an_enrolled_answer_for_a_viewer_under_account_takedown_installs_no_access() {
+        let lifecycle = lifecycle_serving_a_member_with_a_blob_post();
+        lifecycle
+            .apply_label_page(&viewer_account_label_page(1, false), TAKEDOWN_RECORDED_AT)
+            .unwrap();
+
+        let late_answer = enrolled_answer_for_faye(&lifecycle);
+
+        assert!(late_answer.is_err());
+        assert!(!lifecycle.has_current_viewer_authorization(FAYE, 1));
+        assert!(matches!(
+            faye_feed(&lifecycle),
+            Err(crate::feed_service::FeedServiceError::AuthorizationUnavailable)
+        ));
+        assert!(matches!(
+            lifecycle.prepare_viewer_blob(
+                FAYE,
+                &bebop_feeds(),
+                SPIKE_BLOB_POST,
+                1,
+                BEFORE_RETENTION_ENDS
+            ),
+            Err(crate::feed_service::FeedServiceError::AuthorizationUnavailable)
+        ));
+
+        lifecycle
+            .apply_label_page(&viewer_account_label_page(2, true), TAKEDOWN_RECORDED_AT)
+            .unwrap();
+
+        assert_eq!(enrolled_answer_for_faye(&lifecycle), Ok(()));
+        assert!(faye_feed(&lifecycle).is_ok());
+        assert!(blob_route_serves(&lifecycle));
+    }
+
+    #[test]
+    fn a_replayed_enroll_older_than_the_stored_observation_is_stale_while_reinstating() {
+        let lifecycle = lifecycle_serving_a_member_with_a_blob_post();
+        lifecycle
+            .apply_label_page(&account_label_page(1, 1, false), TAKEDOWN_RECORDED_AT)
+            .unwrap();
+        lifecycle
+            .apply_label_page(&account_label_page(2, 2, true), TAKEDOWN_RECORDED_AT)
+            .unwrap();
+        assert_eq!(
+            lifecycle.reinstating_accounts(10).unwrap(),
+            [(SPIKESPIEGEL.to_owned(), 0)]
+        );
+
+        let replay = lifecycle.apply_enrollment_event(EnrollmentEvent {
+            did: SPIKESPIEGEL.to_owned(),
+            action: EnrollmentAction::Enroll,
+            boundaries: vec!["bebop".to_owned()],
+            observed_at: "2026-10-31T00:00:00.000Z".to_owned(),
+        });
+
+        assert!(matches!(replay, Err(crate::store::StoreError::StaleCursor)));
+        assert_eq!(
+            lifecycle
+                .actor_sync_state(BEBOP_AUTHORITY, SPIKESPIEGEL)
+                .unwrap(),
+            None
+        );
+    }
+
+    const ACTOR_AUTHORITY: &str = "did:web:stratos.example.test";
+    const ACTOR_BEBOP: &str = "did:web:stratos.example.test/bebop";
+    const FAYE: &str = "did:plc:faye";
+    const RETAINED_AT: &str = "1998-05-03T00:00:00.000Z";
+    const LIKE: &str = "app.bsky.feed.like";
+    const REPOST: &str = "app.bsky.feed.repost";
+    const FAYE_LIKE_SUBJECT: &str = "at://did:plc:spikespiegel/zone.stratos.feed.post/swordfish";
+
+    fn faye_uri(collection: &str, rkey: &str) -> String {
+        format!("at://{FAYE}/{collection}/{rkey}")
+    }
+
+    fn enrolled_lifecycle() -> ControlLifecycle {
+        let lifecycle = ControlLifecycle::for_authority(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            ACTOR_AUTHORITY,
+        )
+        .unwrap();
+        lifecycle
+            .reconcile_actor_enrollment(
+                FAYE,
+                "1998-04-03T00:00:00.000Z",
+                Some(ActorEnrollment {
+                    did: FAYE.to_owned(),
+                    boundaries: vec![ACTOR_BEBOP.to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        lifecycle
+    }
+
+    fn commit_frame(sequence: u64, ops: serde_json::Value) -> Vec<u8> {
+        let mut bytes = serde_cbor::to_vec(&serde_json::json!({"t": "#commit"})).unwrap();
+        bytes.extend(
+            serde_cbor::to_vec(&serde_json::json!({
+                "seq": sequence,
+                "did": FAYE,
+                "time": "1998-04-03T00:00:00.000Z",
+                "rev": "3jzfcijpj2z2a",
+                "ops": ops,
+            }))
+            .unwrap(),
+        );
+        bytes
+    }
+
+    fn like_create_ops(rkey: &str) -> serde_json::Value {
+        serde_json::json!([{
+            "action": "create",
+            "path": format!("app.bsky.feed.like/{rkey}"),
+            "cid": "bafyreia",
+            "record": {
+                "$type": LIKE,
+                "subject": {"uri": FAYE_LIKE_SUBJECT, "cid": "bafyreib"},
+                "boundary": {"values": [{"value": "bebop"}]},
+            },
+        }])
+    }
+
+    fn apply(lifecycle: &ControlLifecycle, frame: &[u8]) -> ActorFrameResult {
+        lifecycle
+            .apply_actor_frame(frame, ACTOR_AUTHORITY, FAYE, RETAINED_AT)
+            .unwrap()
+    }
+
+    fn faye_cursor(lifecycle: &ControlLifecycle) -> Option<u64> {
+        lifecycle
+            .actor_sync_state(ACTOR_AUTHORITY, FAYE)
+            .unwrap()
+            .unwrap()
+            .cursor
+    }
+
+    #[test]
+    fn a_like_frame_is_stored_and_a_later_delete_frame_removes_it() {
+        let lifecycle = enrolled_lifecycle();
+
+        assert!(matches!(
+            apply(&lifecycle, &commit_frame(7, like_create_ops("one"))),
+            ActorFrameResult::Applied
+        ));
+        assert_eq!(
+            lifecycle.read(|projection| projection.interaction_rows()),
+            [(
+                faye_uri(LIKE, "one"),
+                "like".to_owned(),
+                FAYE_LIKE_SUBJECT.to_owned(),
+                ACTOR_BEBOP.to_owned()
+            )]
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+
+        let delete = commit_frame(
+            8,
+            serde_json::json!([{"action": "delete", "path": "app.bsky.feed.like/one"}]),
+        );
+        assert!(matches!(
+            apply(&lifecycle, &delete),
+            ActorFrameResult::Applied
+        ));
+        assert!(
+            lifecycle
+                .read(|projection| projection.interaction_rows())
+                .is_empty()
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(8));
+    }
+
+    #[test]
+    fn a_malformed_like_frame_still_advances_the_cursor() {
+        let lifecycle = enrolled_lifecycle();
+        let malformed = commit_frame(
+            7,
+            serde_json::json!([{
+                "action": "create",
+                "path": "app.bsky.feed.like/one",
+                "cid": "bafyreia",
+                "record": {"$type": REPOST},
+            }]),
+        );
+
+        assert!(matches!(
+            apply(&lifecycle, &malformed),
+            ActorFrameResult::Applied
+        ));
+        assert!(
+            lifecycle
+                .read(|projection| projection.interaction_rows())
+                .is_empty()
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+    }
+
+    #[test]
+    fn a_like_with_an_unreadable_action_beside_a_post_keeps_the_post_and_advances_the_cursor() {
+        let lifecycle = enrolled_lifecycle();
+        let post_uri = format!("at://{FAYE}/zone.stratos.feed.post/see-you");
+        let frame = commit_frame(
+            7,
+            serde_json::json!([
+                {
+                    "action": "create",
+                    "path": "zone.stratos.feed.post/see-you",
+                    "cid": "bafyreia",
+                    "record": {
+                        "$type": "zone.stratos.feed.post",
+                        "createdAt": "1998-04-03T00:00:00.000Z",
+                        "boundary": {"values": [{"value": "bebop"}]},
+                    },
+                },
+                {
+                    "action": 7,
+                    "path": "app.bsky.feed.like/one",
+                    "cid": "bafyreib",
+                    "record": {
+                        "$type": LIKE,
+                        "subject": {"uri": FAYE_LIKE_SUBJECT, "cid": "bafyreib"},
+                        "boundary": {"values": [{"value": "bebop"}]},
+                    },
+                },
+                {
+                    "path": "app.bsky.feed.repost/two",
+                    "cid": "bafyreic",
+                    "record": {
+                        "$type": REPOST,
+                        "subject": {"uri": FAYE_LIKE_SUBJECT, "cid": "bafyreib"},
+                        "boundary": {"values": [{"value": "bebop"}]},
+                    },
+                },
+            ]),
+        );
+
+        assert!(matches!(
+            apply(&lifecycle, &frame),
+            ActorFrameResult::Applied
+        ));
+
+        let stored_post = lifecycle
+            .read(|projection| projection.blob_post(&post_uri, "1998-04-03T00:00:00.000Z"))
+            .unwrap()
+            .expect("the post is stored");
+        assert_eq!(stored_post.boundaries, [ACTOR_BEBOP]);
+        assert!(
+            lifecycle
+                .read(|projection| projection.interaction_rows())
+                .is_empty()
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+    }
+
+    #[test]
+    fn a_replayed_frame_does_not_readmit_a_taken_down_like() {
+        let lifecycle = enrolled_lifecycle();
+        lifecycle
+            .apply_label_page(
+                &crate::moderation_label::LabelPage {
+                    cursor: 1,
+                    labels: vec![crate::moderation_label::ModerationLabel {
+                        seq: 1,
+                        subject: crate::moderation_label::LabelSubject::Record {
+                            uri: faye_uri(LIKE, "one"),
+                            author_did: FAYE.to_owned(),
+                        },
+                        neg: false,
+                    }],
+                    skipped_subjects: 0,
+                },
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap();
+
+        for _ in 0..2 {
+            assert!(matches!(
+                apply(&lifecycle, &commit_frame(7, like_create_ops("one"))),
+                ActorFrameResult::Applied
+            ));
+        }
+        assert!(matches!(
+            apply(&lifecycle, &commit_frame(8, like_create_ops("two"))),
+            ActorFrameResult::Applied
+        ));
+
+        let stored = lifecycle.read(|projection| projection.interaction_rows());
+        assert_eq!(
+            stored.iter().map(|row| row.0.clone()).collect::<Vec<_>>(),
+            [faye_uri(LIKE, "two")]
+        );
+        assert_eq!(faye_cursor(&lifecycle), Some(8));
+    }
+
+    const CREW: &str = "did:web:bebop.example/crew";
+    const CREW_SPACE: &str = "at:space/did:web:bebop.example/zone.stratos.space.feed/crew";
+    const MEMBER: &str = "did:plc:fayevalentine";
+    const FIRST_REV: &str = "3jzfcijpj2z2a";
+    const OBSERVED: &str = "2026-09-22T00:00:00.000Z";
+    const RETAINED: &str = "2026-09-23T00:00:00.000Z";
+
+    fn lifecycle_with_member() -> (ControlLifecycle, crate::store::VerifiedSpaceTarget) {
+        let lifecycle = ControlLifecycle::new(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+        );
+        lifecycle
+            .replace_pds_space_members(
+                CREW,
+                vec![crate::store::PdsSpaceMember {
+                    did: MEMBER.to_owned(),
+                }],
+                OBSERVED,
+            )
+            .unwrap();
+        let target = crate::store::VerifiedSpaceTarget {
+            boundary: CREW.to_owned(),
+            space_uri: CREW_SPACE.to_owned(),
+            actor_did: MEMBER.to_owned(),
+            host: "https://pds.bebop.example".to_owned(),
+            generation: lifecycle
+                .pds_member_generation(CREW, MEMBER)
+                .unwrap()
+                .unwrap(),
+        };
+        (lifecycle, target)
+    }
+
+    fn empty_repo_commit() -> crate::space_mac::MacVerifiedCommit {
+        crate::space_mac::MacVerifiedCommit::for_tests(
+            MEMBER,
+            CREW_SPACE,
+            FIRST_REV,
+            crate::space_set_hash::SetHashState::empty().digest(),
+        )
+    }
+
+    #[test]
+    fn a_verified_replacement_reaches_the_store_and_its_base_can_be_read_back() {
+        let (lifecycle, target) = lifecycle_with_member();
+        assert_eq!(
+            lifecycle
+                .verified_space_base_at_generation(CREW, CREW_SPACE, MEMBER, target.generation)
+                .unwrap(),
+            None
+        );
+
+        lifecycle
+            .replace_verified_space_repo(&target, &empty_repo_commit(), &[], RETAINED, OBSERVED)
+            .unwrap();
+
+        let base = lifecycle
+            .verified_space_base_at_generation(CREW, CREW_SPACE, MEMBER, target.generation)
+            .unwrap()
+            .unwrap();
+        assert_eq!(base.rev, FIRST_REV);
+        assert_eq!(base.host, "https://pds.bebop.example");
+    }
+
+    #[test]
+    fn a_verified_promotion_reaches_the_store() {
+        let (lifecycle, target) = lifecycle_with_member();
+        let change_set =
+            crate::space_ops::ChangeSet::apply(crate::space_set_hash::SetHashState::empty(), &[])
+                .unwrap();
+
+        lifecycle
+            .promote_verified_space_repo(
+                &target,
+                None,
+                &empty_repo_commit(),
+                &change_set,
+                RETAINED,
+                OBSERVED,
+            )
+            .unwrap();
+
+        let base = lifecycle
+            .verified_space_base_at_generation(CREW, CREW_SPACE, MEMBER, target.generation)
+            .unwrap()
+            .unwrap();
+        assert_eq!(base.rev, FIRST_REV);
+        let stale = lifecycle.promote_verified_space_repo(
+            &target,
+            None,
+            &empty_repo_commit(),
+            &change_set,
+            RETAINED,
+            OBSERVED,
+        );
+        assert!(
+            matches!(stale, Err(crate::store::StoreError::SpaceRepoBaseMoved)),
+            "{stale:?}"
+        );
+    }
+
+    const BRIDGE_SPACE: &str = "at:space/did:web:bebop.example/zone.stratos.space.feed/bridge";
+
+    fn bridge_target_and_commit(
+        target: crate::store::VerifiedSpaceTarget,
+    ) -> (
+        crate::store::VerifiedSpaceTarget,
+        crate::space_mac::MacVerifiedCommit,
+    ) {
+        let commit = crate::space_mac::MacVerifiedCommit::for_tests(
+            MEMBER,
+            BRIDGE_SPACE,
+            FIRST_REV,
+            crate::space_set_hash::SetHashState::empty().digest(),
+        );
+        let target = crate::store::VerifiedSpaceTarget {
+            space_uri: BRIDGE_SPACE.to_owned(),
+            ..target
+        };
+        (target, commit)
+    }
+
+    fn crew_request() -> ReadRequest<'static> {
+        ReadRequest {
+            boundary: CREW,
+            ..request()
+        }
+    }
+
+    #[test]
+    fn a_verified_promotion_into_a_space_its_boundary_does_not_name_leaves_reads_valid() {
+        let (lifecycle, crew_target) = lifecycle_with_member();
+        let (target, commit) = bridge_target_and_commit(crew_target);
+        let change_set =
+            crate::space_ops::ChangeSet::apply(crate::space_set_hash::SetHashState::empty(), &[])
+                .unwrap();
+        let (token, page) = {
+            let mut projection = lifecycle.projection.lock().unwrap();
+            projection.establish_session();
+            projection.prepare(crew_request()).unwrap().unwrap()
+        };
+
+        let outcome = lifecycle.promote_verified_space_repo(
+            &target,
+            None,
+            &commit,
+            &change_set,
+            RETAINED,
+            OBSERVED,
+        );
+
+        assert!(
+            matches!(outcome, Err(crate::store::StoreError::SpaceRepoInvalid)),
+            "{outcome:?}"
+        );
+        assert!(lifecycle.read(|projection| projection.release(token, page, 2).is_some()));
+    }
+
+    #[test]
+    fn a_verified_replacement_into_a_space_its_boundary_does_not_name_leaves_reads_valid() {
+        let (lifecycle, crew_target) = lifecycle_with_member();
+        let (target, commit) = bridge_target_and_commit(crew_target);
+        let (token, page) = {
+            let mut projection = lifecycle.projection.lock().unwrap();
+            projection.establish_session();
+            projection.prepare(crew_request()).unwrap().unwrap()
+        };
+
+        let outcome =
+            lifecycle.replace_verified_space_repo(&target, &commit, &[], RETAINED, OBSERVED);
+
+        assert!(
+            matches!(outcome, Err(crate::store::StoreError::SpaceRepoInvalid)),
+            "{outcome:?}"
+        );
+        assert!(lifecycle.read(|projection| projection.release(token, page, 2).is_some()));
+    }
+
+    #[test]
+    fn reading_the_base_under_a_stale_generation_is_refused() {
+        let (lifecycle, target) = lifecycle_with_member();
+
+        let outcome = lifecycle.verified_space_base_at_generation(
+            CREW,
+            CREW_SPACE,
+            MEMBER,
+            target.generation + 1,
+        );
+
+        assert!(
+            matches!(
+                outcome,
+                Err(crate::store::StoreError::UnauthorizedSpaceMember)
+            ),
+            "{outcome:?}"
+        );
+    }
+
+    const COMMIT_WRITE_LIMIT: usize = 200;
+    const POST_AS_OF: &str = "1998-04-03T00:00:00.000Z";
+
+    fn post_create(rkey: &str, text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "action": "create",
+            "path": format!("zone.stratos.feed.post/{rkey}"),
+            "cid": "bafyreia",
+            "record": {
+                "$type": "zone.stratos.feed.post",
+                "text": text,
+                "createdAt": POST_AS_OF,
+            },
+            "boundary": {"values": [{"value": ACTOR_BEBOP}]},
+        })
+    }
+
+    /// A one-post commit frame padded to exactly `length` bytes.
+    fn post_frame_of_length(length: usize) -> Vec<u8> {
+        let unpadded = commit_frame(7, serde_json::json!([post_create("julia", "")])).len();
+        // Past 65,535 bytes a CBOR text header stops growing, so one step lands.
+        let text = "j".repeat(length - unpadded - 4);
+        let frame = commit_frame(7, serde_json::json!([post_create("julia", &text)]));
+        assert_eq!(frame.len(), length);
+        frame
+    }
+
+    fn stored_posts(lifecycle: &ControlLifecycle, rkeys: &[String]) -> usize {
+        rkeys
+            .iter()
+            .filter(|rkey| {
+                lifecycle
+                    .read(|projection| {
+                        projection.blob_post(&faye_uri("zone.stratos.feed.post", rkey), POST_AS_OF)
+                    })
+                    .unwrap()
+                    .is_some()
+            })
+            .count()
+    }
+
+    #[test]
+    fn a_frame_at_the_frame_limit_applies() {
+        let lifecycle = enrolled_lifecycle();
+
+        let frame = post_frame_of_length(crate::config::MAX_ACTOR_FRAME_BYTES);
+
+        assert!(matches!(
+            apply(&lifecycle, &frame),
+            ActorFrameResult::Applied
+        ));
+        assert_eq!(stored_posts(&lifecycle, &["julia".to_owned()]), 1);
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+    }
+
+    #[test]
+    fn a_frame_one_byte_over_the_limit_is_refused_without_advancing_the_cursor() {
+        let lifecycle = enrolled_lifecycle();
+
+        let frame = post_frame_of_length(crate::config::MAX_ACTOR_FRAME_BYTES + 1);
+
+        assert!(matches!(
+            lifecycle.apply_actor_frame(&frame, ACTOR_AUTHORITY, FAYE, RETAINED_AT),
+            Err(ActorFrameError::Event(
+                crate::actor_event::ActorEventError::FrameTooLarge
+            ))
+        ));
+        assert_eq!(stored_posts(&lifecycle, &["julia".to_owned()]), 0);
+        assert_eq!(faye_cursor(&lifecycle), None);
+    }
+
+    #[test]
+    fn a_commit_of_the_most_writes_applies_every_op_and_advances_the_cursor_once() {
+        let lifecycle = enrolled_lifecycle();
+        let rkeys = (0..COMMIT_WRITE_LIMIT)
+            .map(|index| format!("bebop{index:03}"))
+            .collect::<Vec<_>>();
+        let ops = rkeys
+            .iter()
+            .map(|rkey| post_create(rkey, "See you, space cowboy"))
+            .collect::<Vec<_>>();
+
+        assert!(matches!(
+            apply(&lifecycle, &commit_frame(7, serde_json::Value::Array(ops))),
+            ActorFrameResult::Applied
+        ));
+
+        assert_eq!(stored_posts(&lifecycle, &rkeys), COMMIT_WRITE_LIMIT);
+        assert_eq!(faye_cursor(&lifecycle), Some(7));
+    }
+
+    #[test]
+    fn a_commit_of_the_most_writes_with_an_unreadable_last_post_applies_nothing() {
+        let lifecycle = enrolled_lifecycle();
+        let rkeys = (0..COMMIT_WRITE_LIMIT)
+            .map(|index| format!("bebop{index:03}"))
+            .collect::<Vec<_>>();
+        let mut ops = rkeys
+            .iter()
+            .map(|rkey| post_create(rkey, "See you, space cowboy"))
+            .collect::<Vec<_>>();
+        ops[COMMIT_WRITE_LIMIT - 1]
+            .as_object_mut()
+            .unwrap()
+            .remove("record");
+
+        assert!(matches!(
+            lifecycle.apply_actor_frame(
+                &commit_frame(7, serde_json::Value::Array(ops)),
+                ACTOR_AUTHORITY,
+                FAYE,
+                RETAINED_AT,
+            ),
+            Err(ActorFrameError::Event(
+                crate::actor_event::ActorEventError::InvalidFrame
+            ))
+        ));
+
+        assert_eq!(stored_posts(&lifecycle, &rkeys), 0);
+        assert_eq!(faye_cursor(&lifecycle), None);
     }
 }

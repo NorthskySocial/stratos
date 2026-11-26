@@ -2,7 +2,20 @@ import type { Cid } from '@atproto/lex-data'
 import { parseCid } from '../atproto'
 import * as syntax from '@atproto/syntax'
 import { AtUri } from '@atproto/syntax'
-import { and, asc, desc, eq, gt, gte, isNull, lt, lte } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  type SQL,
+  sql,
+} from 'drizzle-orm'
 import {
   countAll,
   StratosBacklink,
@@ -10,8 +23,10 @@ import {
   StratosDbOrTx,
   StratosRecord,
   stratosRecord,
+  stratosRecordBoundary,
   stratosRepoBlock,
 } from '../db'
+import { formatRecordUri, parseRecordUri } from '../spaces/domain.js'
 import { Logger, StatusAttr } from '../types.js'
 
 /**
@@ -64,6 +79,23 @@ export interface RecordWithMeta {
   indexedAt: string
   takedownRef: string | null
 }
+
+/**
+ * A record that is not taken down, with the boundary rows stored for it.
+ */
+export interface VisibleRecordWithBoundaries {
+  record: RecordWithMeta
+  boundaries: string[]
+}
+
+/**
+ * The most URIs one `getVisibleRecordsWithBoundaries` call accepts; callers
+ * chunk longer lists.
+ */
+export const MAX_VISIBLE_RECORD_BATCH = 100
+
+const normalizeRecordUri = (uri: AtUri | string): string =>
+  new AtUri(uri.toString()).toString()
 
 /**
  * Reader for stratos records
@@ -295,6 +327,106 @@ export class StratosRecordReader {
   }
 
   /**
+   * Reads, in one query, the takedown state of each given record URI.
+   * @param uris - Record URIs to check.
+   * @returns `true` for a row with a takedown marker, `false` for a row
+   * without one. A URI with no row is absent.
+   */
+  async getTakedownStates(uris: string[]): Promise<Map<string, boolean>> {
+    if (uris.length === 0) return new Map()
+    const rows = await this.db
+      .select({
+        uri: stratosRecord.uri,
+        takedownRef: stratosRecord.takedownRef,
+      })
+      .from(stratosRecord)
+      .where(inArray(stratosRecord.uri, uris))
+    return new Map(rows.map((row) => [row.uri, row.takedownRef !== null]))
+  }
+
+  async getRecordBoundaries(uri: string | AtUri): Promise<string[]> {
+    const rows = await this.db
+      .select({ boundary: stratosRecordBoundary.boundary })
+      .from(stratosRecordBoundary)
+      .where(eq(stratosRecordBoundary.recordUri, uri.toString()))
+      .orderBy(asc(stratosRecordBoundary.boundary))
+    return rows.map((row) => row.boundary)
+  }
+
+  /**
+   * Reads a record together with its boundary rows in one statement, so the
+   * body and the rows always belong to the same moment.
+   * @param uri - The URI of the record.
+   * @returns The record and its stored boundaries, or null when the record is
+   * missing or taken down.
+   */
+  async getVisibleRecordWithBoundaries(
+    uri: AtUri | string,
+  ): Promise<VisibleRecordWithBoundaries | null> {
+    const found = await this.getVisibleRecordsWithBoundaries([uri])
+    return found.get(normalizeRecordUri(uri)) ?? null
+  }
+
+  /**
+   * Batch form of {@link getVisibleRecordWithBoundaries}, still one statement.
+   * @param uris - At most {@link MAX_VISIBLE_RECORD_BATCH} record URIs.
+   * @returns The visible records keyed by normalized URI. Missing and
+   * taken-down records are absent.
+   * @throws When more than {@link MAX_VISIBLE_RECORD_BATCH} URIs are given.
+   */
+  async getVisibleRecordsWithBoundaries(
+    uris: readonly (AtUri | string)[],
+  ): Promise<Map<string, VisibleRecordWithBoundaries>> {
+    if (uris.length > MAX_VISIBLE_RECORD_BATCH) {
+      throw new RangeError(
+        `at most ${MAX_VISIBLE_RECORD_BATCH} uris per call, got ${uris.length}`,
+      )
+    }
+    const normalized = [...new Set(uris.map(normalizeRecordUri))]
+    if (normalized.length === 0) return new Map()
+
+    const boundaryColumn = stratosRecordBoundary.boundary
+    const rows = await this.db
+      .select({
+        uri: stratosRecord.uri,
+        cid: stratosRecord.cid,
+        indexedAt: stratosRecord.indexedAt,
+        takedownRef: stratosRecord.takedownRef,
+        content: stratosRepoBlock.content,
+        boundaries: sql<string>`json_group_array(distinct ${boundaryColumn} order by ${boundaryColumn}) filter (where ${boundaryColumn} is not null)`,
+      })
+      .from(stratosRecord)
+      .innerJoin(stratosRepoBlock, eq(stratosRepoBlock.cid, stratosRecord.cid))
+      .leftJoin(
+        stratosRecordBoundary,
+        eq(stratosRecordBoundary.recordUri, stratosRecord.uri),
+      )
+      .where(
+        and(
+          inArray(stratosRecord.uri, normalized),
+          isNull(stratosRecord.takedownRef),
+        ),
+      )
+      .groupBy(stratosRecord.uri)
+
+    return new Map(
+      rows.map((row) => [
+        row.uri,
+        {
+          record: {
+            uri: row.uri,
+            cid: row.cid,
+            value: this.cborToRecord(row.content),
+            indexedAt: row.indexedAt,
+            takedownRef: row.takedownRef,
+          },
+          boundaries: JSON.parse(row.boundaries) as string[],
+        },
+      ]),
+    )
+  }
+
+  /**
    * Retrieves the CID of the current version of a record by URI.
    * @param uri - The URI of the record to retrieve the CID for.
    * @returns The CID of the current version of the record, or null if not found.
@@ -315,6 +447,16 @@ export class StratosRecordReader {
    * @returns An array of backlinks for the specified record.
    */
   async getRecordBacklinks(opts: GetBacklinksOpts): Promise<StratosRecord[]> {
+    return this.selectBacklinkRows(opts, isNull(stratosRecord.takedownRef))
+  }
+
+  /**
+   * Conflict checks use the unfiltered rows so taken-down records still block.
+   */
+  private async selectBacklinkRows(
+    opts: GetBacklinksOpts,
+    extraCondition?: SQL,
+  ): Promise<StratosRecord[]> {
     const { collection, path, linkTo } = opts
     return this.db
       .select({
@@ -333,6 +475,7 @@ export class StratosRecordReader {
           eq(stratosBacklink.path, path),
           eq(stratosBacklink.linkTo, linkTo),
           eq(stratosRecord.collection, collection),
+          extraCondition,
         ),
       )
   }
@@ -351,7 +494,7 @@ export class StratosRecordReader {
     const atUri = typeof uri === 'string' ? new AtUri(uri) : uri
 
     for (const backlink of getStratosBacklinks(atUri, record)) {
-      const backlinks = await this.getRecordBacklinks({
+      const backlinks = await this.selectBacklinkRows({
         collection: atUri.collection,
         path: backlink.path,
         linkTo: backlink.linkTo,
@@ -406,18 +549,29 @@ export function getStratosBacklinks(
     subject &&
     typeof (subject as Record<string, unknown>)['uri'] === 'string'
   ) {
-    try {
-      const subjectUri = (subject as Record<string, unknown>)['uri'] as string
-      syntax.ensureValidAtUri(subjectUri)
-      backlinks.push({
-        uri: uri.toString(),
-        path: 'subject.uri',
-        linkTo: subjectUri,
-      })
-    } catch {
-      // Not a valid AT-URI
+    const subjectUri = (subject as Record<string, unknown>)['uri'] as string
+    const linkTo = subjectLinkTarget(subjectUri)
+    if (linkTo !== null) {
+      backlinks.push({ uri: uri.toString(), path: 'subject.uri', linkTo })
     }
   }
 
   return backlinks
+}
+
+/**
+ * The string a `subject.uri` is indexed under: an at-uri as written, or a
+ * space record uri in its canonical form (the installed at-uri syntax rejects
+ * the space form, so it needs its own parser).
+ */
+function subjectLinkTarget(subjectUri: string): string | null {
+  try {
+    syntax.ensureValidAtUri(subjectUri)
+    return subjectUri
+  } catch {
+    const space = parseRecordUri(subjectUri)
+    if (!space.ok) return null
+    const canonical = formatRecordUri(space.value)
+    return canonical.ok ? canonical.value : null
+  }
 }

@@ -7,7 +7,6 @@ import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import {
   resolveRepoHost,
   spaceUriToBoundary,
-  StratosValidator,
   type Custody,
   type StoredEnrollment,
 } from '@northskysocial/stratos-core'
@@ -18,26 +17,26 @@ import {
   isSpaceCredentialAuth,
   resolveEffectiveBoundaries,
 } from '../../infra/auth/credential-scope.js'
+import { isAccountTakenDown } from '../../subscription/takedown-filter.js'
 import { createRepoHostResolverDeps } from './host-resolution.js'
 
 /**
- * XRPC method NSID for the space-scoped record read. Spec-shaped mirror of
- * `com.atproto.space.getRecord` (atproto#5187), quarantined under the
- * `zone.stratos.*` namespace until the spec is finalized.
+ * XRPC method NSID for the boundary-scoped record read. A Stratos method; it
+ * is not the upstream `com.atproto.space.getRecord` of a similar name.
  */
 export const GET_SPACE_RECORD_METHOD = 'zone.stratos.space.getRecord'
 
 /**
- * XRPC method NSID for the space-scoped blob enumeration. Spec-shaped mirror
- * of `com.atproto.space.listBlobs` (atproto#5187), quarantined under the
- * `zone.stratos.*` namespace until the spec is finalized.
+ * XRPC method NSID for the boundary-scoped blob enumeration. A Stratos method;
+ * it is not the upstream `com.atproto.space.listBlobs` of a similar name.
  */
 export const LIST_SPACE_BLOBS_METHOD = 'zone.stratos.space.listBlobs'
 
 /**
- * XRPC method NSID for the space membership oracle. Spec-shaped mirror of
- * `com.atproto.space.listRepos` (atproto#5187), extended with `host` /
- * `hostSource` per Stratos's own repo-host-discovery convention.
+ * XRPC method NSID for the membership oracle: which repos hold data in a
+ * space, with `host` / `hostSource` per Stratos's repo-host-discovery
+ * convention. It is not the upstream `com.atproto.space.listWriters`, which
+ * lists a space's writers with their revisions.
  */
 export const LIST_SPACE_REPOS_METHOD = 'zone.stratos.space.listRepos'
 
@@ -189,20 +188,23 @@ async function handleGetSpaceRecord(
   await assertAdmitted(ctx, space, boundary, auth)
 
   const exists = await ctx.actorStore.exists(repo)
-  if (!exists) {
+  // A taken-down account reads as a missing record, as a taken-down record does.
+  if (!exists || (await isAccountTakenDown(ctx.labelStore, repo))) {
     throw new InvalidRequestError('Record not found', 'RecordNotFound')
   }
 
   const uri = `at://${repo}/${collection}/${rkey}`
   return await ctx.actorStore.read(repo, async (store) => {
-    const record = await store.record.getRecord(new AtUriSyntax(uri), null)
-    if (!record?.value) {
+    const found = await store.record.getVisibleRecordWithBoundaries(
+      new AtUriSyntax(uri),
+    )
+    if (!found?.record.value) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
-    // The record must belong to the requested space. Unlike the generic
-    // repo read (where a domainless record is public), a space read FAILS
-    // CLOSED on records outside the space — domainless records included.
-    const domains = StratosValidator.extractBoundaryDomains(record.value)
+    const { record, boundaries: domains } = found
+    // The record must belong to the requested space. The generic repo read
+    // also denies a domainless record to every viewer but its owner; a space
+    // read has no owner exception, so it denies it to the owner too.
     if (!domains.includes(boundary)) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
@@ -242,9 +244,17 @@ async function handleListSpaceBlobs(
     throw new InvalidRequestError('Could not find repo', 'RepoNotFound')
   }
 
-  const cids = await ctx.actorStore.read(repo, async (store) => {
-    return store.blob.listBlobsForBoundary({ boundary, since, cursor, limit })
-  })
+  // A taken-down account lists no blobs, as if every record were taken down.
+  const cids = (await isAccountTakenDown(ctx.labelStore, repo))
+    ? []
+    : await ctx.actorStore.read(repo, async (store) => {
+        return store.blob.listBlobsForBoundary({
+          boundary,
+          since,
+          cursor,
+          limit,
+        })
+      })
 
   return {
     cids,
@@ -290,8 +300,9 @@ function parseLimit(raw: unknown, defaultLimit: number): number {
  *   1. Require `space`; resolve its boundary → else `UnknownSpace`.
  *   2. The caller's effective boundary set must include it → else `AuthRequired`.
  *   3. Page active enrollments carrying that boundary.
- *   4. Per member, resolve a repo host (never throws; absent fields on a
- *      resolution miss) and a Stratos-known `rev` (stratos-custody only).
+ *   4. Per member, resolve a repo host (pds-custody only; never throws;
+ *      absent fields on a resolution miss) and a Stratos-known `rev`
+ *      (stratos-custody only).
  */
 async function handleListSpaceRepos(
   ctx: AppContext,

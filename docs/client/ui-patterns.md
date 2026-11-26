@@ -155,9 +155,9 @@ function.
 
 ## Private post indicator
 
-A feed mixes two URI shapes. A Stratos-hosted post has three segments and
-starts with the author. A PDS-hosted post has seven and starts with the
-authority. Do not read the author from the first segment. Take the author and
+A feed mixes two URI shapes. A Stratos-hosted post is `at://` plus three parts
+and starts with the author. A PDS-hosted post is `at:space/` plus six parts and
+starts with the authority. Do not read the author from the first part. Take the author and
 the boundary from the `zone.stratos.feedgen.getFeed` response instead. Each
 post has `author.did`, `author.handle`, and `boundaries`:
 

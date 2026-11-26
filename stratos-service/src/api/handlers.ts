@@ -6,6 +6,8 @@ import type { AppContext } from '../context-types.js'
 import {
   registerEnrollmentHandlers,
   registerHydrationHandlers,
+  registerModerationHandlers,
+  registerRepoUpdateNoticeHandler,
   registerSpaceCredentialHandlers,
   registerSpaceReadHandlers,
   registerSyncHandlers,
@@ -13,16 +15,24 @@ import {
 import { type XrpcServerInternal } from './types.js'
 
 import {
+  applyBoundaryWritesHandler,
   applyWritesHandler,
+  createBoundaryRecordHandler,
   createRecordHandler,
+  deleteBoundaryRecordHandler,
   deleteRecordHandler,
   describeRepoHandler,
   getRecordHandler,
   getRepoHandler,
   listRecordsHandler,
+  putBoundaryRecordHandler,
   stratosUploadBlobHandler,
   uploadBlobHandler,
 } from './handlers/index.js'
+
+// The most a boundary write request body may carry; legacy writes keep the
+// parser's default. The sync stream's frame limit is derived from it.
+export const BOUNDARY_WRITE_JSON_LIMIT_BYTES = 1_000_000
 
 export enum HANDLER_METHOD {
   CREATE_RECORD = 'com.atproto.repo.createRecord',
@@ -36,6 +46,10 @@ export enum HANDLER_METHOD {
   SYNC_GET_REPO = 'zone.stratos.sync.getRepo',
   STRATOS_UPLOAD_BLOB = 'zone.stratos.repo.uploadBlob',
   IMPORT_REPO = 'zone.stratos.repo.importRepo',
+  CREATE_BOUNDARY_RECORD = 'zone.stratos.repo.createRecord',
+  PUT_BOUNDARY_RECORD = 'zone.stratos.repo.putRecord',
+  DELETE_BOUNDARY_RECORD = 'zone.stratos.repo.deleteRecord',
+  APPLY_BOUNDARY_WRITES = 'zone.stratos.repo.applyWrites',
 }
 
 /**
@@ -94,6 +108,34 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
     handler: applyWritesHandler(ctx),
   })
 
+  xrpc.method(HANDLER_METHOD.CREATE_BOUNDARY_RECORD, {
+    type: 'procedure',
+    auth: authVerifier.standard,
+    opts: { jsonLimit: BOUNDARY_WRITE_JSON_LIMIT_BYTES },
+    handler: createBoundaryRecordHandler(ctx),
+  })
+
+  xrpc.method(HANDLER_METHOD.PUT_BOUNDARY_RECORD, {
+    type: 'procedure',
+    auth: authVerifier.standard,
+    opts: { jsonLimit: BOUNDARY_WRITE_JSON_LIMIT_BYTES },
+    handler: putBoundaryRecordHandler(ctx),
+  })
+
+  xrpc.method(HANDLER_METHOD.DELETE_BOUNDARY_RECORD, {
+    type: 'procedure',
+    auth: authVerifier.standard,
+    opts: { jsonLimit: BOUNDARY_WRITE_JSON_LIMIT_BYTES },
+    handler: deleteBoundaryRecordHandler(ctx),
+  })
+
+  xrpc.method(HANDLER_METHOD.APPLY_BOUNDARY_WRITES, {
+    type: 'procedure',
+    auth: authVerifier.standard,
+    opts: { jsonLimit: BOUNDARY_WRITE_JSON_LIMIT_BYTES },
+    handler: applyBoundaryWritesHandler(ctx),
+  })
+
   xrpc.method(HANDLER_METHOD.SYNC_GET_REPO, {
     type: 'query',
     auth: authVerifier.standard,
@@ -108,4 +150,6 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
   registerSyncHandlers(server, ctx)
   registerSpaceCredentialHandlers(server, ctx)
   registerSpaceReadHandlers(server, ctx)
+  registerModerationHandlers(server, ctx)
+  registerRepoUpdateNoticeHandler(ctx)
 }

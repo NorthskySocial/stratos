@@ -7,6 +7,7 @@ import { loadState } from './lib/state.ts'
 import { deleteAccount } from './lib/pds.ts'
 import { stopCloudflareTunnel } from './lib/cloudflare-tunnel.ts'
 import { isAppview, isPostgres } from './lib/backend.ts'
+import { SPACES_PDS_PROFILE } from './lib/phases.ts'
 
 async function deleteTestAccounts() {
   info('Deleting test accounts from PDS...')
@@ -34,6 +35,8 @@ async function stopDockerCompose() {
       'docker-compose.test.yml',
       '--profile',
       'browser-e2e',
+      '--profile',
+      SPACES_PDS_PROFILE,
     ]
     if (isAppview()) composeArgs.push('-f', 'docker-compose.e2e.yml')
     else if (isPostgres()) composeArgs.push('-f', 'docker-compose.postgres.yml')

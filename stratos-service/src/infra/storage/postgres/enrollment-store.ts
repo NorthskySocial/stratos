@@ -31,6 +31,7 @@ function toStoredEnrollment(row: PgEnrollment): StoredEnrollment {
     repoHost: row.repoHost ?? undefined,
     capabilityVerdict:
       (row.capabilityVerdict as SpacesCapability | null) ?? undefined,
+    operatorHold: row.operatorHold,
   }
 }
 
@@ -131,6 +132,7 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
         custody: pgEnrollment.custody,
         repoHost: pgEnrollment.repoHost,
         capabilityVerdict: pgEnrollment.capabilityVerdict,
+        operatorHold: pgEnrollment.operatorHold,
       })
       .from(pgEnrollment)
       .innerJoin(
@@ -180,6 +182,8 @@ export class PgEnrollmentStoreWriter
         custody: data.custody ?? 'stratos',
         repoHost: data.repoHost ?? null,
         capabilityVerdict: data.capabilityVerdict ?? null,
+        // Insert only: a re-enroll must not clear the hold. Only an operator does.
+        operatorHold: data.operatorHold ?? false,
       })
       .onConflictDoUpdate({
         target: pgEnrollment.did,
@@ -245,6 +249,9 @@ export class PgEnrollmentStoreWriter
     }
     if ('capabilityVerdict' in updates) {
       setValues.capabilityVerdict = updates.capabilityVerdict ?? null
+    }
+    if (updates.operatorHold !== undefined) {
+      setValues.operatorHold = updates.operatorHold
     }
 
     if (Object.keys(setValues).length > 0) {

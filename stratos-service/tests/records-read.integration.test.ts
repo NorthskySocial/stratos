@@ -14,7 +14,11 @@ import {
   ServiceDb,
 } from '../src/db'
 import { getRecord, listRecords } from '../src/api/records/index.js'
-import { createMockBlobStore, createTestConfig } from './utils'
+import {
+  createEmptyLabelLog,
+  createMockBlobStore,
+  createTestConfig,
+} from './utils'
 
 describe('Record Read Handlers', () => {
   let dataDir: string
@@ -57,6 +61,7 @@ describe('Record Read Handlers', () => {
       cfg,
       actorStore,
       enrollmentStore,
+      labelStore: createEmptyLabelLog(),
       serviceDid,
     }
 

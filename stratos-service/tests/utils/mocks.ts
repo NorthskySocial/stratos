@@ -1,7 +1,19 @@
 import { vi } from 'vitest'
 import { randomBytes } from 'node:crypto'
 import { Cid } from '@atproto/lex-data'
-import { BlobContentStore, BlobStore } from '@northskysocial/stratos-core'
+import {
+  BlobContentStore,
+  BlobStore,
+  type LabelStore,
+} from '@northskysocial/stratos-core'
+
+/**
+ * A label log with no labels, for test contexts whose reads ask whether an
+ * account is taken down.
+ */
+export function createEmptyLabelLog(): Pick<LabelStore, 'latestTakedowns'> {
+  return { latestTakedowns: async () => new Set<string>() }
+}
 
 /**
  * Mock blob store for testing

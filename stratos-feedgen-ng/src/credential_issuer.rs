@@ -10,6 +10,7 @@ use async_trait::async_trait;
 
 use crate::{
     identifier::Did,
+    identity_key::DidVerificationKey,
     service_auth::{ServiceSigningKey, SpaceDelegationClaims, mint_space_delegation},
     space_http_signature::{SpaceHttpSignatureError, SpaceHttpSignatureKey},
 };
@@ -19,6 +20,9 @@ const MINT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_MINT_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_CREDENTIAL_BYTES: usize = 16 * 1024;
 const MAX_CREDENTIAL_LIFETIME_SECONDS: u64 = 60 * 60;
+const CREDENTIAL_TYP: &str = "atproto-space-credential+jwt";
+const CREDENTIAL_KEY_REFERENCE: &str = "#atproto";
+const CREDENTIAL_ALGORITHMS: [&str; 2] = ["ES256", "ES256K"];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CredentialMintError {
@@ -253,6 +257,9 @@ fn new_jti() -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
+/// Structural check of a credential the configured authority returned: shape,
+/// claims and binding only. The signature is neither resolved nor verified
+/// here; the service that receives the presentation verifies it.
 fn decode_issued_credential(
     bytes: &[u8],
     now: u64,
@@ -273,6 +280,7 @@ fn decode_issued_credential(
     struct Header {
         typ: String,
         alg: String,
+        kid: String,
     }
     #[derive(Deserialize)]
     struct Confirmation {
@@ -290,12 +298,21 @@ fn decode_issued_credential(
     let header: Header =
         serde_json::from_slice(&URL_SAFE_NO_PAD.decode(header).map_err(|_| invalid())?)
             .map_err(|_| invalid())?;
-    let claims: Claims =
+    let claims: serde_json::Value =
         serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).map_err(|_| invalid())?)
             .map_err(|_| invalid())?;
-    if header.typ != "atproto-space-credential+jwt"
-        || header.alg.is_empty()
-        || header.alg == "none"
+    // A credential names its audience through the presentation, never a claim.
+    if claims.get("aud").is_some() {
+        return Err(invalid());
+    }
+    let claims: Claims = serde_json::from_value(claims).map_err(|_| invalid())?;
+    if header.typ != CREDENTIAL_TYP
+        || !CREDENTIAL_ALGORITHMS.contains(&header.alg.as_str())
+        || header.kid != CREDENTIAL_KEY_REFERENCE
+        || !matches!(
+            DidVerificationKey::parse(&claims.cnf.kid),
+            Some(DidVerificationKey::P256(_))
+        )
         || URL_SAFE_NO_PAD
             .decode(signature)
             .map_err(|_| invalid())?
@@ -330,18 +347,211 @@ mod tests {
     use serde_json::{Value, json};
 
     const AUTHORITY: &str = "did:web:stratos.example.test";
-    const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
-    const KEY: &str = "did:key:rei";
+    const SPACE: &str = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
+    const KEY: &str = "did:key:zDnaeWM8zmBiwzf8n42vMCPdXAWPvt8T13XQMBXZmZoLB3fCF";
+    const OTHER_P256_KEY: &str = "did:key:zDnaefoD3gXRF9V7du9CP8Lr3P5mjvS641SK8MTMgoS1HZaNv";
+    const SECP256K1_KEY: &str = "did:key:zQ3shUYe6w1u6Whwces4PG5coQwnvzBMpzVMoKrfC9Nzs6gsU";
+    const TOKEN_FIXTURE: &str =
+        include_str!("../../test/spaces-alignment/november/fixtures/token-audiences.json");
 
     fn claims() -> Value {
         json!({"iss": AUTHORITY, "sub": SPACE, "cnf": {"kid": KEY}, "jti": "rei", "iat": 1000, "exp": 1060})
     }
 
+    fn header() -> Value {
+        json!({"typ": "atproto-space-credential+jwt", "alg": "ES256", "kid": "#atproto"})
+    }
+
     fn body(claims: Value) -> Vec<u8> {
-        let header =
-            URL_SAFE_NO_PAD.encode(br#"{"typ":"atproto-space-credential+jwt","alg":"ES256"}"#);
+        body_with_header(header(), claims)
+    }
+
+    fn body_with_header(header: Value, claims: Value) -> Vec<u8> {
+        let header = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header).unwrap());
         let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap());
         serde_json::to_vec(&json!({"credential": format!("{header}.{payload}.c2ln"), "expiresAt": "1970-01-01T00:17:40Z"})).unwrap()
+    }
+
+    fn structural_check(header: Value, claims: Value) -> bool {
+        decode_issued_credential(
+            &body_with_header(header, claims),
+            1000,
+            AUTHORITY,
+            SPACE,
+            KEY,
+        )
+        .is_ok()
+    }
+
+    #[test]
+    fn structural_check_refuses_a_header_or_binding_the_authority_would_not_issue() {
+        assert!(structural_check(header(), claims()));
+        let mut es256k = header();
+        es256k["alg"] = json!("ES256K");
+        assert!(structural_check(es256k, claims()));
+        let mut unknown = claims();
+        unknown["stratosBoundaryRevision"] = json!(3);
+        unknown["nerv"] = json!({"unit": "01"});
+        assert!(structural_check(header(), unknown));
+
+        for (label, field, value) in [
+            ("another kid", "kid", json!("#atproto_other")),
+            ("kid without the fragment", "kid", json!("atproto")),
+            ("kid null", "kid", Value::Null),
+            ("alg none", "alg", json!("none")),
+            ("alg HS256", "alg", json!("HS256")),
+            ("alg empty", "alg", json!("")),
+            ("alg lower case", "alg", json!("es256")),
+            (
+                "typ of another token",
+                "typ",
+                json!("atproto-space-delegation+jwt"),
+            ),
+        ] {
+            let mut refused = header();
+            refused[field] = value;
+            assert!(!structural_check(refused, claims()), "{label}");
+        }
+        let mut no_kid = header();
+        no_kid.as_object_mut().unwrap().remove("kid");
+        assert!(!structural_check(no_kid, claims()), "kid missing");
+
+        for (label, value) in [
+            (
+                "aud as a string",
+                json!("did:web:stratos.example.test#atproto_pds"),
+            ),
+            ("aud as null", Value::Null),
+            ("aud as an empty string", json!("")),
+        ] {
+            let mut refused = claims();
+            refused["aud"] = value;
+            assert!(!structural_check(header(), refused), "{label}");
+        }
+        for (label, kid) in [
+            ("a secp256k1 key", SECP256K1_KEY),
+            ("a malformed key", "did:key:zNotAKey"),
+            ("a key that is not a did:key", "did:web:bebop.example"),
+            ("another P-256 key", OTHER_P256_KEY),
+        ] {
+            let mut refused = claims();
+            refused["cnf"] = json!({"kid": kid});
+            assert!(!structural_check(header(), refused), "{label}");
+        }
+    }
+
+    #[test]
+    fn structural_check_refuses_a_binding_it_was_not_asked_for_even_when_it_is_a_p256_key() {
+        let issued =
+            decode_issued_credential(&body(claims()), 1000, AUTHORITY, SPACE, OTHER_P256_KEY);
+        assert!(matches!(issued, Err(CredentialMintError::InvalidResponse)));
+    }
+
+    struct FixtureCredential {
+        credential: String,
+        now: u64,
+        authority: String,
+        space: String,
+        key_id: String,
+        expires_at: String,
+        oracle_parse_accepts: bool,
+    }
+
+    fn fixture_credential(name: &str) -> FixtureCredential {
+        let fixture: Value = serde_json::from_str(TOKEN_FIXTURE).unwrap();
+        let entry = fixture["tokens"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["name"] == name)
+            .unwrap();
+        let token = entry["token"].as_str().unwrap();
+        let payload: Value = serde_json::from_slice(
+            &URL_SAFE_NO_PAD
+                .decode(token.split('.').nth(1).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        let exp = payload["exp"].as_i64().unwrap();
+        let at = time::OffsetDateTime::from_unix_timestamp(exp).unwrap();
+        FixtureCredential {
+            credential: token.to_owned(),
+            now: entry["frozenClockSeconds"].as_u64().unwrap(),
+            authority: payload["iss"].as_str().unwrap().to_owned(),
+            space: payload["sub"].as_str().unwrap().to_owned(),
+            key_id: payload["cnf"]["kid"].as_str().unwrap_or(KEY).to_owned(),
+            expires_at: format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+                at.year(),
+                u8::from(at.month()),
+                at.day(),
+                at.hour(),
+                at.minute(),
+                at.second()
+            ),
+            oracle_parse_accepts: entry["verdicts"]["parse"] == "accepted",
+        }
+    }
+
+    fn fixture_structure_is_accepted(name: &str) -> bool {
+        let credential = fixture_credential(name);
+        let bytes = serde_json::to_vec(
+            &json!({"credential": credential.credential, "expiresAt": credential.expires_at}),
+        )
+        .unwrap();
+        decode_issued_credential(
+            &bytes,
+            credential.now,
+            &credential.authority,
+            &credential.space,
+            &credential.key_id,
+        )
+        .is_ok()
+    }
+
+    #[test]
+    fn structural_check_gives_the_oracle_parse_verdict_on_fixture_credentials() {
+        for name in [
+            "credential",
+            "credential without kid",
+            "credential with another kid",
+            "credential without cnf",
+        ] {
+            assert_eq!(
+                fixture_structure_is_accepted(name),
+                fixture_credential(name).oracle_parse_accepts,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn structural_check_accepts_a_credential_signed_by_another_key_because_it_does_not_check_signatures()
+     {
+        let name = "credential signed by another key";
+        assert!(fixture_credential(name).oracle_parse_accepts);
+        assert!(fixture_structure_is_accepted(name));
+    }
+
+    #[test]
+    fn structural_check_is_stricter_than_the_oracle_for_a_credential_with_an_aud_claim() {
+        let name = "credential with an aud claim";
+        assert!(fixture_credential(name).oracle_parse_accepts);
+        assert!(!fixture_structure_is_accepted(name));
+    }
+
+    #[test]
+    fn structural_check_is_stricter_than_the_oracle_for_a_credential_bound_to_a_non_p256_key() {
+        let name = "credential bound to a non-P-256 key";
+        assert!(fixture_credential(name).oracle_parse_accepts);
+        assert!(!fixture_structure_is_accepted(name));
+    }
+
+    #[test]
+    fn structural_check_refuses_alg_none_which_the_oracle_parse_accepts() {
+        let name = "credential with alg none";
+        assert!(fixture_credential(name).oracle_parse_accepts);
+        assert!(!fixture_structure_is_accepted(name));
     }
 
     #[test]

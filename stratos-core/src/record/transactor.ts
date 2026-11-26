@@ -42,6 +42,42 @@ export class StratosRecordTransactor extends StratosRecordReader {
     repoRev: string,
     timestamp?: string,
   ): Promise<void> {
+    const atUri = await this.indexRecordRow(uri, cid, repoRev, timestamp)
+    if (record !== null) {
+      await this.replaceBacklinks(atUri, record, action)
+      await this.replaceRecordBoundaries(
+        atUri,
+        StratosValidator.extractBoundaryDomains(record),
+      )
+    }
+    this.logger?.info({ uri: atUri.toString() }, 'indexed stratos record')
+  }
+
+  /**
+   * Indexes a stratos record under a boundary the caller already authorized.
+   * The boundary comes from the caller, never from the record body.
+   */
+  async indexRecordInBoundary(
+    uri: AtUri | string,
+    cid: Cid,
+    record: Record<string, unknown>,
+    boundary: string,
+    action: 'create' | 'update',
+    repoRev: string,
+    timestamp?: string,
+  ): Promise<void> {
+    const atUri = await this.indexRecordRow(uri, cid, repoRev, timestamp)
+    await this.replaceBacklinks(atUri, record, action)
+    await this.replaceRecordBoundaries(atUri, [boundary])
+    this.logger?.info({ uri: atUri.toString() }, 'indexed stratos record')
+  }
+
+  private async indexRecordRow(
+    uri: AtUri | string,
+    cid: Cid,
+    repoRev: string,
+    timestamp?: string,
+  ): Promise<AtUri> {
     const atUri = typeof uri === 'string' ? new AtUri(uri) : uri
     this.logger?.debug({ uri: atUri.toString() }, 'indexing stratos record')
 
@@ -77,17 +113,20 @@ export class StratosRecordTransactor extends StratosRecordReader {
         },
       })
 
-    if (record !== null) {
-      const backlinks = getStratosBacklinks(atUri, record)
-      if (action === 'update') {
-        // On update just recreate backlinks from scratch for the record
-        await this.removeBacklinksByUri(atUri)
-      }
-      await this.addBacklinks(backlinks)
-      await this.replaceRecordBoundaries(atUri, record)
-    }
+    return atUri
+  }
 
-    this.logger?.info({ uri: atUri.toString() }, 'indexed stratos record')
+  private async replaceBacklinks(
+    atUri: AtUri,
+    record: Record<string, unknown>,
+    action: 'create' | 'update',
+  ): Promise<void> {
+    const backlinks = getStratosBacklinks(atUri, record)
+    if (action === 'update') {
+      // On update just recreate backlinks from scratch for the record
+      await this.removeBacklinksByUri(atUri)
+    }
+    await this.addBacklinks(backlinks)
   }
 
   /**
@@ -138,19 +177,18 @@ export class StratosRecordTransactor extends StratosRecordReader {
   }
 
   /**
-   * Replaces the boundary rows for a record with the boundaries in its value.
+   * Replaces the boundary rows for a record with the given boundaries.
    * @param uri - The URI of the record.
-   * @param record - The record content.
+   * @param boundaries - The boundaries the record now resides in.
    */
   async replaceRecordBoundaries(
     uri: AtUri | string,
-    record: Record<string, unknown>,
+    boundaries: readonly string[],
   ): Promise<void> {
     const recordUri = uri.toString()
     await this.db
       .delete(stratosRecordBoundary)
       .where(eq(stratosRecordBoundary.recordUri, recordUri))
-    const boundaries = StratosValidator.extractBoundaryDomains(record)
     if (boundaries.length === 0) return
     await this.db
       .insert(stratosRecordBoundary)

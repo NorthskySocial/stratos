@@ -22,7 +22,25 @@ export interface AssertionResult {
 export interface ScenarioSuite {
   id: string
   requiredAssertions: readonly string[]
+  /** What the suite leaves out, written into the receipt beside its counts. */
+  coverage?: string
   run: (context: ScenarioContext) => Promise<AssertionResult[]>
+}
+
+export interface JourneyEvidence {
+  id: string
+  tier: 'pinned-host' | 'controlled-transport' | 'in-process'
+  observation: string
+  artifact: string
+  remainingHostQuestion?: string
+}
+
+export interface JourneyReport {
+  outstanding: readonly string[]
+  evidence: readonly JourneyEvidence[]
+  failedGroups: readonly string[]
+  groupProgress?: Readonly<Record<string, readonly string[]>>
+  failedGroupExitCodes?: Readonly<Record<string, number>>
 }
 
 export interface ScenarioContext {
@@ -30,8 +48,19 @@ export interface ScenarioContext {
   composeFile: string
   projectName: string
   scratchDirectory: string
+  recordJourneyReport?: (report: JourneyReport) => void
   runCommand: (file: string, args: string[], cwd: string) => Promise<string>
 }
+
+/**
+ * Suites the runner runs alone, without the baseline before them. Each one
+ * covers a journey the baseline cannot reach on this branch, and its receipt
+ * says what it leaves out.
+ */
+export const STANDALONE_SUITE_IDS: ReadonlySet<string> = new Set([
+  'ordinary-custody',
+  'november-positive',
+])
 
 const SHA = /^[0-9a-f]{40}$/
 const REVIEW_MODELS = new Set(['gpt-5.6-terra', 'gpt-6.1-sol'])
@@ -140,5 +169,88 @@ export function suiteExecutionOrder(
   const selected = suites.find((suite) => suite.id === requested)
   if (!baseline || !selected)
     throw new Error(`Unknown or unavailable suite: ${requested}`)
-  return selected === baseline ? [baseline] : [baseline, selected]
+  if (selected === baseline || STANDALONE_SUITE_IDS.has(selected.id))
+    return [selected]
+  return [baseline, selected]
+}
+
+/**
+ * A suite whose child process failed after reaching some of its assertions.
+ * The runner writes the names reached into the failure report.
+ */
+export class SuiteFailure extends Error {
+  constructor(
+    message: string,
+    readonly suiteId: string,
+    readonly reachedAssertions: readonly string[],
+    options?: { cause?: unknown },
+  ) {
+    super(message, options)
+  }
+}
+
+/** The assertions a failed suite reached, when it says so. */
+export function assertionsReachedBy(
+  error: unknown,
+): readonly string[] | undefined {
+  const reached = (error as { reachedAssertions?: unknown } | null)
+    ?.reachedAssertions
+  return error instanceof Error &&
+    Array.isArray(reached) &&
+    reached.every((id) => typeof id === 'string')
+    ? reached
+    : undefined
+}
+
+/**
+ * The assertion names a driver printed as progress lines, in the order
+ * printed. Only names the suite requires are returned, so the failure report
+ * never carries other output.
+ */
+export function reachedAssertionIds(
+  suite: ScenarioSuite,
+  output: string,
+): string[] {
+  const required = new Set(suite.requiredAssertions)
+  const reached: string[] = []
+  for (const line of output.split('\n')) {
+    const text = line.trim()
+    if (!text.startsWith('{"progress":"assertion-reached"')) continue
+    let parsed: { suite?: unknown; id?: unknown }
+    try {
+      parsed = JSON.parse(text) as { suite?: unknown; id?: unknown }
+    } catch {
+      continue
+    }
+    if (
+      parsed.suite === suite.id &&
+      typeof parsed.id === 'string' &&
+      required.has(parsed.id) &&
+      !reached.includes(parsed.id)
+    )
+      reached.push(parsed.id)
+  }
+  return reached
+}
+
+/**
+ * Runs a driver command and, when it fails, reports which assertions it had
+ * reached from the output it printed before failing.
+ */
+export async function runDriverCommand(
+  suite: ScenarioSuite,
+  run: () => Promise<string>,
+): Promise<string> {
+  try {
+    return await run()
+  } catch (error) {
+    const stdout = (error as { stdout?: unknown } | null)?.stdout
+    if (typeof stdout !== 'string') throw error
+    throw new SuiteFailure(
+      error instanceof Error ? error.message : `${suite.id} driver failed`,
+      suite.id,
+      reachedAssertionIds(suite, stdout),
+      { cause: error },
+    )
+  }
 }

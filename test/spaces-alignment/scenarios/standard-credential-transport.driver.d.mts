@@ -5,7 +5,23 @@ export function prepareAccount(
 ): Promise<{
   account: { username: string; password: string; did: string; seedText: string }
   page: unknown
+  seed: { uri: string; cid: string }
 }>
+export function spaceUriFromParts(authorityDid: string, skey: string): string
+export function presentationAuthorization(credential: string): string
+export function proofKey(): {
+  privateKey: import('node:crypto').KeyObject
+  jwk: { kty: string; crv: string; x: string; y: string }
+}
+export function exchangeHeaders(
+  authorization: string,
+  key: ReturnType<typeof proofKey>,
+): Record<string, string>
+export function presentationHeaders(
+  credential: string,
+  key: ReturnType<typeof proofKey>,
+  audience: string,
+): Record<string, string>
 export function acquireDelegation(page: unknown): Promise<string>
 export function removeMember(page: unknown): Promise<number>
 export function main(

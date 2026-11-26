@@ -321,7 +321,7 @@ describe('zone.stratos.feedgen.getFeed', () => {
 
   it('returns a permissioned space record URI', async () => {
     const post = makePost(
-      'at://did:web:feedgen.spiegelcorp.test/space/zone.stratos.space.feed/engineering/did:plc:fayevalentine/zone.stratos.feed.post/1',
+      'at:space/did:web:feedgen.spiegelcorp.test/zone.stratos.space.feed/engineering/did:plc:fayevalentine/zone.stratos.feed.post/1',
       FAYE_DID,
       '2025-01-01T00:01:00.000Z',
     )

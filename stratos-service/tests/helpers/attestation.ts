@@ -79,7 +79,7 @@ export async function mintAttestation(
   const payload = {
     iss: opts.iss ?? opts.client.clientId,
     sub: opts.sub ?? opts.client.clientId,
-    aud: opts.aud ?? `${opts.serviceDid}#atproto_space_host`,
+    aud: opts.aud ?? `${opts.serviceDid}#atproto_pds`,
     iat,
     exp: opts.exp ?? iat + 120,
     jti: opts.jti ?? `att-${Date.now()}-${jtiCounter++}`,

@@ -459,7 +459,8 @@ export const stratosLexicons: LexiconDoc[] = [
         },
         "spaceUri": {
           "type": "string",
-          "format": "uri"
+          "format": "uri",
+          "description": "The space's URI, at:space/{authority}/{type}/{skey}."
         },
         "host": {
           "type": "string",
@@ -983,7 +984,11 @@ export const stratosLexicons: LexiconDoc[] = [
         }
       },
       "errors": [
-        { "name": "NotFound", "description": "The DID is not enrolled." }
+        { "name": "NotFound", "description": "The DID is not enrolled." },
+        {
+          "name": "AccountTakenDown",
+          "description": "An account takedown is in force, so the member cannot be activated."
+        }
       ]
     }
   }
@@ -1562,7 +1567,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "properties": {
           "uri": {
             "type": "string",
-            "description": "Exact indexed post URI, including space record URIs."
+            "description": "Exact indexed post URI: at://{did}/{collection}/{rkey}, or at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey} for a space record."
           },
           "cid": {
             "type": "string",
@@ -1660,7 +1665,7 @@ export const stratosLexicons: LexiconDoc[] = [
       "properties": {
         "uri": {
           "type": "string",
-          "description": "AT URI or permissioned space record URI."
+          "description": "Record URI: at://{did}/{collection}/{rkey} for a Stratos-hosted post, or at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey} for a permissioned space record."
         },
         "cid": {
           "type": "string",
@@ -1691,6 +1696,33 @@ export const stratosLexicons: LexiconDoc[] = [
             "ref": "#blobView"
           },
           "description": "Authenticated feedgen blob URLs. Record blob refs remain unchanged. Absent for custody whose blobs must be read from the host."
+        },
+        "likeCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of distinct actors who like this post in the feed's boundary."
+        },
+        "repostCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of distinct actors who repost this post in the feed's boundary."
+        },
+        "viewer": {
+          "type": "ref",
+          "ref": "#viewerState"
+        }
+      }
+    },
+    "viewerState": {
+      "type": "object",
+      "properties": {
+        "like": {
+          "type": "string",
+          "description": "URI of the viewer's like record."
+        },
+        "repost": {
+          "type": "string",
+          "description": "URI of the viewer's repost record."
         }
       }
     },
@@ -1837,6 +1869,616 @@ export const stratosLexicons: LexiconDoc[] = [
           }
         }
       }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.moderation.createLabel",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Apply or negate a moderation label on a record or an account. Only for allowlisted moderation services. The service derives the affected boundary itself.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["subject", "val"],
+          "properties": {
+            "subject": {
+              "type": "union",
+              "refs": [
+                "zone.stratos.moderation.defs#recordSubject",
+                "zone.stratos.moderation.defs#accountSubject"
+              ],
+              "closed": true,
+              "description": "What to label."
+            },
+            "val": {
+              "type": "string",
+              "maxLength": 128,
+              "knownValues": ["!takedown"],
+              "description": "The label value."
+            },
+            "neg": {
+              "type": "boolean",
+              "description": "If true, negate a prior label with the same subject and value. Absent means false."
+            },
+            "ref": {
+              "type": "string",
+              "maxLength": 512,
+              "description": "Optional moderation-service reference for this action, such as a report or case identifier."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "ref",
+              "ref": "zone.stratos.moderation.defs#label",
+              "description": "The resulting label. Absent only when the request changed nothing and the subject has no label."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "SubjectNotFound",
+          "description": "The subject record or account does not exist on this service."
+        },
+        {
+          "name": "SubjectCidNotSupported",
+          "description": "The record subject carries a cid. A takedown applies to every version of a record, so send the subject without one."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.moderation.defs",
+  "defs": {
+    "label": {
+      "type": "object",
+      "description": "A moderation label applied by an allowlisted moderation service to a record or an account hosted by this Stratos service.",
+      "required": ["seq", "subject", "val", "createdAt"],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "description": "Position of this label in the service's label sequence."
+        },
+        "subject": {
+          "type": "union",
+          "refs": ["#recordSubject", "#accountSubject"],
+          "description": "What the label applies to."
+        },
+        "val": {
+          "type": "string",
+          "maxLength": 128,
+          "knownValues": ["!takedown"],
+          "description": "The label value. The service enforces which values it accepts."
+        },
+        "neg": {
+          "type": "boolean",
+          "description": "If true, this label negates (removes) a prior label with the same subject and value. Absent means false."
+        },
+        "ref": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Optional moderation-service reference for this action, such as a report or case identifier."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "When the label was created."
+        }
+      }
+    },
+    "recordSubject": {
+      "type": "object",
+      "description": "A record in this service's storage.",
+      "required": ["uri"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "The record's URI, either at://{did}/{collection}/{rkey} or the space form at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey}. Declared as a plain string because the at-uri format does not accept the space form."
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid",
+          "description": "Not accepted yet. A takedown applies to every version of a record, so createLabel refuses a subject with a cid as SubjectCidNotSupported. A label returned by queryLabels can still carry one."
+        }
+      }
+    },
+    "accountSubject": {
+      "type": "object",
+      "description": "An account hosted by this service.",
+      "required": ["did"],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "The DID of the account."
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.moderation.queryLabels",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Page the moderation label log in seq order. For allowlisted moderation services and enrolled services.",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "description": "A label seq as a decimal string. The response returns labels with a higher seq."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250,
+            "default": 50
+          },
+          "subjects": {
+            "type": "array",
+            "maxLength": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "description": "Only return labels on these subjects. Each item is a record URI in repo form (at://{did}/{collection}/{rkey}) or space form (at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey}), or an account DID."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["cursor", "labels"],
+          "properties": {
+            "cursor": {
+              "type": "string",
+              "description": "Poll again from `cursor`. For a log query, it is the last seq scanned for this request. For a `subjects` query, it is the log head when the page is not full. Otherwise it is the last seq returned. When nothing new exists, it is the input cursor, or \"0\". A page may hold fewer than `limit` labels, or none, while more remain."
+            },
+            "labels": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "zone.stratos.moderation.defs#label"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.repo.applyWrites",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Apply a batch of creates, updates, and deletes in one boundary as a single commit. Mirrors com.atproto.space.applyWrites at atproto commit 98ef3a6b9, addressing the boundary by its service-qualified name. Requires auth.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "repo", "writes"],
+          "properties": {
+            "boundary": {
+              "type": "string",
+              "maxLength": 253,
+              "description": "Service-qualified boundary identifier `{serviceDid}/{domainName}`"
+            },
+            "repo": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID of the repo to write to (the authenticated member)."
+            },
+            "validate": {
+              "type": "boolean",
+              "description": "Can be set to 'false' to skip Lexicon schema validation of record data across all operations, 'true' to require it, or leave unset to validate only for known Lexicons."
+            },
+            "writes": {
+              "type": "array",
+              "description": "The writes to apply. One batch is one commit, so the length is bounded to the limit the reference implementation enforces; the server rejects larger batches before charging the rate limit.",
+              "minLength": 1,
+              "maxLength": 200,
+              "items": {
+                "type": "union",
+                "refs": ["#create", "#update", "#delete"],
+                "closed": true
+              }
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "union",
+                "refs": ["#createResult", "#updateResult", "#deleteResult"],
+                "closed": true
+              }
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound",
+          "description": "The boundary does not exist."
+        },
+        {
+          "name": "RecordNotFound",
+          "description": "An update or delete targeted a record that does not exist."
+        },
+        {
+          "name": "RecordAlreadyExists",
+          "description": "A create targeted a collection and rkey that already holds a record."
+        },
+        {
+          "name": "BoundaryMismatch",
+          "description": "The record carries a boundary that differs from the boundary parameter."
+        },
+        {
+          "name": "InvalidRecord",
+          "description": "The record is not an object, its $type is missing or differs from the collection, or it breaks a content rule of the collection."
+        },
+        {
+          "name": "InvalidCollection",
+          "description": "The collection is not allowed in this boundary."
+        },
+        {
+          "name": "NotEnrolled",
+          "description": "The caller is not enrolled, or the enrollment is inactive."
+        },
+        {
+          "name": "ServiceWriteForbidden",
+          "description": "Service identities cannot write records."
+        },
+        {
+          "name": "PdsCustodyWriteForbidden",
+          "description": "The caller keeps their records on their own PDS and cannot write here."
+        },
+        {
+          "name": "ForbiddenBoundary",
+          "description": "The caller does not hold this boundary."
+        },
+        {
+          "name": "InvalidDomain",
+          "description": "The boundary name is malformed."
+        },
+        {
+          "name": "ServiceMismatch",
+          "description": "The boundary belongs to another service."
+        },
+        {
+          "name": "RateLimitExceeded",
+          "description": "The caller has exceeded the write rate limit."
+        },
+        {
+          "name": "ScopeUpgradeRequired",
+          "description": "The member's grant predates this collection. Authorize again."
+        }
+      ]
+    },
+    "create": {
+      "type": "object",
+      "description": "Operation which creates a new record.",
+      "required": ["collection", "value"],
+      "properties": {
+        "collection": {
+          "type": "string",
+          "format": "nsid"
+        },
+        "rkey": {
+          "type": "string",
+          "format": "record-key",
+          "maxLength": 512
+        },
+        "value": {
+          "type": "unknown"
+        }
+      }
+    },
+    "update": {
+      "type": "object",
+      "description": "Operation which updates an existing record.",
+      "required": ["collection", "rkey", "value"],
+      "properties": {
+        "collection": {
+          "type": "string",
+          "format": "nsid"
+        },
+        "rkey": {
+          "type": "string",
+          "format": "record-key"
+        },
+        "value": {
+          "type": "unknown"
+        }
+      }
+    },
+    "delete": {
+      "type": "object",
+      "description": "Operation which deletes an existing record.",
+      "required": ["collection", "rkey"],
+      "properties": {
+        "collection": {
+          "type": "string",
+          "format": "nsid"
+        },
+        "rkey": {
+          "type": "string",
+          "format": "record-key"
+        }
+      }
+    },
+    "createResult": {
+      "type": "object",
+      "required": ["uri", "cid"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri"
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid"
+        },
+        "validationStatus": {
+          "type": "string",
+          "knownValues": ["valid", "unknown"]
+        }
+      }
+    },
+    "updateResult": {
+      "type": "object",
+      "required": ["uri", "cid"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri"
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid"
+        },
+        "validationStatus": {
+          "type": "string",
+          "knownValues": ["valid", "unknown"]
+        }
+      }
+    },
+    "deleteResult": {
+      "type": "object",
+      "required": [],
+      "properties": {}
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.repo.createRecord",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Create a single new record in a boundary. Mirrors com.atproto.space.createRecord at atproto commit 98ef3a6b9, addressing the boundary by its service-qualified name. Requires auth.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "repo", "collection", "record"],
+          "properties": {
+            "boundary": {
+              "type": "string",
+              "maxLength": 253,
+              "description": "Service-qualified boundary identifier `{serviceDid}/{domainName}`"
+            },
+            "repo": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID of the repo to write to (the authenticated member)."
+            },
+            "collection": {
+              "type": "string",
+              "format": "nsid",
+              "description": "The NSID of the record collection."
+            },
+            "rkey": {
+              "type": "string",
+              "format": "record-key",
+              "description": "The Record Key.",
+              "maxLength": 512
+            },
+            "validate": {
+              "type": "boolean",
+              "description": "Can be set to 'false' to skip Lexicon schema validation of record data, 'true' to require it, or leave unset to validate only for known Lexicons."
+            },
+            "record": {
+              "type": "unknown",
+              "description": "The record itself. Must contain a $type field."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "URI of the created record."
+            },
+            "cid": {
+              "type": "string",
+              "format": "cid"
+            },
+            "validationStatus": {
+              "type": "string",
+              "knownValues": ["valid", "unknown"]
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound",
+          "description": "The boundary does not exist."
+        },
+        {
+          "name": "RecordAlreadyExists",
+          "description": "A record already exists at this collection and rkey. Retry with a different rkey, or use putRecord."
+        },
+        {
+          "name": "BoundaryMismatch",
+          "description": "The record carries a boundary that differs from the boundary parameter."
+        },
+        {
+          "name": "InvalidRecord",
+          "description": "The record is not an object, its $type is missing or differs from the collection, or it breaks a content rule of the collection."
+        },
+        {
+          "name": "InvalidCollection",
+          "description": "The collection is not allowed in this boundary."
+        },
+        {
+          "name": "NotEnrolled",
+          "description": "The caller is not enrolled, or the enrollment is inactive."
+        },
+        {
+          "name": "ServiceWriteForbidden",
+          "description": "Service identities cannot write records."
+        },
+        {
+          "name": "PdsCustodyWriteForbidden",
+          "description": "The caller keeps their records on their own PDS and cannot write here."
+        },
+        {
+          "name": "ForbiddenBoundary",
+          "description": "The caller does not hold this boundary."
+        },
+        {
+          "name": "InvalidDomain",
+          "description": "The boundary name is malformed."
+        },
+        {
+          "name": "ServiceMismatch",
+          "description": "The boundary belongs to another service."
+        },
+        {
+          "name": "RateLimitExceeded",
+          "description": "The caller has exceeded the write rate limit."
+        },
+        {
+          "name": "ScopeUpgradeRequired",
+          "description": "The member's grant predates this collection. Authorize again."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.repo.deleteRecord",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Delete a record from a boundary, or ensure it is not there. Mirrors com.atproto.space.deleteRecord at atproto commit 98ef3a6b9, addressing the boundary by its service-qualified name. Succeeds whether or not the record was present in the boundary. Requires auth.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "repo", "collection", "rkey"],
+          "properties": {
+            "boundary": {
+              "type": "string",
+              "maxLength": 253,
+              "description": "Service-qualified boundary identifier `{serviceDid}/{domainName}`"
+            },
+            "repo": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID of the repo to delete from (the authenticated member)."
+            },
+            "collection": {
+              "type": "string",
+              "format": "nsid",
+              "description": "The NSID of the record collection."
+            },
+            "rkey": {
+              "type": "string",
+              "format": "record-key",
+              "description": "The Record Key."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound",
+          "description": "The boundary does not exist."
+        },
+        {
+          "name": "InvalidCollection",
+          "description": "The collection is not allowed in this boundary."
+        },
+        {
+          "name": "NotEnrolled",
+          "description": "The caller is not enrolled, or the enrollment is inactive."
+        },
+        {
+          "name": "ServiceWriteForbidden",
+          "description": "Service identities cannot write records."
+        },
+        {
+          "name": "PdsCustodyWriteForbidden",
+          "description": "The caller keeps their records on their own PDS and cannot write here."
+        },
+        {
+          "name": "ForbiddenBoundary",
+          "description": "The caller does not hold this boundary."
+        },
+        {
+          "name": "InvalidDomain",
+          "description": "The boundary name is malformed."
+        },
+        {
+          "name": "ServiceMismatch",
+          "description": "The boundary belongs to another service."
+        },
+        {
+          "name": "RateLimitExceeded",
+          "description": "The caller has exceeded the write rate limit."
+        }
+      ]
     }
   }
 },
@@ -2012,6 +2654,130 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.repo.putRecord",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Write a record in a boundary, creating it or updating it in place. Mirrors com.atproto.space.putRecord at atproto commit 98ef3a6b9, addressing the boundary by its service-qualified name. A record held in another boundary, or taken down, is never overwritten. Requires auth.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "repo", "collection", "rkey", "record"],
+          "properties": {
+            "boundary": {
+              "type": "string",
+              "maxLength": 253,
+              "description": "Service-qualified boundary identifier `{serviceDid}/{domainName}`"
+            },
+            "repo": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID of the repo to write to (the authenticated member)."
+            },
+            "collection": {
+              "type": "string",
+              "format": "nsid",
+              "description": "The NSID of the record collection."
+            },
+            "rkey": {
+              "type": "string",
+              "format": "record-key",
+              "description": "The Record Key.",
+              "maxLength": 512
+            },
+            "validate": {
+              "type": "boolean",
+              "description": "Can be set to 'false' to skip Lexicon schema validation of record data, 'true' to require it, or leave unset to validate only for known Lexicons."
+            },
+            "record": {
+              "type": "unknown",
+              "description": "The record to write."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "URI of the written record."
+            },
+            "cid": {
+              "type": "string",
+              "format": "cid"
+            },
+            "validationStatus": {
+              "type": "string",
+              "knownValues": ["valid", "unknown"]
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound",
+          "description": "The boundary does not exist."
+        },
+        {
+          "name": "RecordAlreadyExists",
+          "description": "A record already exists at this collection and rkey in another boundary, or has been taken down."
+        },
+        {
+          "name": "BoundaryMismatch",
+          "description": "The record carries a boundary that differs from the boundary parameter."
+        },
+        {
+          "name": "InvalidRecord",
+          "description": "The record is not an object, its $type is missing or differs from the collection, or it breaks a content rule of the collection."
+        },
+        {
+          "name": "InvalidCollection",
+          "description": "The collection is not allowed in this boundary."
+        },
+        {
+          "name": "NotEnrolled",
+          "description": "The caller is not enrolled, or the enrollment is inactive."
+        },
+        {
+          "name": "ServiceWriteForbidden",
+          "description": "Service identities cannot write records."
+        },
+        {
+          "name": "PdsCustodyWriteForbidden",
+          "description": "The caller keeps their records on their own PDS and cannot write here."
+        },
+        {
+          "name": "ForbiddenBoundary",
+          "description": "The caller does not hold this boundary."
+        },
+        {
+          "name": "InvalidDomain",
+          "description": "The boundary name is malformed."
+        },
+        {
+          "name": "ServiceMismatch",
+          "description": "The boundary belongs to another service."
+        },
+        {
+          "name": "RateLimitExceeded",
+          "description": "The caller has exceeded the write rate limit."
+        },
+        {
+          "name": "ScopeUpgradeRequired",
+          "description": "The member's grant predates this collection. Authorize again."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.repo.uploadBlob",
   "defs": {
     "main": {
@@ -2114,8 +2880,12 @@ export const stratosLexicons: LexiconDoc[] = [
       "type": "space",
       "description": "A members-only Stratos post feed",
       "key": "any",
-      "name": "Stratos Feed",
-      "collections": ["zone.stratos.feed.post"]
+      "title": "Stratos Feed",
+      "collections": [
+        "zone.stratos.feed.post",
+        "app.bsky.feed.like",
+        "app.bsky.feed.repost"
+      ]
     }
   }
 },
@@ -2125,14 +2895,14 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "Get a single record from a permissioned space. Spec-shaped mirror of com.atproto.space.getRecord (atproto#5187): callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). The record must belong to the requested space; records outside it - including records with no space at all - resolve to RecordNotFound (no existence leak).",
+      "description": "Get a single record from a permissioned space. This is a boundary-scoped read of a record this service holds. It is a Stratos method, not the upstream com.atproto.space.getRecord of a similar name, and a member's own PDS is never asked. It is callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). The record must belong to the requested space; records outside it - including records with no space at all - resolve to RecordNotFound (no existence leak).",
       "parameters": {
         "type": "params",
         "required": ["space", "repo", "collection", "rkey"],
         "properties": {
           "space": {
             "type": "string",
-            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
+            "description": "The space's URI (at:space/{did}/{type}/{skey}). This is a space URI in the form above; upstream's space-ref format (atproto#5187) is expected to adopt it. Declared as a plain string until @atproto/lexicon supports a matching format. Its space DID must equal this service's DID."
           },
           "repo": {
             "type": "string",
@@ -2194,7 +2964,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "procedure",
-      "description": "Issue a space credential (JWT) for a space the caller is a member of. The credential is multi-use until it expires and is bound to the caller's DPoP key (cnf.jkt, RFC 9449): it must be presented under the DPoP auth scheme with a per-request proof signed by that key. It is signed by the space authority's signing key so any repo host can verify it without contacting the authority. A client may present a space delegation as a Bearer Authorization header with a standalone nonce-free DPoP proof that omits ath, or as delegationToken in the JSON body for existing clients with the same proof and no Authorization header. A body delegation combined with any Authorization header, including a DPoP session token, is rejected. Without delegation, identity comes from the DPoP-authenticated user and the session proof key is bound. Membership is checked live against the enrollment store. App-axis (client attestation) gating is enforced here: spaces configured with an app allow-list require a valid client attestation whose attested client_id is listed; spaces that are open ignore any attestation supplied. Additive HTTP-signature profile: Bearer delegation with RFC 9421 atproto-space Signature and Signature-Input covering exactly authorization, with a P-256 did:key keyid, mints cnf.kid credentials (default 600 seconds, maximum 3600). Present these as Atproto-Space authorization with a signature covering authorization then atproto-space-audience. Repo reads use the actual repo owner DID; authority listing uses the bare authority DID. Presentation signatures are reusable for the same credential and audience. Conflicting proof families are rejected without fallback. Legacy DPoP and OAuth-session minting retain cnf.jkt and their existing lifetime.",
+      "description": "Stratos's own transport for minting a space credential. It issues a credential of the standard shape for a space the caller is a member of, but it is not com.atproto.space.authorizeSpaceSync: it has no notification registration and no writer revision, and it is not an alias for that method. The credential is multi-use until it expires and is bound to the caller's DPoP key (cnf.jkt, RFC 9449): it must be presented under the DPoP auth scheme with a per-request proof signed by that key. It is signed by the space authority's signing key so any repo host can verify it without contacting the authority. A client may present a space delegation as a Bearer Authorization header with a standalone nonce-free DPoP proof that omits ath, or as delegationToken in the JSON body for existing clients with the same proof and no Authorization header. A body delegation combined with any Authorization header, including a DPoP session token, is rejected. Without delegation, identity comes from the DPoP-authenticated user and the session proof key is bound. Membership is checked live against the enrollment store. App-axis (client attestation) gating is enforced here: spaces configured with an app allow-list require a valid client attestation whose attested client_id is listed; spaces that are open ignore any attestation supplied. Additive HTTP-signature profile: Bearer delegation with RFC 9421 atproto-space Signature and Signature-Input covering exactly authorization, with a P-256 did:key keyid, mints cnf.kid credentials (default 600 seconds, maximum 3600). Present these with an Atproto-Space-Credential authorization, an atproto-space-audience header and one signature tagged atproto-space-credential covering authorization then atproto-space-audience. Repo reads use the actual repo owner DID; authority listing uses the bare authority DID. Presentation signatures are reusable for the same credential and audience. Conflicting proof families are rejected without fallback. Legacy DPoP and OAuth-session minting retain cnf.jkt and their existing lifetime.",
       "input": {
         "encoding": "application/json",
         "schema": {
@@ -2203,7 +2973,7 @@ export const stratosLexicons: LexiconDoc[] = [
           "properties": {
             "space": {
               "type": "string",
-              "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
+              "description": "The space's URI (at:space/{did}/{type}/{skey}). This is a space URI in the form above; upstream's space-ref format (atproto#5187) is expected to adopt it. Declared as a plain string until @atproto/lexicon supports a matching format. Its space DID must equal this service's DID."
             },
             "delegationToken": {
               "type": "string",
@@ -2269,14 +3039,14 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "List the CIDs of blobs referenced by an account's records within a permissioned space, optionally since some revision of that repo. Spec-shaped mirror of com.atproto.space.listBlobs (atproto#5187): callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). Blobs behind permissioned records are never enumerated by an unauthenticated endpoint.",
+      "description": "List the CIDs of blobs referenced by an account's records within a permissioned space, optionally since some revision of that repo. This is a boundary-scoped read of blobs this service holds. It is a Stratos method, not the upstream com.atproto.space.listBlobs of a similar name. It is callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). Blobs behind permissioned records are never enumerated by an unauthenticated endpoint.",
       "parameters": {
         "type": "params",
         "required": ["space", "repo"],
         "properties": {
           "space": {
             "type": "string",
-            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
+            "description": "The space's URI (at:space/{did}/{type}/{skey}). This is a space URI in the form above; upstream's space-ref format (atproto#5187) is expected to adopt it. Declared as a plain string until @atproto/lexicon supports a matching format. Its space DID must equal this service's DID."
           },
           "repo": {
             "type": "string",
@@ -2341,14 +3111,14 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "List the known repos that hold data in a space (the writer set), with each repo's current rev and resolved repo host. Spec-shaped mirror of com.atproto.space.listRepos (atproto#5187), extended with the `host` and `hostSource` fields upstream has no answer for: an authority-recorded override, or else the member's DID-document #atproto_pds endpoint. This is a membership oracle, not a member-facing read: callable with inter-service auth (a syncing service, admitted by its own enrolled boundaries) or with a space credential for that space, never with a plain user session.",
+      "description": "List the known repos that hold data in a space (the writer set), each with its DID and custody. A stratos-custody repo also carries its current rev, which this service stores. A pds-custody repo also carries a `host` and `hostSource` when its host can be resolved: an authority-recorded override, or else the member's DID-document #atproto_pds endpoint; both are omitted when neither is found. This is the membership oracle for a space, answered from this service's active enrollments in the space's boundary. It is a Stratos method, not the upstream com.atproto.space.listWriters, and does not take or return what that method does. It is not a member-facing read: callable with inter-service auth (a syncing service, admitted by its own enrolled boundaries) or with a space credential for that space, never with a plain user session.",
       "parameters": {
         "type": "params",
         "required": ["space"],
         "properties": {
           "space": {
             "type": "string",
-            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
+            "description": "The space's URI (at:space/{did}/{type}/{skey}). This is a space URI in the form above; upstream's space-ref format (atproto#5187) is expected to adopt it. Declared as a plain string until @atproto/lexicon supports a matching format. Its space DID must equal this service's DID."
           },
           "limit": {
             "type": "integer",
@@ -2417,7 +3187,7 @@ export const stratosLexicons: LexiconDoc[] = [
         },
         "host": {
           "type": "string",
-          "description": "The Stratos convention's resolved repo host for this member, if resolvable. Absent when neither an override nor a DID-document PDS endpoint could be found."
+          "description": "The Stratos convention's resolved repo host for a pds-custody member, if resolvable. Absent for a stratos-custody member, and when neither an override nor a DID-document PDS endpoint could be found."
         },
         "hostSource": {
           "type": "string",
@@ -2553,7 +3323,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "Full-state recovery: enumerate a repo's record paths and their current CIDs, mirroring listRecords semantics. Record values are inlined by default; excludeValues returns metadata only. Boundary-gated: the caller only observes records within its enrolled boundaries. Intended as the fallback when the oplog (listRepoOps) returns OplogTruncated: the caller enumerates paths, diffs locally, and fetches misses. Callers must authenticate with a signed service JWT via the Authorization: Bearer header.",
+      "description": "Full-state recovery: enumerate the record paths and current CIDs of a repo this service holds, paged by collection and record key. Record values are inlined by default; excludeValues returns metadata only. Boundary-gated: the caller only observes records within its enrolled boundaries. Intended as the fallback when the oplog (listRepoOps) returns OplogTruncated: the caller enumerates paths, diffs locally, and fetches misses. Callers must authenticate with a signed service JWT via the Authorization: Bearer header.",
       "parameters": {
         "type": "params",
         "required": ["did"],
@@ -2649,7 +3419,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "Incremental pull sync of a repo's operation log (oplog), mirroring com.atproto.space.listRepoOps semantics. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: the caller only observes operations for records within its enrolled boundaries. The response reaches the head of the oplog when `cursor` is absent; the repo's current signed commit is then included (unless the repo has no commits yet), consistent with the operations returned. When a concurrent write is detected, a cursor is returned instead of the commit; that response can carry no operations and repeat the cursor you sent, so poll again while a cursor is present and do not read an unchanged cursor as a stall. A write that commits after the head probe is not detected; it falls outside this snapshot and arrives on a later poll. Callers must authenticate with a signed service JWT via the Authorization: Bearer header. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned (stricter than upstream, which silently restarts) so the caller falls back to full-state recovery (listRecordPaths).",
+      "description": "Incremental pull sync of the operation log (oplog) of a repo this service holds, for a syncing service such as a feed generator. It is a Stratos method, not the upstream com.atproto.space.listRepoOps of a similar name, and does not take or return what that method does. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: a service caller only observes operations for records within its enrolled boundaries, and a space credential only those within its space's boundary. The response reaches the head of the oplog when `cursor` is absent; the repo's current signed commit is then included (unless the repo has no commits yet), consistent with the operations returned. When a concurrent write is detected, a cursor is returned instead of the commit; that response can carry no operations and repeat the cursor you sent, so poll again while a cursor is present and do not read an unchanged cursor as a stall. A write that commits after the head probe is not detected; it falls outside this snapshot and arrives on a later poll. Callers authenticate with a signed service JWT via the Authorization: Bearer header, or with a space credential; a plain user session is not admitted. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned rather than a silent restart, so the caller falls back to full-state recovery (listRecordPaths).",
       "parameters": {
         "type": "params",
         "required": ["did"],
@@ -2885,6 +3655,27 @@ export const stratosLexicons: LexiconDoc[] = [
         "record": {
           "type": "unknown",
           "description": "The record content. Present for create and update operations."
+        },
+        "boundary": {
+          "type": "ref",
+          "ref": "#opBoundary",
+          "description": "The boundary the op belongs to; present on create, update and scoped removal ops written by current servers; absent on ops written before it existed, where consumers fall back to the record body."
+        },
+        "excludeBoundary": {
+          "type": "ref",
+          "ref": "#opBoundary",
+          "description": "Present on a scoped removal that is half of a move: the boundary the record moved into. A subscriber that holds one of these boundaries still sees the record and does not receive the removal."
+        }
+      }
+    },
+    "opBoundary": {
+      "type": "object",
+      "description": "The boundaries of a sync op. Unlike a record's boundary, it can list several values, because the removal op for a record written before the one-boundary rule names every boundary the record had.",
+      "required": ["values"],
+      "properties": {
+        "values": {
+          "type": "array",
+          "items": { "type": "ref", "ref": "zone.stratos.boundary.defs#Domain" }
         }
       }
     },

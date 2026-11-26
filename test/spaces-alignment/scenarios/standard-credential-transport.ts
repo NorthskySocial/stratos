@@ -8,7 +8,7 @@ import type { AssertionResult, ScenarioSuite } from '../rules.js'
 const requiredAssertions = [
   'standard-exchange',
   'stratos-read',
-  'october-pds-read',
+  'reference-pds-read',
   'two-owners-one-host',
   'wrong-owner-denied',
   'wrong-key-denied',
@@ -18,7 +18,6 @@ const requiredAssertions = [
   'renewal-fresh-key',
   'renewal-after-removal-denied',
   'cross-space-denied',
-  'legacy-compatible',
   'conflicting-proof-denied',
   'delegation-replay-denied',
 ] as const

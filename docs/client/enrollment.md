@@ -431,10 +431,19 @@ const scope = buildStratosScopes().join(' ')
 
 The Stratos enrollment client requests `atproto`, the enrollment record write
 scope, and a space scope for its own authority. The space scope covers
-`zone.stratos.space.feed`, collection `zone.stratos.feed.post`, and both
-`read` and `create`. It omits `skey` so future boundary memberships remain
+`zone.stratos.space.feed`, the collections `zone.stratos.feed.post`,
+`app.bsky.feed.like` and `app.bsky.feed.repost`, and both `read` and
+`create`. It omits `skey` so future boundary memberships remain
 covered. A scope permits operations; Stratos boundary membership still
 controls access.
+
+The scope asks for the like and repost collections before the published
+`zone.stratos.space.feed` declaration lists them. How a PDS answers that
+request is not verified. A PDS that returns a grant without those collections
+gives a partial grant, and a partial grant counts as `unknown` in the table
+below. A member with such a grant can post but cannot like or repost. Stratos
+asks them to authorize again, and authorizing again returns the same grant
+until the declaration is published.
 
 Successful OAuth authorization does not establish spaces capability. The
 callback reads the granted scope and checks the actual permissions. A grant
@@ -445,6 +454,13 @@ satisfy the request.
 | ------------------------------------------------ | ------------------ | ---------------------- |
 | Matching space read and create permissions       | `capable`          | `pds`                  |
 | Missing, partial, unrelated, or unreadable grant | `unknown`          | `stratos`              |
+
+A PDS older than the November release refuses a space type declaration that
+has no `name`. A member on such a PDS cannot grant the space scope, and
+enrollment ends with `invalid_scope`. It does not fall back to `stratos`
+custody. The operator's choice of how to publish the declaration decides
+whether these members can enroll. See
+[the space type declaration](/operator/november-upgrade#the-space-type-declaration).
 
 An absent grant can mean an ordinary PDS ignored the space request or a user
 withheld consent. It does not prove the PDS lacks spaces support. Stratos

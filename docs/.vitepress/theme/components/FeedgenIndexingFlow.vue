@@ -80,7 +80,7 @@ const steps = [
     edges: ['poll'],
   },
   {
-    text: 'It holds those changes aside until the commit signature verifies.',
+    text: "It writes those changes only when they add up to the state that the host's commit names.",
     edges: ['ops'],
   },
   {

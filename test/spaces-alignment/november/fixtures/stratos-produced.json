@@ -1,0 +1,133 @@
+{
+  "header": {
+    "classification": "upstream-signed-target-uri",
+    "oracle": {
+      "package": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-AasGxXJz1htNRNNR1JL/2v4EV45VvC4UrbY1x/w/cFH0avOHFxhDV0MQMMegVYhSi7DtnkJ1smwDxO6K/W402g==",
+      "additionalPackages": [
+        {
+          "package": "@atproto/lex-json",
+          "version": "0.0.0-spaces-alpha-20261117141222",
+          "integrity": "sha512-rF7Ogq8ZSLjmO82l9ZMjlO7zcKTm/079pQPTdMx92bIdRuWRk3TT3bF+iNkkwE1KNfKpKGACGxpvTXosb4ircg=="
+        }
+      ]
+    },
+    "generator": {
+      "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
+      "sha256": "a42fa7432ecb9f61a0fddc1abd16f2cb47de69b10f302d8f39c2c84c6465dec5"
+    },
+    "upstreamVerified": true,
+    "reproducible": true
+  },
+  "note": "Values Stratos produced, judged by the oracle. upstreamVerified is the oracle verdict. spaceUri is a hand-written at:space/ uri held as an opaque claim.",
+  "rustPresentation": {
+    "source": "stratos-feedgen-ng/src/space_http_signature.rs",
+    "signingKeyFill": 1,
+    "keyId": "did:key:zDnaeXxvmFHMHjqgQTbadpWG7gPHwnga1i7SMwxrV2BSdUjAD",
+    "headers": {
+      "authorization": "Atproto-Space-Credential misato-credential",
+      "atproto-space-audience": "did:plc:tokyo3",
+      "signature-input": "sig=(\"authorization\" \"atproto-space-audience\");tag=\"atproto-space-credential\"",
+      "signature": "sig=:a3jD9GLACE/7cxT/Ui44YkimF1tcWhWb9AgeYzQafP5X7CESqkIDp3uH7VNJUeHN4vFg/8BCnCxoe4mGCVkZNg==:"
+    },
+    "verdict": "accepted"
+  },
+  "rustDelegation": {
+    "source": "stratos-feedgen-ng/src/service_auth.rs",
+    "signingKeyHex": "2fe8e925727a16e4970a5b0a556d9f8263b7c6b894885ca2857c8878938aa97b",
+    "authority": "did:web:localhost%3A3100",
+    "spaceUri": "at:space/did:web:localhost%3A3100/zone.stratos.space.feed/nerv",
+    "token": "eyJhbGciOiJFUzI1NksiLCJ0eXAiOiJhdHByb3RvLXNwYWNlLWRlbGVnYXRpb24rand0Iiwia2lkIjoiI2F0cHJvdG8ifQ.eyJpc3MiOiJkaWQ6d2ViOmZlZWRnZW4uZXhhbXBsZS50ZXN0Iiwic3ViIjoiYXQ6c3BhY2UvZGlkOndlYjpsb2NhbGhvc3QlM0EzMTAwL3pvbmUuc3RyYXRvcy5zcGFjZS5mZWVkL25lcnYiLCJhdWQiOiJkaWQ6d2ViOmxvY2FsaG9zdCUzQTMxMDAjYXRwcm90b19wZHMiLCJpYXQiOjEwMDAsImV4cCI6MTA2MCwianRpIjoibm9uY2UifQ.dBaNYuvHe_V--AayTy6vQusFWf4r00gbbEvpJ4AeWRMdbpTrWDB-rdlEsvpczXAEmkcGkHlsAqhu67xtN11EJA",
+    "frozenClockSeconds": 1000,
+    "verdicts": {
+      "parse": "accepted",
+      "verify": "accepted"
+    }
+  },
+  "rustMacRequest": {
+    "source": "stratos-feedgen-ng/src/space_mac.rs",
+    "acceptSignature": "mac=(\"atproto-space-commit\";sf);keyid=\"did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi\";tag=\"atproto-space-commit\"",
+    "sharedSecret": {
+      "encoding": "base64",
+      "value": "2XYP6iF5whnXMOd8HStZcRr/FOrpIZNfLnyoleNwbw4=",
+      "length": 32
+    },
+    "commit": {
+      "ver": 1,
+      "repo": "did:plc:fayevalentine",
+      "space": "at:space/did:web:nerv.example/zone.stratos.space.feed/tokyo3",
+      "rev": "3jzfcijpj2z2d",
+      "data": {
+        "encoding": "base64",
+        "value": "leq8+PrKkqIGIZOb6faBC5ZQVo6QWd7gWU+DYYA2Gvc=",
+        "length": 32
+      }
+    },
+    "oracle": {
+      "parseRequest": "accepted",
+      "keyShare": "did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi",
+      "decapsulate": "same-secret",
+      "createCommitMacHeaders": "made"
+    },
+    "responseHeaders": {
+      "atproto-space-commit": "ver=1, repo=\"did:plc:fayevalentine\", space=\"at:space/did:web:nerv.example/zone.stratos.space.feed/tokyo3\", rev=\"3jzfcijpj2z2d\", data=:leq8+PrKkqIGIZOb6faBC5ZQVo6QWd7gWU+DYYA2Gvc=:",
+      "signature-input": "mac=(\"atproto-space-commit\";sf);keyid=\"did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi\";tag=\"atproto-space-commit\"",
+      "signature": "mac=:itUXEGMO6im3tCI8E5KcrMuDyb4WKyqO3hh28tdfiuk=:"
+    }
+  },
+  "rustRecordCids": {
+    "source": "stratos-feedgen-ng/src/space_record.rs",
+    "records": [
+      {
+        "name": "a post",
+        "constant": "POST",
+        "json": "{\"$type\":\"zone.stratos.feed.post\",\"text\":\"Whatever happens, happens\"}",
+        "rustCid": "bafyreicy76sh4fkqtlr7dmtiakbzpfqhvcsx36lf26eifaplxgl5abq2fq",
+        "oracleCid": "bafyreicy76sh4fkqtlr7dmtiakbzpfqhvcsx36lf26eifaplxgl5abq2fq"
+      },
+      {
+        "name": "a follow",
+        "constant": "FOLLOW",
+        "json": "{\"$type\":\"app.bsky.graph.follow\",\"subject\":\"did:plc:spikespiegel\",\"createdAt\":\"2026-09-22T00:00:00.000Z\"}",
+        "rustCid": "bafyreigoyb4wgujzkp5jj6l4fiduaefr5hkjfcjwc7tgwbrrfkol4ur22m",
+        "oracleCid": "bafyreigoyb4wgujzkp5jj6l4fiduaefr5hkjfcjwc7tgwbrrfkol4ur22m"
+      },
+      {
+        "name": "a post with a link and bytes",
+        "constant": "LINKED",
+        "json": "{\"$type\":\"zone.stratos.feed.post\",\"text\":\"Ein\",\"embed\":{\"image\":{\"$type\":\"blob\",\"ref\":{\"$link\":\"bafkreicmhqydaeykjinrosvewdw2dkzg6gwayo4i3d5tbyav4mls6nlica\"},\"mimeType\":\"image/png\",\"size\":3},\"thumb\":{\"$bytes\":\"AQID\"}}}",
+        "rustCid": "bafyreiamr44qnmy5gt77wtssi7svuhexyfxffcqhn2mgzrfdqb7fi4lrgi",
+        "oracleCid": "bafyreiamr44qnmy5gt77wtssi7svuhexyfxffcqhn2mgzrfdqb7fi4lrgi"
+      }
+    ]
+  },
+  "rustSetHash": {
+    "source": "stratos-feedgen-ng/src/space_ops.rs",
+    "steps": [
+      [0, "zone.stratos.feed.post", "swordfish", "POST", null],
+      [0, "app.bsky.graph.follow", "spike", "FOLLOW", null],
+      [1, "zone.stratos.feed.post", "ein", "LINKED", null],
+      [2, "zone.stratos.feed.post", "swordfish", "LINKED", "POST"],
+      [2, "app.bsky.graph.follow", "spike", null, "FOLLOW"]
+    ],
+    "rustStateBase64": "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",
+    "rustDigestHex": "d6104e12dc24c5dff84fdd4a7eee2f789b50a7b51820695ec7ed9c00147015fa",
+    "oracleStateBase64": "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",
+    "oracleDigestHex": "d6104e12dc24c5dff84fdd4a7eee2f789b50a7b51820695ec7ed9c00147015fa"
+  },
+  "serviceCredential": {
+    "source": "stratos-service/tests/space-credential-fixed-mint.test.ts",
+    "authority": "did:web:bebop.example",
+    "spaceUri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew",
+    "authoritySigningKeyHex": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "holderKeyHex": "5555555555555555555555555555555555555555555555555555555555555555",
+    "credentialId": "spike-spiegel-credential",
+    "token": "eyJ0eXAiOiJhdHByb3RvLXNwYWNlLWNyZWRlbnRpYWwrand0IiwiYWxnIjoiRVMyNTZLIiwia2lkIjoiI2F0cHJvdG8ifQ.eyJpc3MiOiJkaWQ6d2ViOmJlYm9wLmV4YW1wbGUiLCJzdWIiOiJhdDpzcGFjZS9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3JldyIsImlhdCI6MTAwMDAwMDAwMCwiZXhwIjoxMDAwMDAwNjAwLCJqdGkiOiJzcGlrZS1zcGllZ2VsLWNyZWRlbnRpYWwiLCJjbmYiOnsia2lkIjoiZGlkOmtleTp6RG5hZVdNOHptQml3emY4bjQydk1DUGRYQVdQdnQ4VDEzWFFNQlhabVpvTEIzZkNGIn0sInN0cmF0b3NCb3VuZGFyeVJldmlzaW9uIjoxfQ.LPYdky2qhc7JLfDnxcEJH9NdXh-kcpvEk-4mk_WC1rp8P1oexCV-rW3iqDhugUXP1tFLJnnNQDA_bfVaZKl2xQ",
+    "frozenClockSeconds": 1000000000,
+    "verdicts": {
+      "parse": "accepted",
+      "verify": "accepted"
+    }
+  }
+}

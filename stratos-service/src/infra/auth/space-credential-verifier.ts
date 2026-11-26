@@ -36,7 +36,7 @@ import type { ReplayStore } from './replay-store.js'
  *   - Payload `exp` MUST be present and not in the past (with skew). There is
  *     no `aud` claim and NO credential-`jti` consumption (the credential is
  *     multi-use; single-use applies to the per-request PROOF `jti` instead).
- *   - Payload `sub` MUST parse as an `at://` space URI whose
+ *   - Payload `sub` MUST parse as an `at:space/` space URI whose
  *     `spaceDid` equals our configured service DID (we are the authority).
  *   - The signature MUST verify against OUR OWN service signing key.
  *

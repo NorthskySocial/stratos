@@ -52,7 +52,7 @@ describe('Postgres boundary catalog', () => {
     if (db) await closeServicePgDb(db)
     if (otherDb) await closeServicePgDb(otherDb)
     await container?.stop()
-  })
+  }, 60_000)
   it('persists definitions, optimistic revisions, queues, and irreversible removal', async () => {
     const raw = new PgEnrollmentStoreWriter(db)
     const did = 'did:plc:spike'

@@ -19,3 +19,8 @@ allowBuilds:
   protobufjs: true
   sharp: true
   ssh2: true
+minimumReleaseAgeExclude:
+  - '@atproto/crypto@0.0.0-spaces-alpha-20261124235736'
+  - '@atproto/lex-schema@0.0.0-spaces-alpha-20261124235736'
+  - '@atproto/space@0.0.0-spaces-alpha-20261124235736'
+  - '@atproto/syntax@0.0.0-spaces-alpha-20261124235736'

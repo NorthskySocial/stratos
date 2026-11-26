@@ -7,6 +7,8 @@ const SERVICE_DID = 'did:web:tokyo-3.example%3A3100'
 const AUTHORITY = encodeURIComponent(SERVICE_DID)
 const SPACE = `space:zone.stratos.space.feed?authority=${AUTHORITY}`
 const COLLECTION = 'collection=zone.stratos.feed.post'
+const ALL_COLLECTIONS =
+  'collection=zone.stratos.feed.post&collection=app.bsky.feed.like&collection=app.bsky.feed.repost'
 
 function makeSession(scope: unknown) {
   const getTokenInfo = vi.fn().mockResolvedValue({ scope })
@@ -24,8 +26,8 @@ function makeLogger() {
 describe('detectSpacesCapability', () => {
   it.each([
     buildSpaceScope(SERVICE_DID),
-    `${SPACE}&${COLLECTION}&action=read ${SPACE}&${COLLECTION}&action=create`,
-    `${SPACE}&${COLLECTION}`,
+    `${SPACE}&${ALL_COLLECTIONS}&action=read ${SPACE}&${ALL_COLLECTIONS}&action=create`,
+    `${SPACE}&${ALL_COLLECTIONS}`,
   ])('accepts effective read and create permission from %s', async (scope) => {
     const { session, getTokenInfo } = makeSession(`atproto ${scope}`)
     const logger = makeLogger()
@@ -47,6 +49,11 @@ describe('detectSpacesCapability', () => {
       `space:zone.stratos.space.other?authority=${AUTHORITY}&${COLLECTION}`,
     ],
     ['wrong collection', `${SPACE}&collection=app.bsky.feed.post`],
+    [
+      'post-only read and create grants',
+      `${SPACE}&${COLLECTION}&action=read ${SPACE}&${COLLECTION}&action=create`,
+    ],
+    ['post-only grant without actions', `${SPACE}&${COLLECTION}`],
     ['one boundary only', `${SPACE}&${COLLECTION}&skey=nerv`],
   ])('keeps capability unknown for %s', async (_name, scope) => {
     const { session } = makeSession(scope)

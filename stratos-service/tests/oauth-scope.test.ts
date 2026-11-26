@@ -33,7 +33,7 @@ describe('OAUTH_SCOPE', () => {
 describe('buildSpaceScope', () => {
   it('requests this service as authority, with no skey and no PDS probe', () => {
     expect(buildSpaceScope('did:web:stratos.example.com')).toBe(
-      'space:zone.stratos.space.feed?authority=did%3Aweb%3Astratos.example.com&collection=zone.stratos.feed.post&action=create&action=read',
+      'space:zone.stratos.space.feed?authority=did%3Aweb%3Astratos.example.com&collection=zone.stratos.feed.post&collection=app.bsky.feed.like&collection=app.bsky.feed.repost&action=create&action=read',
     )
   })
 

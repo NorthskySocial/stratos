@@ -3,10 +3,13 @@ import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import {
   canAccessRecord,
   isDomainlessRecord,
-  StratosValidator,
+  MAX_VISIBLE_RECORD_BATCH,
+  type VisibleRecordWithBoundaries,
 } from '@northskysocial/stratos-core'
+import type { ActorReader } from '../../actor-store-types.js'
 import type { AppContext } from '../../context-types.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
+import { isAccountTakenDown } from '../../subscription/takedown-filter.js'
 import type { ListRecordsResult, RecordResult } from './types.js'
 
 export interface GetRecordInput {
@@ -22,6 +25,30 @@ export interface ListRecordsInput {
   limit?: number
   cursor?: string
   reverse?: boolean
+}
+
+/**
+ * Reads a page of records with their boundary rows, one combined read per
+ * chunk of {@link MAX_VISIBLE_RECORD_BATCH}.
+ *
+ * @param store - The actor store reader to read through
+ * @param uris - Record URIs, any number
+ * @returns One entry per input URI, in input order; `undefined` for a record
+ * that is missing or taken down
+ */
+export async function readVisibleRecordsInChunks(
+  store: ActorReader,
+  uris: readonly string[],
+): Promise<Array<VisibleRecordWithBoundaries | undefined>> {
+  const found = new Map<string, VisibleRecordWithBoundaries>()
+  for (let start = 0; start < uris.length; start += MAX_VISIBLE_RECORD_BATCH) {
+    const chunk = uris.slice(start, start + MAX_VISIBLE_RECORD_BATCH)
+    const chunkFound = await store.record.getVisibleRecordsWithBoundaries(chunk)
+    for (const [uri, visible] of chunkFound) {
+      found.set(uri, visible)
+    }
+  }
+  return uris.map((uri) => found.get(new AtUriSyntax(uri).toString()))
 }
 
 /**
@@ -42,24 +69,21 @@ export async function getRecord(
   const { repo, collection, rkey, cid } = input
   const uri = `at://${repo}/${collection}/${rkey}`
 
-  // Check if actor store exists
+  // A taken-down account reads as a missing record, as a taken-down record does.
   const exists = await ctx.actorStore.exists(repo)
-  if (!exists) {
+  if (!exists || (await isAccountTakenDown(ctx.labelStore, repo))) {
     throw new InvalidRequestError('Record not found', 'RecordNotFound')
   }
 
   return await ctx.actorStore.read(repo, async (store) => {
-    const record = await store.record.getRecord(
+    const found = await store.record.getVisibleRecordWithBoundaries(
       new AtUriSyntax(uri),
-      cid ?? null,
     )
-    if (!record || !record.value) {
+    // A pinned cid that is no longer the current one reads as missing.
+    if (!found || !found.record.value || (cid && found.record.cid !== cid)) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
-
-    const recordBoundaries = StratosValidator.extractBoundaryDomains(
-      record.value,
-    )
+    const { record, boundaries: recordBoundaries } = found
     logDomainlessInvariant(ctx.logger, recordBoundaries, {
       uri,
       ownerDid: repo,
@@ -101,9 +125,9 @@ export async function listRecords(
 ): Promise<ListRecordsResult> {
   const { repo, collection, limit = 50, cursor, reverse = false } = input
 
-  // Check if actor store exists
+  // A taken-down account lists nothing, as if every record were taken down.
   const exists = await ctx.actorStore.exists(repo)
-  if (!exists) {
+  if (!exists || (await isAccountTakenDown(ctx.labelStore, repo))) {
     return { records: [] }
   }
 
@@ -115,29 +139,35 @@ export async function listRecords(
       reverse,
     })
 
+    const visible = await readVisibleRecordsInChunks(
+      store,
+      list.map((record) => record.uri),
+    )
     let domainlessCount = 0
-    const records = list
-      .filter((record) => {
-        const recordBoundaries = StratosValidator.extractBoundaryDomains(
-          record.value,
-        )
-        if (isDomainlessRecord(recordBoundaries)) {
-          domainlessCount += 1
-        }
-        return canAccessRecord({
-          recordBoundaries,
-          ownerDid: repo,
-          context: {
-            viewerDid: callerDid ?? null,
-            viewerDomains: callerDomains ?? [],
-          },
-        })
+    const records = visible.flatMap((found) => {
+      if (!found) return []
+      const recordBoundaries = found.boundaries
+      if (isDomainlessRecord(recordBoundaries)) {
+        domainlessCount += 1
+      }
+      const hasAccess = canAccessRecord({
+        recordBoundaries,
+        ownerDid: repo,
+        context: {
+          viewerDid: callerDid ?? null,
+          viewerDomains: callerDomains ?? [],
+        },
       })
-      .map((record) => ({
-        uri: record.uri.toString(),
-        cid: record.cid,
-        value: record.value,
-      }))
+      return hasAccess
+        ? [
+            {
+              uri: found.record.uri,
+              cid: found.record.cid,
+              value: found.record.value,
+            },
+          ]
+        : []
+    })
 
     if (domainlessCount > 0) {
       ctx.logger?.warn(

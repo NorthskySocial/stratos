@@ -10,6 +10,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -17,12 +18,15 @@ import {
   command,
   enforceReportContents,
   ensureSeparatePaths,
+  installAtmosphereAssets,
   parseOptions,
   pinnedCheckout,
   resolveEvidence,
   runSandbox,
   sanitizeOutput,
 } from './run-sandbox.js'
+import { loadNovemberSources } from './november/reference-host.js'
+import type { NovemberSources } from './november/reference-host.js'
 
 import { runScenario } from './scenarios/standard-credential-transport.driver.mjs'
 
@@ -40,6 +44,16 @@ async function directory(): Promise<string> {
   return path
 }
 
+const REFERENCE_REVISION = '1f510f8e36a973f6fd055da349b586918805ae66'
+const PROBED_DIGEST =
+  'sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350'
+
+// A manifest that names a different artifact and carries complete cutover
+// evidence, so the runner can be exercised past its refusal.
+function readyNovemberSources(): NovemberSources {
+  return structuredClone(loadNovemberSources())
+}
+
 async function temporaryAiaBSources(): Promise<string[]> {
   return (await readdir(tmpdir()))
     .filter((path) => path.startsWith('stratos-aiab-source-'))
@@ -47,8 +61,12 @@ async function temporaryAiaBSources(): Promise<string[]> {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
   process.env.PATH = originalPath
+  delete process.env.RUNNER_TEST_WRONG_IMAGE
   delete process.env.RUNNER_TEST_FAIL_STEP
+  delete process.env.RUNNER_TEST_REACHED_FAILURE
+  delete process.env.RUNNER_TEST_NOVEMBER_FAILURE
   delete process.env.RUNNER_TEST_EMPTY_ASSERTIONS
   delete process.env.RUNNER_TEST_MISSING_ACCOUNT
   delete process.env.RUNNER_TEST_INVALID_ACCOUNT
@@ -340,6 +358,9 @@ describe('sandbox preflight', () => {
 
   it('exports the reviewed candidate, runs the pinned sandbox steps, and writes a sanitized receipt', async () => {
     const root = await directory()
+    const privateTemp = join(root, 'tmp')
+    await mkdir(privateTemp)
+    vi.stubEnv('TMPDIR', privateTemp)
     const candidateRepo = join(root, 'candidate')
     const sandboxRepo = join(root, 'sandbox')
     const bin = join(root, 'bin')
@@ -363,6 +384,7 @@ describe('sandbox preflight', () => {
       join(candidateRepo, 'test/spaces-alignment/scenarios/baseline.ts'),
       `export const suite = { id: 'baseline', requiredAssertions: ['browser-pass'], async run(context) {
         const output = await context.runCommand('docker', ['compose', '--file', context.composeFile, 'run'], context.sandboxDirectory)
+        if (process.env.RUNNER_TEST_REACHED_FAILURE) throw Object.assign(new Error('Browser failed'), { reachedAssertions: ['browser-pass', 'secret-looking-word'] })
         if (!output.includes('browser-ok')) throw new Error('Browser failed')
         if (process.env.RUNNER_TEST_EMPTY_ASSERTIONS) return []
         return [{ id: 'browser-pass', status: 'passed' }]
@@ -378,7 +400,7 @@ describe('sandbox preflight', () => {
         candidateRepo,
         'test/spaces-alignment/scenarios/standard-credential-transport.ts',
       ),
-      `export const suite = { id: 'standard-credential-transport', requiredAssertions: ['october-pass'], async run() { return [{ id: 'october-pass', status: 'passed' }] } }`,
+      `export const suite = { id: 'standard-credential-transport', requiredAssertions: ['reference-pass'], async run() { return [{ id: 'reference-pass', status: 'passed' }] } }`,
     )
     await writeFile(
       join(
@@ -388,24 +410,25 @@ describe('sandbox preflight', () => {
       `export const suite = { id: 'rust-production-interop', requiredAssertions: ['rust-pass'], async run() { return [{ id: 'rust-pass', status: 'passed' }] } }`,
     )
     await writeFile(
-      join(candidateRepo, 'test/spaces-alignment/scenarios/october-interop.ts'),
-      `export const suite = { id: 'october-interop', requiredAssertions: ['combined-pass'], async run() { return [{ id: 'combined-pass', status: 'passed' }] } }`,
-    )
-    await writeFile(
       join(
         candidateRepo,
-        'test/spaces-alignment/scenarios/credential-revocation-contract.ts',
+        'test/spaces-alignment/scenarios/november-interop.ts',
       ),
-      `export const suite = { id: 'credential-revocation-contract', requiredAssertions: ['upstream-pass'], async run() { return [{ id: 'upstream-pass', status: 'passed' }] } }`,
+      `export const suite = { id: 'november-interop', requiredAssertions: ['journey-pass', 'journey-followup'], async run(context) {
+        const failed = process.env.RUNNER_TEST_NOVEMBER_FAILURE
+        const evidence = [{ id: 'journey-pass', tier: 'pinned-host', observation: 'Read observed', artifact: 'browser' }]
+        if (!failed) evidence.push({ id: 'journey-followup', tier: 'pinned-host', observation: 'Feed observed', artifact: 'browser' })
+        context.recordJourneyReport({ outstanding: failed ? ['journey-followup'] : [], evidence, failedGroups: failed ? ['feed'] : [] })
+        if (failed) throw Object.assign(new Error('November failed with secret-looking-word'), { reachedAssertions: ['journey-pass'] })
+        return evidence.map(({ id }) => ({ id, status: 'passed' }))
+      } }`,
     )
-    await writeFile(
-      join(
-        candidateRepo,
-        'test/spaces-alignment/scenarios/writer-sync-contract.ts',
-      ),
-      `export const suite = { id: 'writer-sync-contract', requiredAssertions: ['writer-pass'], async run() { return [{ id: 'writer-pass', status: 'passed' }] } }`,
-    )
-    for (const file of ['october-pds.yaml', 'october-pds.definition.json']) {
+    for (const file of [
+      'reference-pds.yaml',
+      'reference-pds.definition.json',
+      'november-webapp.yaml',
+      'november-webapp.definition.json',
+    ]) {
       await writeFile(
         join(candidateRepo, 'test/spaces-alignment/templates', file),
         await readFile(new URL('./templates/' + file, import.meta.url)),
@@ -443,6 +466,16 @@ describe('sandbox preflight', () => {
 
     await mkdir(join(sandboxRepo, 'stacks'))
     await mkdir(join(sandboxRepo, 'runtime'))
+    await mkdir(join(sandboxRepo, 'compose'))
+    await mkdir(join(sandboxRepo, 'lib'))
+    await writeFile(
+      join(sandboxRepo, 'lib/components.mjs'),
+      'runner.user = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`',
+    )
+    await writeFile(
+      join(sandboxRepo, 'compose/pds.yaml'),
+      'services:\n  pds-space:\n    image: ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:36ab29eb69af61d3beba8ada2d8d524921622b2b4fedc487f6e282634cc2b541\n',
+    )
     await writeFile(join(sandboxRepo, 'deno.json'), '{}\n')
     await writeFile(join(sandboxRepo, 'deno.lock'), '{}\n')
     await writeFile(
@@ -471,6 +504,17 @@ describe('sandbox preflight', () => {
     )
     await writeFile(join(sandboxRepo, 'stacks/components.json'), '[]')
     await writeFile(join(sandboxRepo, 'stacks/presets.json'), '{}')
+    const installFixture = join(root, 'install-fixture')
+    await cp(sandboxRepo, installFixture, { recursive: true })
+    const assets = new URL('./atmosphere', import.meta.url).pathname
+    const installed = await installAtmosphereAssets(assets, installFixture)
+    expect(await installAtmosphereAssets(assets, installFixture)).toEqual(
+      installed,
+    )
+    await writeFile(join(installFixture, 'compose/pds.yaml'), 'unrelated drift')
+    await expect(
+      installAtmosphereAssets(assets, installFixture),
+    ).rejects.toThrow('missing or ambiguous')
     git(sandboxRepo, 'add', '.')
     git(sandboxRepo, 'commit', '-qm', 'Pin sandbox')
     const revision = git(sandboxRepo, 'rev-parse', 'HEAD')
@@ -485,7 +529,14 @@ describe('sandbox preflight', () => {
         url: sandboxRepo,
         revision,
         sha256: { 'deno.json': manifestHash, 'deno.lock': lockHash },
-        archivePaths: ['deno.json', 'deno.lock', 'stacks', 'runtime'],
+        archivePaths: [
+          'deno.json',
+          'deno.lock',
+          'stacks',
+          'runtime',
+          'compose',
+          'lib',
+        ],
       },
       spacesPds: {
         url: '/tmp/unused',
@@ -525,7 +576,7 @@ describe('sandbox preflight', () => {
         prepare: async (_browser, name) => {
           accountLabels.push(name)
           if (accountLabels.length === 2)
-            throw new Error('October account labels captured')
+            throw new Error('Reference account labels captured')
           return {
             account: { did: `did:plc:${name}`, seedText: name },
             page: name,
@@ -538,12 +589,12 @@ describe('sandbox preflight', () => {
           throw new Error('No removal expected while capturing labels')
         },
       }),
-    ).rejects.toThrow('October account labels captured')
+    ).rejects.toThrow('Reference account labels captured')
     expect(accountLabels).toEqual(['faye', 'edward'])
-    const octoberOrigins = [
-      'https://october-pds-e2e.atmosbox.test',
+    const referenceOrigins = [
+      'https://reference-pds-e2e.atmosbox.test',
       ...[...accountLabels, 'rustfaye', 'rustedward'].map(
-        (name) => `https://${name}.october-pds-e2e.atmosbox.test`,
+        (name) => `https://${name}.reference-pds-e2e.atmosbox.test`,
       ),
       'https://pds-space1.atmosbox.test',
       'https://motoko.pds-space1.atmosbox.test',
@@ -570,6 +621,7 @@ if (args[1] === 'sandbox' && args[2] === 'create') {
   assert.match(args.at(-3), /^stratos-[0-9a-f]{12}$/)
   assert.deepEqual(args.slice(-2), ['--subnet', 'auto'])
   const components = JSON.parse(fs.readFileSync('stacks/components.json', 'utf8'))
+  assert.ok(fs.readFileSync('compose/pds.yaml', 'utf8').includes('sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350'))
   assert.ok(components.some(component => component.application === 'feedgen-ng-e2e'))
   assert.equal(components.filter(component => component.application === 'feedgen-ng-e2e').length, 1)
   const presets = JSON.parse(fs.readFileSync('stacks/presets.json', 'utf8'))
@@ -584,7 +636,7 @@ if (args[1] === 'sandbox' && args[2] === 'check') {
   const browserDockerfile = fs.readFileSync('stacks/feedgen-ng-e2e-browser.Dockerfile', 'utf8')
   if (browserDockerfile.includes('AS builder')) {
     assert.ok(stack.includes('context: ../stratos\\n      dockerfile: ../atmosphereinabox/stacks/feedgen-ng-e2e-browser.Dockerfile'))
-    assert.equal(stack.includes("STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS: '10'"), process.env.RUNNER_TEST_COMBINED !== '1')
+    assert.ok(stack.includes("STRATOS_SPACE_HTTP_CREDENTIAL_TTL_SECONDS: '10'"))
     assert.ok(browserDockerfile.includes('RUN cargo build --locked --release --package stratos-feedgen-ng --example space_interop_probe'))
     assert.ok(browserDockerfile.includes('COPY --from=builder /workspace/target/release/examples/space_interop_probe /usr/local/bin/space_interop_probe'))
     assert.ok(browserDockerfile.includes('COPY --chown=pwuser:pwuser test/spaces-alignment/atmosphere/runtime/feedgen-ng-e2e-browser.mjs /runner/feedgen-ng-e2e-browser.mjs'))
@@ -596,16 +648,20 @@ if (args[1] === 'sandbox' && args[2] === 'check') {
   assert.ok(stack.includes('pds-space1:'))
   assert.ok(!stack.includes('SPACES_PDS_IMAGE_ID'))
   const origins = stack.match(/IDENTITY_PRIVATE_ORIGINS: (.+)/)[1].split(',')
-  if (stack.includes('feedgen-e2e-pds-october:')) {
-    assert.deepEqual(origins, ${JSON.stringify(octoberOrigins)})
-    const october = fs.readFileSync('../stratos/test/spaces-alignment/templates/october-pds.yaml', 'utf8')
-      .replace('\${OCTOBER_PDS_IMAGE_ID}', 'sha256:${'c'.repeat(64)}')
+  if (stack.includes('feedgen-e2e-pds-reference:')) {
+    assert.deepEqual(origins, [
+      ...${JSON.stringify(referenceOrigins.slice(0, 5))},
+      ...(stack.includes('feedgen-e2e-webapp:') ? ['https://user1.pds-space1.atmosbox.test'] : []),
+      ...${JSON.stringify(referenceOrigins.slice(5))}
+    ])
+    const reference = fs.readFileSync('../stratos/test/spaces-alignment/templates/reference-pds.yaml', 'utf8')
+      .replace('\${REFERENCE_PDS_IMAGE_ID}', stack.includes('sha256:${'b'.repeat(64)}') ? 'sha256:${'b'.repeat(64)}' : 'sha256:${'c'.repeat(64)}')
       .split('\\n')
       .map(line => line ? '  ' + line : line)
       .join('\\n')
-    assert.ok(stack.includes('\\n' + october + '\\nvolumes:\\n  feedgen-e2e-pds-october-data: {}\\n'), 'Preserve the entire October template, including every Compose shell escape')
+    assert.ok(stack.includes('\\n' + reference + '\\nvolumes:\\n  feedgen-e2e-pds-reference-data: {}\\n'), 'Preserve the entire reference template, including every Compose shell escape')
   } else {
-    assert.deepEqual(origins, ${JSON.stringify(octoberOrigins.slice(5))})
+    assert.deepEqual(origins, ${JSON.stringify(referenceOrigins.slice(5))})
   }
 }
 if (args[1] === 'sandbox' && args[2] === 'up') assert.deepEqual(args, ['task', 'sandbox', 'up', '--build'])
@@ -628,6 +684,8 @@ if (process.argv.includes('seed')) {
   fs.mkdirSync('state', { recursive: true })
   fs.writeFileSync('state/accounts.json', JSON.stringify({ accounts: {
     'user1.pds1.atmosbox.test': { did: 'did:plc:faye', password: 'synthetic-one' },
+    'user1.pds-space1.atmosbox.test': { did: 'did:plc:motoko', password: 'synthetic-alpha', phase: 'ready' },
+    'user2.pds-space1.atmosbox.test': { did: 'did:plc:batou', password: 'synthetic-unused-alpha' },
     ...(process.env.RUNNER_TEST_MISSING_ACCOUNT ? {} : {
     'user2.pds1.atmosbox.test': { did: process.env.RUNNER_TEST_INVALID_ACCOUNT ? '' : 'did:plc:ed', password: 'synthetic-two' }
     }),
@@ -647,6 +705,7 @@ assert.ok(process.env.DOCKER_CONFIG?.startsWith(process.env.RUNNER_TEST_DOCKER_C
 assert.equal(fs.statSync(process.env.DOCKER_CONFIG).mode & 0o777, 0o700)
 assert.equal(process.env.COMPOSE_FILE, undefined)
 assert.equal(process.env.COMPOSE_PROJECT_NAME, undefined)
+if (args[0] === 'info') console.log(JSON.stringify(['name=rootless']))
 if (args.includes('build')) {
   assert.ok(args.includes('--progress'))
   assert.ok(args.includes('plain'))
@@ -656,7 +715,13 @@ if (args.includes('build')) {
     process.exit(11)
   }
 }
-if (args.includes('ps')) {
+if (args.includes('ps') && args.includes('-q')) {
+  console.log(args.at(-1))
+} else if (args[0] === 'inspect') {
+  console.log(args.at(-1) === 'pds-space1' ? 'sha256:' + (process.env.RUNNER_TEST_WRONG_IMAGE ? 'd' : 'a').repeat(64) : fs.readFileSync('compose.yaml', 'utf8').match(/image: (sha256:[a-f0-9]{64})/)[1])
+} else if (args[0] === 'image' && args[1] === 'inspect') {
+  console.log(args.at(-1).startsWith('ghcr.io/') ? 'sha256:' + 'a'.repeat(64) : args.at(-1))
+} else if (args.includes('ps')) {
   assert.ok(args.includes('--all'))
   assert.ok(args.includes('--format'))
   assert.ok(args.includes('json'))
@@ -677,7 +742,15 @@ if (args.includes('run')) {
   } else {
     assert.equal(fs.statSync('state/browser-accounts.json').mode & 0o777, 0o444)
     const accounts = JSON.parse(fs.readFileSync('state/browser-accounts.json', 'utf8')).accounts
-    assert.equal(Object.keys(accounts).length, 2)
+    const hasInspector = fs.readFileSync(composeFile, 'utf8').includes('feedgen-e2e-webapp')
+    assert.equal(Object.keys(accounts).length, hasInspector ? 3 : 2)
+    if (hasInspector) {
+      assert.deepEqual(accounts['user1.pds-space1.atmosbox.test'], {
+        did: 'did:plc:motoko',
+        password: 'synthetic-alpha'
+      })
+    }
+    assert.equal(accounts['user2.pds-space1.atmosbox.test'], undefined)
     assert.equal(accounts['user1.pds1.atmosbox.test'].password, 'synthetic-one')
     assert.equal(accounts['user2.pds1.atmosbox.test'].password, 'synthetic-two')
     console.log('browser-ok')
@@ -976,26 +1049,34 @@ if (args[0] === 'image' && args[1] === 'rm') {
     delete process.env.GITHUB_ACTIONS
     delete process.env.GITHUB_BASE_SHA
 
+    process.env.RUNNER_TEST_WRONG_IMAGE = '1'
+    await expect(
+      runSandbox(
+        { ...options, reportDirectory: join(root, 'wrong-image') },
+        dependencies,
+      ),
+    ).rejects.toThrow('Running pds-space1 image does not match')
+    delete process.env.RUNNER_TEST_WRONG_IMAGE
+
+    const unbuildableSources = readyNovemberSources()
+    delete unbuildableSources.referenceHost.sha256[
+      unbuildableSources.referenceHost.dockerfile
+    ]
     await expect(
       runSandbox(
         {
           ...options,
           suite: 'standard-credential-transport',
-          reportDirectory: join(root, 'missing-october-pin'),
+          reportDirectory: join(root, 'unready-reference-manifest'),
         },
-        dependencies,
+        { ...dependencies, novemberSources: unbuildableSources },
       ),
-    ).rejects.toThrow('October PDS source pin is missing')
-    const octoberPin = { ...sourcePins.spacesPds, revision: 'c'.repeat(40) }
+    ).rejects.toThrow('Reference PDS is not buildable')
+    const referenceSources = readyNovemberSources()
     for (const selectedSuite of [
-      'writer-sync-contract',
-      'credential-revocation-contract',
       'standard-credential-transport',
       'rust-production-interop',
-      'october-interop',
     ]) {
-      process.env.RUNNER_TEST_COMBINED =
-        selectedSuite === 'october-interop' ? '1' : '0'
       const dualReport = join(root, selectedSuite + '-dual-pds-report')
       const dualBuilds: string[] = []
       await runSandbox(
@@ -1006,47 +1087,192 @@ if (args[0] === 'image' && args[1] === 'rm') {
         },
         {
           ...dependencies,
-          sourcePins: { ...sourcePins, octoberSpacesPds: octoberPin },
+          novemberSources: referenceSources,
           async buildPds(pin, directory) {
             dualBuilds.push(pin.revision)
             const receipt = await dependencies.buildPds()
             return {
               ...receipt,
               sourceSha: pin.revision,
-              imageId: `sha256:${(pin === octoberPin ? 'c' : 'a').repeat(64)}`,
+              imageId: `sha256:${(pin.revision === REFERENCE_REVISION ? 'c' : 'a').repeat(64)}`,
               imageTag:
-                pin === octoberPin
+                pin.revision === REFERENCE_REVISION
                   ? 'stratos-spaces-pds-11111111-1111-1111-1111-111111111111:local'
                   : receipt.imageTag,
             }
           },
         },
       )
-      expect(dualBuilds).toEqual([octoberPin.revision])
+      expect(dualBuilds).toEqual([REFERENCE_REVISION])
       const dual = JSON.parse(
         await readFile(join(dualReport, 'receipt.json'), 'utf8'),
       )
-      expect(dual.pdsServices.primary).toEqual({ service: 'pds-space1' })
-      expect(dual.pdsServices.october.build.sourceSha).toBe(octoberPin.revision)
-      expect(dual.pdsServices.october.build.imageId).toBe(
+      expect(dual.pdsServices.primary).toMatchObject({
+        service: 'pds-space1',
+        imageId: `sha256:${'a'.repeat(64)}`,
+      })
+      expect(dual.pdsServices.reference.build.sourceSha).toBe(
+        REFERENCE_REVISION,
+      )
+      expect(dual.pdsServices.reference.build.imageId).toBe(
         `sha256:${'c'.repeat(64)}`,
       )
-      expect(dual.cleanup.octoberImage.status).toBe('passed')
+      expect(dual.cleanup.referenceImage.status).toBe('passed')
       expect(dual.suites.map((suite: { id: string }) => suite.id)).toEqual([
         'baseline',
         selectedSuite,
       ])
       expect(dual.cleanup.image).toBeUndefined()
       expect(dual.cleanup.compose.status).toBe('passed')
-      expect(dual.templateHashes['stacks/october-pds.yaml']).toMatch(
+      expect(dual.templateHashes['stacks/reference-pds.yaml']).toMatch(
         /^[0-9a-f]{64}$/,
       )
-      expect(dual.templateHashes['stacks/october-pds.definition.json']).toMatch(
-        /^[0-9a-f]{64}$/,
-      )
+      expect(
+        dual.templateHashes['stacks/reference-pds.definition.json'],
+      ).toMatch(/^[0-9a-f]{64}$/)
     }
 
-    delete process.env.RUNNER_TEST_COMBINED
+    const preparedReport = join(root, 'prepared-report')
+    await expect(
+      runSandbox(
+        {
+          ...options,
+          suite: 'november-interop',
+          reportDirectory: preparedReport,
+        },
+        dependencies,
+      ),
+    ).rejects.toThrow('runs only with --pds-image-digest')
+    const unreadySources = readyNovemberSources()
+    unreadySources.cutoverEvidence.status = 'unfulfilled'
+    await expect(
+      runSandbox(
+        {
+          ...options,
+          suite: 'november-interop',
+          pdsImageDigest: PROBED_DIGEST,
+          reportDirectory: preparedReport,
+        },
+        { ...dependencies, novemberSources: unreadySources },
+      ),
+    ).rejects.toThrow('the November manifest is not ready')
+    expect(existsSync(preparedReport)).toBe(false)
+    await expect(
+      runSandbox(
+        {
+          ...options,
+          suite: 'november-interop',
+          pdsImageDigest: `sha256:${'d'.repeat(64)}`,
+          reportDirectory: preparedReport,
+        },
+        { ...dependencies, novemberSources: referenceSources },
+      ),
+    ).rejects.toThrow('differs from uriProbe.imageDigest')
+    expect(existsSync(preparedReport)).toBe(false)
+    await runSandbox(
+      {
+        ...options,
+        suite: 'november-interop',
+        pdsImageDigest: PROBED_DIGEST,
+        reportDirectory: preparedReport,
+      },
+      {
+        ...dependencies,
+        novemberSources: referenceSources,
+        async buildPds(pin, directory) {
+          return {
+            ...(await dependencies.buildPds()),
+            sourceSha: pin.revision,
+            imageId: `sha256:${'b'.repeat(64)}`,
+          }
+        },
+      },
+    )
+    const prepared = JSON.parse(
+      await readFile(join(preparedReport, 'receipt.json'), 'utf8'),
+    )
+    expect(prepared.suites.map((suite: { id: string }) => suite.id)).toEqual([
+      'baseline',
+      'november-interop',
+    ])
+
+    expect(prepared.templateHashes['stacks/november-webapp.yaml']).toMatch(
+      /^[a-f0-9]{64}$/,
+    )
+    expect(
+      prepared.templateHashes['stacks/november-webapp.definition.json'],
+    ).toMatch(/^[a-f0-9]{64}$/)
+    expect(prepared.novemberInterop).toEqual({
+      outstanding: [],
+      failedGroups: [],
+      evidence: [
+        {
+          id: 'journey-pass',
+          tier: 'pinned-host',
+          observation: 'Read observed',
+          artifact: 'browser',
+        },
+        {
+          id: 'journey-followup',
+          tier: 'pinned-host',
+          observation: 'Feed observed',
+          artifact: 'browser',
+        },
+      ],
+    })
+
+    const incompleteNovember = join(root, 'incomplete-november-report')
+    process.env.RUNNER_TEST_NOVEMBER_FAILURE = '1'
+    await expect(
+      runSandbox(
+        {
+          ...options,
+          suite: 'november-interop',
+          pdsImageDigest: PROBED_DIGEST,
+          reportDirectory: incompleteNovember,
+        },
+        {
+          ...dependencies,
+          novemberSources: referenceSources,
+          async buildPds(pin) {
+            return {
+              ...(await dependencies.buildPds()),
+              sourceSha: pin.revision,
+              imageId: `sha256:${'b'.repeat(64)}`,
+            }
+          },
+        },
+      ),
+    ).rejects.toThrow('November failed')
+    delete process.env.RUNNER_TEST_NOVEMBER_FAILURE
+    expect(await readdir(incompleteNovember)).toEqual(['failure.json'])
+    const incomplete = await readFile(
+      join(incompleteNovember, 'failure.json'),
+      'utf8',
+    )
+    expect(JSON.parse(incomplete)).toMatchObject({
+      failedStep: 'suite:november-interop',
+      pdsServices: {
+        primary: { imageId: `sha256:${'a'.repeat(64)}` },
+        reference: { imageId: `sha256:${'b'.repeat(64)}` },
+      },
+      assertionsReached: { 'november-interop': ['journey-pass'] },
+      novemberInterop: {
+        outstanding: ['journey-followup'],
+        failedGroups: ['feed'],
+        evidence: [
+          {
+            id: 'journey-pass',
+            tier: 'pinned-host',
+            observation: 'Read observed',
+            artifact: 'browser',
+          },
+        ],
+      },
+      cleanup: { status: 'passed' },
+    })
+    expect(incomplete).not.toContain('secret-looking-word')
+
     const actualFs =
       await vi.importActual<typeof import('node:fs/promises')>(
         'node:fs/promises',
@@ -1087,7 +1313,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
             },
             {
               ...dependencies,
-              sourcePins: { ...sourcePins, octoberSpacesPds: octoberPin },
+              novemberSources: referenceSources,
             },
           ),
         ).rejects.toThrow(message)
@@ -1101,7 +1327,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
       expect(failure.completedSteps).toEqual([])
       expect(failure.cleanup.compose.status).toBe('not-needed')
       expect(failure.cleanup.image).toBeUndefined()
-      expect(failure.cleanup.octoberImage.status).toBe('passed')
+      expect(failure.cleanup.referenceImage.status).toBe('passed')
     }
 
     process.env.RUNNER_TEST_FAIL_IMAGE = '1'
@@ -1115,7 +1341,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
         },
         {
           ...dependencies,
-          sourcePins: { ...sourcePins, octoberSpacesPds: octoberPin },
+          novemberSources: referenceSources,
           buildPds: async () => ({
             ...(await dependencies.buildPds()),
             imageId: `sha256:${'c'.repeat(64)}`,
@@ -1126,7 +1352,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
     const imageFailure = JSON.parse(
       await readFile(join(imageFailedReport, 'failure.json'), 'utf8'),
     )
-    expect(imageFailure.cleanup.octoberImage).toEqual({
+    expect(imageFailure.cleanup.referenceImage).toEqual({
       status: 'failed',
       error: 'Cleanup command failed',
       tag: 'stratos-spaces-pds-00000000-0000-0000-0000-000000000000:local',
@@ -1157,26 +1383,60 @@ if (args[0] === 'image' && args[1] === 'rm') {
     })
     delete process.env.RUNNER_TEST_FAIL_CLEANUP
 
+    process.env.RUNNER_TEST_REACHED_FAILURE = '1'
+    const reachedReport = join(root, 'reached-report')
+    await expect(
+      runSandbox({ ...options, reportDirectory: reachedReport }, dependencies),
+    ).rejects.toThrow('Browser failed')
+    const reachedFailure = JSON.parse(
+      await readFile(join(reachedReport, 'failure.json'), 'utf8'),
+    )
+    expect(reachedFailure.failedStep).toBe('suite:baseline')
+    expect(reachedFailure.assertionsReached).toEqual({
+      baseline: ['browser-pass'],
+    })
+    expect(JSON.stringify(reachedFailure)).not.toContain('secret-looking-word')
+    delete process.env.RUNNER_TEST_REACHED_FAILURE
+    process.env.RUNNER_TEST_FAIL_STEP = 'install'
+    const noneReachedReport = join(root, 'none-reached-report')
+    await expect(
+      runSandbox(
+        { ...options, reportDirectory: noneReachedReport },
+        dependencies,
+      ),
+    ).rejects.toThrow('deno task exited 7')
+    expect(
+      JSON.parse(
+        await readFile(join(noneReachedReport, 'failure.json'), 'utf8'),
+      ).assertionsReached,
+    ).toEqual({})
+    delete process.env.RUNNER_TEST_FAIL_STEP
+
     await writeFile(
-      join(candidateRepo, 'test/spaces-alignment/templates/october-pds.yaml'),
+      join(candidateRepo, 'test/spaces-alignment/templates/reference-pds.yaml'),
       'services: {}\n',
     )
     git(candidateRepo, 'add', '.')
-    git(candidateRepo, 'commit', '-qm', 'Remove October PDS image placeholder')
-    const withoutOctoberPlaceholder = git(candidateRepo, 'rev-parse', 'HEAD')
+    git(
+      candidateRepo,
+      'commit',
+      '-qm',
+      'Remove reference PDS image placeholder',
+    )
+    const withoutReferencePlaceholder = git(candidateRepo, 'rev-parse', 'HEAD')
     await writeFile(
       reviewReceipt,
       JSON.stringify({
         ...review,
-        candidateSha: withoutOctoberPlaceholder,
+        candidateSha: withoutReferencePlaceholder,
         reviews: {
           standards: {
             ...review.reviews.standards,
-            reviewedSha: withoutOctoberPlaceholder,
+            reviewedSha: withoutReferencePlaceholder,
           },
           spec: {
             ...review.reviews.spec,
-            reviewedSha: withoutOctoberPlaceholder,
+            reviewedSha: withoutReferencePlaceholder,
           },
         },
       }),
@@ -1186,14 +1446,14 @@ if (args[0] === 'image' && args[1] === 'rm') {
         {
           ...options,
           suite: 'standard-credential-transport',
-          reportDirectory: join(root, 'missing-october-image'),
+          reportDirectory: join(root, 'missing-reference-image'),
         },
         {
           ...dependencies,
-          sourcePins: { ...sourcePins, octoberSpacesPds: octoberPin },
+          novemberSources: referenceSources,
         },
       ),
-    ).rejects.toThrow('October PDS image placeholder is missing')
+    ).rejects.toThrow('Reference PDS image placeholder is missing')
     expect(await temporaryAiaBSources()).toEqual(aiabSources)
   })
 })

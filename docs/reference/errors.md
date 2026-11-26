@@ -47,7 +47,7 @@ the proof. OAuth client libraries do this for you.
 | `ServiceMismatch`          | 400    | The boundary belongs to a different Stratos service                  |
 | `ForbiddenBoundary`        | 400    | The caller does not hold the boundary                                |
 | `InvalidRecord`            | 400    | The record does not match its lexicon                                |
-| `InvalidCollection`        | 400    | The collection is not a `zone.stratos.*` collection                  |
+| `InvalidCollection`        | 400    | The collection is not allowed on this procedure                      |
 | `PdsCustodyWriteForbidden` | 400    | The user's records are kept on their own PDS. Write there instead.   |
 | `ServiceWriteForbidden`    | 400    | The caller is a service identity. Services can read but never write. |
 | `InvalidSwap`              | 400    | A `swapCommit` or `swapRecord` condition did not match               |
@@ -57,6 +57,55 @@ the proof. OAuth client libraries do this for you.
 sent the write to the wrong place. Resolve the repository target from the
 enrollment's custody first. See
 [Your First Post](/guide/first-post#_3-choose-the-repository-host).
+
+## Writing into a boundary
+
+The `zone.stratos.repo.createRecord`, `putRecord`, `deleteRecord` and
+`applyWrites` procedures take the boundary as a parameter. They return `NotEnrolled`,
+`ServiceWriteForbidden`, `PdsCustodyWriteForbidden`, `ForbiddenBoundary`,
+`InvalidDomain`, `ServiceMismatch`, `InvalidCollection` and `RateLimitExceeded`
+as in the tables above. They do not return `InvalidDomainCount` or the swap
+errors. They allow posts, likes and reposts. `com.atproto.repo.*` allows only `zone.stratos.*`
+collections and answers `InvalidCollection` for a like or repost.
+
+| Error                  | Status | Meaning                                                               | What the client does                                                  |
+| ---------------------- | ------ | --------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `BoundaryMismatch`     | 400    | The record body claims a boundary other than the one in the request   | Leave the `boundary` field out of the record, or make it match        |
+| `BoundaryNotFound`     | 400    | The caller holds the boundary, but it is absent or inactive           | Choose a boundary from the user's enrollment                          |
+| `RecordAlreadyExists`  | 400    | The key is taken, or the member already likes or reposts that post    | Use another `rkey`, call `putRecord`, or delete the existing record   |
+| `RecordNotFound`       | 400    | An update or delete in `applyWrites` named a record that is not there | Refresh the record list, then send the batch again                    |
+| `PayloadTooLarge`      | 413    | The body or the commit's sync frame is over its limit                 | Send fewer writes in each `applyWrites` call                          |
+| `ScopeUpgradeRequired` | 400    | The member's grant predates the collection of a like or repost        | Send the member through OAuth authorization again. Do not retry first |
+| `InvalidRecord`        | 400    | For a like or repost: `The subject must be a post in this boundary`   | Use the `uri` and `cid` of a post in the same boundary, as served     |
+| `InvalidRecord`        | 400    | For a reply: the parent cannot be read in this boundary               | Reply in the boundary of a parent that the member can read            |
+
+The reply message starts with `Reply boundaries must be a subset of the
+parent's boundaries` and names the reply's boundary. It is the same for every
+parent the reply cannot have. A parent in another boundary, a parent that
+Stratos holds but cannot find, and a parent that is taken down all return it,
+byte for byte. The error does not tell them apart. Stratos reads the parent's
+boundary from its store at the time of the write, so a reply to a parent that
+has just moved is refused at once. The older `com.atproto.repo` methods do not
+check a parent that is missing or taken down.
+
+The subject message is the same for every wrong subject, whatever the
+`validate` value. A subject that is not a `{ uri, cid }` reference, a post that
+Stratos holds but cannot find, a post in another boundary, a URI that is not
+canonical and a wrong CID all return it. The error does not tell them apart.
+
+For a post by a member who hosts their own repo, Stratos does not hold the
+record. It checks neither that the record exists nor its CID. `subject.cid`
+must still be a valid CID. Stratos checks that the author is an
+active member of the boundary who hosts their own repo, and that the URI is
+well formed for that boundary.
+
+`ScopeUpgradeRequired` is returned only when the member's stored grant has a
+space grant for this service that lacks the collection. See
+[Differences from the upstream procedures](/reference/api#differences-from-the-upstream-procedures).
+
+`RecordNotFound` also appears when reading. There it also covers a record that
+the caller may not read, a record that is taken down, and every record of a
+taken-down account.
 
 ## Reading records
 
@@ -84,15 +133,15 @@ the error name.
 
 ## Space credentials
 
-| Error                 | Status | Meaning                                                                                  |
-| --------------------- | ------ | ---------------------------------------------------------------------------------------- |
-| `AuthRequired`        | 400    | No session and no delegation token                                                       |
-| `InvalidToken`        | 400    | The delegation token or client attestation did not verify, or it names another space     |
-| `ProofRequired`       | 400    | No key proof to bind the credential to                                                   |
-| `UnknownSpace`        | 400    | The space URI is malformed or not a space of this service, or the boundary is not active |
-| `NotEnrolled`         | 400    | No active enrollment that holds the space's boundary                                     |
-| `AttestationRequired` | 400    | The space has an app allow-list and no attestation was presented                         |
-| `ClientNotAllowed`    | 400    | The attested `client_id` is not on the allow-list                                        |
+| Error                 | Status | Meaning                                                                                                                                     |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AuthRequired`        | 400    | No session and no delegation token                                                                                                          |
+| `InvalidToken`        | 400    | The delegation token or client attestation did not verify, or it names another space                                                        |
+| `ProofRequired`       | 400    | No key proof to bind the credential to                                                                                                      |
+| `UnknownSpace`        | 400    | The space URI is malformed, or not a space of this service, or the boundary is not active. A space URI in the earlier spelling is malformed |
+| `NotEnrolled`         | 400    | No active enrollment that holds the space's boundary                                                                                        |
+| `AttestationRequired` | 400    | The space has an app allow-list and no attestation was presented                                                                            |
+| `ClientNotAllowed`    | 400    | The attested `client_id` is not on the allow-list                                                                                           |
 
 These come from `zone.stratos.space.getSpaceCredential`. `UnknownSpace` is
 also the answer when the boundary changes while the request is authorized.
@@ -100,6 +149,26 @@ The space read endpoints answer `AuthRequired` with HTTP 401 when the caller
 is not admitted to the space.
 
 See [Permissioned Spaces](/architecture/permissioned-spaces#credential).
+
+## Repo update notices
+
+A member's PDS sends `com.atproto.space.notifyRepoUpdate` after a write to a
+space repo. Stratos acknowledges a valid notice with an empty 200 and stores
+nothing.
+
+| Error                    | Status | Meaning                                                                                                                                                                                                                                                                       |
+| ------------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AuthenticationRequired` | 401    | No service JWT, or one with another `lxm`, another audience, an expired or non-numeric `exp`, the type of an access token, refresh token or DPoP proof, or a signature not made by the issuer's `#atproto` key                                                                |
+| `RateLimitExceeded`      | 429    | The writer sent more than 1,500 notices in an hour or 10,000 in a day. Back off, then retry.                                                                                                                                                                                  |
+| `InvalidRequest`         | 400    | The body is not JSON, or `repo` is not a DID, `repoRev` is not a TID, or `data` is not bytes                                                                                                                                                                                  |
+| `UnsupportedMediaType`   | 415    | The body is in a charset that is not a UTF encoding, or in a content encoding the service does not read                                                                                                                                                                       |
+| `PayloadTooLarge`        | 413    | The body is over 100 kB                                                                                                                                                                                                                                                       |
+| `Forbidden`              | 403    | The token's `iss` is not `repo`; or `repo` is not an active `pds`-custody member, other than a service, who holds the space's boundary; or that boundary is not active. Every case but the first has one message, so it does not tell an outsider whether the boundary exists |
+| `SpaceNotFound`          | 400    | The space is malformed, belongs to another authority or has another type. A space URI in the earlier spelling is malformed                                                                                                                                                    |
+| `FutureRev`              | 400    | `repoRev` is more than five minutes ahead of the service clock. Only a writer of the space gets this answer                                                                                                                                                                   |
+
+Every other upstream `com.atproto.space.*` method, such as `listWriters`,
+answers `501 MethodNotImplemented`.
 
 ## Enrollment
 
@@ -115,6 +184,18 @@ responds on the Stratos origin with a JSON error:
 
 A successful enrollment redirects back to your app with
 `?stratos_enrolled=true`.
+
+## Moderation labels
+
+`zone.stratos.moderation.createLabel` returns these errors to a moderation
+service:
+
+| Error                    | Status | Meaning                                                                                                   |
+| ------------------------ | ------ | --------------------------------------------------------------------------------------------------------- |
+| `SubjectNotFound`        | 400    | The subject record or account does not exist on this service                                              |
+| `SubjectCidNotSupported` | 400    | The record subject carries a `cid`. A takedown applies to every version of a record. Send it without one. |
+
+A malformed subject, value or space returns `InvalidRequest`.
 
 ## Sync
 

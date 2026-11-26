@@ -57,7 +57,7 @@ async function main() {
   const domain = process.env.SANDBOX_DOMAIN
   assert.match(domain ?? '', /^[a-z0-9.-]+$/)
   const issuerDid = `did:web:stratos-e2e.${domain}`
-  const spaceUri = `at://${issuerDid}/space/zone.stratos.space.feed/general`
+  const spaceUri = `at:space/${issuerDid}/zone.stratos.space.feed/general`
   const boundary = `${issuerDid}/general`
   const url = new URL(
     '/xrpc/zone.stratos.space.listRepos',

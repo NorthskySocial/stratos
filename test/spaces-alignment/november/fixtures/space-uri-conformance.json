@@ -1,0 +1,470 @@
+{
+  "header": {
+    "classification": "target-uri-conformance",
+    "oracle": {
+      "note": "Written by hand from the at:space/ grammar and the identifier rules of @atproto/syntax; no code under test produced these values."
+    },
+    "generator": "hand-derived",
+    "upstreamVerified": false,
+    "reproducible": true
+  },
+  "spaces": [
+    {
+      "name": "a space",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "crew"
+    },
+    {
+      "name": "a did:web authority with an encoded port",
+      "uri": "at:space/did:web:localhost%3A3100/zone.stratos.space.feed/nerv",
+      "authority": "did:web:localhost%3A3100",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "nerv"
+    },
+    {
+      "name": "an authority did with several colons",
+      "uri": "at:space/did:web:nerv.example:tokyo3:magi/zone.stratos.space.feed/cage",
+      "authority": "did:web:nerv.example:tokyo3:magi",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "cage"
+    },
+    {
+      "name": "a one byte skey",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/k",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "k"
+    },
+    {
+      "name": "a 512 byte skey",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "name": "a skey with a dot",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/ikari.shinji",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "ikari.shinji"
+    },
+    {
+      "name": "a skey with an underscore",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/ayanami_rei",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "ayanami_rei"
+    },
+    {
+      "name": "a skey with a colon",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/tokyo:3",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "tokyo:3"
+    },
+    {
+      "name": "a skey with a tilde",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/asuka~langley",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "asuka~langley"
+    },
+    {
+      "name": "a skey with a hyphen",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/misato-katsuragi",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "misato-katsuragi"
+    },
+    {
+      "name": "an upper-case nsid label",
+      "uri": "at:space/did:plc:spikespiegel/zone.Stratos.space.feed/swordfish",
+      "authority": "did:plc:spikespiegel",
+      "spaceType": "zone.Stratos.space.feed",
+      "skey": "swordfish"
+    }
+  ],
+  "records": [
+    {
+      "name": "a record whose author differs from the authority",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "crew",
+      "author": "did:plc:fayevalentine",
+      "collection": "zone.stratos.feed.post",
+      "rkey": "swordfish"
+    },
+    {
+      "name": "a record whose author is the authority",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:web:bebop.example/zone.stratos.feed.post/hammerhead",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "crew",
+      "author": "did:web:bebop.example",
+      "collection": "zone.stratos.feed.post",
+      "rkey": "hammerhead"
+    },
+    {
+      "name": "a record with an encoded port in authority and author",
+      "uri": "at:space/did:web:localhost%3A3100/zone.stratos.space.feed/nerv/did:web:localhost%3A3101/zone.stratos.feed.post/eva01",
+      "authority": "did:web:localhost%3A3100",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "nerv",
+      "author": "did:web:localhost%3A3101",
+      "collection": "zone.stratos.feed.post",
+      "rkey": "eva01"
+    },
+    {
+      "name": "a record with several colons in authority and author",
+      "uri": "at:space/did:web:nerv.example:tokyo3:magi/zone.stratos.space.feed/cage/did:web:seele.example:keel:lorenz/zone.stratos.feed.post/lilith",
+      "authority": "did:web:nerv.example:tokyo3:magi",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "cage",
+      "author": "did:web:seele.example:keel:lorenz",
+      "collection": "zone.stratos.feed.post",
+      "rkey": "lilith"
+    },
+    {
+      "name": "a one byte rkey",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/f",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "crew",
+      "author": "did:plc:fayevalentine",
+      "collection": "zone.stratos.feed.post",
+      "rkey": "f"
+    },
+    {
+      "name": "a 512 byte rkey",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "crew",
+      "author": "did:plc:fayevalentine",
+      "collection": "zone.stratos.feed.post",
+      "rkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "name": "an rkey with every allowed punctuation mark",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/ed.ein_jet:vicious~julia-a",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "crew",
+      "author": "did:plc:fayevalentine",
+      "collection": "zone.stratos.feed.post",
+      "rkey": "ed.ein_jet:vicious~julia-a"
+    },
+    {
+      "name": "a record in a collection whose middle segment starts with a digit",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/com.123.post/swordfish",
+      "authority": "did:web:bebop.example",
+      "spaceType": "zone.stratos.space.feed",
+      "skey": "crew",
+      "author": "did:plc:fayevalentine",
+      "collection": "com.123.post",
+      "rkey": "swordfish"
+    }
+  ],
+  "repoRecords": [
+    {
+      "name": "a custody post",
+      "uri": "at://did:plc:fayevalentine/zone.stratos.feed.post/swordfish",
+      "author": "did:plc:fayevalentine",
+      "collection": "zone.stratos.feed.post",
+      "rkey": "swordfish"
+    },
+    {
+      "name": "a custody record on an encoded port did",
+      "uri": "at://did:web:localhost%3A3100/app.bsky.feed.post/3kbebop",
+      "author": "did:web:localhost%3A3100",
+      "collection": "app.bsky.feed.post",
+      "rkey": "3kbebop"
+    },
+    {
+      "name": "a custody like",
+      "uri": "at://did:plc:spikespiegel/zone.stratos.feed.like/ed",
+      "author": "did:plc:spikespiegel",
+      "collection": "zone.stratos.feed.like",
+      "rkey": "ed"
+    },
+    {
+      "name": "a custody record in a collection whose middle segment starts with a digit",
+      "uri": "at://did:plc:x/com.123.post/r",
+      "author": "did:plc:x",
+      "collection": "com.123.post",
+      "rkey": "r"
+    }
+  ],
+  "boundaries": [
+    {
+      "name": "a boundary on a did:web service",
+      "boundary": "did:web:bebop.example/crew",
+      "spaceType": "zone.stratos.space.feed",
+      "uri": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew"
+    },
+    {
+      "name": "a boundary on an encoded port service",
+      "boundary": "did:web:localhost%3A3100/nerv",
+      "spaceType": "zone.stratos.space.feed",
+      "uri": "at:space/did:web:localhost%3A3100/zone.stratos.space.feed/nerv"
+    },
+    {
+      "name": "a boundary whose domain holds punctuation",
+      "boundary": "did:plc:spikespiegel/swordfish.ii_red:tail",
+      "spaceType": "zone.stratos.space.chat",
+      "uri": "at:space/did:plc:spikespiegel/zone.stratos.space.chat/swordfish.ii_red:tail"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "the old spelling of a space",
+      "input": "at://did:web:bebop.example/space/zone.stratos.space.feed/crew",
+      "as": "both",
+      "legacy": true
+    },
+    {
+      "name": "the old spelling of a record",
+      "input": "at://did:web:bebop.example/space/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish",
+      "as": "both",
+      "legacy": true
+    },
+    {
+      "name": "a space marker right after the scheme",
+      "input": "at://space/did:web:bebop.example/zone.stratos.space.feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a record with a space marker right after the scheme",
+      "input": "at://space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "an empty authority",
+      "input": "at:space//zone.stratos.space.feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "an empty skey",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "an empty rkey",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "two parts",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "four parts",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "five parts",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "seven parts",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish/extra",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a record is not a space",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish",
+      "as": "space",
+      "legacy": false
+    },
+    {
+      "name": "a space is not a record",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew",
+      "as": "record",
+      "legacy": false
+    },
+    {
+      "name": "a space with a trailing slash",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a record with a trailing slash",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish/",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a space with a query suffix",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew?x",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a record with a query suffix",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish?x",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a space with a fragment suffix",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew#x",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a record with a fragment suffix",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish#x",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a space with a leading space",
+      "input": " at:space/did:web:bebop.example/zone.stratos.space.feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a record with a trailing space",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish ",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "an upper-case scheme",
+      "input": "AT:SPACE/did:web:bebop.example/zone.stratos.space.feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a marker without its slash",
+      "input": "at:spacedid:web:bebop.example/zone.stratos.space.feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a public marker with a space shape",
+      "input": "at:public/did:web:bebop.example/zone.stratos.space.feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a skey that is a single dot",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/.",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a skey that is two dots",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/..",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a 513 byte skey",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a skey with an encoded slash",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew%2Fx",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a skey with a non-ascii letter",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/bebop-é",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "an authority with a digit in the method",
+      "input": "at:space/did:plc1:abc/zone.stratos.space.feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "an authority ending in a colon",
+      "input": "at:space/did:plc:abc:/zone.stratos.space.feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "an authority ending in a percent sign",
+      "input": "at:space/did:plc:abc%/zone.stratos.space.feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "an authority with a bad escape",
+      "input": "at:space/did:plc:a%zz/zone.stratos.space.feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "an author with a bad escape",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:a%zz/zone.stratos.feed.post/swordfish",
+      "as": "record",
+      "legacy": false
+    },
+    {
+      "name": "a space type with two labels",
+      "input": "at:space/did:web:bebop.example/zone.stratos/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a space type with an empty label",
+      "input": "at:space/did:web:bebop.example/zone..feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a space type with a hyphen in the last label",
+      "input": "at:space/did:web:bebop.example/zone.stratos.fe-ed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a space type whose last label starts with a digit",
+      "input": "at:space/did:web:bebop.example/zone.stratos.1feed/crew",
+      "as": "both",
+      "legacy": false
+    },
+    {
+      "name": "a collection with two labels",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos/swordfish",
+      "as": "record",
+      "legacy": false
+    },
+    {
+      "name": "an rkey that is two dots",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/..",
+      "as": "record",
+      "legacy": false
+    },
+    {
+      "name": "a collection whose first segment starts with a digit",
+      "input": "at:space/did:web:bebop.example/zone.stratos.space.feed/crew/did:plc:fayevalentine/1com.example.post/swordfish",
+      "as": "record",
+      "legacy": false
+    }
+  ]
+}

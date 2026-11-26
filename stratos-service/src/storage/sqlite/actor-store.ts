@@ -108,6 +108,22 @@ class SqliteActorRecordReader implements IActorRecordReader {
     return this.reader.getRecordTakedownStatus(uri)
   }
 
+  getTakedownStates(uris: string[]) {
+    return this.reader.getTakedownStates(uris)
+  }
+
+  getRecordBoundaries(uri: string | AtUri) {
+    return this.reader.getRecordBoundaries(uri)
+  }
+
+  getVisibleRecordWithBoundaries(uri: string | AtUri) {
+    return this.reader.getVisibleRecordWithBoundaries(uri)
+  }
+
+  getVisibleRecordsWithBoundaries(uris: readonly (string | AtUri)[]) {
+    return this.reader.getVisibleRecordsWithBoundaries(uris)
+  }
+
   /**
    * Get the current CID of a record by URI
    * @param uri - URI of the record
@@ -187,6 +203,30 @@ class SqliteActorRecordTransactor
       record,
       action,
       repoRev ?? '',
+      timestamp,
+    )
+  }
+
+  /**
+   * Index a record under an already authorized boundary. The boundary comes
+   * from the caller, never from the record body.
+   */
+  indexRecordInBoundary(
+    uri: string | AtUri,
+    cid: Cid,
+    record: Record<string, unknown>,
+    boundary: string,
+    action: 'create' | 'update',
+    repoRev: string,
+    timestamp?: string,
+  ) {
+    return this.transactor.indexRecordInBoundary(
+      uri,
+      cid,
+      record,
+      boundary,
+      action,
+      repoRev,
       timestamp,
     )
   }

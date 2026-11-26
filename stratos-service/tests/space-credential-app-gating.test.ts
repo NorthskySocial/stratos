@@ -264,6 +264,49 @@ describe('getSpaceCredential — app-axis gating', () => {
     expect(replay.error?.name).toBe('AttestationRequired')
   })
 
+  it('allowList space: the authority host audience mints, the retired audience → AttestationRequired', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const client = await makeClient()
+    const ctx = createMockCtx({
+      signingKey,
+      clients: [client],
+      appAccessEntries: [
+        {
+          space: SPACE_SKEY,
+          access: 'allowList',
+          clientIds: [client.clientId],
+        },
+      ],
+    })
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as any, ctx)
+
+    const retired = await mintAttestation({
+      client,
+      serviceDid: SERVICE_DID,
+      aud: `${SERVICE_DID}#atproto_space_host`,
+    })
+    const refused = await invoke(
+      server,
+      { space: SPACE_URI, clientAttestation: retired },
+      USER_DID,
+    )
+    expect(refused.error?.name).toBe('AttestationRequired')
+
+    const current = await mintAttestation({
+      client,
+      serviceDid: SERVICE_DID,
+      aud: `${SERVICE_DID}#atproto_pds`,
+    })
+    const minted = await invoke(
+      server,
+      { space: SPACE_URI, clientAttestation: current },
+      USER_DID,
+    )
+    expect(minted.error).toBeUndefined()
+    expect(minted.body?.credential).toBeTruthy()
+  })
+
   it('unlisted client with a valid attestation → ClientNotAllowed', async () => {
     const signingKey = await Secp256k1Keypair.create()
     const listed = await makeClient()

@@ -29,7 +29,7 @@ boundary the viewer is not enrolled in.
 | `zone.stratos.feedgen.getBlob`      | query (authenticated)   | An attachment of a post the viewer may read  |
 | `zone.stratos.feedgen.describeFeed` | query (unauthenticated) | The configured feed list                     |
 
-The spec-shaped `zone.stratos.space.getRecord` answers one record for one
+The Stratos `zone.stratos.space.getRecord` answers one record for one
 caller. It cannot build a timeline. The feed generator closes that gap. See
 [Permissioned Spaces](./permissioned-spaces.md) for the access model it
 enforces.
@@ -122,12 +122,25 @@ generator goes and asks. Every 30 seconds, for each configured boundary, it:
 2. asks Stratos who the members are (`zone.stratos.space.listRepos`) and
    where each PDS-custody member's repository is hosted;
 3. pages `com.atproto.space.listRepoOps` on each member's PDS with that
-   credential;
-4. holds the changes in a staging area until the final commit signature
-   verifies against the author's own key;
-5. promotes the staged changes into the projection in one step.
+   credential, starting after the last verified revision of that member's
+   repo. Every response carries a MAC that only the member's PDS and the feed
+   generator can compute;
+4. applies the ops of all pages in memory to the member's verified state;
+5. writes the result to the projection in one transaction, only when the set
+   hash it computes equals the `data` of the last page's commit.
 
-Two rules make this safe.
+Nothing is staged. If a check fails, the stored state stays as it was. When
+incremental sync cannot work, the feed generator reads the whole repo as an
+archive (`com.atproto.space.getRepo`) and replaces the member's state the same
+way. The operator guide lists when that happens and every limit. See
+[Verified sync of PDS members](/operator/feedgen-ng#verified-sync-of-pds-members).
+
+Three rules make this safe.
+
+**The state is proven, not trusted.** The set hash covers every record path
+and its CID. The feed generator does not check the account signature on the
+commit. The MAC authenticates the host's answer, and the hash proves that the
+ops give the state the commit names.
 
 **The boundary comes from Stratos, never from the post.** Any account can
 write a record into a Stratos-owned space on its own PDS and claim any
@@ -154,14 +167,14 @@ a valid boundary is deleted from the projection.
 
 Every hop is authenticated, and each direction uses a different mechanism.
 
-| Direction                             | Mechanism                                                                  | Verified by                                 |
-| ------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------- |
-| Client → PDS                          | OAuth + DPoP                                                               | The PDS                                     |
-| PDS → feed generator                  | Service-auth JWT: `iss` = user DID, `aud` = feedgen DID, `lxm` = method    | Feed generator, via the user's DID document |
-| Feed generator → Stratos (HTTP)       | Service-auth JWT: `iss` = feedgen DID, `aud` = Stratos DID, `lxm` = method | Stratos                                     |
-| Feed generator → Stratos (WebSocket)  | The same JWT shape, `lxm` = `zone.stratos.sync.subscribeRecords`           | Stratos, against a service enrollment       |
-| Feed generator → Stratos (credential) | A single-use delegation token and an HTTP signature                        | Stratos `getSpaceCredential`                |
-| Feed generator → member's PDS         | Space credential as `Authorization: Atproto-Space`, with an HTTP signature | The member's PDS                            |
+| Direction                             | Mechanism                                                                             | Verified by                                 |
+| ------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Client → PDS                          | OAuth + DPoP                                                                          | The PDS                                     |
+| PDS → feed generator                  | Service-auth JWT: `iss` = user DID, `aud` = feedgen DID, `lxm` = method               | Feed generator, via the user's DID document |
+| Feed generator → Stratos (HTTP)       | Service-auth JWT: `iss` = feedgen DID, `aud` = Stratos DID, `lxm` = method            | Stratos                                     |
+| Feed generator → Stratos (WebSocket)  | The same JWT shape, `lxm` = `zone.stratos.sync.subscribeRecords`                      | Stratos, against a service enrollment       |
+| Feed generator → Stratos (credential) | A single-use delegation token and an HTTP signature                                   | Stratos `getSpaceCredential`                |
+| Feed generator → member's PDS         | Space credential as `Authorization: Atproto-Space-Credential`, with an HTTP signature | The member's PDS                            |
 
 The last two rows are the
 [HTTP-signature credential profile](./permissioned-spaces.md#two-ways-to-bind-a-credential).
@@ -177,16 +190,17 @@ DID as a service enrollment before it accepts the sync stream.
 The feed generator's copy is a projection, not a system of record. It can be
 thrown away and rebuilt from Stratos and the members' PDSs.
 
-| Concern                         | Choice                                          |
-| ------------------------------- | ----------------------------------------------- |
-| Posts, boundaries, sync cursors | SQLCipher (encrypted SQLite)                    |
-| Staged PDS changes              | The same database, with its own reserved budget |
-| Attachments                     | In-memory cache only; never written to disk     |
-| Viewer boundaries               | In-memory, five-minute lifetime                 |
-| Feed list                       | A static file or an environment variable        |
+| Concern                         | Choice                                                                                    |
+| ------------------------------- | ----------------------------------------------------------------------------------------- |
+| Posts, boundaries, sync cursors | SQLCipher (encrypted SQLite)                                                              |
+| Verified state of PDS members   | The same database: a set-hash state per member and space, and the CID at each record path |
+| Attachments                     | In-memory cache only; never written to disk                                               |
+| Viewer boundaries               | In-memory, five-minute lifetime                                                           |
+| Feed list                       | A static file or an environment variable                                                  |
 
 The projection is bounded by age and by size. A compactor evicts the oldest
-posts first. A feed therefore shows recent history, not an archive.
+posts first and keeps part of the size budget free for the writes of verified
+PDS state. A feed therefore shows recent history, not an archive.
 
 There are two storage profiles. The default, `ephemeral`, keeps everything
 in memory and forgets it on restart. The `encrypted-volume` profile persists
@@ -207,7 +221,8 @@ member's PDS appears in the feed without its attachments. See
 ## What it does not do
 
 - It does not rank, recommend, or mix boundaries into one feed.
-- It does not attach moderation labels.
+- It does not attach moderation labels to posts. It applies takedown labels
+  from the authority's label log to its projection.
 - It does not resolve handles. A post's author carries a DID only.
 - It does not serve public posts. Clients merge public and private timelines
   themselves.

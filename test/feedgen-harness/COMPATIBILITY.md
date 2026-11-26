@@ -78,6 +78,53 @@ not provide SQLCipher at-rest encryption. A Rust projection must use independent
 encrypted state and must never share a writer or database with the TypeScript
 projection.
 
+The Rust Feedgen takes a Stratos-custody post's boundary from the operation
+`boundary` the authority sets, and uses the record body only for operations
+recorded before the authority set it. When an operation carries a boundary the
+body boundary is not read. The result is still limited to the boundaries the
+actor currently holds.
+
+The Rust Feedgen counts likes and reposts of the posts it serves. Every post
+in a feed response carries `likeCount`, `repostCount` and `viewer`. The counts
+are 0 when nothing counts, and `viewer` is `{}` when the viewer has neither
+liked nor reposted the post. `viewer.like` and `viewer.repost` hold the URIs of
+the viewer's own records and nothing else. A like or repost counts only when
+its boundary is the feed's boundary and its subject is exactly the post's URI.
+One actor counts once per post, however many likes it made. An expired like or
+repost does not count. A like or repost can arrive before its post and counts
+once the post arrives. A like or repost never makes a post visible to a viewer
+who cannot already read it, and the response never names another actor or
+another actor's record URI.
+
+## Moderation labels
+
+The Rust Feedgen applies Stratos moderation labels. It polls the authority's
+`zone.stratos.moderation.queryLabels` every 10 seconds, using a service-auth
+JWT it mints itself.
+
+Feeds stay closed until the label cursor has caught up with the authority.
+Caught up means the authority returned the cursor the Feedgen already held. A
+Feedgen whose `queryLabels` calls are refused, for example because its DID has
+no service enrollment covering its boundaries, never opens its feeds.
+
+The cursor records the served boundaries that the Feedgen's enrollment covers.
+When a boundary joins that set, the Feedgen reads the label log again from the
+start, and feeds stay closed until that read catches up.
+
+Reads close again once five poll intervals, which is 50 seconds, pass without
+the cursor catching up. A separate task enforces this, so it holds while a poll
+is still running, when polls keep stopping at their page limit, and when the
+polling task has died. A takedown is therefore served for at most 50 seconds
+after the authority records it. Reads reopen without a restart once the log is
+reachable and the cursor has caught up again. A page that advances the cursor
+but does not reach the head does not reopen them.
+
+A taken-down account loses its posts, its sync position and its viewer
+authorization, and its sync worker stops. A replayed `enroll` or a staged space
+page does not re-admit it while the takedown stands. A taken-down record is
+removed and its cached blobs are evicted. A later update, replay or staged page
+does not re-admit it.
+
 ## Known legacy deviations
 
 The legacy implementation normalizes a malformed cursor to the first page and
@@ -89,3 +136,15 @@ metadata is unavailable. Legacy TypeScript can race a later authorization
 mutation; Rust closes that race before release. The Rust durable projection
 adds encrypted-at-rest storage before it is eligible to replace the legacy
 durable path.
+
+The deprecated TypeScript Feedgen does not apply labels. It never reads the
+label log, so a takedown has no effect on what it serves.
+
+The deprecated TypeScript Feedgen reads only the record body's boundary for a
+Stratos-custody post and ignores the operation `boundary`. A post written
+without a body boundary does not appear after a rollback to it.
+
+The deprecated TypeScript Feedgen has no likes or reposts. It emits none of
+`likeCount`, `repostCount` and `viewer`. Its copy of the `getFeed` lexicon
+lists these three fields as optional so that it stays identical to the
+lexicon, but it never emits them.

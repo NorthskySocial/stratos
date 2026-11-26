@@ -1,0 +1,71 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.moderation.defs",
+  "defs": {
+    "label": {
+      "type": "object",
+      "description": "A moderation label applied by an allowlisted moderation service to a record or an account hosted by this Stratos service.",
+      "required": ["seq", "subject", "val", "createdAt"],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "description": "Position of this label in the service's label sequence."
+        },
+        "subject": {
+          "type": "union",
+          "refs": ["#recordSubject", "#accountSubject"],
+          "description": "What the label applies to."
+        },
+        "val": {
+          "type": "string",
+          "maxLength": 128,
+          "knownValues": ["!takedown"],
+          "description": "The label value. The service enforces which values it accepts."
+        },
+        "neg": {
+          "type": "boolean",
+          "description": "If true, this label negates (removes) a prior label with the same subject and value. Absent means false."
+        },
+        "ref": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Optional moderation-service reference for this action, such as a report or case identifier."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "When the label was created."
+        }
+      }
+    },
+    "recordSubject": {
+      "type": "object",
+      "description": "A record in this service's storage.",
+      "required": ["uri"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "The record's URI, either at://{did}/{collection}/{rkey} or the space form at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey}. Declared as a plain string because the at-uri format does not accept the space form."
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid",
+          "description": "Not accepted yet. A takedown applies to every version of a record, so createLabel refuses a subject with a cid as SubjectCidNotSupported. A label returned by queryLabels can still carry one."
+        }
+      }
+    },
+    "accountSubject": {
+      "type": "object",
+      "description": "An account hosted by this service.",
+      "required": ["did"],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "The DID of the account."
+        }
+      }
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { ownValue } from './dictionary'
 import type { RoomAccessState, RoomCatalogEntry } from './types'
 
 export function defaultRoomState(room: RoomCatalogEntry): RoomAccessState {
@@ -8,5 +9,5 @@ export function stateForRoom(
   room: RoomCatalogEntry,
   states: Readonly<Record<string, RoomAccessState>>,
 ): RoomAccessState {
-  return states[room.id] ?? defaultRoomState(room)
+  return ownValue(states, room.id) ?? defaultRoomState(room)
 }

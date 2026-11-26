@@ -3,16 +3,32 @@ import { InvalidRequestError } from '@atproto/xrpc-server'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import {
   assertBoundaryMatchesService,
+  AT_SCHEME,
   BoundaryServiceMismatchError,
+  buildRecordRules,
+  findRecordRule,
+  isEligibleSubject,
+  isSyntacticDid,
   isValidSkey,
+  parseCanonicalRepoUri,
   parseRecordUri,
   parseQualifiedBoundary,
   qualifyBoundary,
+  type RecordRule,
+  type RecordRuleInput,
+  type StratosConfig,
   StratosValidationError,
   StratosValidator,
+  SUBJECT_ERROR_MESSAGE,
 } from '@northskysocial/stratos-core'
 import { MissingBlockError } from '@atcute/mst'
 import type { AppContext } from '../../context.js'
+import {
+  HOSTED_SPACE_TYPE,
+  SPACE_TYPE_REGISTRY,
+} from '../../shared/space-type-registry.js'
+import { isWellFormedStrongRef } from './lexicon-validation.js'
+import { resolveReferencedRecord } from './references.js'
 
 // Cache the boundaries in case a post gets _really_ popular.
 // Exported for tests: they clear the cache and check its insertion order.
@@ -23,24 +39,39 @@ export const parentBoundaryCache = new Map<
 const PARENT_BOUNDARY_TTL_MS = 60_000
 export const PARENT_BOUNDARY_CACHE_MAX = 1000
 
-/**
- * Validates that the caller has permission to write domains in the given collection.
- * @param ctx - Application context
- * @param callerDid - DID of the caller
- * @param collection - Collection name
- * @param record - Record data
- * @throws InvalidRequestError if the caller is not authorized to write domains
- */
-export async function assertCallerCanWriteDomains(
-  ctx: AppContext,
-  callerDid: string,
-  collection: string,
-  record: unknown,
-): Promise<void> {
-  if (!collection.startsWith('zone.stratos.')) {
-    return
-  }
+const POST_COLLECTION = 'zone.stratos.feed.post'
 
+const recordRulesByConfig = new WeakMap<
+  StratosConfig,
+  ReadonlyMap<string, RecordRule>
+>()
+
+/** The record rules of one service configuration, built the first time they are asked for. */
+export function recordRulesFor(
+  config: StratosConfig,
+): ReadonlyMap<string, RecordRule> {
+  let rules = recordRulesByConfig.get(config)
+  if (!rules) {
+    rules = buildRecordRules(config)
+    recordRulesByConfig.set(config, rules)
+  }
+  return rules
+}
+
+export function assertCollectionInHostedSpaceType(collection: string): void {
+  if (!SPACE_TYPE_REGISTRY.allowsCollection(HOSTED_SPACE_TYPE, collection)) {
+    throw new InvalidRequestError(
+      `Collection ${collection} is not allowed in space type ${HOSTED_SPACE_TYPE}`,
+      'InvalidCollection',
+    )
+  }
+}
+
+/**
+ * Reads the one boundary a record claims.
+ * @throws InvalidRequestError if the record does not claim exactly one boundary
+ */
+export function extractRecordBoundary(record: unknown): string {
   const requestedDomains = StratosValidator.extractBoundaryDomains(
     record as Record<string, unknown>,
   )
@@ -53,74 +84,319 @@ export async function assertCallerCanWriteDomains(
       'InvalidDomainCount',
     )
   }
+  return requestedDomains[0]
+}
 
+/**
+ * Authorizes the caller to write to a boundary and returns it.
+ * @throws InvalidRequestError if the boundary is malformed, targets another service, or is not held by the caller
+ */
+export async function authorizeBoundary(
+  ctx: AppContext,
+  callerDid: string,
+  boundary: string,
+): Promise<string> {
   // The bare domain name is the space skey; validate it as such.
-  const [onlyDomain] = requestedDomains
-  const bareName = parseQualifiedBoundary(onlyDomain)?.name ?? onlyDomain
+  const bareName = parseQualifiedBoundary(boundary)?.name ?? boundary
   if (!isValidSkey(bareName)) {
     throw new InvalidRequestError(
-      `Domain "${onlyDomain}" is not a valid domain skey`,
+      `Domain "${boundary}" is not a valid domain skey`,
       'InvalidDomain',
     )
   }
 
-  // Reject records whose boundaries target a different Stratos service
-  for (const domain of requestedDomains) {
-    try {
-      assertBoundaryMatchesService(domain, ctx.serviceDid)
-    } catch (err) {
-      if (err instanceof BoundaryServiceMismatchError) {
-        throw new InvalidRequestError(err.message, 'ServiceMismatch')
-      }
-      throw err
+  // Reject boundaries that target a different Stratos service
+  try {
+    assertBoundaryMatchesService(boundary, ctx.serviceDid)
+  } catch (err) {
+    if (err instanceof BoundaryServiceMismatchError) {
+      throw new InvalidRequestError(err.message, 'ServiceMismatch')
     }
+    throw err
   }
 
-  const callerDomains = await ctx.boundaryResolver.getBoundaries(callerDid)
-  const missingDomains = requestedDomains.filter(
-    (domain) => !callerDomains.includes(domain),
-  )
+  // a hand-built context without a write cache falls back to the live resolver
+  const callerDomains = await (
+    ctx.writeBoundaryResolver ?? ctx.boundaryResolver
+  ).getBoundaries(callerDid)
+  assertBoundaryHeld(callerDomains, boundary)
 
-  if (missingDomains.length > 0) {
-    const availableDomains =
-      callerDomains.length > 0 ? callerDomains.join(', ') : '(none)'
+  return boundary
+}
+
+/**
+ * Refuses a boundary the caller does not hold in the store now. It bypasses
+ * the write cache, so a removal made on any instance is seen. Run it under the
+ * repo lock, after {@link authorizeBoundary} has checked the boundary's form.
+ * @throws InvalidRequestError `ForbiddenBoundary` when the caller does not hold the boundary
+ */
+export async function assertBoundaryStillHeld(
+  ctx: AppContext,
+  callerDid: string,
+  boundary: string,
+): Promise<void> {
+  assertBoundaryHeld(
+    await ctx.boundaryResolver.getBoundaries(callerDid),
+    boundary,
+  )
+}
+
+function assertBoundaryHeld(callerDomains: string[], boundary: string): void {
+  if (callerDomains.includes(boundary)) return
+  const availableDomains =
+    callerDomains.length > 0 ? callerDomains.join(', ') : '(none)'
+  throw new InvalidRequestError(
+    `You do not have access to boundary domain(s): ${boundary}. Your enrolled domains: ${availableDomains}`,
+    'ForbiddenBoundary',
+  )
+}
+
+/**
+ * Authorizes the caller to write the record's single boundary and returns it.
+ * @throws InvalidRequestError if the boundary is not exactly one, is malformed, targets another service, or is not held by the caller
+ */
+export async function authorizeRecordBoundary(
+  ctx: AppContext,
+  callerDid: string,
+  collection: string,
+  record: unknown,
+): Promise<string> {
+  return authorizeBoundary(ctx, callerDid, extractRecordBoundary(record))
+}
+
+/**
+ * Refuses a boundary whose catalog entry is not active. The write cache can
+ * list a boundary for up to its TTL after the catalog deactivated it, so
+ * membership alone does not say the boundary still accepts writes. It reads the
+ * store, which every process shares, rather than the in-memory allowed domains.
+ * @throws InvalidRequestError `BoundaryNotFound` when the boundary is absent, not active, or there is no catalog store to read
+ */
+export async function assertBoundaryInCatalog(
+  ctx: AppContext,
+  boundary: string,
+): Promise<void> {
+  // Without a catalog store the boundary cannot be shown to be active, so the
+  // write is refused rather than allowed unchecked.
+  const definition = await ctx.boundaryStore?.get(boundary)
+  if (definition?.status !== 'active') {
     throw new InvalidRequestError(
-      `You do not have access to boundary domain(s): ${missingDomains.join(', ')}. Your enrolled domains: ${availableDomains}`,
-      'ForbiddenBoundary',
+      `Boundary ${boundary} is not in the active catalog`,
+      'BoundaryNotFound',
     )
   }
 }
 
 /**
- * Validates that the caller has permission to write records in the given collection.
- * @param ctx - Application context
- * @param callerDid - DID of the caller
- * @param collection - Collection name
- * @param record - Record data
- * @throws InvalidRequestError if the caller is not authorized to write records
+ * Validates a legacy write against the lexicon and Stratos record rules, judging
+ * the boundary the body claims. It runs on every legacy write; `validate: false`
+ * cannot skip it. Its `allowedDomains` check is what rejects a boundary the
+ * catalog has just deactivated, while the write cache still lists it for the
+ * member.
  */
-export async function validateWritableRecord(
+export async function validateLegacyRecordContent(
   ctx: AppContext,
-  callerDid: string,
   collection: string,
   record: unknown,
 ): Promise<void> {
   const rec = record as Record<string, unknown>
-
-  // Resolve parent boundaries when the record is a reply
   const parentBoundaries = await resolveParentBoundaries(ctx, rec)
 
-  const validator = new StratosValidator(ctx.cfg.stratos)
+  assertRulesHold(() =>
+    new StratosValidator(ctx.cfg.stratos).assertValid(
+      rec,
+      collection,
+      parentBoundaries,
+    ),
+  )
+}
+
+/**
+ * Validates a write into one named boundary. The rules judge that boundary and
+ * never the record's own claim.
+ */
+export async function validateRecordInBoundary(
+  ctx: AppContext,
+  collection: string,
+  record: unknown,
+  boundary: string,
+): Promise<void> {
+  const rec = record as Record<string, unknown>
+  assertReferenceUrisAreStrings(collection, rec)
+  const subjectRule = findRecordRule(
+    recordRulesFor(ctx.cfg.stratos),
+    collection,
+  )?.subject
+  // A record that points at a subject has no use for a reply parent, and the
+  // parent's actor store may not exist: a stray reply field must not decide
+  // its outcome.
+  const parentBoundaries = subjectRule
+    ? undefined
+    : await judgeParentBoundaries(ctx, rec, boundary)
+  const subject = subjectRule
+    ? await judgeSubject(ctx, subjectRule, rec, boundary)
+    : undefined
+
+  assertRulesHold(() =>
+    new StratosValidator(ctx.cfg.stratos).assertValidWithInput(
+      rec,
+      collection,
+      {
+        boundaryClaim: { values: [{ value: boundary }] },
+        parentBoundaries,
+        subject,
+      },
+    ),
+  )
+}
+
+/**
+ * Refuses a subject that is not a well-formed reference with the subject
+ * error. It runs in every validate mode and before the lexicon check, which
+ * would otherwise answer a misshapen subject in its own words.
+ * @throws InvalidRequestError `InvalidRecord` with the subject error
+ */
+export function assertSubjectWellFormed(record: Record<string, unknown>): void {
+  if (isWellFormedStrongRef(record.subject)) return
+  throw new InvalidRequestError(SUBJECT_ERROR_MESSAGE, 'InvalidRecord')
+}
+
+/**
+ * Looks up the subject of a record whose rule names one and decides whether
+ * the record may point at it.
+ */
+async function judgeSubject(
+  ctx: AppContext,
+  subjectRule: NonNullable<RecordRule['subject']>,
+  record: Record<string, unknown>,
+  boundary: string,
+): Promise<NonNullable<RecordRuleInput['subject']>> {
+  const claimedCid = asObject(record.subject)?.cid
+  const facts = await resolveReferencedRecord(ctx, record.subject)
+  return {
+    eligible: isEligibleSubject(facts, {
+      boundary,
+      serviceDid: ctx.serviceDid,
+      spaceType: HOSTED_SPACE_TYPE,
+      collections: subjectRule.collections,
+      cid: typeof claimedCid === 'string' ? claimedCid : undefined,
+    }),
+  }
+}
+
+/**
+ * The boundaries a reply inherits from its parent on a boundary write. A
+ * space-form parent names its boundary in a URI that anyone can write, so it
+ * counts only as a post by an active pds-custody member of this boundary in the
+ * hosted space type. Any other space-form parent holds no boundary, and the
+ * reply rules refuse the reply as they refuse a parent in another boundary.
+ * Any other parent is judged by {@link readStoredParentBoundaries}.
+ */
+async function judgeParentBoundaries(
+  ctx: AppContext,
+  record: Record<string, unknown>,
+  boundary: string,
+): Promise<string[] | undefined> {
+  const parent = asObject(asObject(record.reply)?.parent)
+  if (typeof parent?.uri !== 'string') return undefined
+  if (!parseRecordUri(parent.uri).ok) {
+    return readStoredParentBoundaries(ctx, parent.uri)
+  }
+  const parentBoundaries = await resolveParentBoundaries(ctx, record)
+  const facts = await resolveReferencedRecord(ctx, parent)
+  const eligible = isEligibleSubject(facts, {
+    boundary,
+    serviceDid: ctx.serviceDid,
+    spaceType: HOSTED_SPACE_TYPE,
+    collections: [POST_COLLECTION],
+    cid: typeof parent.cid === 'string' ? parent.cid : undefined,
+  })
+  return eligible ? parentBoundaries : []
+}
+
+/**
+ * The boundaries a hosted parent is stored in, read from the store at this
+ * moment and never from the parent cache, so a parent that has moved is judged
+ * where it is now. A parent that is missing, taken down, or not a canonical
+ * record URI holds no boundary. The reply rules then refuse the reply as they
+ * refuse a parent in another boundary, so the answer does not tell the writer
+ * whether a record they cannot see exists.
+ */
+async function readStoredParentBoundaries(
+  ctx: AppContext,
+  parentUri: string,
+): Promise<string[] | undefined> {
+  // An empty uri names no parent, as resolveParentBoundaries treats it.
+  if (!parentUri) return undefined
+  const parts = parseCanonicalRepoUri(parentUri)
+  // A read of a store that does not exist fails on sqlite and is unverified on
+  // postgres, so the store is looked for first.
+  if (!parts || !(await ctx.actorStore.exists(parts.author))) return []
+  const found = await ctx.actorStore.read(parts.author, (store) =>
+    store.record.getVisibleRecordWithBoundaries(parentUri),
+  )
+  return found?.boundaries ?? []
+}
+
+/**
+ * Refuses a record whose reply or embedded record references carry a uri that
+ * is not a string. The rules and the parent lookup call string methods on these
+ * uris and run even when lexicon validation is skipped, so they cannot rely on
+ * the lexicon's shapes.
+ * @throws InvalidRequestError `InvalidRecord` naming the collection, never the value
+ */
+function assertReferenceUrisAreStrings(
+  collection: string,
+  record: Record<string, unknown>,
+): void {
+  const reply = asObject(record.reply)
+  const uris = [asObject(reply?.parent)?.uri, asObject(reply?.root)?.uri]
+  if (collection === POST_COLLECTION) {
+    for (
+      let embed = asObject(record.embed);
+      embed;
+      embed = asObject(embed.media)
+    ) {
+      uris.push(asObject(embed.record)?.uri)
+    }
+  }
+  if (uris.some((uri) => uri !== undefined && typeof uri !== 'string')) {
+    throw new InvalidRequestError(
+      `Invalid ${collection} record: a reference uri must be a string`,
+      'InvalidRecord',
+    )
+  }
+}
+
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function assertRulesHold(validate: () => void): void {
   try {
-    validator.assertValid(rec, collection, parentBoundaries)
+    validate()
   } catch (err) {
     if (err instanceof StratosValidationError) {
       throw new InvalidRequestError(err.message, 'InvalidRecord')
     }
     throw err
   }
+}
 
-  await assertCallerCanWriteDomains(ctx, callerDid, collection, record)
+const CUSTODY_URI_PART_COUNT = 3
+
+function isCustodyRecordUri(uri: string): boolean {
+  if (!uri.startsWith(AT_SCHEME)) return false
+  const parts = uri.slice(AT_SCHEME.length).split('/')
+  return parts.length === CUSTODY_URI_PART_COUNT && isSyntacticDid(parts[0])
+}
+
+function unreadableParentError(): InvalidRequestError {
+  return new InvalidRequestError(
+    'The reply parent is not a record URI',
+    'InvalidRecord',
+  )
 }
 
 /**
@@ -133,24 +409,29 @@ export async function resolveParentBoundaries(
   ctx: AppContext,
   record: Record<string, unknown>,
 ): Promise<string[] | undefined> {
-  const reply = record.reply as { parent?: { uri?: string } } | undefined
-  if (!reply?.parent?.uri) {
+  const reply = record.reply as { parent?: { uri?: unknown } } | undefined
+  const parentUri = reply?.parent?.uri
+  if (!parentUri) {
     return undefined
   }
+  if (typeof parentUri !== 'string') throw unreadableParentError()
 
-  const spaceRecord = parseRecordUri(reply.parent.uri)
+  const spaceRecord = parseRecordUri(parentUri)
   if (spaceRecord.ok) {
     return [qualifyBoundary(spaceRecord.value.spaceDid, spaceRecord.value.skey)]
   }
 
-  let parentUri: AtUriSyntax
+  // Only a custody record names an actor store to read; for any other string
+  // the first segment is not an author, so no store is opened.
+  if (!isCustodyRecordUri(parentUri)) throw unreadableParentError()
+  let parentRecord: AtUriSyntax
   try {
-    parentUri = new AtUriSyntax(reply.parent.uri)
+    parentRecord = new AtUriSyntax(parentUri)
   } catch {
-    return undefined
+    throw unreadableParentError()
   }
 
-  const cacheKey = reply.parent.uri
+  const cacheKey = parentUri
   const cached = parentBoundaryCache.get(cacheKey)
   if (cached) {
     if (Date.now() - cached.cachedAt < PARENT_BOUNDARY_TTL_MS) {
@@ -160,13 +441,11 @@ export async function resolveParentBoundaries(
   }
 
   const boundaries = await ctx.actorStore.read(
-    parentUri.hostname,
+    parentRecord.hostname,
     async (store) => {
-      const parentRecord = await store.record.getRecord(parentUri, null)
-      if (!parentRecord) {
-        return undefined
-      }
-      return StratosValidator.extractBoundaryDomains(parentRecord.value)
+      const parent =
+        await store.record.getVisibleRecordWithBoundaries(parentRecord)
+      return parent?.boundaries
     },
   )
 

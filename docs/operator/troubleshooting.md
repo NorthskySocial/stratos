@@ -70,12 +70,12 @@ could decide whether it may enroll.
 `zone.stratos.sync.subscribeRecords` needs a service-auth token from a service
 enrollment.
 
-| Message                                   | Cause                                                    |
-| ----------------------------------------- | -------------------------------------------------------- |
-| `Service auth required`                   | The token is missing or is not a service-auth token      |
-| `Enrollment is missing or deactivated`    | The caller has no active service enrollment              |
-| `Service is not enrolled in any boundary` | Grant the service identity a boundary in **Enrollments** |
-| `Subscription authorization changed`      | The caller's membership changed. Reconnect               |
+| Message                                   | Cause                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------- |
+| `Service auth required`                   | The token is missing or is not a service-auth token                             |
+| `Enrollment is missing or deactivated`    | No active service enrollment. An operator hold keeps it deactivated on restarts |
+| `Service is not enrolled in any boundary` | Grant the service identity a boundary in **Enrollments**                        |
+| `Subscription authorization changed`      | The caller's membership changed. Reconnect                                      |
 
 When the stream is open but silent:
 
@@ -97,9 +97,10 @@ When the stream is open but silent:
 
 ### `invalid_scope` from a spaces PDS {#invalid-scope-from-a-spaces-pds}
 
-The PDS could not resolve the `zone.stratos.space.feed` space type. Nothing in
-the Stratos logs shows this. Check that the lexicon record is still published.
-See [Keep the space type published](/operator/architecture#keep-the-space-type-published).
+The PDS could not resolve the `zone.stratos.space.feed` space type, or it
+refused the declaration it found. Nothing in the Stratos logs shows either.
+Check that the lexicon record is still published. A PDS older than the November
+release refuses a declaration that has no `name`. See [Keep the space type published](/operator/architecture#keep-the-space-type-published).
 
 ## Admin login fails
 
@@ -116,6 +117,16 @@ Open the admin interface on the same host as `STRATOS_PUBLIC_URL`.
 When `STRATOS_VALKEY_URL` is not set, delegation requests fail with
 `InvalidToken` and attested clients fail with `AttestationRequired`. The log
 says `no replay store (cache) configured`. Set `STRATOS_VALKEY_URL`.
+
+A delegation whose `aud` is not `<Stratos DID>#atproto_pds` fails with
+`InvalidToken`. The log line `space-credential delegation token rejected`
+carries the reason, `Invalid aud claim: expected "<Stratos DID>#atproto_pds"`.
+A client attestation with another audience fails with `AttestationRequired`.
+A request that presents a credential with the earlier `Atproto-Space` scheme is
+not recognised. The five space and sync read routes refuse it with `401`.
+`zone.stratos.repo.hydrateRecord` and `hydrateRecords` answer it as an
+anonymous request, which returns nothing private. See
+[November upgrade and rollback](/operator/november-upgrade#order).
 
 ## DPoP nonce errors
 

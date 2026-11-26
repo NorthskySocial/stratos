@@ -1,6 +1,17 @@
 import postgres from 'postgres'
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  type SQL,
+  sql,
+} from 'drizzle-orm'
 import { Cid } from '@atproto/lex-data'
 import { AtUri } from '@atproto/syntax'
 import * as crypto from '@atproto/crypto'
@@ -19,6 +30,7 @@ import {
   type ListRecordsOpts,
   type Logger,
   LruBlockCache,
+  MAX_VISIBLE_RECORD_BATCH,
   migrateStratosPgDb,
   parseCid,
   pgSchema as pgActorSchema,
@@ -38,6 +50,7 @@ import {
   type StratosPgDbOrTx,
   type StratosRecordDescript,
   StratosValidator,
+  type VisibleRecordWithBoundaries,
 } from '@northskysocial/stratos-core'
 import {
   ActorReader,
@@ -48,6 +61,9 @@ import {
 } from '../../../actor-store-types.js'
 
 // ─── Record Reader ──────────────────────────────────────────────────────────
+
+const normalizeRecordUri = (uri: string | AtUri): string =>
+  new AtUri(uri.toString()).toString()
 
 /**
  * Reader for actor records from the PostgreSQL database.
@@ -276,6 +292,107 @@ export class PgActorRecordReader {
       : { applied: false }
   }
 
+  async getTakedownStates(uris: string[]): Promise<Map<string, boolean>> {
+    if (uris.length === 0) return new Map()
+    const rows = await this.db
+      .select({
+        uri: pgStratosRecord.uri,
+        takedownRef: pgStratosRecord.takedownRef,
+      })
+      .from(pgStratosRecord)
+      .where(inArray(pgStratosRecord.uri, uris))
+    return new Map(rows.map((row) => [row.uri, row.takedownRef !== null]))
+  }
+
+  async getRecordBoundaries(uri: string | AtUri): Promise<string[]> {
+    const rows = await this.db
+      .select({ boundary: pgStratosRecordBoundary.boundary })
+      .from(pgStratosRecordBoundary)
+      .where(eq(pgStratosRecordBoundary.recordUri, uri.toString()))
+      .orderBy(asc(pgStratosRecordBoundary.boundary))
+    return rows.map((row) => row.boundary)
+  }
+
+  /**
+   * Read a record together with its boundary rows in one statement, so the
+   * body and the rows always belong to the same moment.
+   *
+   * @param uri - The URI of the record.
+   * @returns The record and its stored boundaries, or null when the record is
+   * missing or taken down.
+   */
+  async getVisibleRecordWithBoundaries(
+    uri: string | AtUri,
+  ): Promise<VisibleRecordWithBoundaries | null> {
+    const found = await this.getVisibleRecordsWithBoundaries([uri])
+    return found.get(normalizeRecordUri(uri)) ?? null
+  }
+
+  /**
+   * Batch form of {@link getVisibleRecordWithBoundaries}, still one statement.
+   *
+   * @param uris - At most {@link MAX_VISIBLE_RECORD_BATCH} record URIs.
+   * @returns The visible records keyed by normalized URI. Missing and
+   * taken-down records are absent.
+   * @throws When more than {@link MAX_VISIBLE_RECORD_BATCH} URIs are given.
+   */
+  async getVisibleRecordsWithBoundaries(
+    uris: readonly (string | AtUri)[],
+  ): Promise<Map<string, VisibleRecordWithBoundaries>> {
+    if (uris.length > MAX_VISIBLE_RECORD_BATCH) {
+      throw new RangeError(
+        `at most ${MAX_VISIBLE_RECORD_BATCH} uris per call, got ${uris.length}`,
+      )
+    }
+    const normalized = [...new Set(uris.map(normalizeRecordUri))]
+    if (normalized.length === 0) return new Map()
+
+    const boundaryColumn = pgStratosRecordBoundary.boundary
+    const rows = await this.db
+      .select({
+        uri: pgStratosRecord.uri,
+        cid: pgStratosRecord.cid,
+        indexedAt: pgStratosRecord.indexedAt,
+        takedownRef: pgStratosRecord.takedownRef,
+        content: pgStratosRepoBlock.content,
+        boundaries: sql<
+          string[]
+        >`coalesce(array_agg(distinct ${boundaryColumn} order by ${boundaryColumn}) filter (where ${boundaryColumn} is not null), '{}')`,
+      })
+      .from(pgStratosRecord)
+      .innerJoin(
+        pgStratosRepoBlock,
+        eq(pgStratosRepoBlock.cid, pgStratosRecord.cid),
+      )
+      .leftJoin(
+        pgStratosRecordBoundary,
+        eq(pgStratosRecordBoundary.recordUri, pgStratosRecord.uri),
+      )
+      .where(
+        and(
+          inArray(pgStratosRecord.uri, normalized),
+          isNull(pgStratosRecord.takedownRef),
+        ),
+      )
+      .groupBy(pgStratosRecord.uri, pgStratosRepoBlock.cid)
+
+    return new Map(
+      rows.map((row) => [
+        row.uri,
+        {
+          record: {
+            uri: row.uri,
+            cid: row.cid,
+            value: this.cborToRecord(row.content),
+            indexedAt: row.indexedAt,
+            takedownRef: row.takedownRef ? row.takedownRef.toString() : null,
+          },
+          boundaries: row.boundaries,
+        },
+      ]),
+    )
+  }
+
   /**
    * Retrieve the current CID of a record by URI.
    *
@@ -299,6 +416,16 @@ export class PgActorRecordReader {
    * @returns An array of backlink records.
    */
   async getRecordBacklinks(opts: GetBacklinksOpts) {
+    return this.selectBacklinkRows(opts, isNull(pgStratosRecord.takedownRef))
+  }
+
+  /**
+   * Conflict checks use the unfiltered rows so taken-down records still block.
+   */
+  private async selectBacklinkRows(
+    opts: GetBacklinksOpts,
+    extraCondition?: SQL,
+  ) {
     const { collection, path, linkTo } = opts
     return this.db
       .select({
@@ -320,6 +447,7 @@ export class PgActorRecordReader {
           eq(pgStratosBacklink.path, path),
           eq(pgStratosBacklink.linkTo, linkTo),
           eq(pgStratosRecord.collection, collection),
+          extraCondition,
         ),
       )
   }
@@ -339,7 +467,7 @@ export class PgActorRecordReader {
     const conflicts: AtUri[] = []
 
     for (const backlink of getStratosBacklinks(uriObj, record)) {
-      const backlinks = await this.getRecordBacklinks({
+      const backlinks = await this.selectBacklinkRows({
         collection: uriObj.collection,
         path: backlink.path,
         linkTo: backlink.linkTo,
@@ -418,6 +546,42 @@ export class PgActorRecordTransactor
     repoRev: string,
     timestamp?: string,
   ): Promise<void> {
+    const uriObj = await this.indexRecordRow(uri, cid, repoRev, timestamp)
+    if (record !== null) {
+      await this.replaceBacklinks(uriObj, record, action)
+      await this.replaceRecordBoundaries(
+        uriObj,
+        StratosValidator.extractBoundaryDomains(record),
+      )
+    }
+    this.logger?.info({ uri: uriObj.toString() }, 'indexed stratos record')
+  }
+
+  /**
+   * Index a record under a boundary the caller already authorized. The
+   * boundary comes from the caller, never from the record body.
+   */
+  async indexRecordInBoundary(
+    uri: string | AtUri,
+    cid: Cid,
+    record: Record<string, unknown>,
+    boundary: string,
+    action: 'create' | 'update',
+    repoRev: string,
+    timestamp?: string,
+  ): Promise<void> {
+    const uriObj = await this.indexRecordRow(uri, cid, repoRev, timestamp)
+    await this.replaceBacklinks(uriObj, record, action)
+    await this.replaceRecordBoundaries(uriObj, [boundary])
+    this.logger?.info({ uri: uriObj.toString() }, 'indexed stratos record')
+  }
+
+  private async indexRecordRow(
+    uri: string | AtUri,
+    cid: Cid,
+    repoRev: string,
+    timestamp?: string,
+  ): Promise<AtUri> {
     const uriObj = typeof uri === 'string' ? new AtUri(uri) : uri
     this.logger?.debug({ uri: uriObj.toString() }, 'indexing stratos record')
 
@@ -442,33 +606,35 @@ export class PgActorRecordTransactor
       sql`INSERT INTO stratos_record (uri, cid, collection, rkey, "repoRev", "indexedAt", "takedownRef") VALUES (${row.uri}, ${row.cid}, ${row.collection}, ${row.rkey}, ${row.repoRev}, ${row.indexedAt}, ${null}) ON CONFLICT (uri) DO UPDATE SET cid = ${row.cid}, "repoRev" = ${row.repoRev}, "indexedAt" = ${row.indexedAt}`,
     )
 
-    if (record !== null) {
-      const backlinks = getStratosBacklinks(uriObj, record)
-      if (action === 'update') {
-        await this.removeBacklinksByUri(uriObj)
-      }
-      await this.addBacklinks(backlinks)
-      await this.replaceRecordBoundaries(uriObj, record)
-    }
+    return uriObj
+  }
 
-    this.logger?.info({ uri: uriObj.toString() }, 'indexed stratos record')
+  private async replaceBacklinks(
+    uriObj: AtUri,
+    record: Record<string, unknown>,
+    action: 'create' | 'update',
+  ): Promise<void> {
+    const backlinks = getStratosBacklinks(uriObj, record)
+    if (action === 'update') {
+      await this.removeBacklinksByUri(uriObj)
+    }
+    await this.addBacklinks(backlinks)
   }
 
   /**
-   * Replaces the boundary rows for a record with the boundaries in its value.
+   * Replaces the boundary rows for a record with the given boundaries.
    *
    * @param uri - The URI of the record.
-   * @param record - The record content.
+   * @param boundaries - The boundaries the record now resides in.
    */
   async replaceRecordBoundaries(
     uri: string | AtUri,
-    record: Record<string, unknown>,
+    boundaries: readonly string[],
   ): Promise<void> {
     const recordUri = uri.toString()
     await this.db
       .delete(pgStratosRecordBoundary)
       .where(eq(pgStratosRecordBoundary.recordUri, recordUri))
-    const boundaries = StratosValidator.extractBoundaryDomains(record)
     if (boundaries.length === 0) return
     await this.db
       .insert(pgStratosRecordBoundary)
@@ -1064,6 +1230,8 @@ export class PgActorBlobReader {
    * List blobs referenced by records that currently reside in the boundary.
    * Boundary residence is derived from stratos_record_boundary, which follows
    * the record lifecycle, so moved or deleted records drop out immediately.
+   * Taken-down records do not count as residence, and a taken-down blob is
+   * omitted outright. Both filters run in the query so pages stay full.
    *
    * @param opts - Boundary plus the listBlobs paging options.
    * @returns Blob CIDs in ascending order.
@@ -1076,7 +1244,11 @@ export class PgActorBlobReader {
   }): Promise<string[]> {
     const { boundary, since, cursor, limit } = opts
 
-    const conditions = [eq(pgStratosRecordBoundary.boundary, boundary)]
+    const conditions = [
+      eq(pgStratosRecordBoundary.boundary, boundary),
+      isNull(pgStratosRecord.takedownRef),
+      isNull(pgStratosBlob.takedownRef),
+    ]
     if (cursor) {
       conditions.push(gt(pgStratosRecordBlob.blobCid, cursor))
     }
@@ -1093,6 +1265,10 @@ export class PgActorBlobReader {
           pgStratosRecord,
           eq(pgStratosRecord.uri, pgStratosRecordBlob.recordUri),
         )
+        .leftJoin(
+          pgStratosBlob,
+          eq(pgStratosBlob.cid, pgStratosRecordBlob.blobCid),
+        )
         .where(and(gt(pgStratosRecord.repoRev, since), ...conditions))
         .orderBy(asc(pgStratosRecordBlob.blobCid))
         .limit(limit)
@@ -1105,6 +1281,14 @@ export class PgActorBlobReader {
       .innerJoin(
         pgStratosRecordBoundary,
         eq(pgStratosRecordBoundary.recordUri, pgStratosRecordBlob.recordUri),
+      )
+      .innerJoin(
+        pgStratosRecord,
+        eq(pgStratosRecord.uri, pgStratosRecordBlob.recordUri),
+      )
+      .leftJoin(
+        pgStratosBlob,
+        eq(pgStratosBlob.cid, pgStratosRecordBlob.blobCid),
       )
       .where(and(...conditions))
       .orderBy(asc(pgStratosRecordBlob.blobCid))

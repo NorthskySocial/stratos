@@ -1,15 +1,57 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, rm } from 'node:fs/promises'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { randomBytes } from 'crypto'
 import { AtUri } from '@atproto/syntax'
+import { StratosActorStore } from '../src/context.js'
 import {
   ActorStoreRecordResolver,
   HydrationServiceImpl,
 } from '../src/features/hydration/adapter.js'
 import type { ActorStore } from '../src/actor-store-types.js'
+import { createCid } from './helpers/test-env.js'
+import { createEmptyLabelLog, createMockBlobStore } from './utils/index.js'
 
 describe('Hydration Features', () => {
   describe('ActorStoreRecordResolver', () => {
     let mockActorStore: any
     let resolver: ActorStoreRecordResolver
+    const sqliteCleanups: Array<() => Promise<void>> = []
+
+    async function openSqliteActorStore(): Promise<ActorStore> {
+      const dataDir = join(
+        tmpdir(),
+        `stratos-test-${randomBytes(8).toString('hex')}`,
+      )
+      await mkdir(dataDir, { recursive: true })
+      sqliteCleanups.push(() => rm(dataDir, { recursive: true, force: true }))
+      return new StratosActorStore({
+        dataDir,
+        blobstore: () => createMockBlobStore(),
+        cborToRecord: (content) =>
+          JSON.parse(new TextDecoder().decode(content)),
+      }) as unknown as ActorStore
+    }
+
+    async function seedRecord(
+      actorStore: ActorStore,
+      did: string,
+      uri: string,
+      value: Record<string, unknown>,
+    ) {
+      const content = new TextEncoder().encode(JSON.stringify(value))
+      const cid = await createCid(content)
+      await actorStore.create(did)
+      await actorStore.transact(did, async (store) => {
+        await store.record.putRecord({ uri, cid, value, content })
+      })
+      return { uri, cid: cid.toString(), value }
+    }
+
+    afterEach(async () => {
+      for (const cleanup of sqliteCleanups.splice(0)) await cleanup()
+    })
 
     beforeEach(() => {
       mockActorStore = {
@@ -18,6 +60,7 @@ describe('Hydration Features', () => {
       }
       resolver = new ActorStoreRecordResolver(
         mockActorStore as unknown as ActorStore,
+        createEmptyLabelLog(),
       )
     })
 
@@ -32,27 +75,18 @@ describe('Hydration Features', () => {
     })
 
     it('returns record with boundaries if actor exists in getRecord', async () => {
-      mockActorStore.exists.mockResolvedValue(true)
-      const mockRecord = {
-        uri: 'at://did:plc:shinji/app.bsky.feed.post/123',
-        cid: 'bafyreih...',
-        value: {
+      const actorStore = await openSqliteActorStore()
+      resolver = new ActorStoreRecordResolver(actorStore, createEmptyLabelLog())
+      const mockRecord = await seedRecord(
+        actorStore,
+        'did:plc:shinji',
+        'at://did:plc:shinji/app.bsky.feed.post/123',
+        {
           text: 'Get in the robot, Shinji.',
           boundary: {
             $type: 'zone.stratos.boundary.defs#Domains',
             values: [{ value: 'did:web:nerv.tokyo.jp/eva-unit-01' }],
           },
-        },
-      }
-
-      mockActorStore.read.mockImplementation(
-        async (did: string, fn: (store: any) => Promise<any>) => {
-          const mockStore = {
-            record: {
-              getRecord: vi.fn().mockResolvedValue(mockRecord),
-            },
-          }
-          return fn(mockStore)
         },
       )
 
@@ -75,32 +109,18 @@ describe('Hydration Features', () => {
     })
 
     it('returns map of records in getRecords', async () => {
-      mockActorStore.exists.mockResolvedValue(true)
-      const mockRecord = {
-        uri: 'at://did:plc:rei/app.bsky.feed.post/456',
-        cid: 'bafyreirei...',
-        value: {
+      const actorStore = await openSqliteActorStore()
+      resolver = new ActorStoreRecordResolver(actorStore, createEmptyLabelLog())
+      const mockRecord = await seedRecord(
+        actorStore,
+        'did:plc:rei',
+        'at://did:plc:rei/app.bsky.feed.post/456',
+        {
           text: 'I am not a doll.',
           boundary: {
             $type: 'zone.stratos.boundary.defs#Domains',
             values: [{ value: 'did:web:nerv.tokyo.jp/eva-unit-00' }],
           },
-        },
-      }
-
-      mockActorStore.read.mockImplementation(
-        async (did: string, fn: (store: any) => Promise<any>) => {
-          const mockStore = {
-            record: {
-              getRecord: vi.fn().mockImplementation(async (uri: AtUri) => {
-                if (uri.toString() === mockRecord.uri) {
-                  return mockRecord
-                }
-                return null
-              }),
-            },
-          }
-          return fn(mockStore)
         },
       )
 

@@ -17,6 +17,8 @@ export interface Enrollment {
   custody?: Custody
   /** The repo host endpoint when custody is 'pds'. Undefined for 'stratos' custody. */
   repoHost?: string
+  /** An operator deactivated this enrollment by hand. Absent means false. */
+  operatorHold?: boolean
 }
 
 /**

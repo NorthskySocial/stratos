@@ -198,7 +198,7 @@ services:
         VITE_STRATOS_SERVICE_DID: did:web:stratos-e2e.atmosbox.test
         VITE_FEEDGEN_URL: https://feedgen-e2e.atmosbox.test
         VITE_FEEDGEN_DID: did:web:feedgen-e2e.atmosbox.test
-        VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON: '{"general":"at://did:web:stratos-e2e.atmosbox.test/space/zone.stratos.space.feed/general"}'
+        VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON: '{"general":"at:space/did:web:stratos-e2e.atmosbox.test/zone.stratos.space.feed/general"}'
         VITE_ATPROTO_HANDLE_RESOLVER: https://pds-space1.atmosbox.test
         VITE_PLC_DIRECTORY: https://plc.atmosbox.test
         VITE_STRATOS_URL: https://stratos-e2e.atmosbox.internal

@@ -32,11 +32,11 @@ service, then place it on its page inside a `<Figure>` component. Do not add a
 
 ## Demo web app
 
-| Page                  | Section                 | The screenshot must show                                             |
-| --------------------- | ----------------------- | -------------------------------------------------------------------- |
-| `guide/webapp.md`     | What you can do with it | The sign-in screen                                                   |
-| `guide/webapp.md`     | What you can do with it | The enrollment status with the user's boundaries                     |
-| `guide/webapp.md`     | What you can do with it | The composer with a private post and one boundary chosen             |
-| `guide/webapp.md`     | What you can do with it | The feed that mixes public posts with private posts                  |
-| `guide/webapp.md`     | What you can do with it | The record inspector with a private post's URI, CID, and raw content |
-| `guide/first-post.md` | 4. Write the post       | The new private post in the web app, as the result of the tutorial   |
+| Page                  | Section                 | The screenshot must show                                                                              |
+| --------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| `guide/webapp.md`     | What you can do with it | The sign-in screen                                                                                    |
+| `guide/webapp.md`     | What you can do with it | The enrollment status with the user's boundaries                                                      |
+| `guide/webapp.md`     | What you can do with it | The composer with a private post and one boundary chosen                                              |
+| `guide/webapp.md`     | What you can do with it | The feed that mixes public posts with private posts                                                   |
+| `guide/webapp.md`     | The record inspector    | One inspector state: custody with two panels, your own record, a feed snapshot, or an invalid address |
+| `guide/first-post.md` | 4. Write the post       | The new private post in the web app, as the result of the tutorial                                    |

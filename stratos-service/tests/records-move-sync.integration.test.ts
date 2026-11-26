@@ -33,6 +33,7 @@ import {
   eventInScope,
   type SeqEvent,
 } from '../src/subscription/index.js'
+import { SqliteLabelStore } from '../src/features/moderation/index.js'
 import { listRepoOps, type RepoOp } from '../src/features/pull-sync/index.js'
 import { createMockBlobStore, createTestConfig } from './utils/index.js'
 
@@ -114,6 +115,15 @@ describe('Record move sync contract', () => {
     await migrateServiceDb(db)
 
     enrollmentStore = new SqliteEnrollmentStore(db)
+    await enrollmentStore.enroll({
+      did: testDid,
+      enrolledAt: '2026-01-01T00:00:00.000Z',
+      boundaries: [],
+      signingKeyDid: 'did:key:zDnaeTestKey',
+      active: true,
+      isService: false,
+      custody: 'stratos',
+    })
     actorStore = new StratosActorStore({
       dataDir,
       blobstore: () => createMockBlobStore() as any,
@@ -124,6 +134,7 @@ describe('Record move sync contract', () => {
       cfg,
       actorStore,
       enrollmentStore,
+      labelStore: new SqliteLabelStore(db, join(dataDir, 'service.sqlite')),
       serviceDid,
       writeRateLimiter: { assertWriteAllowed: vi.fn() },
       actorSigner: {

@@ -62,11 +62,11 @@ Use `post.author.did` for attribution. Space record URIs start with the space au
 ### Which posts have attachments here
 
 The feed generator serves attachments only for posts that Stratos hosts.
-Those posts have a three-segment URI: `at://{authorDid}/{collection}/{rkey}`.
+Those posts have an `at://` URI with three parts: `at://{authorDid}/{collection}/{rkey}`.
 
-A post that a member's own PDS hosts has a seven-segment space record URI.
-Its `post.blobs` field is absent. `getBlob` answers `BlobNotFound` for every
-seven-segment URI. Read those files from the host PDS, through that host's
+A post that a member's own PDS hosts has a space record URI, `at:space/` plus
+six parts. Its `post.blobs` field is absent. `getBlob` answers `BlobNotFound`
+for every space record URI. Read those files from the host PDS, through that host's
 authenticated file-read path, if the host supports it.
 
 So the rule for a client is short. If `post.blobs` is present, use it. If it
@@ -146,7 +146,7 @@ revoke local object URLs after sign-out or removal. The older TypeScript
 | ------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | 401    | Token errors     | The service-auth token is missing or invalid. See the [operator page](/operator/feedgen-ng#request-limits-and-errors). |
 | 400    | `InvalidRequest` | `uri` or `cid` is missing, `uri` is over 2,048 bytes, or `cid` is over 256 bytes                                       |
-| 400    | `BlobNotFound`   | The URI is a seven-segment space record URI                                                                            |
+| 400    | `BlobNotFound`   | The URI is a space record URI                                                                                          |
 | 400    | `BlobNotFound`   | The post is not indexed, or the viewer holds none of its feed boundaries                                               |
 | 400    | `BlobNotFound`   | The post does not reference that CID                                                                                   |
 | 400    | `BlobTooLarge`   | The file is over 4 MiB                                                                                                 |

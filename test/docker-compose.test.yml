@@ -110,8 +110,10 @@ services:
       timeout: 5s
       retries: 30
 
+  # Starts only when requested by `run-all.ts --spaces-pds`.
   pds-spaces:
-    image: ghcr.io/bluesky-social/atproto:pds-spaces-alpha
+    profiles: ['spaces-pds']
+    image: ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350
     container_name: stratos-test-pds-spaces
     restart: 'no'
     network_mode: service:stratos

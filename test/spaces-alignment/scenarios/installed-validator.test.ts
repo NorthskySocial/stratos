@@ -38,9 +38,9 @@ describe('installed service space-ref validator', () => {
     expect(() => new Lexicons([schema])).not.toThrow()
   })
   it.each([
-    ['at://did:plc:motoko/space/zone.stratos.space.feed/general', true],
+    ['at:space/did:plc:motoko/zone.stratos.space.feed/general', true],
     ['not a space', false],
-    ['at://did:plc:motoko/space/zone.stratos.space.feed', false],
+    ['at:space/did:plc:motoko/zone.stratos.space.feed', false],
   ])(
     'does not enforce string format for %s; runtime parsing remains strict',
     (space, valid) => {

@@ -1,6 +1,7 @@
 /**
- * Contract tests for `zone.stratos.space.getRecord` — the spec-shaped mirror
- * of `com.atproto.space.getRecord` (atproto#5187).
+ * Contract tests for `zone.stratos.space.getRecord` — Stratos's own
+ * boundary-scoped record read, not the upstream `com.atproto.space.getRecord`
+ * of a similar name.
  *
  * Contract under test (from the quoted reference lexicon):
  *   - callable with standard user auth (member of the space) OR a space
@@ -31,7 +32,11 @@ import {
   ServiceDb,
 } from '../src/db/index.js'
 import { registerSpaceReadHandlers } from '../src/features/space-read/handler.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  createEmptyLabelLog,
+  createMockBlobStore,
+  createTestConfig,
+} from './utils/index.js'
 import { makeSpaceUri } from './helpers/space-uri.js'
 
 const SERVICE_DID = 'did:web:nerv.tokyo.jp'
@@ -75,6 +80,7 @@ describe('zone.stratos.space.getRecord', () => {
       cfg,
       actorStore,
       enrollmentStore,
+      labelStore: createEmptyLabelLog(),
       serviceDid: SERVICE_DID,
       authVerifier: { standardOrSpaceCredential: vi.fn() },
       logger: {

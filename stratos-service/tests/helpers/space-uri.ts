@@ -1,7 +1,7 @@
 import { formatSpaceUri } from '@northskysocial/stratos-core'
 
 /**
- * Build a space URI `at://{did}/space/{type}/{skey}` for static test fixtures.
+ * Build a space URI `at:space/{did}/{type}/{skey}` for static test fixtures.
  * Unwraps {@link formatSpaceUri}; throws on invalid parts, since fixtures are
  * constant and a rejection means the test itself is wrong.
  */

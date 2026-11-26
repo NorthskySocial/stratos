@@ -16,7 +16,8 @@ import {
   STRATOS_URL,
 } from './lib/config.ts'
 import { PDS_SPACES_URL } from './lib/mixed-mode-pds.ts'
-import { loadState } from './lib/state.ts'
+import { spacesPdsRequested } from './lib/phases.ts'
+import { loadState, type UserState } from './lib/state.ts'
 import { assert, dim, fail, finish, section } from './lib/log.ts'
 
 const SCREENSHOT_DIR = new URL('../test-data/screenshots', import.meta.url)
@@ -72,6 +73,39 @@ async function completePdsLogin(page: Page, password: string): Promise<void> {
   }
 }
 
+async function assertPdsCustodyMemberShown(
+  page: Page,
+  pdsFixture: UserState,
+): Promise<void> {
+  await page.selectOption('[data-testid="members-custody-filter"]', {
+    value: 'pds',
+  })
+  await page.waitForSelector('[data-testid="members-list"]', {
+    timeout: 15_000,
+  })
+  const pdsRows = page.locator('[data-testid="member-row"]')
+  assert(
+    (await pdsRows.count()) === 1 &&
+      (await pdsRows.first().textContent())?.includes(pdsFixture.did) === true,
+    'Custody filter shows the one PDS-custody fixture',
+  )
+  await pdsRows.first().click()
+  await page
+    .locator('[data-testid="repo-host-detail"]')
+    .filter({ hasText: `${PDS_SPACES_URL} (authority-override)` })
+    .waitFor({
+      state: 'visible',
+      timeout: 15_000,
+    })
+  const pdsDetail = await page.textContent('[data-testid="enrollment-detail"]')
+  assert(
+    pdsDetail?.includes(pdsFixture.did) === true &&
+      pdsDetail.includes(PDS_SPACES_URL) &&
+      pdsDetail.includes('authority-override'),
+    'PDS-custody detail shows the enrollment host and resolution source',
+  )
+}
+
 async function run(): Promise<void> {
   section('Admin UI: SPA Smoke Tests')
 
@@ -79,10 +113,10 @@ async function run(): Promise<void> {
   const operator = state.users[ADMIN_OPERATOR_KEY]
   const target = state.users[ADMIN_TARGET_KEY]
   const pdsFixture = state.mixedMode?.member
-  if (!operator || !target || !pdsFixture) {
+  if (!operator || !target || (spacesPdsRequested() && !pdsFixture)) {
     fail(
       'Missing operator/target user state',
-      `operator=${ADMIN_OPERATOR_KEY}, target=${ADMIN_TARGET_KEY} — run setup.ts first`,
+      `operator=${ADMIN_OPERATOR_KEY}, target=${ADMIN_TARGET_KEY} — run setup.ts first (with --spaces-pds when this run asks for a spaces PDS)`,
     )
     Deno.exit(1)
   }
@@ -185,36 +219,9 @@ async function run(): Promise<void> {
       (await page.locator('[data-testid="member-row"]').count()) > 0,
       'Custody filter keeps Stratos-custody members visible',
     )
-    await page.selectOption('[data-testid="members-custody-filter"]', {
-      value: 'pds',
-    })
-    await page.waitForSelector('[data-testid="members-list"]', {
-      timeout: 15_000,
-    })
-    const pdsRows = page.locator('[data-testid="member-row"]')
-    assert(
-      (await pdsRows.count()) === 1 &&
-        (await pdsRows.first().textContent())?.includes(pdsFixture.did) ===
-          true,
-      'Custody filter shows the one PDS-custody fixture',
-    )
-    await pdsRows.first().click()
-    await page
-      .locator('[data-testid="repo-host-detail"]')
-      .filter({ hasText: `${PDS_SPACES_URL} (authority-override)` })
-      .waitFor({
-        state: 'visible',
-        timeout: 15_000,
-      })
-    const pdsDetail = await page.textContent(
-      '[data-testid="enrollment-detail"]',
-    )
-    assert(
-      pdsDetail?.includes(pdsFixture.did) === true &&
-        pdsDetail.includes(PDS_SPACES_URL) &&
-        pdsDetail.includes('authority-override'),
-      'PDS-custody detail shows the enrollment host and resolution source',
-    )
+    if (spacesPdsRequested() && pdsFixture) {
+      await assertPdsCustodyMemberShown(page, pdsFixture)
+    }
     await page.selectOption('[data-testid="members-custody-filter"]', {
       value: 'stratos',
     })

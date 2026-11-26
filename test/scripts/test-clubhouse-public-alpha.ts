@@ -10,6 +10,8 @@
  */
 import { chromium, type Locator, type Page } from 'npm:playwright@1.65.1'
 
+import { parseRecordAddress } from '../../stratos-client/src/space-uri.ts'
+
 interface AlphaAccount {
   username: string
   password: string
@@ -383,7 +385,10 @@ async function run(): Promise<void> {
       parent: topic,
     })
     await waitForPost(page, replyText)
-    assert(reply.uri.startsWith('at://'), 'Reply URI is not an AT URI')
+    assert(
+      parseRecordAddress(reply.uri).ok,
+      'Reply URI is not a record address',
+    )
     await signOut(page)
     console.log(JSON.stringify({ ok: true, roomId, writes: 2 }))
   } finally {

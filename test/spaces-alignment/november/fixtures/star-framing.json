@@ -1,0 +1,82 @@
+{
+  "header": {
+    "classification": "upstream-legacy-uri",
+    "oracle": {
+      "package": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-AasGxXJz1htNRNNR1JL/2v4EV45VvC4UrbY1x/w/cFH0avOHFxhDV0MQMMegVYhSi7DtnkJ1smwDxO6K/W402g=="
+    },
+    "generator": {
+      "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
+      "sha256": "a42fa7432ecb9f61a0fddc1abd16f2cb47de69b10f302d8f39c2c84c6465dec5"
+    },
+    "upstreamVerified": true,
+    "reproducible": true
+  },
+  "framing": {
+    "magicHex": "2a6c0100",
+    "pairControlHex": "01",
+    "endControlHex": "00",
+    "layout": "[magic | len | meta] [01 | len | key | len | value]... [00]"
+  },
+  "meta": {
+    "$type": "atproto-space-repo",
+    "ver": 1,
+    "repo": "did:plc:fayevalentine",
+    "space": "at://did:web:bebop.example/space/zone.stratos.space.feed/crew",
+    "rev": "3jzfcijpj2z2b",
+    "data": {
+      "$bytes": "okNpRMGkR5B3cOe6XMIggnjUNiWAJUuWe8RpRkj4rmI"
+    }
+  },
+  "recordPaths": ["app.bsky.feed.like/ed", "zone.stratos.feed.post/swordfish"],
+  "archive": {
+    "encoding": "base64",
+    "value": "KmwBALgBpmNyZXZtM2p6ZmNpanBqMnoyYmN2ZXIBZGRhdGFYIKJDaUTBpEeQd3DnulzCIIJ41DYlgCVLlnvEaUZI+K5iZHJlcG91ZGlkOnBsYzpmYXlldmFsZW50aW5lZSR0eXBlcmF0cHJvdG8tc3BhY2UtcmVwb2VzcGFjZXg9YXQ6Ly9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvc3BhY2Uvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3JldwEVYXBwLmJza3kuZmVlZC5saWtlL2VkzwGjZSR0eXBlcmFwcC5ic2t5LmZlZWQubGlrZWdzdWJqZWN0omNjaWRpYmFmeXJlaWgyY3VyaXh0YXQ6Ly9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvc3BhY2Uvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3Jldy9kaWQ6cGxjOmZheWV2YWxlbnRpbmUvem9uZS5zdHJhdG9zLmZlZWQucG9zdC9zd29yZGZpc2hpY3JlYXRlZEF0eBgxOTk4LTEwLTI1VDAwOjAwOjAwLjAwMFoBIHpvbmUuc3RyYXRvcy5mZWVkLnBvc3Qvc3dvcmRmaXNoZaNkdGV4dHgcU2VlIHlvdSBzcGFjZSBjb3dib3ksIGVkaXRlZGUkdHlwZXZ6b25lLnN0cmF0b3MuZmVlZC5wb3N0aWNyZWF0ZWRBdHgYMTk5OC0xMC0yNFQwMDowMDowMC4wMDBaAA==",
+    "length": 559
+  },
+  "archiveVerdict": {
+    "accepted": true
+  },
+  "negatives": [
+    {
+      "name": "cut short before the end marker",
+      "archive": {
+        "encoding": "base64",
+        "value": "KmwBALgBpmNyZXZtM2p6ZmNpanBqMnoyYmN2ZXIBZGRhdGFYIKJDaUTBpEeQd3DnulzCIIJ41DYlgCVLlnvEaUZI+K5iZHJlcG91ZGlkOnBsYzpmYXlldmFsZW50aW5lZSR0eXBlcmF0cHJvdG8tc3BhY2UtcmVwb2VzcGFjZXg9YXQ6Ly9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvc3BhY2Uvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3JldwEVYXBwLmJza3kuZmVlZC5saWtlL2VkzwGjZSR0eXBlcmFwcC5ic2t5LmZlZWQubGlrZWdzdWJqZWN0omNjaWRpYmFmeXJlaWgyY3VyaXh0YXQ6Ly9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvc3BhY2Uvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3Jldy9kaWQ6cGxjOmZheWV2YWxlbnRpbmUvem9uZS5zdHJhdG9zLmZlZWQucG9zdC9zd29yZGZpc2hpY3JlYXRlZEF0eBgxOTk4LTEwLTI1VDAwOjAwOjAwLjAwMFoBIHpvbmUuc3RyYXRvcy5mZWVkLnBvc3Qvc3dvcmRmaXNoZaNkdGV4dHgcU2VlIHlvdSBzcGFjZSBjb3dib3ksIGVkaXRlZGUkdHlwZXZ6b25lLnN0cmF0b3MuZmVlZC5wb3N0aWNyZWF0ZWRBdHgYMTk5OC0xMC0yNFQwMDowMDowMC4wMDBa",
+        "length": 558
+      },
+      "verdict": {
+        "accepted": false,
+        "error": "StarParseError",
+        "message": "unexpected end of archive"
+      }
+    },
+    {
+      "name": "invalid control byte where the end marker belongs",
+      "archive": {
+        "encoding": "base64",
+        "value": "KmwBALgBpmNyZXZtM2p6ZmNpanBqMnoyYmN2ZXIBZGRhdGFYIKJDaUTBpEeQd3DnulzCIIJ41DYlgCVLlnvEaUZI+K5iZHJlcG91ZGlkOnBsYzpmYXlldmFsZW50aW5lZSR0eXBlcmF0cHJvdG8tc3BhY2UtcmVwb2VzcGFjZXg9YXQ6Ly9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvc3BhY2Uvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3JldwEVYXBwLmJza3kuZmVlZC5saWtlL2VkzwGjZSR0eXBlcmFwcC5ic2t5LmZlZWQubGlrZWdzdWJqZWN0omNjaWRpYmFmeXJlaWgyY3VyaXh0YXQ6Ly9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvc3BhY2Uvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3Jldy9kaWQ6cGxjOmZheWV2YWxlbnRpbmUvem9uZS5zdHJhdG9zLmZlZWQucG9zdC9zd29yZGZpc2hpY3JlYXRlZEF0eBgxOTk4LTEwLTI1VDAwOjAwOjAwLjAwMFoBIHpvbmUuc3RyYXRvcy5mZWVkLnBvc3Qvc3dvcmRmaXNoZaNkdGV4dHgcU2VlIHlvdSBzcGFjZSBjb3dib3ksIGVkaXRlZGUkdHlwZXZ6b25lLnN0cmF0b3MuZmVlZC5wb3N0aWNyZWF0ZWRBdHgYMTk5OC0xMC0yNFQwMDowMDowMC4wMDBaAg==",
+        "length": 559
+      },
+      "verdict": {
+        "accepted": false,
+        "error": "StarParseError",
+        "message": "invalid control byte: 2"
+      }
+    },
+    {
+      "name": "bytes after the end marker",
+      "archive": {
+        "encoding": "base64",
+        "value": "KmwBALgBpmNyZXZtM2p6ZmNpanBqMnoyYmN2ZXIBZGRhdGFYIKJDaUTBpEeQd3DnulzCIIJ41DYlgCVLlnvEaUZI+K5iZHJlcG91ZGlkOnBsYzpmYXlldmFsZW50aW5lZSR0eXBlcmF0cHJvdG8tc3BhY2UtcmVwb2VzcGFjZXg9YXQ6Ly9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvc3BhY2Uvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3JldwEVYXBwLmJza3kuZmVlZC5saWtlL2VkzwGjZSR0eXBlcmFwcC5ic2t5LmZlZWQubGlrZWdzdWJqZWN0omNjaWRpYmFmeXJlaWgyY3VyaXh0YXQ6Ly9kaWQ6d2ViOmJlYm9wLmV4YW1wbGUvc3BhY2Uvem9uZS5zdHJhdG9zLnNwYWNlLmZlZWQvY3Jldy9kaWQ6cGxjOmZheWV2YWxlbnRpbmUvem9uZS5zdHJhdG9zLmZlZWQucG9zdC9zd29yZGZpc2hpY3JlYXRlZEF0eBgxOTk4LTEwLTI1VDAwOjAwOjAwLjAwMFoBIHpvbmUuc3RyYXRvcy5mZWVkLnBvc3Qvc3dvcmRmaXNoZaNkdGV4dHgcU2VlIHlvdSBzcGFjZSBjb3dib3ksIGVkaXRlZGUkdHlwZXZ6b25lLnN0cmF0b3MuZmVlZC5wb3N0aWNyZWF0ZWRBdHgYMTk5OC0xMC0yNFQwMDowMDowMC4wMDBaAAA=",
+        "length": 560
+      },
+      "verdict": {
+        "accepted": false,
+        "error": "StarParseError",
+        "message": "unexpected bytes after end of archive"
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "services": [
+    {
+      "service": "feedgen-e2e-webapp",
+      "environment": []
+    }
+  ],
+  "routes": [
+    {
+      "id": "webapp-oauth",
+      "service": "feedgen-e2e-webapp",
+      "hostname": "webapp-e2e.atmosbox.internal",
+      "port": 80
+    }
+  ]
+}

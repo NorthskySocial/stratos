@@ -3,9 +3,11 @@ import { IdResolver } from '@atproto/identity'
 import {
   AuthRequiredError,
   InvalidRequestError,
+  parseReqNsid,
   type StreamAuthVerifier,
 } from '@atproto/xrpc-server'
-import { verifyServiceAuth } from './verifier.js'
+import { verifyMethodBoundServiceAuth, verifyServiceAuth } from './verifier.js'
+import { SPACE_HOST_FRAGMENT } from './delegation-verifier.js'
 import { DpopVerificationError, DpopVerifier } from './index.js'
 import {
   SPACE_CREDENTIAL_TYP,
@@ -46,6 +48,24 @@ export interface AuthVerifiers {
   service: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string; did: string; iss: string } }>
+  /** Allowlisted moderation service JWT bound to the called method via lxm */
+  moderationService: (
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
+  ) => Promise<{
+    credentials: { type: 'moderation-service'; did: string; iss: string }
+  }>
+  /**
+   * Verifies with {@link service} first, then routes on the verified `iss`: an
+   * allowlisted issuer is handed to {@link moderationService} alone, whose
+   * rejection is final; every other issuer keeps the service result.
+   */
+  moderationServiceOrService: (
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
+  ) => Promise<{
+    credentials:
+      | { type: 'moderation-service'; did: string; iss: string }
+      | { type: string; did: string; iss: string }
+  }>
   /** Optional user auth */
   optionalStandard: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
@@ -168,6 +188,12 @@ export function createAuthVerifiers(
     logger,
   })
   const service = createServiceVerifier({ serviceDid, idResolver })
+  const moderationService = createModerationServiceVerifier({
+    serviceDid,
+    idResolver,
+    allowedIssuers: cfg.moderationServiceDids,
+    logger,
+  })
   const optionalStandard = createOptionalStandardVerifier({
     devMode,
     idResolver,
@@ -180,6 +206,12 @@ export function createAuthVerifiers(
   return {
     standard,
     service,
+    moderationService,
+    moderationServiceOrService: routeByModerationIssuer(
+      service,
+      moderationService,
+      new Set(cfg.moderationServiceDids),
+    ),
     optionalStandard,
     spaceCredentialMint: createSpaceCredentialMintVerifier(optionalStandard),
     spaceCredential,
@@ -248,13 +280,18 @@ async function handleDevModeAuth(
 ): Promise<{ credentials: { type: string; did: string } }> {
   const did = authHeader.slice(7).trim()
   if (did.startsWith('did:')) {
-    await verifyEnrolled(did, {
-      idResolver: deps.idResolver,
-      enrollmentStore: deps.enrollmentStore,
-      config: deps.cfg.enrollment,
-      allowListProvider: deps.allowListProvider,
-      logger: deps.logger,
-    })
+    try {
+      await verifyEnrolled(did, {
+        idResolver: deps.idResolver,
+        enrollmentStore: deps.enrollmentStore,
+        config: deps.cfg.enrollment,
+        allowListProvider: deps.allowListProvider,
+        logger: deps.logger,
+      })
+    } catch (err) {
+      if (err instanceof EnrollmentDeniedError) throw notEnrolledError()
+      throw err
+    }
     return { credentials: { type: 'user', did } }
   }
   deps.logger?.info('auth rejected: dev bearer token is not a DID')
@@ -370,21 +407,26 @@ function createServiceVerifier(deps: {
  * recognized only so dev mode can present unbound credentials; the verifier
  * rejects a Bearer presentation outside dev mode.
  *
+ * `Atproto-Space-Credential` is the signed-presentation scheme (HTTP message
+ * signature, key-bound credential). The earlier `Atproto-Space` scheme is not
+ * recognised here, so such a request takes the fallback verifier.
+ *
  * @param authHeader - The raw Authorization header value.
  * @returns The token and its scheme when it looks like a space credential.
  */
-function extractSpaceCredentialToken(
-  authHeader: string | undefined,
-): { token: string; scheme: 'dpop' | 'bearer' | 'atproto-space' } | null {
+function extractSpaceCredentialToken(authHeader: string | undefined): {
+  token: string
+  scheme: 'dpop' | 'bearer' | 'atproto-space-credential'
+} | null {
   // RFC 9110 section 11.1: the auth scheme is case-insensitive.
-  if (authHeader && /^atproto-space(?:\s|$)/i.test(authHeader)) {
-    const token = /^atproto-space ([^\s]+)$/i.exec(authHeader)?.[1]
+  if (authHeader && /^atproto-space-credential(?:\s|$)/i.test(authHeader)) {
+    const token = /^atproto-space-credential ([^\s]+)$/i.exec(authHeader)?.[1]
     if (!token) throw new AuthRequiredError('Malformed space authorization')
-    return { token, scheme: 'atproto-space' }
+    return { token, scheme: 'atproto-space-credential' }
   }
   const match = authHeader ? /^(dpop|bearer) +(.+)$/i.exec(authHeader) : null
   if (!match) return null
-  const scheme: 'dpop' | 'bearer' | 'atproto-space' =
+  const scheme: 'dpop' | 'bearer' =
     match[1].toLowerCase() === 'dpop' ? 'dpop' : 'bearer'
   const token = match[2].trim()
   const parts = token.split('.')
@@ -475,7 +517,7 @@ function createSpaceCredentialVerifier(deps: {
           ...rawHeaders.filter((_, index) => index % 2 === 0),
         ].map((name) => name.toLowerCase()),
       )
-      if (scheme === 'atproto-space') {
+      if (scheme === 'atproto-space-credential') {
         if (proofHeaders.has('dpop')) {
           throw new AuthRequiredError('Conflicting credential proof families')
         }
@@ -856,6 +898,126 @@ export function createSubscribeAuthVerifier(
 }
 
 /**
+ * Creates the verifier for a notice a member's host sends this service as
+ * space host. Narrower than the `service` verifier: the token's `lxm` must be
+ * present and equal `lxm`, its `aud` is the service DID or the host role
+ * `<serviceDid>#atproto_pds`, and only the issuer's `#atproto` key verifies
+ * it.
+ *
+ * @param deps - Our service DID, the identity resolver and the bound method
+ * @returns A verifier yielding the token's issuer
+ * @throws AuthRequiredError if the token is missing or does not verify
+ */
+export function createRepoHostNoticeVerifier(deps: {
+  serviceDid: string
+  idResolver: IdResolver
+  lxm: string
+}): (req: import('node:http').IncomingMessage) => Promise<{ iss: string }> {
+  const binding = {
+    audiences: [deps.serviceDid, `${deps.serviceDid}${SPACE_HOST_FRAGMENT}`],
+    lxm: deps.lxm,
+  }
+  return async (req) => {
+    const authHeader = req.headers.authorization
+    if (!authHeader) {
+      throw new AuthRequiredError('Service authorization required')
+    }
+    try {
+      const result = await verifyMethodBoundServiceAuth(
+        authHeader,
+        binding,
+        deps.idResolver,
+      )
+      return { iss: result.iss }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Service authorization failed'
+      throw new AuthRequiredError(message)
+    }
+  }
+}
+
+const MODERATION_AUTH_FAILURE_MESSAGE =
+  'Moderation service authorization failed'
+
+/**
+ * Accepts a service JWT only from an allowlisted issuer, and only when its
+ * lxm names the method being called. Every failure carries one message so a
+ * caller cannot tell an unknown issuer from a wrong lxm.
+ */
+export function createModerationServiceVerifier(deps: {
+  serviceDid: string
+  idResolver: IdResolver
+  allowedIssuers: string[]
+  logger?: Logger
+}): AuthVerifiers['moderationService'] {
+  const allowedIssuers = new Set(deps.allowedIssuers)
+  const reject = (reason: string): never => {
+    deps.logger?.debug({ reason }, 'moderation service auth rejected')
+    throw new AuthRequiredError(MODERATION_AUTH_FAILURE_MESSAGE)
+  }
+
+  return async (ctx) => {
+    const authHeader = ctx.req.headers.authorization
+    if (!authHeader) return reject('missing authorization header')
+
+    let result: Awaited<ReturnType<typeof verifyServiceAuth>>
+    let nsid: string
+    try {
+      nsid = parseReqNsid(ctx.req)
+      result = await verifyServiceAuth(
+        authHeader,
+        deps.serviceDid,
+        nsid,
+        deps.idResolver,
+      )
+    } catch (err) {
+      return reject(
+        err instanceof Error ? err.message : 'service auth verification failed',
+      )
+    }
+
+    // verifyServiceAuth tolerates a missing lxm, so require it explicitly
+    if (result.lxm !== nsid) return reject('lxm missing or mismatched')
+    if (!allowedIssuers.has(result.iss)) return reject('issuer not allowlisted')
+
+    return {
+      credentials: {
+        type: 'moderation-service',
+        did: result.iss,
+        iss: result.iss,
+      },
+    }
+  }
+}
+
+// Routing on the verified `iss` means no second parse of the header can
+// disagree with service auth. An allowlisted issuer is re-checked by
+// moderationService, whose rejection is final, so it never ends as plain
+// service auth (which ignores lxm).
+function routeByModerationIssuer(
+  service: AuthVerifiers['service'],
+  moderationService: AuthVerifiers['moderationService'],
+  allowedIssuers: ReadonlySet<string>,
+): AuthVerifiers['moderationServiceOrService'] {
+  return async (ctx) => {
+    const result = await service(ctx)
+    if (allowedIssuers.has(result.credentials.iss)) {
+      return moderationService(ctx)
+    }
+    return result
+  }
+}
+
+/** The dev bearer and DPoP refuse a member without an active enrollment alike. */
+function notEnrolledError(): InvalidRequestError {
+  return new InvalidRequestError(
+    'User is not enrolled in this Stratos service',
+    'NotEnrolled',
+  )
+}
+
+/**
  * Shared logic to handle DPoP errors in standard auth
  * @param ctx - XRPC context
  * @param err - Error object
@@ -892,10 +1054,7 @@ function handleDpopError(
     (err instanceof DpopVerificationError && err.code === 'not_enrolled') ||
     err instanceof EnrollmentDeniedError
   ) {
-    throw new InvalidRequestError(
-      'User is not enrolled in this Stratos service',
-      'NotEnrolled',
-    )
+    throw notEnrolledError()
   }
 
   const message =

@@ -6,7 +6,7 @@ import { randomBytes } from 'crypto'
 import { CID } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { StratosActorStore } from '../../src/context.js'
-import { createMockBlobStore } from '../utils'
+import { createEmptyLabelLog, createMockBlobStore } from '../utils'
 import { decode } from '@atcute/cbor'
 import { encodeRecord } from '@northskysocial/stratos-core'
 import {
@@ -41,7 +41,10 @@ describe('Performance: Hydration', () => {
       cborToRecord: (content) => decode(content) as Record<string, unknown>,
     })
 
-    const recordResolver = new ActorStoreRecordResolver(actorStore)
+    const recordResolver = new ActorStoreRecordResolver(
+      actorStore,
+      createEmptyLabelLog(),
+    )
     const boundaryResolver = {
       getBoundaries: vi.fn().mockResolvedValue([boundary]),
     }

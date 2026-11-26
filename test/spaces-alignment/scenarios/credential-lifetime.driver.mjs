@@ -29,8 +29,10 @@ function failureOutcome(error) {
   )
 }
 import {
+  exchangeHeaders,
+  presentationHeaders,
   proofKey,
-  signedHeaders,
+  spaceUriFromParts,
 } from './standard-credential-transport.driver.mjs'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
@@ -46,7 +48,7 @@ const clubhouse = 'https://clubhouse-e2e.atmosbox.internal'
 const authority = 'https://stratos-e2e.atmosbox.internal'
 const pds = `https://pds-space1.${domain}`
 const authorityDid = `did:web:stratos-e2e.${domain}`
-const space = `at://${authorityDid}/space/zone.stratos.space.feed/general`
+const space = spaceUriFromParts(authorityDid, 'general')
 const mintUrl = `${authority}/xrpc/zone.stratos.space.getSpaceCredential`
 const passed = []
 
@@ -199,7 +201,7 @@ async function exchange(token, key, body = { space }) {
   const response = await fetch(mintUrl, {
     method: 'POST',
     headers: {
-      ...signedHeaders(`Bearer ${token}`, key),
+      ...exchangeHeaders(`Bearer ${token}`, key),
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -230,7 +232,7 @@ async function main() {
     )
     check(claims.iss === did, 'delegation-iss')
     check(claims.sub === space, 'delegation-sub')
-    check(claims.aud === `${authorityDid}#atproto_space_host`, 'delegation-aud')
+    check(claims.aud === `${authorityDid}#atproto_pds`, 'delegation-aud')
     passed.push('pds-issued-delegation')
 
     const key = proofKey()
@@ -249,8 +251,8 @@ async function main() {
     async function read(url, presentationKey = key) {
       return fetch(url, {
         headers: {
-          ...signedHeaders(
-            `Atproto-Space ${credential}`,
+          ...presentationHeaders(
+            credential,
             presentationKey,
             url === localUrl ? authorityDid : did,
           ),

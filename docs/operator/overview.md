@@ -62,3 +62,5 @@ page that does it.
 - [Configuration](/operator/configuration): every environment variable
 - [Manage boundaries](/operator/boundaries): the admin interface
 - [Operations](/operator/operations): monitoring, backup, scaling
+- [November upgrade and rollback](/operator/november-upgrade): the upgrade to the
+  November spaces contract

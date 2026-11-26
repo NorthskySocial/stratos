@@ -11,9 +11,8 @@ use rusqlite::Connection;
 use serde::Deserialize;
 
 use super::{
-    ActorEnrollment, ActorPage, EncryptedStore, MAX_ACTOR_ENROLLMENT_PAGE, PdsSpaceMember,
-    ProjectionCompaction, ProjectionPost, SpaceStageMutation, SpaceStagePage, StorageKey,
-    StoreError,
+    ActorEnrollment, ActorPage, EncryptedStore, MAX_ACTOR_ENROLLMENT_PAGE, ProjectionCompaction,
+    ProjectionPost, StorageKey, StoreError,
 };
 
 #[derive(Deserialize)]
@@ -71,7 +70,7 @@ fn post_order_accepts_valid_utc_microseconds() {
 
 fn space_post() -> ProjectionPost {
     let mut post = spike_post();
-    post.uri = "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string();
+    post.uri = "at:space/did:web:stratos.example/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string();
     post
 }
 
@@ -83,35 +82,8 @@ fn actor_page(sequence: u64, upserts: Vec<ProjectionPost>, deletes: Vec<String>)
         upserts,
         deletes,
         updated_at: "1998-04-03T00:00:02.000Z".to_string(),
+        interactions: crate::store::InteractionChanges::default(),
     }
-}
-
-fn space_stage_page(next_cursor: Option<&str>) -> SpaceStagePage {
-    SpaceStagePage {
-        space_uri: "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop".to_string(),
-        actor_did: "did:plc:spikespiegel".to_string(),
-        boundary: "bebop".to_string(),
-        next_cursor: next_cursor.map(str::to_string),
-        updated_at: "1998-04-03T00:00:00.000Z".to_string(),
-    }
-}
-
-fn authorized_space_stage_page(next_cursor: Option<&str>) -> SpaceStagePage {
-    SpaceStagePage {
-        boundary: "did:web:stratos.example/bebop".to_owned(),
-        ..space_stage_page(next_cursor)
-    }
-}
-
-fn staged_space_post() -> SpaceStageMutation {
-    SpaceStageMutation::Upsert {
-            uri: "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string(),
-            cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
-            sort_at: "1998-04-03T00:00:00.000Z".to_string(),
-            indexed_at: "1998-04-03T00:00:01.000Z".to_string(),
-            record_json: br#"{\"text\":\"Bang\"}"#.to_vec(),
-            blob_refs_json: b"[]".to_vec(),
-        }
 }
 
 fn temporary_path(name: &str) -> PathBuf {
@@ -167,14 +139,6 @@ fn reconciles_actor_enrollment_shrink_and_unenrollment_atomically() {
     store
             .connection
             .execute(
-                "INSERT INTO space_sync_pending_verification (space_uri, did, boundary, updated_at)
-                 VALUES ('at://did:web:stratos.example/space/zone.stratos.space.feed/crew', 'did:plc:spikespiegel', 'crew', '1998-04-03T00:00:00.000Z')",
-                [],
-            )
-            .unwrap();
-    store
-            .connection
-            .execute(
                 "INSERT INTO suppression_marker (authority_did, source_id, uri, sequence)
                  VALUES ('did:plc:authority', 'did:plc:spikespiegel', 'at://did:plc:spikespiegel/zone.stratos.feed.post/spike', 1)",
                 [],
@@ -218,27 +182,6 @@ fn reconciles_actor_enrollment_shrink_and_unenrollment_atomically() {
             .unwrap(),
         0
     );
-    assert_eq!(
-        store
-            .connection
-            .query_row(
-                "SELECT COUNT(*) FROM space_sync_pending_verification WHERE boundary = 'crew'",
-                [],
-                |row| row.get::<_, i64>(0)
-            )
-            .unwrap(),
-        0
-    );
-
-    store
-        .stage_space_page(
-            space_stage_page(Some("firehose:8")),
-            vec![staged_space_post()],
-        )
-        .unwrap();
-    store
-        .stage_space_page(space_stage_page(None), Vec::new())
-        .unwrap();
 
     let result = store
         .reconcile_actor_enrollment("did:plc:spikespiegel", "1998-04-03T00:00:02.000Z", None)
@@ -259,27 +202,6 @@ fn reconciles_actor_enrollment_shrink_and_unenrollment_atomically() {
             .unwrap(),
         0
     );
-    assert!(matches!(
-        store.promote_verified_space_stage(
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-            "did:plc:spikespiegel",
-            "1998-04-04T00:00:00.000Z",
-        ),
-        Err(StoreError::UnverifiedSpaceStage)
-    ));
-    for table in [
-        "space_cursor",
-        "space_sync_pending_verification",
-        "space_sync_stage",
-    ] {
-        let count: i64 = store
-            .connection
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 0, "{table}");
-    }
     assert_eq!(
         store
             .connection
@@ -819,6 +741,125 @@ fn compaction_evicts_oldest_posts_until_the_projection_fits_its_byte_cap() {
     );
 }
 
+fn insert_post_counted_as(store: &EncryptedStore, rkey: &str, projection_bytes: i64) {
+    store
+        .connection
+        .execute(
+            "INSERT INTO post (uri, author_did, cid, sort_at, indexed_at, retained_at, projection_bytes, record_json, blob_refs_json, row_version)
+             VALUES (?1, 'did:plc:spikespiegel', 'bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                     '1998-04-03T00:00:00.000Z', '1998-04-03T00:00:00.000Z', '1998-05-03T00:00:00.000Z', ?2, x'7b7d', x'5b5d', 0)",
+            rusqlite::params![
+                format!("at://did:plc:spikespiegel/zone.stratos.feed.post/{rkey}"),
+                projection_bytes
+            ],
+        )
+        .unwrap();
+}
+
+fn posts_held(store: &EncryptedStore) -> i64 {
+    store
+        .connection
+        .query_row("SELECT COUNT(*) FROM post", [], |row| row.get(0))
+        .unwrap()
+}
+
+// A 6,500-byte post fits the 10,000-byte maximum but not the 6,000 bytes left
+// beside a 4,000-byte reserve, so compaction evicts it.
+#[test]
+fn compaction_keeps_the_space_write_reserve_free_before_published_posts_fill_the_maximum() {
+    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+    insert_post_counted_as(&store, "bang", 6_500);
+
+    let result = store
+        .compact_projection_with_reserve(
+            "1998-04-01T00:00:00.000Z",
+            "1998-06-01T00:00:00.000Z",
+            10_000,
+            1,
+            4_000,
+        )
+        .unwrap();
+
+    assert_eq!(result.deleted, 1);
+    assert!(!result.has_more);
+    assert_eq!(posts_held(&store), 0);
+}
+
+#[test]
+fn compaction_without_an_explicit_reserve_keeps_half_the_maximum_free() {
+    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+    insert_post_counted_as(&store, "bang", 6_000);
+
+    let result = store
+        .compact_projection(
+            "1998-04-01T00:00:00.000Z",
+            "1998-06-01T00:00:00.000Z",
+            10_000,
+            1,
+        )
+        .unwrap();
+
+    assert_eq!(result.deleted, 1);
+    assert_eq!(posts_held(&store), 0);
+}
+
+// An older build wrote its stage limits into retention metadata; the reserve
+// comes from the configuration alone.
+#[test]
+fn compaction_ignores_the_stage_limits_an_older_build_left_in_retention_metadata() {
+    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+    for (stale_key, value) in [
+        ("stage_target_max_rows", 1),
+        ("stage_global_max_rows", 1),
+        ("stage_target_max_bytes", 1),
+        ("stage_global_max_bytes", 9_999),
+    ] {
+        store
+            .connection
+            .execute(
+                "INSERT INTO retention_metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![stale_key, value],
+            )
+            .unwrap();
+    }
+    insert_post_counted_as(&store, "bang", 5_000);
+
+    let result = store
+        .compact_projection_with_reserve(
+            "1998-04-01T00:00:00.000Z",
+            "1998-06-01T00:00:00.000Z",
+            10_000,
+            1,
+            4_000,
+        )
+        .unwrap();
+
+    assert_eq!(result.deleted, 0);
+    assert_eq!(posts_held(&store), 1);
+}
+
+#[test]
+fn compaction_refuses_a_reserve_that_is_zero_or_not_below_the_maximum() {
+    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+    insert_post_counted_as(&store, "bang", 100);
+    for reserve in [0, 10_000, 10_001] {
+        assert!(
+            matches!(
+                store.compact_projection_with_reserve(
+                    "1998-04-01T00:00:00.000Z",
+                    "1998-06-01T00:00:00.000Z",
+                    10_000,
+                    1,
+                    reserve,
+                ),
+                Err(StoreError::InvalidProjectionMutation)
+            ),
+            "{reserve}"
+        );
+    }
+    assert_eq!(posts_held(&store), 1);
+}
+
 #[test]
 fn compaction_applies_a_shortened_retention_policy_to_existing_posts() {
     let mut store = EncryptedStore::open_memory(key(7)).unwrap();
@@ -866,459 +907,6 @@ fn boundary_purge_preserves_posts_still_scoped_to_another_boundary() {
             .posts
             .len(),
         1
-    );
-}
-
-#[test]
-fn boundary_purge_removes_staged_space_state_before_it_can_promote() {
-    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-    store
-        .stage_space_page(space_stage_page(Some("firehose:8")), Vec::new())
-        .unwrap();
-    store
-        .stage_space_page(space_stage_page(None), Vec::new())
-        .unwrap();
-
-    assert_eq!(store.purge_boundary("bebop").unwrap(), 0);
-    assert!(matches!(
-        store.promote_verified_space_stage(
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-            "did:plc:spikespiegel",
-            "1998-04-04T00:00:00.000Z",
-        ),
-        Err(StoreError::UnverifiedSpaceStage)
-    ));
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        0
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM space_cursor", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        0
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM space_sync_stage_cursor", [], |row| {
-                row.get::<_, i64>(0)
-            })
-            .unwrap(),
-        0
-    );
-}
-
-#[test]
-fn terminal_space_stage_stays_invisible_until_promotion() {
-    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-    store
-        .stage_space_page(space_stage_page(None), vec![staged_space_post()])
-        .unwrap();
-    assert_eq!(
-        store
-            .connection
-            .query_row(
-                "SELECT COUNT(*) FROM space_sync_pending_verification",
-                [],
-                |row| row.get::<_, i64>(0)
-            )
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM post", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
-        0
-    );
-}
-
-#[test]
-fn terminal_space_staging_keeps_the_resumable_cursor_uncommitted() {
-    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-    store
-        .stage_space_page(
-            space_stage_page(Some("firehose:8")),
-            vec![staged_space_post()],
-        )
-        .unwrap();
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT cursor FROM space_sync_stage_cursor", [], |row| {
-                row.get::<_, String>(0)
-            })
-            .unwrap(),
-        "firehose:8"
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row(
-                "SELECT COUNT(*) FROM space_sync_pending_verification",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-        0
-    );
-
-    store
-        .stage_space_page(space_stage_page(None), Vec::new())
-        .unwrap();
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT cursor FROM space_sync_stage_cursor", [], |row| {
-                row.get::<_, String>(0)
-            })
-            .unwrap(),
-        "firehose:8"
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row(
-                "SELECT COUNT(*) FROM space_sync_pending_verification",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-        1
-    );
-}
-
-#[test]
-fn restarting_a_staged_page_requires_a_new_terminal_verification() {
-    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-    store
-        .stage_space_page(space_stage_page(None), vec![staged_space_post()])
-        .unwrap();
-    store
-        .stage_space_page(space_stage_page(Some("retry")), Vec::new())
-        .unwrap();
-
-    assert!(matches!(
-        store.promote_verified_space_stage(
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-            "did:plc:spikespiegel",
-            "1998-04-04T00:00:00.000Z",
-        ),
-        Err(StoreError::UnverifiedSpaceStage)
-    ));
-}
-
-#[test]
-fn space_staging_rejects_a_record_outside_its_space_atomically() {
-    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-    let invalid = SpaceStageMutation::Delete {
-            uri: "at://did:web:stratos.example/space/zone.stratos.space.feed/red-tail/did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string(),
-        };
-
-    assert!(matches!(
-        store.stage_space_page(
-            space_stage_page(Some("firehose:8")),
-            vec![staged_space_post(), invalid]
-        ),
-        Err(StoreError::InvalidProjectionMutation)
-    ));
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        0
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM space_cursor", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        0
-    );
-}
-
-#[test]
-fn promotion_publishes_a_verified_terminal_stage_and_keeps_its_cursor() {
-    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-    store
-        .stage_space_page(
-            space_stage_page(Some("firehose:8")),
-            vec![staged_space_post()],
-        )
-        .unwrap();
-    store
-        .stage_space_page(space_stage_page(None), Vec::new())
-        .unwrap();
-
-    store
-        .promote_verified_space_stage(
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-            "did:plc:spikespiegel",
-            "1998-04-04T00:00:00.000Z",
-        )
-        .unwrap();
-
-    assert_eq!(
-        store
-            .list_posts_by_boundary("bebop", None, 50, "1998-04-03T12:00:00.000Z")
-            .unwrap()
-            .posts
-            .len(),
-        1
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT cursor FROM space_cursor", [], |row| row
-                .get::<_, String>(0))
-            .unwrap(),
-        "firehose:8"
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        0
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row(
-                "SELECT COUNT(*) FROM space_sync_pending_verification",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-        0
-    );
-}
-
-#[test]
-fn discarding_an_unverified_stage_preserves_the_last_verified_cursor() {
-    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-    store
-        .replace_pds_space_members(
-            "did:web:stratos.example/bebop",
-            vec![super::PdsSpaceMember {
-                did: "did:plc:spikespiegel".to_owned(),
-            }],
-            "1998-04-03T00:00:00.000Z",
-        )
-        .unwrap();
-    store
-        .stage_authorized_space_page(
-            authorized_space_stage_page(Some("verified")),
-            vec![staged_space_post()],
-        )
-        .unwrap();
-    store
-        .stage_authorized_space_page(authorized_space_stage_page(None), Vec::new())
-        .unwrap();
-    store
-        .promote_authorized_space_stage(
-            "did:web:stratos.example/bebop",
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-            "did:plc:spikespiegel",
-            "1998-04-04T00:00:00.000Z",
-        )
-        .unwrap();
-
-    store
-        .stage_authorized_space_page(
-            authorized_space_stage_page(Some("unverified")),
-            vec![staged_space_post()],
-        )
-        .unwrap();
-    store
-        .stage_authorized_space_page(authorized_space_stage_page(None), Vec::new())
-        .unwrap();
-    store
-        .discard_unverified_space_stage(
-            "did:web:stratos.example/bebop",
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-            "did:plc:spikespiegel",
-        )
-        .unwrap();
-
-    assert_eq!(
-        store
-            .space_sync_cursor(
-                "did:web:stratos.example/bebop",
-                "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-                "did:plc:spikespiegel",
-            )
-            .unwrap(),
-        Some("verified".to_owned())
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        0
-    );
-}
-
-#[test]
-fn discarding_unverified_state_succeeds_after_membership_revocation() {
-    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-    store
-        .replace_pds_space_members(
-            "did:web:stratos.example/bebop",
-            vec![PdsSpaceMember {
-                did: "did:plc:spikespiegel".to_owned(),
-            }],
-            "1998-04-03T00:00:00.000Z",
-        )
-        .unwrap();
-    store
-        .stage_authorized_space_page(
-            authorized_space_stage_page(Some("unverified")),
-            vec![staged_space_post()],
-        )
-        .unwrap();
-    store
-        .replace_pds_space_members(
-            "did:web:stratos.example/bebop",
-            Vec::new(),
-            "1998-04-03T00:01:00.000Z",
-        )
-        .unwrap();
-
-    store
-        .discard_unverified_space_stage(
-            "did:web:stratos.example/bebop",
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-            "did:plc:spikespiegel",
-        )
-        .unwrap();
-}
-
-#[test]
-fn promotion_rejects_a_partial_space_stage_without_publishing_it() {
-    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-    store
-        .stage_space_page(
-            space_stage_page(Some("firehose:8")),
-            vec![staged_space_post()],
-        )
-        .unwrap();
-
-    assert!(matches!(
-        store.promote_verified_space_stage(
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-            "did:plc:spikespiegel",
-            "1998-04-04T00:00:00.000Z",
-        ),
-        Err(StoreError::UnverifiedSpaceStage)
-    ));
-    assert!(
-        store
-            .list_posts_by_boundary("bebop", None, 50, "1998-04-03T12:00:00.000Z")
-            .unwrap()
-            .posts
-            .is_empty()
-    );
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        1
-    );
-}
-
-#[test]
-fn promotion_processes_staged_records_in_bounded_batches() {
-    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-    let mutations = (0..=usize::from(super::MAX_SPACE_PROMOTION_BATCH))
-            .map(|index| SpaceStageMutation::Upsert {
-                uri: format!(
-                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/{index}"
-                ),
-                cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
-                sort_at: "1998-04-03T00:00:00.000Z".to_string(),
-                indexed_at: "1998-04-03T00:00:01.000Z".to_string(),
-                record_json: br#"{\"text\":\"Bang\"}"#.to_vec(),
-                blob_refs_json: b"[]".to_vec(),
-            })
-            .collect();
-    store
-        .stage_space_page(space_stage_page(None), mutations)
-        .unwrap();
-
-    store
-        .promote_verified_space_stage(
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-            "did:plc:spikespiegel",
-            "1998-04-04T00:00:00.000Z",
-        )
-        .unwrap();
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM post", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
-        i64::from(super::MAX_SPACE_PROMOTION_BATCH) + 1
-    );
-}
-
-#[test]
-fn promotion_applies_a_verified_tombstone() {
-    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-    store
-        .stage_space_page(space_stage_page(None), vec![staged_space_post()])
-        .unwrap();
-    store
-        .promote_verified_space_stage(
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-            "did:plc:spikespiegel",
-            "1998-04-04T00:00:00.000Z",
-        )
-        .unwrap();
-    let staged_delete = SpaceStageMutation::Delete {
-            uri: "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string(),
-        };
-    store
-        .stage_space_page(space_stage_page(None), vec![staged_delete])
-        .unwrap();
-
-    store
-        .promote_verified_space_stage(
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
-            "did:plc:spikespiegel",
-            "1998-04-04T00:00:00.000Z",
-        )
-        .unwrap();
-    assert_eq!(
-        store
-            .connection
-            .query_row("SELECT COUNT(*) FROM post", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
-        0
     );
 }
 
@@ -1409,4 +997,310 @@ fn rejects_secret_files_under_symlinked_directories() {
     ));
     fs::remove_file(link).unwrap();
     fs::remove_dir_all(target_directory).unwrap();
+}
+
+const LEGACY_SPACE_POST: &str = "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/see-you";
+const LEGACY_ORPHANED_POST: &str = "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/gone";
+const CURRENT_SPACE_POST: &str = "at:space/did:web:stratos.example/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/see-you";
+const LABEL_AUTHORITY: &str = "did:web:stratos.example";
+const LEGACY_LIKE: &str = "at://did:plc:edwardwong/app.bsky.feed.like/ein";
+const LEGACY_ORPHAN_LIKE: &str = "at://did:plc:edwardwong/app.bsky.feed.like/corgi";
+const CURRENT_LIKE: &str = "at://did:plc:fayevalentine/app.bsky.feed.like/swordfish";
+const READ_AT: &str = "1998-04-03T12:00:00.000Z";
+
+fn insert_space_post_row(store: &EncryptedStore, uri: &str, blob_refs_json: &str) {
+    store
+        .connection
+        .execute(
+            "INSERT INTO post (uri, author_did, cid, sort_at, indexed_at, retained_at, projection_bytes, record_json, blob_refs_json, row_version)
+             VALUES (?1, 'did:plc:spikespiegel', 'bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                     '1998-04-03T00:00:00.000Z', '1998-04-03T00:00:01.000Z', '1998-05-03T00:00:00.000Z', 100,
+                     x'7b7d', ?2, 1)",
+            rusqlite::params![uri, blob_refs_json.as_bytes()],
+        )
+        .unwrap();
+    store
+        .connection
+        .execute(
+            "INSERT INTO post_boundary (uri, boundary, sort_at) VALUES (?1, 'bebop', '1998-04-03T00:00:00.000Z')",
+            [uri],
+        )
+        .unwrap();
+}
+
+fn insert_like(store: &EncryptedStore, uri: &str, actor_did: &str, subject_uri: &str) {
+    store
+        .connection
+        .execute(
+            "INSERT INTO interaction (uri, actor_did, kind, subject_uri, boundary, indexed_at, retained_at, projection_bytes)
+             VALUES (?1, ?2, 'like', ?3, 'bebop', '1998-04-03T00:00:01.000Z', '1998-05-03T00:00:00.000Z', 100)",
+            rusqlite::params![uri, actor_did, subject_uri],
+        )
+        .unwrap();
+}
+
+/// Rows an older build wrote in the previous spelling, beside the current one.
+fn store_holding_both_spellings() -> EncryptedStore {
+    let store = EncryptedStore::open_memory(key(7)).unwrap();
+    insert_space_post_row(&store, LEGACY_SPACE_POST, r#"[{"cid":"bafylegacy"}]"#);
+    insert_like(&store, LEGACY_LIKE, "did:plc:edwardwong", LEGACY_SPACE_POST);
+    insert_like(
+        &store,
+        LEGACY_ORPHAN_LIKE,
+        "did:plc:edwardwong",
+        LEGACY_ORPHANED_POST,
+    );
+    store
+        .connection
+        .execute(
+            "INSERT INTO label_subject (authority_did, subject_key, subject_kind, author_did, label_sequence, state, attempts)
+             VALUES (?1, ?2, 'record', 'did:plc:spikespiegel', 1, 'takedown', 0)",
+            rusqlite::params![LABEL_AUTHORITY, LEGACY_SPACE_POST],
+        )
+        .unwrap();
+    insert_space_post_row(&store, CURRENT_SPACE_POST, "[]");
+    insert_like(
+        &store,
+        CURRENT_LIKE,
+        "did:plc:fayevalentine",
+        CURRENT_SPACE_POST,
+    );
+    store
+}
+
+fn post_count(store: &EncryptedStore, uri: &str) -> i64 {
+    store
+        .connection
+        .query_row("SELECT COUNT(*) FROM post WHERE uri = ?1", [uri], |row| {
+            row.get(0)
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_feed_read_serves_the_current_post_beside_a_row_in_the_previous_spelling() {
+    let store = store_holding_both_spellings();
+
+    let uris: Vec<String> = store
+        .list_posts_by_boundary("bebop", None, 50, READ_AT)
+        .unwrap()
+        .posts
+        .into_iter()
+        .map(|post| post.uri)
+        .collect();
+
+    assert_eq!(uris, [LEGACY_SPACE_POST, CURRENT_SPACE_POST]);
+}
+
+#[test]
+fn a_like_is_counted_on_the_post_of_its_own_subject_spelling_only() {
+    let store = store_holding_both_spellings();
+
+    let summaries = store
+        .interaction_summaries(
+            "bebop",
+            "did:plc:fayevalentine",
+            &[CURRENT_SPACE_POST.to_owned(), LEGACY_SPACE_POST.to_owned()],
+            READ_AT,
+        )
+        .unwrap();
+
+    let current = &summaries[CURRENT_SPACE_POST];
+    assert_eq!(current.like_count, 1);
+    assert_eq!(current.viewer_like.as_deref(), Some(CURRENT_LIKE));
+    let legacy = &summaries[LEGACY_SPACE_POST];
+    assert_eq!(legacy.like_count, 1);
+    assert_eq!(legacy.viewer_like, None);
+
+    for (requested, other) in [
+        (CURRENT_SPACE_POST, LEGACY_SPACE_POST),
+        (LEGACY_SPACE_POST, CURRENT_SPACE_POST),
+    ] {
+        let alone = store
+            .interaction_summaries(
+                "bebop",
+                "did:plc:fayevalentine",
+                &[requested.to_owned()],
+                READ_AT,
+            )
+            .unwrap();
+        assert_eq!(
+            alone.len(),
+            1,
+            "{other} must not be counted for {requested}"
+        );
+        assert_eq!(alone[requested].like_count, 1);
+    }
+}
+
+#[test]
+fn a_blob_lookup_by_the_current_uri_finds_the_current_post_only() {
+    let store = store_holding_both_spellings();
+
+    let current = store
+        .blob_post(CURRENT_SPACE_POST, READ_AT)
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.uri, CURRENT_SPACE_POST);
+    assert_eq!(current.blob_refs_json, b"[]");
+    let legacy = store
+        .blob_post(LEGACY_SPACE_POST, READ_AT)
+        .unwrap()
+        .unwrap();
+    assert_eq!(legacy.blob_refs_json, br#"[{"cid":"bafylegacy"}]"#);
+}
+
+#[test]
+fn a_legacy_takedown_does_not_suppress_the_current_post() {
+    let store = store_holding_both_spellings();
+
+    assert!(
+        store
+            .is_taken_down(LABEL_AUTHORITY, LEGACY_SPACE_POST)
+            .unwrap()
+    );
+    assert!(
+        !store
+            .is_taken_down(LABEL_AUTHORITY, CURRENT_SPACE_POST)
+            .unwrap()
+    );
+    assert_eq!(post_count(&store, CURRENT_SPACE_POST), 1);
+}
+
+#[test]
+fn a_takedown_of_the_current_uri_leaves_the_row_in_the_previous_spelling() {
+    let mut store = store_holding_both_spellings();
+
+    store
+        .apply_label_page(
+            LABEL_AUTHORITY,
+            &crate::moderation_label::LabelPage {
+                cursor: 2,
+                labels: vec![crate::moderation_label::ModerationLabel {
+                    seq: 2,
+                    subject: crate::moderation_label::LabelSubject::Record {
+                        uri: CURRENT_SPACE_POST.to_owned(),
+                        author_did: "did:plc:spikespiegel".to_owned(),
+                    },
+                    neg: false,
+                }],
+                skipped_subjects: 0,
+            },
+            "1998-04-03T00:00:02.000Z",
+        )
+        .unwrap();
+
+    assert_eq!(post_count(&store, CURRENT_SPACE_POST), 0);
+    assert_eq!(post_count(&store, LEGACY_SPACE_POST), 1);
+    assert!(
+        store
+            .is_taken_down(LABEL_AUTHORITY, CURRENT_SPACE_POST)
+            .unwrap()
+    );
+    assert!(
+        store
+            .is_taken_down(LABEL_AUTHORITY, LEGACY_SPACE_POST)
+            .unwrap()
+    );
+    let remaining_likes: Vec<String> = store
+        .connection
+        .prepare("SELECT uri FROM interaction ORDER BY uri")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(remaining_likes, [LEGACY_ORPHAN_LIKE, LEGACY_LIKE]);
+}
+
+#[test]
+fn retention_and_orphan_eviction_run_over_rows_in_the_previous_spelling() {
+    let mut store = store_holding_both_spellings();
+    let published_bytes: i64 = store
+        .connection
+        .query_row(
+            "SELECT (SELECT SUM(projection_bytes) FROM post) + (SELECT SUM(projection_bytes) FROM interaction)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    let compaction = store
+        .compact_projection(
+            "1998-04-01T00:00:00.000Z",
+            "1998-06-01T00:00:00.000Z",
+            (published_bytes - 1) as u64,
+            10,
+        )
+        .unwrap();
+
+    assert_eq!(compaction.deleted, 1);
+    assert_eq!(post_count(&store, LEGACY_SPACE_POST), 1);
+    assert_eq!(post_count(&store, CURRENT_SPACE_POST), 1);
+    let orphan_likes: i64 = store
+        .connection
+        .query_row(
+            "SELECT COUNT(*) FROM interaction WHERE uri = ?1",
+            [LEGACY_ORPHAN_LIKE],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(orphan_likes, 0);
+    store.purge_expired("1998-06-01T00:00:00.000Z", 10).unwrap();
+    let rows_left: i64 = store
+        .connection
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM post) + (SELECT COUNT(*) FROM interaction)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(rows_left, 0);
+}
+
+#[test]
+fn an_actor_page_that_fails_partway_through_its_transaction_stores_nothing() {
+    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+    store
+        .apply_actor_page(actor_page(6, Vec::new(), Vec::new()))
+        .unwrap();
+    let posts = (0..200)
+        .map(|index| {
+            let mut post = spike_post();
+            post.uri = format!("at://did:plc:spikespiegel/zone.stratos.feed.post/bebop{index:03}");
+            post
+        })
+        .collect::<Vec<_>>();
+    let last_uri = posts[199].uri.clone();
+    // The last of the page's writes fails after the other 199 have been made.
+    store
+        .connection
+        .execute(
+            &format!(
+                "CREATE TEMP TRIGGER refuse_last_post BEFORE INSERT ON post WHEN NEW.uri = '{last_uri}'
+                 BEGIN SELECT RAISE(ABORT, 'the last post is refused'); END"
+            ),
+            [],
+        )
+        .unwrap();
+
+    assert!(
+        store
+            .apply_actor_page(actor_page(7, posts, Vec::new()))
+            .is_err()
+    );
+
+    let stored: i64 = store
+        .connection
+        .query_row("SELECT COUNT(*) FROM post", [], |row| row.get(0))
+        .unwrap();
+    let cursor: i64 = store
+        .connection
+        .query_row(
+            "SELECT sequence FROM actor_cursor WHERE did = 'did:plc:spikespiegel'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!((stored, cursor), (0, 6));
 }

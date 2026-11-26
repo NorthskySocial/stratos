@@ -18,7 +18,7 @@ import {
 
 // 90s-anime crew DIDs and space, matching the space-sync test fixtures.
 const SPACE_URI =
-  'at://did:web:stratos.test/space/zone.stratos.space.feed/bebop-crew'
+  'at:space/did:web:stratos.test/zone.stratos.space.feed/bebop-crew'
 const SPIKE_DID = 'did:plc:spikespiegel'
 const REV = '3juwxyz'
 
@@ -490,7 +490,7 @@ describe('CommitVerifier', () => {
   it('binds the space into the signed context, rejecting cross-space replay', async () => {
     const keypair = await Secp256k1Keypair.create({ exportable: true })
     const otherSpace =
-      'at://did:web:stratos.test/space/zone.stratos.space.feed/nerv-pilots'
+      'at:space/did:web:stratos.test/zone.stratos.space.feed/nerv-pilots'
     const commit = await signTestCommit(keypair, { space: otherSpace })
     const verifier = buildVerifier(stubResolver(async () => keypair.did()))
 

@@ -14,6 +14,7 @@ import {
   migrateServiceDb,
   ServiceDb,
 } from '../src/db/index.js'
+import { SqliteLabelStore } from '../src/features/moderation/index.js'
 import { createSubscribeRecordsHandler } from '../src/subscription/index.js'
 import { createMockBlobStore, createTestConfig } from './utils/index.js'
 
@@ -55,6 +56,7 @@ describe('Multi-Actor Sync Integration', () => {
       cfg,
       actorStore,
       enrollmentStore,
+      labelStore: new SqliteLabelStore(db, join(dataDir, 'service.sqlite')),
       serviceDid,
       sequenceEvents,
       enrollmentEvents,

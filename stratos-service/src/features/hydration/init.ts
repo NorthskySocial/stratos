@@ -4,6 +4,7 @@ import {
   type EnrollmentStoreReader,
   type Logger,
 } from '@northskysocial/stratos-core'
+import type { AccountTakedownLog } from '../../subscription/takedown-filter.js'
 import {
   CachedBoundaryResolver,
   EnrollmentBoundaryResolver,
@@ -16,6 +17,7 @@ import { type ActorStore } from '../../actor-store-types.js'
  * Initialize hydration context
  * @param actorStore - Actor store
  * @param enrollmentStore - Enrollment store reader
+ * @param takedownLog - Label log that decides account takedowns
  * @param cache - Optional cache for boundary resolution
  * @param logger - Optional logger for invariant reporting
  * @returns Hydration context
@@ -23,6 +25,7 @@ import { type ActorStore } from '../../actor-store-types.js'
 export function initHydration(
   actorStore: ActorStore,
   enrollmentStore: EnrollmentStoreReader,
+  takedownLog: AccountTakedownLog,
   cache?: Cache,
   logger?: Logger,
 ): HydrationContext {
@@ -33,7 +36,7 @@ export function initHydration(
     boundaryResolver = new CachedBoundaryResolver(boundaryResolver, cache)
   }
 
-  const recordResolver = new ActorStoreRecordResolver(actorStore)
+  const recordResolver = new ActorStoreRecordResolver(actorStore, takedownLog)
   const hydrationService = new HydrationServiceImpl(
     recordResolver,
     boundaryResolver,

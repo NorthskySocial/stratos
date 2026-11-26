@@ -1,7 +1,8 @@
 /**
- * Contract tests for `zone.stratos.space.listRepos` — the spec-shaped mirror
- * of `com.atproto.space.listRepos` (atproto#5187), extended with `host` /
- * `hostSource`.
+ * Contract tests for `zone.stratos.space.listRepos` — Stratos's own member
+ * listing, each repo with its custody and, for a PDS-custody repo, a `host` /
+ * `hostSource`. It does not take or return what an upstream method of that
+ * name does.
  *
  * Contract under test:
  *   - a membership oracle, never a member-facing read: callable with

@@ -157,6 +157,7 @@ describe('SqliteEnrollmentStore isService support', () => {
       isService: false,
       custody: 'stratos',
       repoHost: undefined,
+      operatorHold: false,
     })
     expect(await store.getBoundaries(USER_DID)).toEqual(
       expect.arrayContaining(['pilot', 'medical']),
@@ -208,6 +209,7 @@ describe('SqliteEnrollmentStore isService support', () => {
       isService: true,
       custody: 'stratos',
       repoHost: undefined,
+      operatorHold: false,
     })
 
     // Untouched fields remain after a partial update.
@@ -250,6 +252,7 @@ describe('SqliteEnrollmentStore isService support', () => {
       isService: false,
       custody: 'stratos',
       repoHost: undefined,
+      operatorHold: false,
     })
     const service = all.find((e) => e.did === SERVICE_DID)
     expect(service?.active).toBe(false)
@@ -293,6 +296,7 @@ describe('SqliteEnrollmentStore isService support', () => {
       isService: true,
       custody: 'stratos',
       repoHost: undefined,
+      operatorHold: false,
     })
 
     const limited = await store.listServiceEnrollments({ limit: 1 })

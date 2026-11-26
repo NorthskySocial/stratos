@@ -513,7 +513,7 @@ describe('Clubhouse integration', () => {
       serviceUrl: 'https://stratos.example',
       pdsSpaceUriByRoom: {
         'nerv-hq':
-          'at://did:web:stratos.example/space/zone.stratos.space.feed/nerv-hq',
+          'at:space/did:web:stratos.example/zone.stratos.space.feed/nerv-hq',
       },
     })
     await integration.initialize?.()
@@ -571,7 +571,7 @@ describe('Clubhouse integration', () => {
       serviceUrl: 'https://stratos.example',
       pdsSpaceUriByRoom: {
         'nerv-hq':
-          'at://did:web:stratos.example/space/zone.stratos.space.feed/nerv-hq',
+          'at:space/did:web:stratos.example/zone.stratos.space.feed/nerv-hq',
       },
     })
     await integration.initialize?.()
@@ -661,7 +661,7 @@ describe('Clubhouse integration', () => {
     )
   })
 
-  it('deletes a PDS-custodied post through the actor repository', async () => {
+  it('deletes a PDS-custodied post through the space method', async () => {
     const fetchHandler = vi
       .fn()
       .mockResolvedValueOnce(
@@ -677,12 +677,15 @@ describe('Clubhouse integration', () => {
     mocks.auth.init.mockResolvedValue(session(fetchHandler))
     const integration = createClubhouseIntegration({
       serviceUrl: 'https://stratos.example',
-      pdsSpaceUriByRoom: {},
+      pdsSpaceUriByRoom: {
+        'nerv-hq':
+          'at:space/did:web:stratos.example/zone.stratos.space.feed/nerv-hq',
+      },
     })
     await integration.initialize?.()
 
     await integration.deletePost?.('nerv-hq', {
-      uri: 'at://did:plc:misato/zone.stratos.feed.post/3k6',
+      uri: 'at:space/did:web:stratos.example/zone.stratos.space.feed/nerv-hq/did:plc:misato/zone.stratos.feed.post/3k6',
       cid: 'bafy-misato-3k6',
       author: { did: 'did:plc:misato' },
       text: 'Delete this PDS report.',
@@ -690,8 +693,62 @@ describe('Clubhouse integration', () => {
     })
 
     expect(fetchHandler).toHaveBeenLastCalledWith(
-      '/xrpc/com.atproto.repo.deleteRecord',
-      expect.objectContaining({ method: 'POST' }),
+      '/xrpc/com.atproto.space.deleteRecord',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          space:
+            'at:space/did:web:stratos.example/zone.stratos.space.feed/nerv-hq',
+          repo: 'did:plc:misato',
+          collection: 'zone.stratos.feed.post',
+          rkey: '3k6',
+        }),
+      },
     )
   })
+
+  it('sends no request at all for a post reference it refuses', async () => {
+    const fetchHandler = vi.fn()
+    mocks.auth.init.mockResolvedValue(session(fetchHandler))
+    const integration = createClubhouseIntegration({
+      serviceUrl: 'https://stratos.example',
+      pdsSpaceUriByRoom: {},
+    })
+    await integration.initialize?.()
+
+    await expect(
+      integration.deletePost?.('nerv-hq', {
+        uri: 'at://did:plc:faye/zone.stratos.feed.post/3k7',
+        cid: 'bafy-faye-3k7',
+        author: { did: 'did:plc:misato' },
+        text: 'Not mine.',
+        indexedAt: '2026-09-04T18:00:00.000Z',
+      }),
+    ).rejects.toThrow('You can only delete your own posts.')
+    expect(fetchHandler).not.toHaveBeenCalled()
+  })
+})
+
+describe('room state for a room named like an inherited property', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it.each([
+    'constructor',
+    'toString',
+    'hasOwnProperty',
+    'valueOf',
+    '__proto__',
+  ])(
+    'reads the room %s as unjoined for a visitor who is not signed in',
+    async (roomId) => {
+      mocks.auth.init.mockResolvedValue(null)
+      const integration = createClubhouseIntegration({ pdsSpaceUriByRoom: {} })
+      await integration.initialize()
+
+      await expect(integration.getRoomState(roomId)).resolves.toBe('unjoined')
+    },
+  )
 })

@@ -1,5 +1,6 @@
 import { compactVerify } from 'jose'
 import type { Logger } from '@northskysocial/stratos-core'
+import { SPACE_HOST_FRAGMENT } from './delegation-verifier.js'
 import { decodeCompactJwt } from './jwt.js'
 import {
   JwksResolutionError,
@@ -25,7 +26,7 @@ import type { ReplayStore } from './replay-store.js'
  *   - Header `kid` MUST be present (names the client's JWKS key).
  *   - Payload `iss` MUST equal `sub` (both are the `client_id`).
  *   - `iss` MUST be a valid HTTPS URL (the client-metadata.json location).
- *   - Payload `aud` MUST be `${serviceDid}#atproto_space_host`.
+ *   - Payload `aud` MUST be `${serviceDid}#atproto_pds`.
  *   - `iat`/`exp` MUST be present, currently valid (with skew), and the
  *     attestation lifetime (`exp - iat`) MUST NOT exceed {@link MAX_LIFETIME_SECONDS}.
  *   - Signature MUST verify against the client's JWKS key named by `kid`
@@ -39,8 +40,6 @@ import type { ReplayStore } from './replay-store.js'
 
 /** Required JWT `typ` header value for a client attestation. */
 export const CLIENT_ATTESTATION_TYP = 'atproto-client-attestation+jwt'
-/** Service fragment identifying the space-host audience. */
-export const SPACE_HOST_FRAGMENT = '#atproto_space_host'
 /** Replay-store namespace for client-attestation nonces. */
 export const CLIENT_ATTESTATION_REPLAY_KIND = 'client-attestation'
 /**
@@ -78,7 +77,7 @@ export class InvalidAttestationKidError extends ClientAttestationError {}
 export class InvalidAttestationIssuerError extends ClientAttestationError {}
 /** `iss` (the client_id) was not a valid HTTPS URL. */
 export class NonHttpsClientError extends ClientAttestationError {}
-/** `aud` was not `${serviceDid}#atproto_space_host`. */
+/** `aud` was not `${serviceDid}#atproto_pds`. */
 export class InvalidAttestationAudError extends ClientAttestationError {}
 /** `iat`/`exp` missing, malformed, expired, future, or lifetime > max. */
 export class AttestationTimingError extends ClientAttestationError {}
@@ -173,7 +172,7 @@ export async function verifyClientAttestation(
   const clientId = payload.iss
   requireHttpsUrl(clientId)
 
-  // 6. aud — must be our space-host service fragment
+  // 6. aud — must name this authority's host (`#atproto_pds`)
   const expectedAud = `${deps.serviceDid}${SPACE_HOST_FRAGMENT}`
   if (payload.aud !== expectedAud) {
     throw new InvalidAttestationAudError(

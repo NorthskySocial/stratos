@@ -60,6 +60,26 @@ const EXPECTED_EXPORTS = [
   'findHistoricalSigningKey',
   'keyHistoryTimestamp',
   'MAX_KEY_HISTORY_ENTRIES',
+  // writes
+  'applyBoundaryWrites',
+  'BoundaryWriteError',
+  'createBoundaryRecord',
+  'deleteBoundaryRecord',
+  'putBoundaryRecord',
+  'ScopeUpgradeRequiredError',
+  'BoundaryWriteClient',
+  // space URIs
+  'boundaryToSpaceUri',
+  'parseSpaceUri',
+  'parseSpaceRecordUri',
+  'parseRecordAddress',
+  'BoundarySpaceUriResult',
+  'CustodyRecordAddress',
+  'RecordAddress',
+  'SpaceRecordAddress',
+  'SpaceRecordUriParts',
+  'SpaceUriParseResult',
+  'SpaceUriParts',
   // scopes
   'STRATOS_SCOPES',
   'buildCollectionScope',
@@ -75,8 +95,10 @@ const EXPECTED_MODULES = [
   'lexicons.js',
   'routing.js',
   'scopes.js',
+  'space-uri.js',
   'types.js',
   'verification.js',
+  'writes.js',
 ]
 
 if (!existsSync(entryPath)) {

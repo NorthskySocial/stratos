@@ -128,6 +128,8 @@ bare name or a qualified identifier.
 Configuration decides which service identities exist. On every start Stratos
 creates the declared identities, marks them `isService = true`, and removes
 service identities you no longer declare. User enrollments are never affected.
+A restart does not reactivate a declared identity that an operator deactivated.
+It stays inactive until `zone.stratos.admin.setActive` with `active: true`.
 
 Configuration does not keep deciding their boundaries. The `boundaries` list
 applies when Stratos first creates the identity. After that, admins manage its
@@ -173,6 +175,201 @@ service's own origin.
 The interface has four tabs: **Health**, **Boundaries**, **Enrollments**, and
 **Admins**. It is built with the service (`pnpm build`) and served from the
 same process.
+
+## Moderation services
+
+`STRATOS_MODERATION_SERVICE_DIDS` is a comma-separated list of service DIDs.
+Stratos treats these services as moderation services.
+
+```bash
+STRATOS_MODERATION_SERVICE_DIDS="did:plc:nervmoderation"
+```
+
+The default is empty. With an empty list, Stratos accepts no moderation service.
+
+A moderation service authenticates with an AT Protocol service-auth JWT.
+Stratos checks these items:
+
+- The audience is the DID of this service.
+- The `lxm` claim names the exact method being called. Stratos rejects a token
+  with no `lxm` claim.
+- The token has not expired.
+- The signature verifies against the DID document of the issuer.
+- The issuer is on the list.
+
+The moderation check returns the same message for every rejection. A caller
+cannot tell an unknown issuer from a wrong `lxm` claim. Stratos does not tell
+the caller why it rejected the request.
+
+A record subject names the record by its URI. A takedown applies to every
+version of the record. Stratos refuses a record subject that carries a `cid`
+with `SubjectCidNotSupported`, and it stores nothing.
+
+### Reading labels with `queryLabels`
+
+`zone.stratos.moderation.queryLabels` accepts a moderation service. It also
+accepts services that hold a service enrollment. A member's own enrollment does
+not qualify, and Stratos rejects it with a 401. To grant a service enrollment,
+list the service in `STRATOS_SERVICE_ENROLLMENTS`. Stratos creates the
+enrollment with the service flag on startup.
+
+On `queryLabels`, service auth runs first. A moderation service with a wrong
+audience, an expired token, or a bad signature gets the ordinary service-auth
+message. It does not get the moderation message. Stratos applies the moderation
+check only to a token whose issuer is on the list. An issuer that is not on the
+list is an ordinary service, and it must hold a service enrollment.
+
+Stratos shows each caller these labels:
+
+- A moderation service reads every label.
+- A service reads a record label only if it shares a boundary with the label.
+- A service reads an account label if it shares a boundary with the member's
+  enrollment. The enrollment can be active or not.
+- A service never reads an account label when the member has no enrollment.
+- A record label with no boundaries is visible only to moderation services.
+- The reserved all-members boundary gives every service that holds a service
+  enrollment the account label of every enrolled member. It also gives every
+  record label that carries that boundary.
+
+Reads stop serving the record at once. Stratos cannot stop a member's own PDS
+from serving a record to a holder of a space credential. Consumers must apply
+labels. The reserved-boundary statements hold while the reserved boundary is an
+active catalog entry.
+
+### Account takedowns and the operator hold
+
+A moderation service can label a member's account as taken down. The subject is
+an `accountSubject` with the member's DID.
+
+- A takedown deactivates the member's enrollment.
+- A negation reactivates it only when no operator hold is set.
+- Stratos rejects a DID with no enrollment as `SubjectNotFound`.
+- Stratos rejects a service enrollment as an account subject.
+- This works for members with `stratos` custody and `pds` custody.
+- Stratos writes no record or blob marker for an account takedown.
+
+While an account takedown stands, Stratos serves no record or blob of the
+member to any caller. Each read answers as it does when every record of the
+member is taken down:
+
+- `com.atproto.repo.getRecord`, `zone.stratos.space.getRecord` and
+  `zone.stratos.repo.hydrateRecord` answer `RecordNotFound`.
+- `zone.stratos.repo.hydrateRecords` lists the member's URIs in `notFound`.
+- `com.atproto.repo.listRecords`, `zone.stratos.sync.listRecordPaths` and
+  `zone.stratos.space.listBlobs` leave out the member's records and blobs.
+- Both `getBlob` methods answer `BlobBlocked`.
+- `zone.stratos.space.listRepos` leaves out the member, as it does for every
+  inactive member.
+- `com.atproto.repo.describeRepo` still names the member's collections. A
+  record takedown does not change it either.
+
+A negation serves every record again at once. Stratos rewrites nothing. Each
+read asks the label log, so every Stratos process applies a takedown and its
+negation on its next read. An operator hold alone hides no record. It only
+drops the member from `listRepos`, which lists active members.
+
+A `pds`-custody member's records are on their own PDS, which Stratos does not
+serve. `listRepos` already leaves out the inactive member, so the feed
+generator stops reading that PDS.
+
+When an account label fails, the request either changes nothing or completes.
+Stratos changes the enrollment first, then records the label. If recording
+fails, Stratos sets the enrollment back from the label log and reports an
+error. Then the takedown or the negation has no effect. If Stratos records the
+label and a later step fails, the change is complete. Stratos still reports an
+error. Repeat the call after any error. A repeat is safe.
+
+One limit applies. Recording the label and setting the enrollment back can
+both fail. Then the enrollment keeps the change until the moderation service
+repeats the call:
+
+- After a failed takedown, the member is inactive and Stratos serves the
+  records.
+- After a failed negation, the member is active and Stratos hides the records.
+
+An operator hold is separate. `zone.stratos.admin.setActive` with `active: false`
+sets it. `active: true` clears it. The two holds do not lift each other.
+
+- While an account takedown is in force, activating the member fails with
+  `AccountTakenDown`. Nothing changes.
+- Members who were inactive when the hold was introduced became operator-held
+  once.
+- An inactive member who completes OAuth gets 403 `EnrollmentDenied`. Nothing
+  changes.
+- An inactive member cannot unenroll. `POST /oauth/revoke` and the XRPC
+  `zone.stratos.enrollment.unenroll` both refuse. Stratos keeps the row until
+  the hold lifts. When a hold lands during an unenrollment that already deleted
+  the member's enrollment record from their PDS, Stratos refuses and writes the
+  record back through the PDS sync queue.
+- An inactive member cannot write. `createRecord`, `deleteRecord`,
+  `applyWrites` and `uploadBlob` are all refused with `NotEnrolled` before the
+  handler runs. Updates go through `applyWrites`.
+
+Consumers read account labels through `queryLabels`. A consumer that keeps
+copies of a member's records must drop them itself.
+
+### Takedown and the sync streams
+
+A takedown changes what `zone.stratos.sync.subscribeRecords` and
+`zone.stratos.sync.listRepoOps` send. Stratos checks each record at the time it
+reads the frames.
+
+- Both streams leave out the create and update ops of a record that is taken
+  down now.
+- While an account takedown stands, both streams leave out every create and
+  update op of the member. A replay from any cursor does the same.
+- Stratos skips an event that has no ops left.
+- Delete ops always pass the takedown filter. The boundary scope rules still
+  apply to them.
+- A takedown never adds an event to either stream. Labels travel only through
+  `queryLabels`.
+- After a negation, a replay of the log serves the record again.
+
+A takedown applies to sync frames that Stratos reads after it. A page that
+Stratos already read can still deliver the record once. Consumers must apply
+labels.
+
+An account takedown sends nothing to a consumer that is already caught up. It
+must apply the account label from `queryLabels` to drop its copies. After the
+negation it reads the member again from the start of the stream. The Rust feed
+generator does both. A consumer that applies no labels keeps serving its copies
+until it reads the member again.
+
+Deleting a taken-down record that carries a boundary sends a delete event.
+Subscribers in the record's boundaries receive it. This holds for a single
+delete and for a delete in a batch.
+
+After a taken-down record is deleted, sync replays still leave out its create
+and update ops while the latest label is a takedown.
+
+One limit applies:
+
+- An author can delete a taken-down record and create a new one at the same
+  URI. The new record has no takedown, so Stratos serves it. While it exists,
+  sync replays serve it and the earlier history of that URI. If the author
+  deletes it again, replays leave out every create and update for the URI while
+  its latest label is a takedown. The delete op still arrives. Consumers that
+  apply labels by URI still refuse the new record. To hide it on the host, the
+  moderation service repeats `createLabel`.
+
+### Moderation logs
+
+Stratos writes one `info` entry, `moderation label appended`, for each label it
+stores. The entry has these fields:
+
+- `seq`: the position of the label in the label log.
+- `neg`: `true` for a negation, `false` for a takedown.
+- `subjectKind`: `record` or `account`.
+- `callerDid`: the moderation service that sent the label.
+
+The subject DID, the record URI, a CID and the `ref` stay out of the logs of
+`createLabel` and `queryLabels`. This applies to accepted and refused requests.
+The request log leaves out the `subjects` parameter of `queryLabels`. To find
+the subject of a `seq`, read the label log with `queryLabels` as a moderation
+service.
+
+A refused request is logged with the message that the caller gets. If a subject
+is malformed, that message can quote the part that failed to parse.
 
 ## Write rate limiter
 
@@ -431,10 +628,10 @@ caller can act as any member.
 Development mode also allows OAuth over plain HTTP and trusts loopback origins
 for redirects and admin requests. The value must be exactly `true` or `false`.
 
-## October Spaces rollout
+## November upgrade
 
-The October transport upgrade has its own procedure. See
-[October spaces rollout](/operator/upgrades/october-spaces).
+The upgrade to the November spaces contract has its own procedure. See
+[November upgrade and rollback](/operator/november-upgrade).
 
 ## Environment variable reference
 

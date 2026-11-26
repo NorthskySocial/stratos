@@ -1,0 +1,295 @@
+{
+  "header": {
+    "classification": "upstream-uri-free",
+    "oracle": {
+      "package": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-AasGxXJz1htNRNNR1JL/2v4EV45VvC4UrbY1x/w/cFH0avOHFxhDV0MQMMegVYhSi7DtnkJ1smwDxO6K/W402g==",
+      "additionalPackages": [
+        {
+          "package": "@atproto/lex-json",
+          "version": "0.0.0-spaces-alpha-20261117141222",
+          "integrity": "sha512-rF7Ogq8ZSLjmO82l9ZMjlO7zcKTm/079pQPTdMx92bIdRuWRk3TT3bF+iNkkwE1KNfKpKGACGxpvTXosb4ircg=="
+        }
+      ]
+    },
+    "generator": {
+      "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
+      "sha256": "a42fa7432ecb9f61a0fddc1abd16f2cb47de69b10f302d8f39c2c84c6465dec5"
+    },
+    "upstreamVerified": true,
+    "reproducible": true
+  },
+  "note": "json is the text a host sends. An oracle outcome is `accepted <bytes hex> <cid>` or `refused: <error>: <message>`: lexParse (strict false), then the lex-cbor encoder serializeRecord uses, then the CID. oracleStrict appears only where lexParse with strict true differs. A stricter row is one the oracle accepts and Stratos refuses; its reason is named in reasons. cidStrings holds the oracle CBOR-flavour parse and whether the text is the canonical text of the CID it parses to.",
+  "records": [
+    {
+      "name": "a post",
+      "json": "{\"$type\":\"zone.stratos.feed.post\",\"text\":\"See you space cowboy\"}",
+      "oracle": "accepted a264746578747453656520796f7520737061636520636f77626f79652474797065767a6f6e652e73747261746f732e666565642e706f7374 bafyreiblisg4mhig4cyda6j2cizhefufa7n3smi5jxdlxug3t45ztfe5pq"
+    },
+    {
+      "name": "a post, edited",
+      "json": "{\"$type\":\"zone.stratos.feed.post\",\"text\":\"See you space cowboy, edited\"}",
+      "oracle": "accepted a26474657874781c53656520796f7520737061636520636f77626f792c20656469746564652474797065767a6f6e652e73747261746f732e666565642e706f7374 bafyreia2riwiofeyueakvuobrujsfp6rovaqbfkbi5v455itkaoyxf4wii"
+    },
+    {
+      "name": "a post, edited again",
+      "json": "{\"$type\":\"zone.stratos.feed.post\",\"text\":\"See you space cowboy, again\"}",
+      "oracle": "accepted a26474657874781b53656520796f7520737061636520636f77626f792c20616761696e652474797065767a6f6e652e73747261746f732e666565642e706f7374 bafyreiccr7epf4hee6fqyqdqeocowao75uakqh6vbr6bsugbylyd5q6pr4"
+    },
+    {
+      "name": "a post by Ein",
+      "json": "{\"$type\":\"zone.stratos.feed.post\",\"text\":\"Bark\"}",
+      "oracle": "accepted a26474657874644261726b652474797065767a6f6e652e73747261746f732e666565642e706f7374 bafyreid66mju6bipbp2fuq2yp2o3w4klwyhzotzdlt3ajvbdquimiarsm4"
+    },
+    {
+      "name": "a like with a strong reference",
+      "json": "{\"$type\":\"app.bsky.feed.like\",\"subject\":{\"uri\":\"at://did:plc:fayevalentine/zone.stratos.feed.post/swordfish\",\"cid\":\"bafyreihypg3uvx3sc754r22emkw6ujpiqjozie6puum4ie4egt2jqxz6wa\"}}",
+      "oracle": "accepted a2652474797065726170702e62736b792e666565642e6c696b65677375626a656374a263636964783b626166797265696879706733757678337363373534723232656d6b7736756a7069716a6f7a6965367075756d34696534656774326a71787a36776163757269783b61743a2f2f6469643a706c633a6661796576616c656e74696e652f7a6f6e652e73747261746f732e666565642e706f73742f73776f726466697368 bafyreiap6kjr6q5agaxyb6t3sozd2lpvsqr5nhwvzxhdxlrrytfop6744a"
+    },
+    {
+      "name": "a repost",
+      "json": "{\"$type\":\"app.bsky.feed.repost\",\"subject\":{\"uri\":\"at://did:plc:fayevalentine/zone.stratos.feed.post/swordfish\",\"cid\":\"bafyreihypg3uvx3sc754r22emkw6ujpiqjozie6puum4ie4egt2jqxz6wa\"}}",
+      "oracle": "accepted a2652474797065746170702e62736b792e666565642e7265706f7374677375626a656374a263636964783b626166797265696879706733757678337363373534723232656d6b7736756a7069716a6f7a6965367075756d34696534656774326a71787a36776163757269783b61743a2f2f6469643a706c633a6661796576616c656e74696e652f7a6f6e652e73747261746f732e666565642e706f73742f73776f726466697368 bafyreibbhi2yoxc2qpkwu5areztzr73klz3eue3ygac6jdyiw7aarv7k2e"
+    },
+    {
+      "name": "a follow",
+      "json": "{\"$type\":\"app.bsky.graph.follow\",\"subject\":\"did:plc:jetblack\"}",
+      "oracle": "accepted a2652474797065756170702e62736b792e67726170682e666f6c6c6f77677375626a656374706469643a706c633a6a6574626c61636b bafyreiapbmc4vcdo7b4m72byyth4cynim3xprtghbfhssdn66gj622d2hq"
+    },
+    {
+      "name": "a post with a blob reference",
+      "json": "{\"$type\":\"zone.stratos.feed.post\",\"text\":\"Ein\",\"embed\":{\"$type\":\"app.bsky.embed.images\",\"images\":[{\"alt\":\"a corgi\",\"image\":{\"$type\":\"blob\",\"ref\":{\"$link\":\"bafkreicmhqydaeykjinrosvewdw2dkzg6gwayo4i3d5tbyav4mls6nlica\"},\"mimeType\":\"image/png\",\"size\":3}}]}}",
+      "oracle": "accepted a364746578746345696e652474797065767a6f6e652e73747261746f732e666565642e706f737465656d626564a2652474797065756170702e62736b792e656d6265642e696d6167657366696d6167657381a263616c74676120636f72676965696d616765a463726566d82a582500015512204c3c3030130a4a1b174aa4b0eda1ab26f1ac0c3b88d8fb30e015e3172f3568106473697a650365247479706564626c6f62686d696d655479706569696d6167652f706e67 bafyreicph7kqvq577luofoghfmu2yfavc2ci7kf2wb5n2glwfy2o74v6ie"
+    },
+    {
+      "name": "a record with bytes",
+      "json": "{\"$type\":\"zone.stratos.feed.post\",\"text\":\"bytes\",\"raw\":{\"$bytes\":\"AQID\"}}",
+      "oracle": "accepted a363726177430102036474657874656279746573652474797065767a6f6e652e73747261746f732e666565642e706f7374 bafyreiat62lh4ifkxyqnm6lol2zzmz7obo6epgo5w6riujhl3nqattixya"
+    },
+    {
+      "name": "nested maps and arrays",
+      "json": "{\"a\":{\"b\":{\"c\":[1,[2,[3,{}]],{\"d\":[]}]}},\"list\":[{\"x\":1},{\"y\":[true,null]}]}",
+      "oracle": "accepted a26161a16162a16163830182028203a0a1616480646c69737482a1617801a1617982f5f6 bafyreicpgp37ko3bpuhv4lw4kvc4b75n4mtd6u3iab2jzee7eqgu4xbini"
+    },
+    {
+      "name": "keys that sort by length then bytes",
+      "json": "{\"9\":7,\"10\":6,\"b\":1,\"aa\":2,\"a\":3,\"B\":4,\"ab\":5,\"\":8}",
+      "oracle": "accepted a86008613907614204616103616201623130066261610262616205 bafyreiepckfrvordyzrupcwtyizlud7ctjacd2t6fgxo5hrygbl5e6pec4"
+    },
+    {
+      "name": "non-ASCII keys and values",
+      "json": "{\"é\":\"café\",\"日本\":\"東京\",\"z\":\"Tokyo-3\",\"ab\":\"ünïcode\",\"long\":\"aaaaaaaaaaaaaaaaaaaaaaaa\",\"🛸\":\"Bebop\"}",
+      "oracle": "accepted a6617a67546f6b796f2d3362616269c3bc6ec3af636f646562c3a965636166c3a9646c6f6e67781861616161616161616161616161616161616161616161616164f09f9bb8654265626f7066e697a5e69cac66e69db1e4baac bafyreihwp6rymjzey4mtmlfkjxk5adslikemsckot2q33v25zkpfxlghri"
+    },
+    {
+      "name": "integers across every width",
+      "json": "{\"n\":[0,-1,23,24,255,256,65535,65536,4294967295,4294967296,9007199254740991,-9007199254740991,-24,-25,-256,-257]}",
+      "oracle": "accepted a1616e90002017181818ff19010019ffff1a000100001affffffff1b00000001000000001b001fffffffffffff3b001ffffffffffffe37381838ff390100 bafyreiagvyg4qcrffqidiufzdcaev4rr6y27ulhpxfjyjhguq2ukquqium"
+    },
+    {
+      "name": "empty containers, null and booleans",
+      "json": "{\"empty\":{},\"list\":[],\"nothing\":null,\"yes\":true,\"no\":false}",
+      "oracle": "accepted a5626e6ff463796573f5646c6973748065656d707479a0676e6f7468696e67f6 bafyreiflnpca5kygxlcc7cfaki2hay3beo366g2f3put7xcpwmp7lohf4q"
+    }
+  ],
+  "edge": [
+    {
+      "name": "a number with a fraction",
+      "json": "{\"a\":1.5}",
+      "oracle": "refused: Error: Non-integer numbers (1.5) are not supported by the AT Data Model",
+      "oracleStrict": "refused: TypeError: Invalid non-integer number: 1.5"
+    },
+    {
+      "name": "the integer 2^53",
+      "json": "{\"a\":9007199254740992}",
+      "oracle": "refused: Error: Non-integer numbers (9007199254740992) are not supported by the AT Data Model",
+      "oracleStrict": "refused: TypeError: Invalid non-integer number: 9007199254740992"
+    },
+    {
+      "name": "an exponent beyond the double range",
+      "json": "{\"a\":1e400}",
+      "oracle": "refused: Error: Non-integer numbers (Infinity) are not supported by the AT Data Model",
+      "oracleStrict": "refused: TypeError: Invalid non-integer number: Infinity"
+    },
+    {
+      "name": "a $link beside another key",
+      "json": "{\"$link\":\"bafyreihypg3uvx3sc754r22emkw6ujpiqjozie6puum4ie4egt2jqxz6wa\",\"x\":1}",
+      "oracle": "accepted a261780165246c696e6b783b626166797265696879706733757678337363373534723232656d6b7736756a7069716a6f7a6965367075756d34696534656774326a71787a367761 bafyreicqfzzigxna44o44obqpbbjx74o4tm6tom2uyqqcszq7gahfbhigu",
+      "oracleStrict": "refused: TypeError: Invalid $link object"
+    },
+    {
+      "name": "a $link holding a number",
+      "json": "{\"$link\":5}",
+      "oracle": "accepted a165246c696e6b05 bafyreiei2ung7vnfjalqw7rjppbb2bhh26n5a4ttgmpjg7xpbzrpsvvyqq",
+      "oracleStrict": "refused: TypeError: Invalid $link object"
+    },
+    {
+      "name": "a $link in base58 version 0",
+      "json": "{\"$link\":\"QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG\"}",
+      "oracle": "accepted d82a58230012209d6c2be50f706953479ab9df2ce3edca90b68053c00b3004b7f0accbe1e8eedf bafyreiem7dege3utox4l77e27fzekpy7ddmx37pm5zwh35zlunpwuswqya"
+    },
+    {
+      "name": "a $bytes unpadded",
+      "json": "{\"$bytes\":\"AQ\"}",
+      "oracle": "accepted 4101 bafyreif35nktog75xtgpwyosgfhpcze2dyysmxird4j6n7t7ql3hwib43m"
+    },
+    {
+      "name": "a $bytes padded",
+      "json": "{\"$bytes\":\"AQ==\"}",
+      "oracle": "accepted 4101 bafyreif35nktog75xtgpwyosgfhpcze2dyysmxird4j6n7t7ql3hwib43m"
+    },
+    {
+      "name": "a $bytes beside another key",
+      "json": "{\"$bytes\":\"AQ\",\"x\":1}",
+      "oracle": "accepted a261780166246279746573624151 bafyreias3qsou6kiojw6ug4upuojsuu2ypy76eqdybjdustxg2hfekwyai",
+      "oracleStrict": "refused: TypeError: Invalid $bytes object"
+    },
+    {
+      "name": "a key written twice",
+      "json": "{\"a\":1,\"a\":2}",
+      "oracle": "accepted a1616102 bafyreia5ec2ka6hvct2tuvnbn7jaw7zm7mgqylg5ppx2hrixxztr5viozq"
+    },
+    {
+      "name": "a string of 256 bytes",
+      "json": "{\"s\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "oracle": "accepted a1617379010061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161 bafyreibzdosp4yqzq7dpzqufdto6eh6btgk3ezsdbtdbesqqqx2g5dneie"
+    },
+    {
+      "name": "a combining character beside its precomposed form",
+      "json": "{\"s\":[\"é\",\"é\"]}",
+      "oracle": "accepted a16173826365cc8162c3a9 bafyreibe55p63gzak6wnxblhlltco3uugqwqb2x5q3lnbys4olvg47ogxi"
+    },
+    {
+      "name": "a top level array",
+      "json": "[1,\"a\",null]",
+      "oracle": "accepted 83016161f6 bafyreihbgrztbitimfgzpxfxpwzayyqa2sts6mixqa6eoqhqhzjt575bze"
+    },
+    {
+      "name": "nesting 32 deep",
+      "json": "{\"a\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "oracle": "accepted a1616181818181818181818181818181818181818181818181818181818181818180 bafyreig6f7egtggh5va5i4z7j4fjqaivb4vo6sxzh4ajz2qbnms2ar3dx4"
+    }
+  ],
+  "reasons": {
+    "number": "Stratos refuses any number written with a fraction or exponent.",
+    "depth": "Stratos refuses nesting deeper than 32; the oracle has no limit.",
+    "link": "Stratos refuses a $link whose text is not a canonical CID; the oracle reads a plain map or the CID.",
+    "bytes": "Stratos refuses a $bytes that is not standard base64 without trailing bits; the oracle is lenient.",
+    "text": "The Rust JSON reader refuses a lone surrogate escape; the oracle writes U+FFFD."
+  },
+  "stricter": [
+    {
+      "name": "the number 1.0",
+      "json": "{\"a\":1.0}",
+      "oracle": "accepted a1616101 bafyreihltcnuuyqp2jm24aqydpnlj7b6w3ogwrplomrjtg5rifv44mmjey",
+      "expectedStratos": "refused",
+      "reason": "number"
+    },
+    {
+      "name": "the number 1e2",
+      "json": "{\"a\":1e2}",
+      "oracle": "accepted a161611864 bafyreih4mt434a4qkiwux6x4lwfbjq4h2z2bghioyitbplr5ps736jq55e",
+      "expectedStratos": "refused",
+      "reason": "number"
+    },
+    {
+      "name": "the number -0",
+      "json": "{\"a\":-0}",
+      "oracle": "accepted a1616100 bafyreiejujza3kpqphuy54ocixjyxtsfbhfn4rycdnzyx4bte7kxbmuxci",
+      "expectedStratos": "refused",
+      "reason": "number"
+    },
+    {
+      "name": "nesting 33 deep",
+      "json": "{\"a\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "oracle": "accepted a161618181818181818181818181818181818181818181818181818181818181818180 bafyreif7qgpokie5dujmd4wz2glzmiaugu4xoplswxjzmhvc4hqonrk2my",
+      "expectedStratos": "refused",
+      "reason": "depth"
+    },
+    {
+      "name": "a $link that is not a CID",
+      "json": "{\"$link\":\"not a cid\"}",
+      "oracle": "accepted a165246c696e6b696e6f74206120636964 bafyreibdgv6powydxse5t4a7orpgn5awk5uubifyfcuhxlxaf6rjy5nb54",
+      "oracleStrict": "refused: TypeError: Invalid $link object",
+      "expectedStratos": "refused",
+      "reason": "link"
+    },
+    {
+      "name": "a $link in uppercase",
+      "json": "{\"$link\":\"BAFYREIHYPG3UVX3SC754R22EMKW6UJPIQJOZIE6PUUM4IE4EGT2JQXZ6WA\"}",
+      "oracle": "accepted a165246c696e6b783b424146595245494859504733555658335343373534523232454d4b5736554a5049514a4f5a4945365055554d34494534454754324a51585a365741 bafyreibv6y7wsumqlxfvuf43hp7mxyvxo5krrfsmuixc6kf2a3r4rtakza",
+      "oracleStrict": "refused: TypeError: Invalid $link object",
+      "expectedStratos": "refused",
+      "reason": "link"
+    },
+    {
+      "name": "a $link in base58 version 1",
+      "json": "{\"$link\":\"zdj7WWeQ43G6JJvLWQWZpyHuAMq6uYWRjkBXFad11vE2LHhQ7\"}",
+      "oracle": "accepted d82a58250001701220120f6af601d46e10b2d2e11ed71c55d25f3042c22501e41d1246e7a1e9d3d8ec bafyreiftnfgdymz322yt233sxzbwx2ymtog5xeaprddruujpbvdrmipq7q",
+      "expectedStratos": "refused",
+      "reason": "link"
+    },
+    {
+      "name": "a $bytes that is not base64",
+      "json": "{\"$bytes\":\"!\"}",
+      "oracle": "accepted a1662462797465736121 bafyreifkxvvrx3rcjlgnr42wc2r2zqmulp7jnzyspfmp2wbuvjqykajaiq",
+      "oracleStrict": "refused: TypeError: Invalid $bytes object",
+      "expectedStratos": "refused",
+      "reason": "bytes"
+    },
+    {
+      "name": "a $bytes in the URL-safe alphabet",
+      "json": "{\"$bytes\":\"-_8\"}",
+      "oracle": "accepted 42fbff bafyreih3n4cl2eucx7afyuju2ajlhqrecmoas75rdjh72v5vt4avzyw5ne",
+      "expectedStratos": "refused",
+      "reason": "bytes"
+    },
+    {
+      "name": "a $bytes with trailing bits",
+      "json": "{\"$bytes\":\"AR\"}",
+      "oracle": "accepted 4101 bafyreif35nktog75xtgpwyosgfhpcze2dyysmxird4j6n7t7ql3hwib43m",
+      "expectedStratos": "refused",
+      "reason": "bytes"
+    },
+    {
+      "name": "a lone surrogate escape",
+      "json": "{\"a\":\"\\ud800\"}",
+      "oracle": "accepted a1616163efbfbd bafyreicjnsbductcvbvdiq2m3hkkyzh3xk6jkdusamjeebjy77gko3sq2q",
+      "expectedStratos": "refused",
+      "reason": "text"
+    }
+  ],
+  "cidStrings": [
+    {
+      "name": "the canonical text",
+      "text": "bafyreiblisg4mhig4cyda6j2cizhefufa7n3smi5jxdlxug3t45ztfe5pq",
+      "parsesAsCborCid": true,
+      "canonicalText": true
+    },
+    {
+      "name": "the same cid in base58 version 1",
+      "text": "zdpuAoLLeDs99mUsRNd6kneszrZC1fAB3t2ETLweuJ7DY1Wm1",
+      "parsesAsCborCid": true,
+      "canonicalText": false
+    },
+    {
+      "name": "the same cid in uppercase",
+      "text": "BAFYREIBLISG4MHIG4CYDA6J2CIZHEFUFA7N3SMI5JXDLXUG3T45ZTFE5PQ",
+      "parsesAsCborCid": false,
+      "canonicalText": false
+    },
+    {
+      "name": "a version 0 cid",
+      "text": "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+      "parsesAsCborCid": false,
+      "canonicalText": true
+    },
+    {
+      "name": "a raw-codec cid",
+      "text": "bafkreicmhqydaeykjinrosvewdw2dkzg6gwayo4i3d5tbyav4mls6nlica",
+      "parsesAsCborCid": false,
+      "canonicalText": true
+    }
+  ]
+}

@@ -13,6 +13,7 @@ import {
   type EnrollmentValidator,
   type HydrationService,
   type LexiconProvider,
+  type LabelStore,
   type Logger,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from './actor-store-types.js'
@@ -72,6 +73,7 @@ export interface StorageContext {
   db?: ServiceDb
   actorStore: ActorStore
   enrollmentStore: EnrollmentStore & EnrollmentStoreReader
+  labelStore: LabelStore
   oauthStores: {
     sessionStore: import('./oauth/client.js').OAuthSessionStoreBackend
     stateStore: import('./oauth/client.js').OAuthStateStoreBackend
@@ -114,6 +116,12 @@ export interface BlobContext {
  */
 export interface RepoContext extends MstContext {
   actorStore: ActorStore
+  /**
+   * Boundary lookup for the write authorization check before the repo lock,
+   * behind a short-lived cache. A hand-built context may omit it and fall
+   * back to `boundaryResolver`.
+   */
+  writeBoundaryResolver?: BoundaryResolver
   repoWriteLocks: RepoWriteLocks
   writeRateLimiter: WriteRateLimiter
   rateLimits: WriteRateLimiter // Added for compatibility
@@ -185,6 +193,7 @@ export interface EnrollmentEvent {
 
 export type EnrollmentEventEmitter = EventEmitter<{
   enrollment: [EnrollmentEvent]
+  activeChanged: [{ did: string }]
 }>
 
 export type SequenceEventEmitter = EventEmitter<{
