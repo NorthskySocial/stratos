@@ -1291,6 +1291,269 @@ async function runNovemberUpstreamMint() {
   )
 }
 
+const inspectorUrl = 'https://webapp-e2e.atmosbox.internal'
+const inspectorReadPath = '/xrpc/com.atproto.space.getRecord'
+
+async function seedInspectorPost(browser, domain, account) {
+  const clubhouse = 'https://clubhouse-e2e.atmosbox.internal'
+  const context = await browser.newContext({ serviceWorkers: 'block' })
+  try {
+    const page = await context.newPage()
+    await signIn(page, account, clubhouse)
+    await enterRoom(page, account, clubhouse, 'general')
+    const text = `Bebop inspector ${randomUUID()}`
+    const origin = accountPdsUrl(domain, account)
+    const write = page.waitForResponse(
+      (response) => {
+        const url = new URL(response.url())
+        return (
+          url.origin === origin &&
+          url.pathname === pdsCreatePath &&
+          response.request().method() === 'POST'
+        )
+      },
+      { timeout: 45_000 },
+    )
+    await page.locator('#room-post').fill(text)
+    await page.getByRole('button', { name: 'Post topic' }).click()
+    const response = await write
+    assert.equal(response.status(), 200, 'Inspector fixture write failed')
+    const { uri, cid } = await response.json()
+    const space = spaceUriFromParts(`did:web:stratos-e2e.${domain}`, 'general')
+    const { author, rkey } = assertSpaceRecordUri(uri, space)
+    assert.equal(author, (await pdsSession(domain, account)).did)
+    assert.ok(
+      typeof cid === 'string' && cid.length > 0,
+      'Inspector fixture has no CID',
+    )
+    return {
+      uri,
+      cid,
+      text,
+      origin,
+      address: { space, repo: author, collection: postCollection, rkey },
+    }
+  } finally {
+    await context.close()
+  }
+}
+
+async function signInToInspectorApp(page, account) {
+  await page.goto(inspectorUrl, { waitUntil: 'domcontentloaded' })
+  await page.getByLabel('Bluesky handle').fill(account.username)
+  await page.getByRole('button', { name: 'Sign In' }).click()
+  await completeOAuth(page, account, inspectorUrl)
+  await page
+    .getByRole('button', { name: 'Log Out' })
+    .waitFor({ timeout: 30_000 })
+}
+
+function inspectorCard(page, seed) {
+  return page.getByRole('article').filter({ hasText: seed.text })
+}
+
+async function waitForInspectorFeed(page, seed, responses) {
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline) {
+    const containsSeed = responses.some(
+      ({ status, body }) =>
+        status === 200 &&
+        Array.isArray(body?.feed) &&
+        body.feed.some(
+          ({ post }) =>
+            post?.uri === seed.uri &&
+            post?.cid === seed.cid &&
+            post?.record?.text === seed.text,
+        ),
+    )
+    if (containsSeed && (await visible(inspectorCard(page, seed)))) return
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 10_000 })
+    await delay(1_000)
+  }
+  throw new Error(
+    'Webapp did not render the exact fixture entry from a real feed response',
+  )
+}
+
+async function inspectorSettled(page) {
+  const dialog = page.getByRole('dialog', { name: 'Record Inspector' })
+  await dialog.waitFor({ timeout: 15_000 })
+  await dialog
+    .locator('[role="status"]')
+    .waitFor({ state: 'hidden', timeout: 15_000 })
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      ),
+  )
+  return dialog
+}
+
+async function runNovemberOwnInspector() {
+  const domain = required('SANDBOX_DOMAIN')
+  await trustSandboxCa()
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const account = await provisionAccount(domain, 'batou')
+    const seed = await seedInspectorPost(browser, domain, account)
+    const context = await browser.newContext({ serviceWorkers: 'block' })
+    const page = await context.newPage()
+    const responses = listenForFeedResponses(page)
+    await signInToInspectorApp(page, account)
+    await waitForInspectorFeed(page, seed, responses)
+    const reads = []
+    context.on('request', (request) => {
+      if (new URL(request.url()).pathname === inspectorReadPath)
+        reads.push(request)
+    })
+    await inspectorCard(page, seed)
+      .getByRole('button', { name: 'Inspect your record on your PDS' })
+      .click()
+    const dialog = await inspectorSettled(page)
+    await dialog
+      .getByText(seed.text, { exact: false })
+      .waitFor({ timeout: 15_000 })
+    assert.equal(
+      await dialog.locator('.panel-label').textContent(),
+      'Your record on your PDS',
+    )
+    assert.equal(await dialog.locator('.panel-address').textContent(), seed.uri)
+    assert.equal(
+      reads.length,
+      1,
+      'The inspector did not send exactly one record request',
+    )
+    const [request] = reads
+    const url = new URL(request.url())
+    assert.equal(url.origin, seed.origin)
+    assert.equal(request.method(), 'GET')
+    assert.deepEqual(Object.fromEntries(url.searchParams), seed.address)
+    const scheme = (await request.headerValue('authorization'))?.split(
+      ' ',
+      1,
+    )[0]
+    assert.equal(
+      scheme,
+      'DPoP',
+      'The inspector did not use an OAuth-bound read',
+    )
+    const response = await request.response()
+    assert.equal(response?.status(), 200)
+    const record = await response.json()
+    assert.ok(
+      record.uri === seed.uri &&
+        record.cid === seed.cid &&
+        record.value?.text === seed.text,
+      'The PDS returned a different record or CID',
+    )
+    reach('own-record-read-verified')
+
+    const invalid = 'Invalid inspector fixture'
+    await page.route(
+      `**${feedPath}?*`,
+      async (route) => {
+        const real = await route.fetch({ maxRedirects: 0 })
+        assert.equal(
+          real.status(),
+          200,
+          'The feed control could not fetch its seed',
+        )
+        const body = await real.json()
+        const existing = body.feed.find(({ post }) => post.uri === seed.uri)
+        assert.ok(existing, 'The feed control has no seeded entry')
+        const entry = structuredClone(existing)
+        entry.post.uri = 'at:space/invalid'
+        entry.post.record.text = invalid
+        await route.fulfill({
+          response: real,
+          json: { ...body, feed: [entry] },
+        })
+      },
+      { times: 1 },
+    )
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 10_000 })
+    await page
+      .getByRole('article')
+      .filter({ hasText: invalid })
+      .getByRole('button', { name: 'Inspect this record' })
+      .click({ timeout: 15_000 })
+    const invalidDialog = await inspectorSettled(page)
+    assert.equal(
+      await invalidDialog.getByRole('alert').textContent(),
+      'This record address is not valid',
+    )
+    assert.equal(reads.length, 1, 'The invalid address caused a PDS read')
+    reach('invalid-address-sends-no-read')
+    writeBrowserReceipt([
+      'own-record-read-verified',
+      'invalid-address-sends-no-read',
+    ])
+  } finally {
+    await browser.close()
+  }
+}
+
+async function runNovemberSnapshotInspector() {
+  const domain = required('SANDBOX_DOMAIN')
+  await trustSandboxCa()
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const author = await provisionAccount(domain, 'motoko')
+    const seed = await seedInspectorPost(browser, domain, author)
+    const viewer = await ordinaryAccount(domain)
+    assert.notEqual(viewer.did, seed.address.repo)
+    assert.notEqual(accountPdsUrl(domain, viewer), seed.origin)
+    const clubhouse = 'https://clubhouse-e2e.atmosbox.internal'
+    const join = await browser.newContext()
+    try {
+      const page = await join.newPage()
+      await signIn(page, viewer, clubhouse)
+      await enterRoom(page, viewer, clubhouse, 'general')
+    } finally {
+      await join.close()
+    }
+
+    const context = await browser.newContext({ serviceWorkers: 'block' })
+    const hits = []
+    context.on('request', (request) => {
+      const url = new URL(request.url())
+      if (url.origin === seed.origin) hits.push(url.pathname)
+    })
+    const page = await context.newPage()
+    const responses = listenForFeedResponses(page)
+    await signInToInspectorApp(page, viewer)
+    await waitForInspectorFeed(page, seed, responses)
+    await inspectorCard(page, seed)
+      .getByRole('button', { name: 'Inspect the copy the feed served' })
+      .click()
+    const dialog = await inspectorSettled(page)
+    assert.equal(
+      await dialog.locator('.panel-label').textContent(),
+      'Feed snapshot',
+    )
+    assert.equal(await dialog.locator('.panel-address').textContent(), seed.uri)
+    await dialog
+      .locator('.json-block')
+      .getByText(seed.text, { exact: false })
+      .waitFor({ timeout: 15_000 })
+    assert.equal(hits.length, 0, 'The viewer browser contacted the author PDS')
+    reach('other-author-snapshot-verified')
+    writeBrowserReceipt(['other-author-snapshot-verified'])
+  } finally {
+    await browser.close()
+  }
+}
+
+function writeBrowserReceipt(ids) {
+  console.log(
+    JSON.stringify({
+      suite: activeSuite,
+      assertions: ids.map((id) => ({ id, status: 'passed' })),
+    }),
+  )
+}
+
 const baselineAssertions = [
   'browser-oauth',
   'stratos-custody',
@@ -1397,6 +1660,8 @@ const journeys = {
   'ordinary-custody': runOrdinaryCustody,
   'november-positive': runNovemberPositive,
   'november-upstream-mint': runNovemberUpstreamMint,
+  'november-own-inspector': runNovemberOwnInspector,
+  'november-snapshot-inspector': runNovemberSnapshotInspector,
 }
 
 async function main() {

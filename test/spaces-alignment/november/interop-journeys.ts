@@ -366,18 +366,21 @@ export function renderJourneyChecklist(
           ? 'Run `november-positive` for the positive journey; the complete suite still requires all journeys.'
           : journey.id === 'upstream-standard-mint-control'
             ? 'Run `november-interop` for the published PDS personal-space mint and verified read. Use the per-group progress to locate a host failure.'
-            : carrier
-              ? `Run \`${carrier}\` (command below); it carries this journey in a ported form${
-                  journey.carriedBy.length > 1
-                    ? `, as do ${journey.carriedBy
-                        .slice(1)
-                        .map((id) => `\`${id}\``)
-                        .join(' and ')}`
-                    : ''
-                }.`
-              : hasFixture
-                ? 'Run `november-interop` for fixture evidence. The pinned-host observation remains open.'
-                : 'No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.'
+            : journey.id === 'inspector-reads-own-record-through-oauth' ||
+                journey.id === 'other-author-snapshot-without-direct-request'
+              ? 'Run `november-interop` for the webapp and its isolated browser request recorder.'
+              : carrier
+                ? `Run \`${carrier}\` (command below); it carries this journey in a ported form${
+                    journey.carriedBy.length > 1
+                      ? `, as do ${journey.carriedBy
+                          .slice(1)
+                          .map((id) => `\`${id}\``)
+                          .join(' and ')}`
+                      : ''
+                  }.`
+                : hasFixture
+                  ? 'Run `november-interop` for fixture evidence. The pinned-host observation remains open.'
+                  : 'No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.'
       return [
         `### ${index + 1}. \`${journey.id}\``,
         '',

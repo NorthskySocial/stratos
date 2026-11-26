@@ -422,6 +422,8 @@ describe('sandbox preflight', () => {
     for (const file of [
       'reference-pds.yaml',
       'reference-pds.definition.json',
+      'november-webapp.yaml',
+      'november-webapp.definition.json',
     ]) {
       await writeFile(
         join(candidateRepo, 'test/spaces-alignment/templates', file),
@@ -1176,6 +1178,12 @@ if (args[0] === 'image' && args[1] === 'rm') {
       'november-interop',
     ])
 
+    expect(prepared.templateHashes['stacks/november-webapp.yaml']).toMatch(
+      /^[a-f0-9]{64}$/,
+    )
+    expect(
+      prepared.templateHashes['stacks/november-webapp.definition.json'],
+    ).toMatch(/^[a-f0-9]{64}$/)
     expect(prepared.novemberInterop).toEqual({
       outstanding: [],
       failedGroups: [],

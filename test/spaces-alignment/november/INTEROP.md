@@ -532,7 +532,7 @@ save. Walk them in this order.
 - Proves: The webapp inspector reads the signed-in member own PDS-custody record with that member OAuth grant.
 - Expected: The inspector classifies the address, then sends exactly one com.atproto.space.getRecord to the signed-in member's own PDS for their own repo, and no request for another author's space record or for an address it refuses.
 - Unknown: The host response to the OAuth-bound read.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for the webapp and its isolated browser request recorder.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 7. `other-author-snapshot-without-direct-request`
@@ -541,7 +541,7 @@ save. Walk them in this order.
 - Proves: A viewer sees another author post only as a labeled feed snapshot, and no request goes from the viewer to that author PDS.
 - Expected: The feed generator serves from its own projection.
 - Unknown: Needs a request log from the host or the sandbox proxy to show no direct request; the baseline does not record one.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for the webapp and its isolated browser request recorder.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 8. `custom-mint-reads-from-reference-pds`

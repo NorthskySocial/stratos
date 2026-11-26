@@ -826,6 +826,49 @@ export async function runSandbox(
       : sourceStack
     await writeFile(stackPath, stack)
 
+    if (options.suite === 'november-interop') {
+      failedStep = 'prepare-november-webapp'
+      const templates = join(
+        workspace,
+        'stratos/test/spaces-alignment/templates',
+      )
+      const webappStack = join(templates, 'november-webapp.yaml')
+      const webappDefinition = join(
+        templates,
+        'november-webapp.definition.json',
+      )
+      const stack = await readFile(stackPath, 'utf8')
+      if (stack.split('\nvolumes:\n').length !== 2)
+        throw new Error('Sandbox stack does not contain one volume declaration')
+      const service = (await readFile(webappStack, 'utf8'))
+        .trimEnd()
+        .split('\n')
+        .map((line) => `  ${line}`)
+        .join('\n')
+      await writeFile(
+        stackPath,
+        stack.replace('\nvolumes:\n', `\n${service}\n\nvolumes:\n`),
+      )
+
+      const definitionPath = join(
+        atmosphere,
+        'stacks/feedgen-ng-e2e.definition.json',
+      )
+      const definition = JSON.parse(
+        await readFile(definitionPath, 'utf8'),
+      ) as Record<string, unknown[]>
+      const extra = JSON.parse(
+        await readFile(webappDefinition, 'utf8'),
+      ) as Record<string, unknown[]>
+      for (const key of ['services', 'routes'])
+        definition[key].push(...extra[key])
+      await writeFile(definitionPath, JSON.stringify(definition))
+      templateHashes['stacks/november-webapp.yaml'] =
+        await sha256File(webappStack)
+      templateHashes['stacks/november-webapp.definition.json'] =
+        await sha256File(webappDefinition)
+    }
+
     if (referencePds) {
       const referenceImageId = referencePds.imageId
       const referenceStack = await readFile(

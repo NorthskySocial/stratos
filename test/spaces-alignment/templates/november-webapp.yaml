@@ -1,0 +1,31 @@
+feedgen-e2e-webapp:
+  build:
+    context: ../stratos
+    dockerfile: webapp/Dockerfile
+    args:
+      VITE_STRATOS_SERVICE_DID: did:web:stratos-e2e.atmosbox.test
+      VITE_STRATOS_URL: https://stratos-e2e.atmosbox.internal
+      VITE_WEBAPP_URL: https://webapp-e2e.atmosbox.internal
+      VITE_FEEDGEN_DID: did:web:feedgen-e2e.atmosbox.test
+      VITE_FEEDGEN_FEED: general
+      VITE_ATPROTO_HANDLE_RESOLVER: https://pds1.atmosbox.test
+      VITE_PLC_DIRECTORY: https://plc.atmosbox.test
+  read_only: true
+  tmpfs:
+    - /var/cache/nginx:rw,noexec,nosuid,size=16m,uid=0,gid=0,mode=0755
+    - /var/run:rw,noexec,nosuid,size=4m,uid=0,gid=0,mode=0755
+  cap_drop: [ALL]
+  cap_add: [CHOWN, NET_BIND_SERVICE, SETGID, SETUID]
+  security_opt: ['no-new-privileges:true']
+  healthcheck:
+    test:
+      [
+        'CMD',
+        'wget',
+        '--quiet',
+        '--spider',
+        'http://127.0.0.1/client-metadata.json',
+      ]
+    interval: 3s
+    timeout: 3s
+    retries: 20

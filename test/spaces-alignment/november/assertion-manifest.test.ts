@@ -710,7 +710,11 @@ describe('november-interop suite', () => {
           'post-uri-and-text-in-real-feed-response',
           'ordinary-custody-create-feed-delete',
         ],
-        failedGroups: ['november-upstream-mint'],
+        failedGroups: [
+          'november-upstream-mint',
+          'november-own-inspector',
+          'november-snapshot-inspector',
+        ],
         evidence: expect.arrayContaining([
           expect.objectContaining({
             id: 'mixed-cache-migration-preserves-custody',

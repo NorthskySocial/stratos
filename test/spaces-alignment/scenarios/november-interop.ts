@@ -45,6 +45,21 @@ const upstreamMint: ScenarioSuite = {
   run: (context) => runNovemberBrowserScenario(context, upstreamMint),
 }
 
+const ownInspector: ScenarioSuite = {
+  id: 'november-own-inspector',
+  requiredAssertions: [
+    'own-record-read-verified',
+    'invalid-address-sends-no-read',
+  ],
+  run: (context) => runNovemberBrowserScenario(context, ownInspector),
+}
+
+const snapshotInspector: ScenarioSuite = {
+  id: 'november-snapshot-inspector',
+  requiredAssertions: ['other-author-snapshot-verified'],
+  run: (context) => runNovemberBrowserScenario(context, snapshotInspector),
+}
+
 const positiveJourneys = [
   {
     id: 'canonical-uri-at-each-boundary',
@@ -134,21 +149,26 @@ export const suite: ScenarioSuite = {
             evidence,
           ),
       },
-      {
-        name: upstreamMint.id,
+      ...[
+        { id: 'upstream-standard-mint-control', carrier: upstreamMint },
+        {
+          id: 'inspector-reads-own-record-through-oauth',
+          carrier: ownInspector,
+        },
+        {
+          id: 'other-author-snapshot-without-direct-request',
+          carrier: snapshotInspector,
+        },
+      ].map(({ id, carrier }) => ({
+        name: carrier.id,
         run: () =>
           observeCarrier(
             context,
-            upstreamMint,
-            [
-              {
-                id: 'upstream-standard-mint-control',
-                assertions: upstreamMint.requiredAssertions,
-              },
-            ],
+            carrier,
+            [{ id, assertions: carrier.requiredAssertions }],
             evidence,
           ),
-      },
+      })),
       {
         name: 'encrypted-cache-migration',
         async run() {

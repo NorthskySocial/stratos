@@ -120,7 +120,8 @@ describe('the prepared november-interop suite', () => {
       .mockRejectedValue(new Error('test returned no results'))
     const incompleteUpstream = vi
       .spyOn(positiveBrowser, 'runNovemberBrowserScenario')
-      .mockRejectedValue(
+      .mockRejectedValue(new Error('webapp unavailable'))
+      .mockRejectedValueOnce(
         new SuiteFailure(
           'upstream read failed',
           'november-upstream-mint',
@@ -163,6 +164,8 @@ describe('the prepared november-interop suite', () => {
         failedGroups: [
           'november-positive',
           'november-upstream-mint',
+          'november-own-inspector',
+          'november-snapshot-inspector',
           'encrypted-cache-migration',
           'terminal-set-hash-mismatch-never-promoted',
         ],
