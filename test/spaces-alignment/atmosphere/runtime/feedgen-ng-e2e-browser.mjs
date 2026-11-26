@@ -116,8 +116,12 @@ async function clickEnabled(locator) {
   for (let index = 0; index < (await locator.count()); index += 1) {
     const candidate = locator.nth(index)
     if (!(await visible(candidate)) || !(await candidate.isEnabled())) continue
-    await candidate.click({ noWaitAfter: true, timeout: 2_000 }).catch(() => {})
-    return true
+    try {
+      await candidate.click({ noWaitAfter: true, timeout: 2_000 })
+      return true
+    } catch {
+      continue
+    }
   }
   return false
 }
@@ -125,6 +129,7 @@ async function clickEnabled(locator) {
 async function completeOAuth(page, account, origin) {
   const deadline = Date.now() + 60_000
   let leftClubhouse = false
+  let credentialsSubmitted = false
   page.on('framenavigated', (frame) => {
     if (frame !== page.mainFrame()) return
     if (new URL(frame.url()).origin !== origin) leftClubhouse = true
@@ -137,7 +142,7 @@ async function completeOAuth(page, account, origin) {
     const password = page
       .locator('input[name="password"], input[type="password"]')
       .first()
-    if (await visible(password)) {
+    if (!credentialsSubmitted && (await visible(password))) {
       const username = page
         .locator(
           'input[name="username"]:not([readonly]):not([disabled]), input[name="identifier"]:not([readonly]):not([disabled])',
@@ -148,12 +153,8 @@ async function completeOAuth(page, account, origin) {
       const submit = page.locator(
         'button[type="submit"], button:has-text("Sign in")',
       )
-      if (await clickEnabled(submit)) {
-        await delay(300)
-        continue
-      }
-      await page.keyboard.press('Enter')
-      await delay(300)
+      if (!(await clickEnabled(submit))) await page.keyboard.press('Enter')
+      credentialsSubmitted = true
       continue
     }
 
