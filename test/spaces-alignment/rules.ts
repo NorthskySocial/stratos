@@ -27,11 +27,26 @@ export interface ScenarioSuite {
   run: (context: ScenarioContext) => Promise<AssertionResult[]>
 }
 
+export interface JourneyEvidence {
+  id: string
+  tier: 'pinned-host' | 'controlled-transport' | 'in-process'
+  observation: string
+  artifact: string
+  remainingHostQuestion?: string
+}
+
+export interface JourneyReport {
+  outstanding: readonly string[]
+  evidence: readonly JourneyEvidence[]
+  failedGroups: readonly string[]
+}
+
 export interface ScenarioContext {
   sandboxDirectory: string
   composeFile: string
   projectName: string
   scratchDirectory: string
+  recordJourneyReport?: (report: JourneyReport) => void
   runCommand: (file: string, args: string[], cwd: string) => Promise<string>
 }
 

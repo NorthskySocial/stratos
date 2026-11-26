@@ -65,6 +65,7 @@ afterEach(async () => {
   delete process.env.RUNNER_TEST_WRONG_IMAGE
   delete process.env.RUNNER_TEST_FAIL_STEP
   delete process.env.RUNNER_TEST_REACHED_FAILURE
+  delete process.env.RUNNER_TEST_NOVEMBER_FAILURE
   delete process.env.RUNNER_TEST_EMPTY_ASSERTIONS
   delete process.env.RUNNER_TEST_MISSING_ACCOUNT
   delete process.env.RUNNER_TEST_INVALID_ACCOUNT
@@ -409,7 +410,14 @@ describe('sandbox preflight', () => {
         candidateRepo,
         'test/spaces-alignment/scenarios/november-interop.ts',
       ),
-      `export const suite = { id: 'november-interop', requiredAssertions: ['journey-pass'], async run() { return [{ id: 'journey-pass', status: 'passed' }] } }`,
+      `export const suite = { id: 'november-interop', requiredAssertions: ['journey-pass', 'journey-followup'], async run(context) {
+        const failed = process.env.RUNNER_TEST_NOVEMBER_FAILURE
+        const evidence = [{ id: 'journey-pass', tier: 'pinned-host', observation: 'Read observed', artifact: 'browser' }]
+        if (!failed) evidence.push({ id: 'journey-followup', tier: 'pinned-host', observation: 'Feed observed', artifact: 'browser' })
+        context.recordJourneyReport({ outstanding: failed ? ['journey-followup'] : [], evidence, failedGroups: failed ? ['feed'] : [] })
+        if (failed) throw Object.assign(new Error('November failed with secret-looking-word'), { reachedAssertions: ['journey-pass'] })
+        return evidence.map(({ id }) => ({ id, status: 'passed' }))
+      } }`,
     )
     for (const file of [
       'reference-pds.yaml',
@@ -1167,6 +1175,73 @@ if (args[0] === 'image' && args[1] === 'rm') {
       'baseline',
       'november-interop',
     ])
+
+    expect(prepared.novemberInterop).toEqual({
+      outstanding: [],
+      failedGroups: [],
+      evidence: [
+        {
+          id: 'journey-pass',
+          tier: 'pinned-host',
+          observation: 'Read observed',
+          artifact: 'browser',
+        },
+        {
+          id: 'journey-followup',
+          tier: 'pinned-host',
+          observation: 'Feed observed',
+          artifact: 'browser',
+        },
+      ],
+    })
+
+    const incompleteNovember = join(root, 'incomplete-november-report')
+    process.env.RUNNER_TEST_NOVEMBER_FAILURE = '1'
+    await expect(
+      runSandbox(
+        {
+          ...options,
+          suite: 'november-interop',
+          pdsImageDigest: PROBED_DIGEST,
+          reportDirectory: incompleteNovember,
+        },
+        {
+          ...dependencies,
+          novemberSources: referenceSources,
+          async buildPds(pin) {
+            return {
+              ...(await dependencies.buildPds()),
+              sourceSha: pin.revision,
+              imageId: `sha256:${'b'.repeat(64)}`,
+            }
+          },
+        },
+      ),
+    ).rejects.toThrow('November failed')
+    delete process.env.RUNNER_TEST_NOVEMBER_FAILURE
+    expect(await readdir(incompleteNovember)).toEqual(['failure.json'])
+    const incomplete = await readFile(
+      join(incompleteNovember, 'failure.json'),
+      'utf8',
+    )
+    expect(JSON.parse(incomplete)).toMatchObject({
+      failedStep: 'suite:november-interop',
+      assertionsReached: { 'november-interop': ['journey-pass'] },
+      novemberInterop: {
+        outstanding: ['journey-followup'],
+        failedGroups: ['feed'],
+        evidence: [
+          {
+            id: 'journey-pass',
+            tier: 'pinned-host',
+            observation: 'Read observed',
+            artifact: 'browser',
+          },
+        ],
+      },
+      cleanup: { status: 'passed' },
+    })
+    expect(incomplete).not.toContain('secret-looking-word')
 
     const actualFs =
       await vi.importActual<typeof import('node:fs/promises')>(

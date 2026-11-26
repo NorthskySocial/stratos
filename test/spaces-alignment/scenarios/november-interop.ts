@@ -7,58 +7,148 @@ import { SuiteFailure, validateAssertions } from '../rules.js'
 import { runNovemberCacheEvidence } from './november-cache.driver.js'
 import { suite as ordinary } from './ordinary-custody.js'
 import { suite as positive } from './november-positive.js'
-import type { AssertionResult, ScenarioSuite } from '../rules.js'
+import type {
+  AssertionResult,
+  JourneyEvidence,
+  ScenarioContext,
+  ScenarioSuite,
+} from '../rules.js'
 
-const executedJourneys = [
-  'canonical-uri-at-each-boundary',
-  'schema-resolution-and-explicit-grants',
-  'ordinary-custody-create-feed-delete',
-  'post-uri-and-text-in-real-feed-response',
-] as const
-const withoutDriver = JOURNEYS.filter(
-  (journey) =>
-    !executedJourneys.includes(journey.id as (typeof executedJourneys)[number]),
-).map((journey) => journey.id)
+export class NovemberInteropFailure extends SuiteFailure {
+  constructor(
+    readonly outstanding: readonly string[],
+    readonly evidence: readonly JourneyEvidence[],
+    readonly failedGroups: readonly string[],
+  ) {
+    super(
+      `november-interop still requires ${outstanding.length} journeys: ${outstanding.join(', ')}`,
+      'november-interop',
+      evidence.filter((row) => !row.remainingHostQuestion).map((row) => row.id),
+    )
+  }
+}
+
+const positiveJourneys = [
+  {
+    id: 'canonical-uri-at-each-boundary',
+    assertions: ['oauth-create', 'oauth-read', 'credential-read'],
+  },
+  {
+    id: 'schema-resolution-and-explicit-grants',
+    assertions: ['schema-grant', 'oauth-create'],
+  },
+  {
+    id: 'post-uri-and-text-in-real-feed-response',
+    assertions: ['oauth-create', 'authorized-feed'],
+  },
+]
+
+async function observeCarrier(
+  context: ScenarioContext,
+  carrier: ScenarioSuite,
+  mappings: readonly { id: string; assertions: readonly string[] }[],
+  evidence: JourneyEvidence[],
+): Promise<void> {
+  let reached: readonly string[]
+  try {
+    const results = await carrier.run(context)
+    validateAssertions(carrier, results)
+    reached = results.map((result) => result.id)
+  } catch (error) {
+    if (!(error instanceof SuiteFailure) || error.suiteId !== carrier.id)
+      throw error
+    reached = error.reachedAssertions
+    recordObservations()
+    throw error
+  }
+  recordObservations()
+
+  function recordObservations() {
+    for (const { id, assertions } of mappings) {
+      if (
+        assertions.every(
+          (assertion) =>
+            carrier.requiredAssertions.includes(assertion) &&
+            reached.includes(assertion),
+        )
+      ) {
+        evidence.push({
+          id,
+          tier: 'pinned-host',
+          observation: assertions.join(', '),
+          artifact: carrier.id,
+        })
+      }
+    }
+  }
+}
 
 export const suite: ScenarioSuite = {
   id: 'november-interop',
   requiredAssertions: JOURNEYS.map((journey) => journey.id),
   coverage:
-    'Full November interop runs positive and ordinary custody journeys plus partial in-process cache migration evidence. Endpoint-backed migration and other unimplemented journeys prevent acceptance.',
+    'November interop tracks completed host journeys and partial fixture evidence per row.',
   async run(context): Promise<AssertionResult[]> {
     const problems = manifestReadinessProblems(loadNovemberSources())
     if (problems.length > 0)
       throw new Error(
         `november-interop refuses to run until the November manifest is ready: ${problems.join('; ')}`,
       )
-    const results = await positive.run(context)
-    validateAssertions(positive, results)
-    try {
-      validateAssertions(ordinary, await ordinary.run(context))
-    } catch (error) {
-      throw new SuiteFailure(
-        'The ordinary-custody journey failed.',
-        suite.id,
-        executedJourneys.filter(
-          (id) => id !== 'ordinary-custody-create-feed-delete',
-        ),
-        { cause: error },
-      )
+
+    const evidence: JourneyEvidence[] = []
+    const groups = [
+      {
+        name: positive.id,
+        run: () =>
+          observeCarrier(context, positive, positiveJourneys, evidence),
+      },
+      {
+        name: ordinary.id,
+        run: () =>
+          observeCarrier(
+            context,
+            ordinary,
+            [
+              {
+                id: 'ordinary-custody-create-feed-delete',
+                assertions: ordinary.requiredAssertions,
+              },
+            ],
+            evidence,
+          ),
+      },
+      {
+        name: 'encrypted-cache-migration',
+        async run() {
+          const { test } = await runNovemberCacheEvidence(context)
+          evidence.push({
+            id: 'mixed-cache-migration-preserves-custody',
+            tier: 'in-process',
+            observation: 'Migrated encrypted store accepted a verified sync.',
+            artifact: test,
+            remainingHostQuestion:
+              'The migrated cache still needs a verified rebuild from the pinned host.',
+          })
+        },
+      },
+    ]
+
+    const failedGroups: string[] = []
+    for (const group of groups) {
+      try {
+        await group.run()
+      } catch {
+        failedGroups.push(group.name)
+      }
     }
-    try {
-      await runNovemberCacheEvidence(context)
-    } catch (error) {
-      throw new SuiteFailure(
-        'The in-process cache migration evidence failed; it does not establish endpoint-backed migration.',
-        suite.id,
-        executedJourneys,
-        { cause: error },
-      )
-    }
-    throw new SuiteFailure(
-      `november-interop ran partial in-process cache migration evidence; it has no driver for ${withoutDriver.length} of its ${JOURNEYS.length} journeys yet: ${withoutDriver.join(', ')}`,
-      suite.id,
-      executedJourneys,
+
+    const completed = evidence.filter((row) => !row.remainingHostQuestion)
+    const outstanding = suite.requiredAssertions.filter(
+      (id) => !completed.some((row) => row.id === id),
     )
+    context.recordJourneyReport?.({ outstanding, evidence, failedGroups })
+    if (outstanding.length > 0 || failedGroups.length > 0)
+      throw new NovemberInteropFailure(outstanding, evidence, failedGroups)
+    return completed.map(({ id }) => ({ id, status: 'passed' }))
   },
 }

@@ -441,9 +441,12 @@ pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
 
 10. **Run `november-interop`.** It starts only with `--pds-image-digest` naming
     the published member image, and only when the manifest is ready and its probe
-    records the same digest. It has no driver for some journeys yet (see the
-    journey list); until each has one the run stops with the names it lacks.
-    Not verified: it has never run.
+    records the same digest. If journeys remain open, the command exits nonzero
+    and writes `failure.json`. Read `novemberInterop.outstanding` for the
+    remaining IDs, `failedGroups` for groups that stopped early, and `evidence`
+    for the observation and artifact for each reported journey. An evidence row
+    with `remainingHostQuestion` is still open. The runner continues with
+    independent groups after a group fails.
 
 ```sh
 pnpm exec tsx test/spaces-alignment/run-sandbox.ts \

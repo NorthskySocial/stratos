@@ -30,7 +30,12 @@ import {
   validateAssertions,
   validateReviewReceipt,
 } from './rules.js'
-import type { AssertionResult, ReviewReceipt, ScenarioSuite } from './rules.js'
+import type {
+  AssertionResult,
+  JourneyReport,
+  ReviewReceipt,
+  ScenarioSuite,
+} from './rules.js'
 
 export const MEMBER_PDS_IMAGE =
   'ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350'
@@ -689,6 +694,7 @@ export async function runSandbox(
   const steps: Array<{ name: string; exitCode: 0 }> = []
   const results: Record<string, AssertionResult[]> = {}
   const assertionsReached: Record<string, readonly string[]> = {}
+  let novemberInterop: JourneyReport | undefined
   let referencePds: PdsBuildReceipt | undefined
   let failedStep = 'docker-config'
   let gateError: unknown
@@ -1058,6 +1064,13 @@ export async function runSandbox(
           composeFile,
           projectName,
           scratchDirectory: workspace,
+          ...(suite.id === 'november-interop'
+            ? {
+                recordJourneyReport: (report: JourneyReport) => {
+                  novemberInterop = report
+                },
+              }
+            : {}),
           runCommand: async (file, args, cwd) =>
             (await command(file, args, cwd, childEnvironment)).output,
         })
@@ -1104,6 +1117,7 @@ export async function runSandbox(
           : {}),
       },
       projectName,
+      ...(novemberInterop ? { novemberInterop } : {}),
       suites: suites.map((suite) => ({
         id: suite.id,
         requiredAssertions: suite.requiredAssertions,
@@ -1203,6 +1217,7 @@ export async function runSandbox(
           failedStep,
           completedSteps: steps,
           assertionsReached,
+          ...(novemberInterop ? { novemberInterop } : {}),
           error: 'Sandbox gate failed',
           cleanup,
         },

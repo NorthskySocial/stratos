@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { loadNovemberSources } from './november/reference-host.js'
 import type { NovemberSources } from './november/reference-host.js'
 import {
@@ -9,9 +9,16 @@ import {
   PREPARED_SUITE_IDS,
   requirePreparedRunConditions,
 } from './run-sandbox.js'
-import { STANDALONE_SUITE_IDS, suiteExecutionOrder } from './rules.js'
+import {
+  SuiteFailure,
+  STANDALONE_SUITE_IDS,
+  suiteExecutionOrder,
+} from './rules.js'
 import { suite as baseline } from './scenarios/baseline.js'
+import * as cacheEvidence from './scenarios/november-cache.driver.js'
 import { suite as novemberInterop } from './scenarios/november-interop.js'
+import { suite as positive } from './scenarios/november-positive.js'
+import { suite as ordinary } from './scenarios/ordinary-custody.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DIGEST =
@@ -90,6 +97,57 @@ describe('the prepared november-interop suite', () => {
         (suite) => suite.id,
       ),
     ).toEqual(['baseline', 'november-interop'])
+  })
+
+  it('continues after a child failure and credits only completed host observations', async () => {
+    const failedPositive = vi
+      .spyOn(positive, 'run')
+      .mockRejectedValue(
+        new SuiteFailure('child failed', positive.id, [
+          'schema-grant',
+          'oauth-create',
+          'oauth-read',
+          'authorized-feed',
+        ]),
+      )
+    const passedOrdinary = vi
+      .spyOn(ordinary, 'run')
+      .mockResolvedValue(
+        ordinary.requiredAssertions.map((id) => ({ id, status: 'passed' })),
+      )
+    const failedCache = vi
+      .spyOn(cacheEvidence, 'runNovemberCacheEvidence')
+      .mockRejectedValue(new Error('test returned no results'))
+    try {
+      await expect(
+        novemberInterop.run({
+          sandboxDirectory: '/sandbox',
+          composeFile: '/sandbox/compose.yaml',
+          projectName: 'test',
+          scratchDirectory: '/scratch',
+          runCommand: async () => {
+            throw new Error('unexpected command')
+          },
+        }),
+      ).rejects.toMatchObject({
+        reachedAssertions: [
+          'schema-resolution-and-explicit-grants',
+          'post-uri-and-text-in-real-feed-response',
+          'ordinary-custody-create-feed-delete',
+        ],
+        outstanding: expect.arrayContaining([
+          'canonical-uri-at-each-boundary',
+          'mixed-cache-migration-preserves-custody',
+        ]),
+        failedGroups: ['november-positive', 'encrypted-cache-migration'],
+      })
+      expect(passedOrdinary).toHaveBeenCalledOnce()
+      expect(failedCache).toHaveBeenCalledOnce()
+    } finally {
+      failedPositive.mockRestore()
+      passedOrdinary.mockRestore()
+      failedCache.mockRestore()
+    }
   })
 
   it('is not named by the workflow that runs on every pull request', () => {

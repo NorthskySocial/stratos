@@ -663,9 +663,17 @@ describe('november-interop suite', () => {
         reachedAssertions: [
           'canonical-uri-at-each-boundary',
           'schema-resolution-and-explicit-grants',
-          'ordinary-custody-create-feed-delete',
           'post-uri-and-text-in-real-feed-response',
+          'ordinary-custody-create-feed-delete',
         ],
+        failedGroups: [],
+        evidence: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'mixed-cache-migration-preserves-custody',
+            tier: 'in-process',
+            artifact: 'migration',
+          }),
+        ]),
       })
       expect(failure.message).not.toContain(
         'ordinary-custody-create-feed-delete',
