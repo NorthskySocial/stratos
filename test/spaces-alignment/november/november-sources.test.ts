@@ -202,7 +202,7 @@ describe('november source manifest', () => {
     expect(
       manifest.packages.find((entry) => entry.name === '@atproto/oauth-scopes')
         ?.version,
-    ).toBe('0.0.0-spaces-alpha-20261117141222')
+    ).toBe('0.0.0-spaces-alpha-20261124235736')
   })
 
   it('verifies every fixture against its recorded hash', () => {

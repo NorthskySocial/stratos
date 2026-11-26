@@ -1,21 +1,23 @@
 import postgres from 'postgres'
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import { sql } from 'drizzle-orm'
+import { defineRelations, sql } from 'drizzle-orm'
 import * as pgSchemaModule from './schema/pg-index.js'
 
-export type StratosPgDb = PostgresJsDatabase<typeof pgSchemaModule.pgSchema>
+export const pgActorRelations = defineRelations(pgSchemaModule.pgSchema)
 
-export type StratosPgDbOrTx = PostgresJsDatabase<typeof pgSchemaModule.pgSchema>
+export type StratosPgDb = PostgresJsDatabase<typeof pgActorRelations>
+
+export type StratosPgDbOrTx = StratosPgDb
 
 export function createStratosPgDb(
   connectionString: string,
   schemaName?: string,
-): StratosPgDb {
+): StratosPgDb & { $client: postgres.Sql } {
   const client = postgres(connectionString, {
     max: 10,
-    ...(schemaName ? { search_path: schemaName } : {}),
+    ...(schemaName ? { connection: { search_path: schemaName } } : {}),
   })
-  return drizzle({ client, schema: pgSchemaModule.pgSchema })
+  return drizzle({ client, relations: pgActorRelations })
 }
 
 export async function migrateStratosPgDb(

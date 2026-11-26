@@ -6,7 +6,7 @@ import {
 import { buildSpaceScope } from '../src/oauth/index.js'
 
 // Every `expected` value below is what the upstream scope parser
-// (@atproto/oauth-scopes 0.0.0-spaces-alpha-20261117141222, the copy this
+// (@atproto/oauth-scopes 0.0.0-spaces-alpha-20261124235736, the copy this
 // service depends on) answered for the string beside it. `null` means the
 // parser refused the string. The strings the apps request are written out
 // here and pinned again in the browser package's tests.

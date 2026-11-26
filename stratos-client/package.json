@@ -56,13 +56,13 @@
   "devDependencies": {
     "@atcute/mst": "^1.1.1",
     "@atproto/crypto": "^0.5.8",
-    "@atproto/lexicon": "^0.7.21",
+    "@atproto/lexicon": "^0.7.22",
     "@northskysocial/stratos-core": "workspace:*",
     "@stryker-mutator/core": "^10.1.1",
     "@stryker-mutator/vitest-runner": "^10.1.1",
-    "@types/node": "^26.6.6",
+    "@types/node": "^26.6.11",
     "typescript": "npm:@typescript/typescript6@~6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^5.1.1"
+    "vitest": "^5.1.2"
   }
 }

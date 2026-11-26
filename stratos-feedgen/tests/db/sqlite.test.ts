@@ -144,6 +144,25 @@ describe('SQLite-specific behavior', () => {
     }
   })
 
+  it('stops compaction when the projection byte counter is missing', async () => {
+    const db = createSqliteDb(':memory:')
+    await migrateSqliteDb(db)
+    const store = new SqliteFeedgenStore(db, db, {
+      maxAgeMs: 1000,
+      maxBytes: 10_000,
+    })
+    try {
+      await db.run(
+        sql`DELETE FROM projection_retention_metadata WHERE key = 'projection-bytes'`,
+      )
+      await expect(store.compactProjection()).rejects.toThrow(
+        'Missing projection byte counter',
+      )
+    } finally {
+      await store.close()
+    }
+  })
+
   it('excludes expired posts before compaction and removes them incrementally', async () => {
     let now = Date.parse('2026-01-01T00:00:00.000Z')
     const db = createSqliteDb(':memory:')

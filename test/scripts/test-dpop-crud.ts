@@ -15,7 +15,7 @@ import {
   type NodeSavedState,
   type OAuthSession,
   requestLocalLock,
-} from 'npm:@atproto/oauth-client-node@0.5.19'
+} from 'npm:@atproto/oauth-client-node@0.5.21'
 import { DOMAINS, PDS_URL, STRATOS_URL } from './lib/config.ts'
 import { loadState } from './lib/state.ts'
 import {

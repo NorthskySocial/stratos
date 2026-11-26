@@ -25,9 +25,9 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@atproto/api": "^0.32.5",
-    "@atproto/lexicon": "^0.7.21",
-    "@atproto/oauth-client-browser": "^0.5.17",
+    "@atproto/api": "^0.32.7",
+    "@atproto/lexicon": "^0.7.22",
+    "@atproto/oauth-client-browser": "^0.5.19",
     "@atproto/oauth-types": "^0.8.0",
     "@northskysocial/stratos-client": "workspace:*"
   },
@@ -36,6 +36,6 @@
     "@stryker-mutator/vitest-runner": "^10.1.1",
     "typescript": "npm:@typescript/typescript6@~6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^5.1.1"
+    "vitest": "^5.1.2"
   }
 }

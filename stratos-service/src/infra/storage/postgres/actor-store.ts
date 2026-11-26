@@ -33,7 +33,7 @@ import {
   MAX_VISIBLE_RECORD_BATCH,
   migrateStratosPgDb,
   parseCid,
-  pgSchema as pgActorSchema,
+  pgActorRelations,
   pgStratosBacklink,
   pgStratosBlob,
   pgStratosRecord,
@@ -1590,13 +1590,19 @@ export class PostgresActorStore implements ActorStore {
       idle_timeout: 20,
       connect_timeout: 10,
     })
-    this.adminDb = drizzle({ client: this.adminClient })
+    this.adminDb = drizzle({
+      client: this.adminClient,
+      relations: pgActorRelations,
+    })
     this.actorClient = postgres(config.connectionString, {
       max: config.actorPoolSize ?? 200,
       idle_timeout: 20,
       connect_timeout: 10,
     })
-    this.actorDb = drizzle({ client: this.actorClient, schema: pgActorSchema })
+    this.actorDb = drizzle({
+      client: this.actorClient,
+      relations: pgActorRelations,
+    })
   }
 
   /**

@@ -1,5 +1,15 @@
 import postgres from 'postgres'
-import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
+import {
+  defineRelations,
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  lt,
+  or,
+  sql,
+} from 'drizzle-orm'
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import {
   pgEnrolledActor as enrolledActorTbl,
@@ -32,7 +42,9 @@ import type { CatalogBoundary } from '../feeds/catalog-model.js'
 
 const CATALOG_BASELINE_KEY = 'boundary-catalog-baseline'
 
-export type PgDb = PostgresJsDatabase<typeof pgSchema> & {
+const relations = defineRelations(pgSchema)
+
+export type PgDb = PostgresJsDatabase<typeof relations> & {
   _client: postgres.Sql
 }
 
@@ -44,7 +56,7 @@ export function createPgDb(
     max: 10,
     ...(schemaName ? { connection: { search_path: schemaName } } : {}),
   })
-  const baseDb = drizzle({ client, schema: pgSchema })
+  const baseDb = drizzle({ client, relations })
   const db = baseDb as unknown as PgDb
   db._client = client
   return db

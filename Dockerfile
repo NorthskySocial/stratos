@@ -7,7 +7,7 @@
 # --- Build stage ---
 FROM node:26-alpine AS builder
 
-RUN npm install --global pnpm@12.21.0
+RUN npm install --global pnpm@12.23.0
 
 WORKDIR /app
 
@@ -56,7 +56,7 @@ FROM node:26-alpine AS stratos
 
 RUN apk add --no-cache flock
 
-RUN npm install --global pnpm@12.21.0
+RUN npm install --global pnpm@12.23.0
 
 WORKDIR /app
 
@@ -126,6 +126,7 @@ COPY --from=builder /app/webapp/package.json ./webapp/
 # uses a dedicated Deno config with `nodeModulesDir: auto` (the root deno.json
 # uses `none` to coexist with pnpm on the host / in the test e2e scripts).
 COPY deno.indexer.json ./deno.json
+COPY deno.lock ./
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 
 # Copy lexicons (needed at runtime by stratos-core)

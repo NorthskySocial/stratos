@@ -28,7 +28,7 @@ serde_yaml = "0.9.34"
 time = { version = "0.3.55", features = ["parsing"] }
 url = "2.5.9"
 serde_urlencoded = "0.7.1"
-sha2 = "0.11.1"
+sha2 = "0.11.2"
 hmac = "0.13.0"
 hkdf = "0.13.0"
 sfv = "0.16.1"

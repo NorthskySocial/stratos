@@ -224,7 +224,7 @@ No Stratos package, the webapp or Clubhouse sends
 `com.atproto.space.listSpaces` or `com.atproto.space.createSpace`. Internal
 space types and OAuth scope strings are unchanged by the URI spelling.
 
-The installed service validator, `@atproto/lexicon` 0.7.21, accepts a
+The installed service validator, `@atproto/lexicon` 0.7.22, accepts a
 `space-ref` schema but also accepts an invalid space string: it does not
 enforce that format. The executable
 `test/spaces-alignment/scenarios/installed-validator.test.ts` regression loads

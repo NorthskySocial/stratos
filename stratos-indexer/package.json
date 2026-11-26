@@ -14,15 +14,15 @@
     "@atcute/cbor": "^2.3.8",
     "@atcute/cid": "^2.5.0",
     "@atcute/firehose": "^1.2.0",
-    "@atproto/bsky": "^0.5.17",
-    "@atproto/identity": "^0.5.25",
+    "@atproto/bsky": "^0.5.21",
+    "@atproto/identity": "^0.5.27",
     "@atproto/lex-data": "^0.1.11",
-    "@atproto/lexicon": "^0.7.21",
-    "@atproto/repo": "^0.11.7",
+    "@atproto/lexicon": "^0.7.22",
+    "@atproto/repo": "^0.11.8",
     "@atproto/syntax": "^0.7.9",
     "@northskysocial/stratos-core": "workspace:*",
     "kysely": "^0.29.9",
-    "multiformats": "^14.0.6",
+    "multiformats": "^14.0.8",
     "p-queue": "^10.0.0",
     "zod": "^4.6.7"
   },
@@ -30,9 +30,9 @@
     "@stryker-mutator/core": "^10.1.1",
     "@stryker-mutator/vitest-runner": "^10.1.1",
     "@types/deno": "^2.7.0",
-    "@types/node": "^26.6.6",
+    "@types/node": "^26.6.11",
     "typescript": "npm:@typescript/typescript6@~6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^5.1.1"
+    "vitest": "^5.1.2"
   }
 }

@@ -1,10 +1,43 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
+  initializeTelemetry,
   parseTelemetryConfig,
   scrubEvent,
 } from '../src/observability/runtime.js'
 
+vi.mock('@sentry/node', { spy: true })
+
 describe('feedgen telemetry runtime', () => {
+  it('scrubs transactions and disables private data collection on initialization', async () => {
+    const sdk = await import('@sentry/node')
+    const init = vi.mocked(sdk.init).mockImplementation(() => undefined)
+    initializeTelemetry(
+      parseTelemetryConfig(
+        { SENTRY_DSN: 'https://public@nerv.example/1' },
+        'stratos-feedgen',
+      ),
+    )
+    expect(init).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceLifecycle: 'static',
+        beforeSendTransaction: scrubEvent,
+        dataCollection: {
+          userInfo: false,
+          cookies: false,
+          httpBodies: [],
+          httpHeaders: false,
+          urlQueryParams: false,
+          databaseQueryData: false,
+          stackFrameVariables: false,
+          queues: false,
+          graphQL: { document: false, variables: false },
+          genAI: { inputs: false, outputs: false },
+          mcp: { inputs: false, outputs: false },
+        },
+      }),
+    )
+  })
+
   it('uses bounded defaults when exporters are disabled', () => {
     const config = parseTelemetryConfig({}, 'stratos-feedgen')
 

@@ -8,9 +8,9 @@ import {
   UnsupportedDidMethodError,
   UnsupportedDidWebPathError,
 } from '@atproto/identity'
-import { expand as hkdfExpand } from '@noble/hashes/hkdf'
-import { hmac } from '@noble/hashes/hmac'
-import { sha256 } from '@noble/hashes/sha256'
+import { expand as hkdfExpand } from '@noble/hashes/hkdf.js'
+import { hmac } from '@noble/hashes/hmac.js'
+import { sha256 } from '@noble/hashes/sha2.js'
 import {
   CommitVerifier,
   type CommitVerifierDeps,

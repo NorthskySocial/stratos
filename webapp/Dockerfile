@@ -1,7 +1,7 @@
 # Build stage: Install dependencies and build webapp
 FROM node:26-alpine AS build
 
-RUN npm install --global pnpm@12.21.0
+RUN npm install --global pnpm@12.23.0
 
 WORKDIR /build
 
