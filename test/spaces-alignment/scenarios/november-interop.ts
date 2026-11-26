@@ -4,6 +4,7 @@ import {
   manifestReadinessProblems,
 } from '../november/reference-host.js'
 import { SuiteFailure, validateAssertions } from '../rules.js'
+import { runAttestationFixture } from './november-attestation.driver.js'
 import { runNovemberCacheEvidence } from './november-cache.driver.js'
 import { runSyncFixture } from './november-sync.driver.js'
 import { syncFixtures } from '../november/sync-fixtures.js'
@@ -60,6 +61,12 @@ const snapshotInspector: ScenarioSuite = {
   run: (context) => runNovemberBrowserScenario(context, snapshotInspector),
 }
 
+const membershipControl: ScenarioSuite = {
+  id: 'november-membership-control',
+  requiredAssertions: ['unjoined-viewer-ineligible', 'joined-viewer-eligible'],
+  run: (context) => runNovemberBrowserScenario(context, membershipControl),
+}
+
 const positiveJourneys = [
   {
     id: 'canonical-uri-at-each-boundary',
@@ -78,7 +85,11 @@ const positiveJourneys = [
 async function observeCarrier(
   context: ScenarioContext,
   carrier: ScenarioSuite,
-  mappings: readonly { id: string; assertions: readonly string[] }[],
+  mappings: readonly {
+    id: string
+    assertions: readonly string[]
+    remainingHostQuestion?: string
+  }[],
   evidence: JourneyEvidence[],
 ): Promise<void> {
   let reached: readonly string[]
@@ -96,7 +107,7 @@ async function observeCarrier(
   recordObservations()
 
   function recordObservations() {
-    for (const { id, assertions } of mappings) {
+    for (const { id, assertions, remainingHostQuestion } of mappings) {
       if (
         assertions.every(
           (assertion) =>
@@ -109,6 +120,7 @@ async function observeCarrier(
           tier: 'pinned-host',
           observation: assertions.join(', '),
           artifact: carrier.id,
+          ...(remainingHostQuestion ? { remainingHostQuestion } : {}),
         })
       }
     }
@@ -159,16 +171,34 @@ export const suite: ScenarioSuite = {
           id: 'other-author-snapshot-without-direct-request',
           carrier: snapshotInspector,
         },
-      ].map(({ id, carrier }) => ({
+        {
+          id: 'host-does-not-authorize-write-against-authority',
+          carrier: membershipControl,
+          remainingHostQuestion:
+            'Upstream PDS write admission remains unverified.',
+        },
+      ].map(({ id, carrier, remainingHostQuestion }) => ({
         name: carrier.id,
         run: () =>
           observeCarrier(
             context,
             carrier,
-            [{ id, assertions: carrier.requiredAssertions }],
+            [
+              {
+                id,
+                assertions: carrier.requiredAssertions,
+                remainingHostQuestion,
+              },
+            ],
             evidence,
           ),
       })),
+      {
+        name: 'client-attestation-fixture',
+        async run() {
+          evidence.push(await runAttestationFixture(context))
+        },
+      },
       {
         name: 'encrypted-cache-migration',
         async run() {

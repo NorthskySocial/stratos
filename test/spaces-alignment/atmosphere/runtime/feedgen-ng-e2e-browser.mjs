@@ -1545,6 +1545,36 @@ async function runNovemberSnapshotInspector() {
   }
 }
 
+async function runNovemberMembershipControl() {
+  const domain = required('SANDBOX_DOMAIN')
+  const authority = `did:web:stratos-e2e.${domain}`
+  const clubhouse = 'https://clubhouse-e2e.atmosbox.internal'
+  const viewer = await unjoinedOrdinaryAccount(domain)
+  await trustSandboxCa()
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const member = await provisionAccount(domain, 'motoko')
+    const seed = await seedInspectorPost(browser, domain, member)
+    const page = await browser.newPage()
+    await enrollThroughStratos(page, viewer)
+    await assertEnrolledOnlyInOtherBoundary(domain, viewer, authority)
+    await assertFeedEmptyOrRefused(domain, viewer, 'general')
+    reach('unjoined-viewer-ineligible')
+
+    const responses = listenForFeedResponses(page)
+    await signIn(page, viewer, clubhouse)
+    await enterRoom(page, viewer, clubhouse, 'general')
+    await waitForFeed(page, responses, seed.text, seed.uri)
+    reach('joined-viewer-eligible')
+    writeBrowserReceipt([
+      'unjoined-viewer-ineligible',
+      'joined-viewer-eligible',
+    ])
+  } finally {
+    await browser.close()
+  }
+}
+
 function writeBrowserReceipt(ids) {
   console.log(
     JSON.stringify({
@@ -1662,6 +1692,7 @@ const journeys = {
   'november-upstream-mint': runNovemberUpstreamMint,
   'november-own-inspector': runNovemberOwnInspector,
   'november-snapshot-inspector': runNovemberSnapshotInspector,
+  'november-membership-control': runNovemberMembershipControl,
 }
 
 async function main() {

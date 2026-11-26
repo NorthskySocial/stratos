@@ -613,7 +613,7 @@ save. Walk them in this order.
 - Proves: Whether the host checks the space authority or membership on a write: a second account writes into a space whose authority cannot be resolved.
 - Expected: The write should succeed: at the November reference revision, com.atproto.space.createRecord checks only the caller's own repo, its OAuth grant and that the collection is not a policy record before it commits (packages/pds/src/api/com/atproto/space/createRecord.ts). Stratos treats any record in a member repo as an unverified claim until its own membership and boundary state agree.
 - Unknown: What a pinned November host does. An August probe of an earlier alpha build reported that such a write succeeded; the repository keeps its commit message, not its output or the build it ran against, and its first version did not ensure the writer was a second, unrelated account.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for the supported Stratos membership control. Upstream write admission remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 16. `post-uri-and-text-in-real-feed-response`
