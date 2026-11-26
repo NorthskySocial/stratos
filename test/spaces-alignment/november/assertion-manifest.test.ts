@@ -629,22 +629,18 @@ describe('november-interop suite', () => {
   })
 
   it('reports only journeys actually executed when the full suite remains incomplete', async () => {
-    const positiveRun = vi
-      .spyOn(positive, 'run')
-      .mockResolvedValue(
-        positive.requiredAssertions.map((id) => ({
-          id,
-          status: 'passed' as const,
-        })),
-      )
-    const ordinaryRun = vi
-      .spyOn(ordinaryCustody, 'run')
-      .mockResolvedValue(
-        ordinaryCustody.requiredAssertions.map((id) => ({
-          id,
-          status: 'passed' as const,
-        })),
-      )
+    const positiveRun = vi.spyOn(positive, 'run').mockResolvedValue(
+      positive.requiredAssertions.map((id) => ({
+        id,
+        status: 'passed' as const,
+      })),
+    )
+    const ordinaryRun = vi.spyOn(ordinaryCustody, 'run').mockResolvedValue(
+      ordinaryCustody.requiredAssertions.map((id) => ({
+        id,
+        status: 'passed' as const,
+      })),
+    )
     const cacheRun = vi
       .spyOn(cacheEvidence, 'runNovemberCacheEvidence')
       .mockResolvedValue({ test: 'migration', endpointBacked: false })
