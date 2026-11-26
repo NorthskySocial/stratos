@@ -41,9 +41,9 @@
     },
     {
       "name": "@atproto/oauth-scopes",
-      "version": "0.0.0-spaces-alpha-20261117141222",
-      "integrity": "sha512-7crBfEPSaXsROwMzrgCSVd2+2PJB2scUjlUXpC3pO8NmoJLt/2S6NdP9iaIVTVa6H5sBNmFwurTtloSjgqUWzQ==",
-      "tarballSha256": "bcc03c4d1129f17c23319fde60f829a341a6b2ab05824d849ec99a53c0abf389",
+      "version": "0.0.0-spaces-alpha-20261124235736",
+      "integrity": "sha512-9FUB61oNK8rYKVmi9Z+RSA7DtqWCD1QgmP3J8XAKWMuBcPCOT4HNiu+hYeaWa/Zz4/5ooH00EwrQr5bV9Bt6gA==",
+      "tarballSha256": "5bfdfeb8bec17fbb15e647dbb9a2c8f85e44e9689bbf04c2912fc6d5731c61a7",
       "selection": "selected"
     },
     {

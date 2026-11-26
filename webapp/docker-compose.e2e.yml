@@ -25,7 +25,7 @@ services:
     # Node 25 and later no longer bundle corepack, and a global npm install
     # needs root, so install pnpm under /tmp and invoke it from there.
     command: >
-      sh -c "npm install --prefix /tmp/pnpm pnpm@12.21.0 &&
+      sh -c "npm install --prefix /tmp/pnpm pnpm@12.23.0 &&
              /tmp/pnpm/node_modules/.bin/pnpm install --frozen-lockfile &&
              /tmp/pnpm/node_modules/.bin/pnpm run dev"
     ports:

@@ -37,7 +37,7 @@ export function createSqliteBoundaryStore(db: ServiceDb): BoundaryCatalogStore {
 
 export function createPgBoundaryStore(db: ServicePgDb): BoundaryCatalogStore {
   const connection: BoundarySql = {
-    read: async (statement) => [...(await db.execute(statement))],
+    read: (statement) => db.execute(statement, 'objects'),
     write: async (statement) => {
       await db.execute(statement)
     },
@@ -45,7 +45,7 @@ export function createPgBoundaryStore(db: ServicePgDb): BoundaryCatalogStore {
   return new SqlBoundaryCatalogStore(connection, (work) =>
     db.transaction((tx) =>
       work({
-        read: async (statement) => [...(await tx.execute(statement))],
+        read: (statement) => tx.execute(statement, 'objects'),
         write: async (statement) => {
           await tx.execute(statement)
         },

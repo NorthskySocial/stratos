@@ -36,7 +36,8 @@ import {
 } from '../src/infra/storage/postgres/index.js'
 import { PgPdsSyncQueueStore } from '../src/features/enrollment/internal/pds-sync-store.js'
 import { PgLabelStore } from '../src/features/moderation/index.js'
-import type { NewLabel } from '@northskysocial/stratos-core'
+import { createStratosPgDb, type NewLabel } from '@northskysocial/stratos-core'
+import { sql } from 'drizzle-orm'
 
 describe('PostgreSQL Backend Integration', () => {
   let pgUrl: string
@@ -81,6 +82,23 @@ describe('PostgreSQL Backend Integration', () => {
 
     await cleanupClient`DELETE FROM enrollment_boundary`
     await cleanupClient`DELETE FROM enrollment`
+  })
+
+  it('selects the actor schema on each pooled connection', async () => {
+    await cleanupClient`CREATE SCHEMA nerv`
+    const db = createStratosPgDb(pgUrl, 'nerv')
+    try {
+      await db.transaction(async (tx) => {
+        const statement = sql`SELECT current_schema() AS schema, pg_backend_pid() AS pid`
+        const [first] = await tx.execute(statement, 'objects')
+        const [second] = await db.execute(statement, 'objects')
+        expect([first.schema, second.schema]).toEqual(['nerv', 'nerv'])
+        expect(first.pid).not.toBe(second.pid)
+      })
+    } finally {
+      await db.$client.end()
+      await cleanupClient`DROP SCHEMA nerv`
+    }
   })
 
   describe('Service Schema Migration', () => {

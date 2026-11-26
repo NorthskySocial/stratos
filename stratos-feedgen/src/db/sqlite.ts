@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
+  defineRelations,
   and,
   asc,
   desc,
@@ -50,7 +51,9 @@ import type { CatalogBoundary } from '../feeds/catalog-model.js'
 import { blobCacheKey } from '../blob/cache.js'
 import { assertPrivateSqlitePath } from '../config.js'
 
-export type SqliteDb = LibSQLDatabase<typeof sqliteSchema> & {
+const relations = defineRelations(sqliteSchema)
+
+export type SqliteDb = LibSQLDatabase<typeof relations> & {
   _client: Client
   _memoryAnchor?: Client
   _initialized: Promise<void>
@@ -95,7 +98,7 @@ export function createSqliteDb(location: string): SqliteDb {
   const client = createClient({
     url,
   })
-  const baseDb = drizzle({ client, schema: sqliteSchema })
+  const baseDb = drizzle({ client, relations })
   const db = baseDb as unknown as SqliteDb
   db._client = client
   db._location = location
@@ -275,13 +278,13 @@ async function replacePostBlobRefs(
 }
 
 async function queueOrphanedPostBlobs(
-  db: Pick<SqliteDb, 'get' | 'run'>,
+  db: Pick<SqliteDb, 'all' | 'run'>,
   rows: readonly CompactedPostRow[],
   queuedAt: string,
 ): Promise<void> {
   const keys: string[] = []
   for (const reference of blobReferencesForRows(rows)) {
-    const remaining = await db.get<{ found: number }>(sql`
+    const [remaining] = await db.all<{ found: number }>(sql`
       SELECT EXISTS(
         SELECT 1 FROM post_blob_ref
         WHERE did = ${reference.did} AND cid = ${reference.cid}
@@ -295,11 +298,11 @@ async function queueOrphanedPostBlobs(
 }
 
 async function hasCompactionWork(
-  db: Pick<SqliteDb, 'get'>,
+  db: Pick<SqliteDb, 'all'>,
   cutoff: string,
   maxBytes: number,
 ): Promise<boolean> {
-  const result = await db.get<{ hasWork: number }>(sql`
+  const [result] = await db.all<{ hasWork: number }>(sql`
     SELECT EXISTS(
       SELECT 1 FROM post WHERE retainedAt <= ${cutoff}
       UNION ALL SELECT 1 FROM sync_cursor WHERE updatedAt <= ${cutoff}
@@ -1345,6 +1348,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
           SELECT value AS bytes FROM projection_retention_metadata
           WHERE key = ${PROJECTION_BYTES_METADATA_KEY}
         `)
+        if (!current) throw new Error('Missing projection byte counter')
         const byteEvictions = await evictOverBudgetPosts(
           tx,
           Math.max(0, Number(current.bytes)),
@@ -1428,7 +1432,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
           ORDER BY queuedAt ASC, key ASC
           LIMIT ${DEFAULT_COMPACTION_BATCH_SIZE}
         `)
-        const more = await tx.get<{ hasMore: number }>(sql`
+        const [more] = await tx.all<{ hasMore: number }>(sql`
           SELECT EXISTS(
             SELECT 1 FROM blob_cache_eviction
             ORDER BY queuedAt ASC, key ASC
@@ -1446,7 +1450,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   private async queuePostBlobs(
-    db: Pick<SqliteDb, 'get' | 'run'>,
+    db: Pick<SqliteDb, 'all' | 'run'>,
     rows: readonly CompactedPostRow[],
   ): Promise<void> {
     await queueOrphanedPostBlobs(db, rows, this.retainedAt())

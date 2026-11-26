@@ -6,6 +6,7 @@ import * as os from 'node:os'
 import {
   closeStratosDb,
   createStratosDb,
+  createStratosPgDb,
   migrateStratosDb,
   stratosBacklink,
   stratosBlob,
@@ -15,6 +16,23 @@ import {
   stratosRepoRoot,
   stratosSeq,
 } from '../src'
+
+describe('Postgres connection options', () => {
+  it.each([undefined, 'nerv'])(
+    'passes schema %s to postgres-js',
+    async (schema) => {
+      const db = createStratosPgDb('postgres://localhost/stratos', schema)
+      try {
+        expect(db.$client.options.connection.search_path).toBe(schema)
+        expect(db.query.pgStratosRecord.findMany().toSQL().sql).toContain(
+          'stratos_record',
+        )
+      } finally {
+        await db.$client.end()
+      }
+    },
+  )
+})
 
 describe('stratos-db', () => {
   let db: StratosDb

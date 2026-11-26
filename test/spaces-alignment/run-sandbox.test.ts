@@ -474,7 +474,7 @@ describe('sandbox preflight', () => {
     )
     await writeFile(
       join(sandboxRepo, 'compose/pds.yaml'),
-      'services:\n  pds-space:\n    image: ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:36ab29eb69af61d3beba8ada2d8d524921622b2b4fedc487f6e282634cc2b541\n',
+      'services:\n  pds-space:\n    image: ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350\n',
     )
     await writeFile(join(sandboxRepo, 'deno.json'), '{}\n')
     await writeFile(join(sandboxRepo, 'deno.lock'), '{}\n')
@@ -732,29 +732,20 @@ if (args.includes('run')) {
   const composeFile = args[args.indexOf('--file') + 1]
   assert.ok(composeFile.endsWith('/compose.yaml'))
   assert.ok(fs.existsSync(composeFile))
-  if (!fs.existsSync('state/browser-accounts.json')) {
-    assert.equal(args[args.indexOf('--user') + 1], '0:0')
-    assert.equal(args[args.indexOf('--entrypoint') + 1], 'sh')
-    assert.equal(args[args.indexOf('--entrypoint') + 2], 'pds-space1')
-    assert.equal(args.at(-2), '-ec')
-    assert.match(args.at(-1), /chown 1000:1000 \\/data/)
-    fs.appendFileSync(process.env.RUNNER_TEST_DOCKER_LOG, 'initialize-space-pds ' + process.env.DOCKER_CONFIG + '\\n')
-  } else {
-    assert.equal(fs.statSync('state/browser-accounts.json').mode & 0o777, 0o444)
-    const accounts = JSON.parse(fs.readFileSync('state/browser-accounts.json', 'utf8')).accounts
-    const hasInspector = fs.readFileSync(composeFile, 'utf8').includes('feedgen-e2e-webapp')
-    assert.equal(Object.keys(accounts).length, hasInspector ? 3 : 2)
-    if (hasInspector) {
-      assert.deepEqual(accounts['user1.pds-space1.atmosbox.test'], {
-        did: 'did:plc:motoko',
-        password: 'synthetic-alpha'
-      })
-    }
-    assert.equal(accounts['user2.pds-space1.atmosbox.test'], undefined)
-    assert.equal(accounts['user1.pds1.atmosbox.test'].password, 'synthetic-one')
-    assert.equal(accounts['user2.pds1.atmosbox.test'].password, 'synthetic-two')
-    console.log('browser-ok')
+  assert.equal(fs.statSync('state/browser-accounts.json').mode & 0o777, 0o444)
+  const accounts = JSON.parse(fs.readFileSync('state/browser-accounts.json', 'utf8')).accounts
+  const hasInspector = fs.readFileSync(composeFile, 'utf8').includes('feedgen-e2e-webapp')
+  assert.equal(Object.keys(accounts).length, hasInspector ? 3 : 2)
+  if (hasInspector) {
+    assert.deepEqual(accounts['user1.pds-space1.atmosbox.test'], {
+      did: 'did:plc:motoko',
+      password: 'synthetic-alpha'
+    })
   }
+  assert.equal(accounts['user2.pds-space1.atmosbox.test'], undefined)
+  assert.equal(accounts['user1.pds1.atmosbox.test'].password, 'synthetic-one')
+  assert.equal(accounts['user2.pds1.atmosbox.test'].password, 'synthetic-two')
+  console.log('browser-ok')
 }
 if (args.includes('down')) {
   const composeFile = args[args.indexOf('--file') + 1]
@@ -1019,10 +1010,7 @@ if (args[0] === 'image' && args[1] === 'rm') {
     expect(JSON.stringify(receipt)).not.toContain('synthetic-one')
     expect((await stat(reportDirectory)).mode & 0o777).toBe(0o700)
     const dockerConfigs = (await readFile(dockerLog, 'utf8')).trim().split('\n')
-    expect(dockerConfigs).toHaveLength(21)
-    expect(
-      dockerConfigs.filter((line) => line.startsWith('initialize-space-pds ')),
-    ).toHaveLength(6)
+    expect(dockerConfigs).toHaveLength(15)
     expect(
       dockerConfigs.filter((line) => line.startsWith('build ')),
     ).toHaveLength(7)

@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm'
+import { sql, type SQL } from 'drizzle-orm'
 import type { ServiceDb } from '../../db/index.js'
 import { SqliteEnrollmentStore } from '../../storage/sqlite/enrollment-store.js'
 import type { BoundaryAuditBackend, BoundaryAuditTransaction } from './audit.js'
@@ -8,7 +8,7 @@ export function sqliteAuditSql(
   db: Pick<ServiceDb, 'all' | 'run'>,
 ): BoundaryAuditSql {
   return {
-    all: (statement) => db.all(statement),
+    all: <T extends object>(statement: SQL) => db.all<T>(statement),
     execute: async (statement) => {
       await db.run(statement)
     },

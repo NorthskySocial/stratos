@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 let initializeClubhouseTelemetry: typeof import('./telemetry').initializeClubhouseTelemetry
 let scrubEvent: typeof import('./telemetry').scrubEvent
 
+vi.mock('@sentry/svelte', { spy: true })
+
 beforeEach(async () => {
   // Reload module-level matchers while each mutation is active.
   vi.resetModules()
@@ -10,6 +12,33 @@ beforeEach(async () => {
 })
 
 describe('Clubhouse telemetry', () => {
+  it('scrubs transactions and disables private data collection on initialization', async () => {
+    const sdk = await import('@sentry/svelte')
+    const init = vi.mocked(sdk.init).mockImplementation(() => undefined)
+    initializeClubhouseTelemetry({
+      VITE_SENTRY_DSN: 'https://public@nerv.example/1',
+    })
+    expect(init).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceLifecycle: 'static',
+        beforeSendTransaction: scrubEvent,
+        dataCollection: {
+          userInfo: false,
+          cookies: false,
+          httpBodies: [],
+          httpHeaders: false,
+          urlQueryParams: false,
+          databaseQueryData: false,
+          stackFrameVariables: false,
+          queues: false,
+          graphQL: { document: false, variables: false },
+          genAI: { inputs: false, outputs: false },
+          mcp: { inputs: false, outputs: false },
+        },
+      }),
+    )
+  })
+
   it('does nothing when a browser DSN is absent', () => {
     expect(() => initializeClubhouseTelemetry({})).not.toThrow()
   })

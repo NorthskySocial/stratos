@@ -29,7 +29,7 @@
 # --- Build stage: install workspace deps and run esbuild bundle ---
 FROM node:26-alpine AS builder
 
-RUN npm install --global pnpm@12.21.0
+RUN npm install --global pnpm@12.23.0
 
 WORKDIR /app
 

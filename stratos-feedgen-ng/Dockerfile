@@ -2,7 +2,7 @@
 # Build from the workspace root:
 # docker build -f stratos-feedgen-ng/Dockerfile -t stratos-feedgen-ng:rehearsal .
 
-FROM rust:1.100.0-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea AS builder
+FROM rust:1.100.0-bookworm@sha256:75d26c23c24cc6ea1cdabf0714a6bff8fd7bf3248716043fd7ae86dac7f41b94 AS builder
 
 WORKDIR /workspace
 ENV RUSTUP_TOOLCHAIN=1.100.0
@@ -14,7 +14,7 @@ COPY stratos-feedgen-ng/ ./stratos-feedgen-ng/
 # selected at build or runtime.
 RUN cargo build --locked --release --package stratos-feedgen-ng
 
-FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime
+FROM debian:bookworm-slim@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e AS runtime
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 

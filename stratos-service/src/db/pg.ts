@@ -1,7 +1,9 @@
 import postgres from 'postgres'
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import { sql } from 'drizzle-orm'
+import { defineRelations, sql } from 'drizzle-orm'
 import * as pgSchema from './pg-schema.js'
+
+const relations = defineRelations(pgSchema)
 
 type ServicePgClient = ReturnType<typeof postgres>
 
@@ -15,7 +17,7 @@ export interface ServicePgStartupDiagnostics {
   hasSchemaCreate: boolean | null
 }
 
-export type ServicePgDb = PostgresJsDatabase<typeof pgSchema> & {
+export type ServicePgDb = PostgresJsDatabase<typeof relations> & {
   $client: ServicePgClient
 }
 
@@ -26,7 +28,7 @@ export type ServicePgDb = PostgresJsDatabase<typeof pgSchema> & {
  */
 export function createServicePgDb(connectionString: string): ServicePgDb {
   const client = postgres(connectionString, { max: 5, idle_timeout: 20 })
-  return drizzle({ client, schema: pgSchema }) as unknown as ServicePgDb
+  return drizzle({ client, relations }) as unknown as ServicePgDb
 }
 
 /**

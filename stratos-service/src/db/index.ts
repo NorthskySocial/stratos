@@ -1,6 +1,6 @@
 import { createClient } from '@libsql/client'
 import { drizzle, LibSQLDatabase } from 'drizzle-orm/libsql'
-import { sql, type SQL } from 'drizzle-orm'
+import { defineRelations, sql, type SQL } from 'drizzle-orm'
 import * as schema from './schema.js'
 
 export {
@@ -30,7 +30,9 @@ export type {
   NewModerationLabelRow,
 } from './schema.js'
 
-export type ServiceDb = LibSQLDatabase<typeof schema> & {
+const relations = defineRelations(schema)
+
+export type ServiceDb = LibSQLDatabase<typeof relations> & {
   _client: ReturnType<typeof createClient>
 }
 
@@ -44,7 +46,7 @@ export function createServiceDb(location: string): ServiceDb {
   const client = createClient({
     url: `file:${location}`,
   })
-  const base = drizzle({ client, schema }) as unknown as ServiceDb
+  const base = drizzle({ client, relations }) as unknown as ServiceDb
   base._client = client
   return base
 }
