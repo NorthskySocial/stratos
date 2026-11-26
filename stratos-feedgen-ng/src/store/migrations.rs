@@ -1476,7 +1476,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_verified_sync_of_a_member_works_end_to_end_on_a_migrated_file_store() {
-        use std::sync::{Arc, Mutex};
+        use std::{
+            sync::{Arc, Mutex},
+            time::Duration,
+        };
 
         use async_trait::async_trait;
         use serde_json::json;
@@ -1490,7 +1493,9 @@ mod tests {
             membership_reconciler::PdsPollTarget,
             pds_space_sync::{
                 PdsSpaceSynchronizer, VerifiedSyncOutcome,
-                test_host::{HostRepo, StaticKemKeys, TestClock, TestHost, TestSource},
+                test_host::{
+                    ArchiveStep, Gate, HostRepo, StaticKemKeys, TestClock, TestHost, TestSource,
+                },
             },
             readiness::FeedReadinessGate,
             service::ProjectionReader,
@@ -1524,8 +1529,12 @@ mod tests {
         const AS_OF: &str = "1998-04-03T12:00:00.000Z";
         let post = |text: &str| json!({ "$type": POST, "text": text, "createdAt": THEN });
 
-        let path = old_build_encrypted_file("verified-sync");
-        let survivors_before = survivors_of_file(&path);
+        let rollback = old_build_encrypted_file("verified-sync-rollback");
+        let rollback_bytes = fs::read(&rollback).unwrap();
+        let path = database_path("verified-sync-candidate");
+        fs::copy(&rollback, &path).unwrap();
+        let survivors_before = survivors_of_file(&rollback);
+        assert_eq!(survivors_of_file(&path), survivors_before);
         let store = EncryptedStore::open(&path, key()).unwrap();
         assert_eq!(version_of(&store.connection), 12);
         assert_eq!(
@@ -1589,12 +1598,39 @@ mod tests {
                 .expect("jet is a current member"),
         };
 
-        assert_eq!(
-            synchronizer
-                .sync_target(&lifecycle, &target, RETAINED)
-                .await,
-            VerifiedSyncOutcome::Replaced
-        );
+        {
+            let held = Gate::new();
+            host.script_archives(JET, vec![ArchiveStep::Gate(held.clone())]);
+            let replacement = synchronizer.sync_target(&lifecycle, &target, RETAINED);
+            tokio::pin!(replacement);
+            tokio::select! {
+                outcome = &mut replacement => panic!("replacement finished before the archive: {outcome:?}"),
+                ready = tokio::time::timeout(Duration::from_secs(2), held.reached.notified()) => {
+                    ready.expect("migrated cache did not request the archive");
+                }
+            }
+            assert_eq!(host.archives_requested(), 1);
+            assert_eq!(
+                lifecycle
+                    .verified_space_base_at_generation(BOUNDARY, SPACE, JET, target.generation)
+                    .unwrap(),
+                None
+            );
+            let held_feed = lifecycle.read(|projection| projection.served_posts(BOUNDARY, AS_OF));
+            assert!(held_feed.iter().any(|(uri, _)| uri == FAYE_POST));
+            assert!(
+                held_feed
+                    .iter()
+                    .all(|(uri, _)| !uri.starts_with(SPACE) && uri != LEGACY_JET_POST)
+            );
+            held.release.notify_one();
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(2), replacement)
+                    .await
+                    .unwrap(),
+                VerifiedSyncOutcome::Replaced
+            );
+        }
         host.edit(JET, |repo| {
             repo.put(3, POST, "bebop", post("Bang"));
         });
@@ -1646,7 +1682,10 @@ mod tests {
             assert_eq!(rows, 1, "{uri} survives reopen");
         }
         drop(reopened);
+        assert_eq!(fs::read(&rollback).unwrap(), rollback_bytes);
+        assert_eq!(survivors_of_file(&rollback), survivors_before);
         fs::remove_file(path).unwrap();
+        fs::remove_file(rollback).unwrap();
     }
 
     #[test]

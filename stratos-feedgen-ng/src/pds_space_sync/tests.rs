@@ -4,6 +4,9 @@
 //! prove how a cycle flows and what it writes, not that the cryptography is
 //! right: the MAC and the set hash have their own vectors.
 
+#[path = "restart_tests.rs"]
+mod restart_tests;
+
 use std::{
     sync::{
         Arc, Mutex,
@@ -112,7 +115,11 @@ impl Scene {
     }
 
     fn with_limits(limits: SyncLimits) -> Self {
-        let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+        let store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+        Self::with_store(store, limits)
+    }
+
+    fn with_store(mut store: EncryptedStore, limits: SyncLimits) -> Self {
         store
             .replace_pds_space_members(
                 BOUNDARY,

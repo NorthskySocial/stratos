@@ -55,11 +55,12 @@ export const syncFixtures = [
     id: 'crash-restart-reaches-verified-terminal-revision',
     tests: [
       'pds_space_sync::tests::a_crashed_poll_leaves_no_state_and_the_next_poll_starts_from_the_verified_rev',
+      'pds_space_sync::tests::restart_tests::a_killed_poll_process_restarts_from_its_persisted_verified_base',
     ],
     observation:
-      'Dropping a pending poll left the verified base untouched. A new poll resumed at its revision and promoted the terminal state.',
+      'A killed fixture process left the encrypted projection intact. A new process resumed the production synchronizer from the stored revision and promoted the terminal state.',
     remainingHostQuestion:
-      'Whether the feedgen process resumes correctly after a stop and restart on the same encrypted volume.',
+      'The running feedgen container still needs a gated restart against the pinned host on its Docker volume.',
   },
   {
     id: 'host-and-kem-key-rotation',
