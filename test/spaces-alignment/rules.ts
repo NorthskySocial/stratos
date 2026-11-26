@@ -39,6 +39,8 @@ export interface JourneyReport {
   outstanding: readonly string[]
   evidence: readonly JourneyEvidence[]
   failedGroups: readonly string[]
+  groupProgress?: Readonly<Record<string, readonly string[]>>
+  failedGroupExitCodes?: Readonly<Record<string, number>>
 }
 
 export interface ScenarioContext {

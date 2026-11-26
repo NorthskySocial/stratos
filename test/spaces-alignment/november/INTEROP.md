@@ -56,17 +56,13 @@ the step that proves it ends, and `failure.json` lists those names under
 - If a step fails, read `assertionsReached` to identify the completed steps;
   later steps are not evidence of acceptance.
 
-## Not covered by any test today
+## Health during a write
 
-These assertions of the earlier suites have no test in the repository now.
-`assertion-manifest.json` marks each one `uncovered`, and only a journey of the
-prepared suite carries it. Treat each as unprotected until a test or a driver
-exists.
-
-- `staging-limits:service-responsive`: the feed generator answers `/health`
-  within two seconds while a sync writes to the store. Journey
-  `health-answers-while-a-sync-writes`. A test would hold a store write open,
-  request `/health`, and require the answer within that bound.
+The October manifest still records `staging-limits:service-responsive` as
+uncovered by an October carrier. The November fixture for
+`health-answers-while-a-sync-writes` makes three loopback HTTP calls while a
+verified replacement holds the write transaction open. Timing in the
+standalone sandbox process remains open.
 
 ## 2. Repeating the published-host checks
 
@@ -444,7 +440,9 @@ pnpm exec tsx test/spaces-alignment/run-sandbox.ts \
     records the same digest. If journeys remain open, the command exits nonzero
     and writes `failure.json`. Read `novemberInterop.outstanding` for the
     remaining IDs, `failedGroups` for groups that stopped early, and `evidence`
-    for the observation and artifact for each reported journey. An evidence row
+    for the observation and artifact for each reported journey. For a failed
+    child command, `groupProgress` lists its completed steps and
+    `failedGroupExitCodes` lists numeric exit codes. An evidence row
     with `remainingHostQuestion` is still open. The runner continues with
     independent groups after a group fails.
 
@@ -559,9 +557,9 @@ save. Walk them in this order.
 
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: The host's own standard credential exchange works in the same stack, so a failure of the custom mint is not a stack fault.
-- Expected: For a space whose authority is the host, its com.atproto.space.authorizeSpaceSync returns a credential for a delegation token and a P-256 credentialKey. No driver calls it: the reference-host drivers exchange through the Stratos method zone.stratos.space.getSpaceCredential.
+- Expected: For a space whose authority is the host, its com.atproto.space.authorizeSpaceSync returns a credential for a delegation token and a P-256 credentialKey. The November control uses a separate personal space and compares the credential issuer and subject and the retrieved record CID.
 - Unknown: The host exchange route at the pinned build.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for the published PDS personal-space mint and verified read. Use the per-group progress to locate a host failure.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 10. `wrong-key-and-wrong-owner-denied`
@@ -606,7 +604,7 @@ save. Walk them in this order.
 - Proves: A non-member's write with a forged boundary lands in the host repo and is never indexed or served by the feed generator.
 - Expected: The feed generator reads the boundary from Stratos membership state, never from the record.
 - Unknown: Whether the host lets a non-member write at all. That is the next journey.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 15. `host-does-not-authorize-write-against-authority`
@@ -642,7 +640,7 @@ save. Walk them in this order.
 - Proves: A terminal page whose set hash does not match the records applied promotes nothing.
 - Expected: The set hash of the whole repo, kept from the stored base and updated by each op, must equal the commit's data before anything is promoted.
 - Unknown: As above.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 19. `non-post-record-contributes-to-integrity`
@@ -651,7 +649,7 @@ save. Walk them in this order.
 - Proves: A record of a collection the feed does not serve still counts in the integrity hash of the repo.
 - Expected: Every record of the repo is hashed, whatever its collection.
 - Unknown: How the host orders and pages such records.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 20. `full-page-then-empty-terminal`
@@ -660,7 +658,7 @@ save. Walk them in this order.
 - Proves: A repo that exactly fills a page is followed by an empty terminal page and verifies.
 - Expected: A page without a cursor ends the poll, whatever its ops, and only that page's commit is proven and promoted; a page with a cursor is never the last.
 - Unknown: Whether the host sends a cursor after a full page and then an empty page, or ends on the full page.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 21. `expired-cursor-replaced-by-verified-star`
@@ -669,7 +667,7 @@ save. Walk them in this order.
 - Proves: When the host refuses an expired cursor, the feed generator reads a whole-repo archive and replaces the stored state only after it verifies.
 - Expected: The archive is read to the end and verified before any stored row changes.
 - Unknown: How long the host keeps a cursor and the archive error words.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 22. `crash-restart-reaches-verified-terminal-revision`
@@ -678,7 +676,7 @@ save. Walk them in this order.
 - Proves: Stopping the feed generator mid-sync and starting it again ends at the verified terminal revision with nothing half-applied.
 - Expected: Nothing is promoted until verification ends; a restart resyncs.
 - Unknown: The restart timing against a real host.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 23. `host-and-kem-key-rotation`
@@ -687,7 +685,7 @@ save. Walk them in this order.
 - Proves: After a member moves host or rotates the key the host uses for the encrypted commit data, the next poll refreshes the key once and verifies.
 - Expected: One refresh and one new request after a failure with the old key; a stored host other than the target starts a replacement.
 - Unknown: How the host publishes the rotated key.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 24. `membership-revoked-mid-poll`
@@ -696,16 +694,16 @@ save. Walk them in this order.
 - Proves: A member removed while a poll is running promotes nothing, other members are untouched, a member added again starts with a fresh generation, and a restart keeps the removal.
 - Expected: Each store write checks the generation, so a stale poll changes nothing.
 - Unknown: Timing against a real host.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 25. `health-answers-while-a-sync-writes`
 
 - Closes: The feed generator promotes only fully verified repo state from a real host, and recovers from gaps, key rotation and restarts without serving unverified records.
 - Proves: While a poll or a whole-repo replacement of a large member repo writes to the store, the feed generator answers /health within two seconds.
-- Expected: No test covers this today. The health handler reads the readiness gate and the scheduler status, not the store.
+- Expected: The health handler reads the readiness gate and scheduler status independently of the store transaction.
 - Unknown: How long a store write takes on a large real repo, and whether /health waits for it.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 26. `malformed-or-truncated-archive-refused`
@@ -714,7 +712,7 @@ save. Walk them in this order.
 - Proves: A malformed or truncated whole-repo archive is refused and changes nothing.
 - Expected: An archive over a limit fails as a unit with nothing written.
 - Unknown: What the host sends when its own read fails midway.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 27. `suspension-and-offline-are-not-deletion`
@@ -723,7 +721,7 @@ save. Walk them in this order.
 - Proves: A suspended or unreachable host leaves the member projection in place and does not delete it.
 - Expected: A failed target is counted as a failure.
 - Unknown: The host error codes for suspension and takedown.
-- Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
+- Command: Run `november-interop` for fixture evidence. The pinned-host observation remains open.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 
 ### 28. `mixed-cache-migration-preserves-custody`

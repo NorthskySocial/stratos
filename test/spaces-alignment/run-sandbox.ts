@@ -220,6 +220,7 @@ export class SandboxCommandFailure extends Error {
     readonly stdout: string,
     readonly stderr: string,
     message: string,
+    readonly exitCode?: number,
   ) {
     super(message)
   }
@@ -243,6 +244,7 @@ export async function command(
         error.stdout,
         error.stderr,
         `${file} ${args[0] ?? ''} exited ${error.code ?? 'unknown'}`,
+        typeof error.code === 'number' ? error.code : undefined,
       )
     }
     throw new Error(`${file} ${args[0] ?? ''} exited unknown`)
@@ -695,6 +697,7 @@ export async function runSandbox(
   const results: Record<string, AssertionResult[]> = {}
   const assertionsReached: Record<string, readonly string[]> = {}
   let novemberInterop: JourneyReport | undefined
+  let pdsServices: Record<string, unknown> | undefined
   let referencePds: PdsBuildReceipt | undefined
   let failedStep = 'docker-config'
   let gateError: unknown
@@ -1025,6 +1028,22 @@ export async function runSandbox(
     const referenceImageId = referencePds
       ? await inspectService('feedgen-e2e-pds-reference', referencePds.imageId)
       : undefined
+    pdsServices = {
+      primary: {
+        service: 'pds-space1',
+        image: MEMBER_PDS_IMAGE,
+        imageId: memberImageId,
+      },
+      ...(referencePds
+        ? {
+            reference: {
+              service: 'feedgen-e2e-pds-reference',
+              imageId: referenceImageId,
+              build: referencePds,
+            },
+          }
+        : {}),
+    }
     await runStep('seed', 'deno', ['task', 'sandbox', 'seed'])
     failedStep = 'prepare-browser-accounts'
     const state = JSON.parse(
@@ -1100,22 +1119,7 @@ export async function runSandbox(
       atmosphereFingerprint,
       templateHashes,
       referencePds,
-      pdsServices: {
-        primary: {
-          service: 'pds-space1',
-          image: MEMBER_PDS_IMAGE,
-          imageId: memberImageId,
-        },
-        ...(referencePds
-          ? {
-              reference: {
-                service: 'feedgen-e2e-pds-reference',
-                imageId: referenceImageId,
-                build: referencePds,
-              },
-            }
-          : {}),
-      },
+      pdsServices,
       projectName,
       ...(novemberInterop ? { novemberInterop } : {}),
       suites: suites.map((suite) => ({
@@ -1217,6 +1221,7 @@ export async function runSandbox(
           failedStep,
           completedSteps: steps,
           assertionsReached,
+          ...(pdsServices ? { pdsServices } : {}),
           ...(novemberInterop ? { novemberInterop } : {}),
           error: 'Sandbox gate failed',
           cleanup,

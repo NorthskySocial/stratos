@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import * as cacheEvidence from '../scenarios/november-cache.driver.js'
-import { suite as positive } from '../scenarios/november-positive.js'
+import * as positiveBrowser from '../scenarios/november-positive.js'
 import { suite as baseline } from '../scenarios/baseline.js'
 import { suite as clientCustody } from '../scenarios/client-custody.js'
 import { suite as credentialLifetime } from '../scenarios/credential-lifetime.js'
@@ -535,8 +535,8 @@ describe('assertion manifest', () => {
   it('lists each uncovered assertion and its journey in the checklist', () => {
     const checklist = readFileSync(resolve(HERE, 'INTEROP.md'), 'utf8')
     const section = checklist.slice(
-      checklist.indexOf('## Not covered by any test today'),
-      checklist.indexOf('## 2. The day a host accepts the new spelling'),
+      checklist.indexOf('## Health during a write'),
+      checklist.indexOf('## 2. Repeating the published-host checks'),
     )
     for (const entry of manifest.entries.filter(
       (candidate) => candidate.disposition === 'uncovered',
@@ -599,14 +599,51 @@ describe('november-interop suite', () => {
     )
   })
 
-  it('has the journeys the plan names', () => {
-    const ids = JOURNEYS.map((journey) => journey.id)
-    for (const id of [
-      'membership-revoked-mid-poll',
+  it('keeps the 19 new journeys distinct from the four baseline and five carrier journeys', () => {
+    const baseline = new Set([
+      'canonical-uri-at-each-boundary',
+      'schema-resolution-and-explicit-grants',
+      'ordinary-custody-create-feed-delete',
+      'post-uri-and-text-in-real-feed-response',
+    ])
+    const unfinished = JOURNEYS.filter((journey) => !baseline.has(journey.id))
+    expect(JOURNEYS).toHaveLength(28)
+    expect(
+      unfinished
+        .filter((journey) => journey.carriedBy.length > 0)
+        .map(({ id }) => id),
+    ).toEqual([
+      'two-authors-on-one-host',
+      'custom-mint-reads-from-reference-pds',
+      'wrong-key-and-wrong-owner-denied',
+      'invalid-jwt-signature-refused-by-receiver',
+      'renewal-and-revoked-member-denied',
+    ])
+    expect(
+      unfinished
+        .filter((journey) => journey.carriedBy.length === 0)
+        .map(({ id }) => id),
+    ).toEqual([
+      'authors-on-separate-hosts',
+      'inspector-reads-own-record-through-oauth',
+      'other-author-snapshot-without-direct-request',
+      'upstream-standard-mint-control',
+      'current-delegation-and-client-attestation-accepted',
       'non-member-forged-boundary-write-never-indexed',
       'host-does-not-authorize-write-against-authority',
+      'nonterminal-mac-tamper-never-promoted',
+      'terminal-set-hash-mismatch-never-promoted',
+      'non-post-record-contributes-to-integrity',
+      'full-page-then-empty-terminal',
+      'expired-cursor-replaced-by-verified-star',
+      'crash-restart-reaches-verified-terminal-revision',
+      'host-and-kem-key-rotation',
+      'membership-revoked-mid-poll',
+      'health-answers-while-a-sync-writes',
+      'malformed-or-truncated-archive-refused',
+      'suspension-and-offline-are-not-deletion',
+      'mixed-cache-migration-preserves-custody',
     ])
-      expect(ids).toContain(id)
   })
 
   it('names an acceptance row for every journey', () => {
@@ -629,6 +666,7 @@ describe('november-interop suite', () => {
   })
 
   it('reports only journeys actually executed when the full suite remains incomplete', async () => {
+    const positive = positiveBrowser.suite
     const positiveRun = vi.spyOn(positive, 'run').mockResolvedValue(
       positive.requiredAssertions.map((id) => ({
         id,
@@ -644,6 +682,12 @@ describe('november-interop suite', () => {
     const cacheRun = vi
       .spyOn(cacheEvidence, 'runNovemberCacheEvidence')
       .mockResolvedValue({ test: 'migration', endpointBacked: false })
+    const failedUpstream = vi
+      .spyOn(positiveBrowser, 'runNovemberBrowserScenario')
+      .mockRejectedValue(new Error('upstream unavailable'))
+    const fixtureRun = vi
+      .spyOn(cacheEvidence, 'runNamedFeedgenTest')
+      .mockResolvedValue()
     try {
       const failure = await novemberInterop
         .run({
@@ -666,7 +710,7 @@ describe('november-interop suite', () => {
           'post-uri-and-text-in-real-feed-response',
           'ordinary-custody-create-feed-delete',
         ],
-        failedGroups: [],
+        failedGroups: ['november-upstream-mint'],
         evidence: expect.arrayContaining([
           expect.objectContaining({
             id: 'mixed-cache-migration-preserves-custody',
@@ -687,6 +731,8 @@ describe('november-interop suite', () => {
       positiveRun.mockRestore()
       ordinaryRun.mockRestore()
       cacheRun.mockRestore()
+      fixtureRun.mockRestore()
+      failedUpstream.mockRestore()
     }
   })
 })

@@ -486,6 +486,169 @@ async fn health_exposes_a_pds_sync_that_has_not_completed() {
 }
 
 #[tokio::test]
+async fn health_serves_a_loopback_client_during_a_verified_store_write() {
+    use std::time::Instant;
+
+    use crate::{
+        pds_space_scheduler::PdsSpaceSyncStatus,
+        readiness::ReconciliationOutcome,
+        space_mac::MacVerifiedCommit,
+        space_record::{encode_record, record_cid},
+        space_set_hash::{RecordPath, SetHashState, set_hash_element},
+        store::{
+            PdsSpaceMember, VerifiedSpaceRecord, VerifiedSpaceTarget,
+            observe_replacement_before_commit,
+        },
+    };
+
+    let boundary = "did:web:stratos.example.test/bebop";
+    let space = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
+    let did = "did:plc:fayevalentine";
+    let observed_at = "1998-04-03T00:00:00.000Z";
+    let retained_at = "2998-04-03T00:00:00.000Z";
+    let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+    let store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+    let lifecycle = Arc::new(ControlLifecycle::new(
+        ProjectionReader::new(store),
+        Arc::clone(&readiness),
+    ));
+    lifecycle
+        .replace_pds_space_members(
+            boundary,
+            vec![PdsSpaceMember {
+                did: did.to_owned(),
+            }],
+            observed_at,
+        )
+        .unwrap();
+    lifecycle.session_established();
+    lifecycle.mark_labels_current();
+    let generation = lifecycle.begin_reconciliation();
+    assert!(lifecycle.complete_reconciliation(
+        generation,
+        ReconciliationOutcome {
+            errors: 0,
+            truncated: false
+        },
+    ));
+
+    let signing_key = SigningKey::from_bytes((&[9_u8; 32]).into()).unwrap();
+    let app = router_with_feed_with_request_limit(
+        ServerState {
+            config: config(),
+            feeds: feeds(),
+            readiness,
+            pds_space_sync: Some(Arc::new(Mutex::new(PdsSpaceSyncStatus::default()))),
+        },
+        Arc::clone(&lifecycle),
+        FeedRequestVerifier::new(
+            "did:web:feedgen.example.test",
+            ["zone.stratos.feedgen.getFeed".to_owned()],
+            Arc::new(StaticResolver(did_key(&signing_key))) as Arc<dyn IdentityKeyResolver>,
+        ),
+        super::MAX_CONCURRENT_FEED_REQUESTS,
+        None,
+        None,
+        Arc::new(FeedTelemetry::disabled()),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/health", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await });
+
+    let record_collection = "zone.stratos.feed.post";
+    let mut state = SetHashState::empty();
+    let records: Vec<_> = (0..64)
+        .map(|index| {
+            let path = RecordPath::parse(record_collection, &format!("bebop-{index:02}")).unwrap();
+            let record = serde_json::json!({
+                "$type": record_collection,
+                "text": format!("Bebop {index}"),
+                "createdAt": observed_at,
+            });
+            let cid = record_cid(&encode_record(&record).unwrap());
+            state.add(&set_hash_element(&path, &cid));
+            VerifiedSpaceRecord {
+                path,
+                cid,
+                value: Some(record),
+            }
+        })
+        .collect();
+    let target = VerifiedSpaceTarget {
+        boundary: boundary.to_owned(),
+        space_uri: space.to_owned(),
+        actor_did: did.to_owned(),
+        host: "https://bebop.example.test".to_owned(),
+        generation: lifecycle
+            .pds_member_generation(boundary, did)
+            .unwrap()
+            .unwrap(),
+    };
+    let commit = MacVerifiedCommit::for_tests(did, space, "3jzfcijpj2z2a", state.digest());
+    let (entered, written) = tokio::sync::oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let writer = {
+        let lifecycle = Arc::clone(&lifecycle);
+        tokio::task::spawn_blocking(move || {
+            observe_replacement_before_commit(move || {
+                entered
+                    .send(Instant::now())
+                    .expect("health client disappeared");
+                released
+                    .recv_timeout(Duration::from_secs(3))
+                    .expect("health request did not finish during the write");
+            });
+            lifecycle
+                .replace_verified_space_repo(&target, &commit, &records, retained_at, observed_at)
+                .unwrap();
+            Instant::now()
+        })
+    };
+
+    let write_observed = tokio::time::timeout(Duration::from_secs(2), written)
+        .await
+        .unwrap()
+        .unwrap();
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
+    let mut samples = Vec::new();
+    for _ in 0..3 {
+        let started = Instant::now();
+        let response = client.get(&url).send().await.unwrap();
+        let status = response.status();
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
+        let finished = Instant::now();
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["feedReady"], true);
+        samples.push((started, finished));
+    }
+    release.send(()).unwrap();
+    let write_completed = writer.await.unwrap();
+    server.abort();
+
+    for (started, finished) in samples {
+        assert!(write_observed <= started && finished <= write_completed);
+        assert!(finished.duration_since(started) <= Duration::from_secs(2));
+    }
+    let generation = lifecycle
+        .pds_member_generation(boundary, did)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        lifecycle
+            .verified_space_base_at_generation(boundary, space, did, generation)
+            .unwrap()
+            .unwrap()
+            .record_count,
+        64,
+    );
+}
+
+#[tokio::test]
 async fn serves_a_did_document_matching_the_typescript_contract() {
     let app = router(
         config(),

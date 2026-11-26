@@ -135,8 +135,27 @@ impl EncryptedStore {
             retained_at,
             observed_at,
         )?;
+        #[cfg(test)]
+        REPLACEMENT_WRITE_OBSERVER.with(|observer| {
+            if let Some(observe) = observer.take() {
+                observe();
+            }
+        });
         transaction.commit().map_err(StoreError::Open)
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static REPLACEMENT_WRITE_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(crate) fn observe_replacement_before_commit(observer: impl FnOnce() + 'static) {
+    REPLACEMENT_WRITE_OBSERVER.with(|slot| {
+        assert!(slot.replace(Some(Box::new(observer))).is_none());
+    });
 }
 
 #[cfg(test)]

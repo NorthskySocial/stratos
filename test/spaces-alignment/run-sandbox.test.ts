@@ -1226,6 +1226,10 @@ if (args[0] === 'image' && args[1] === 'rm') {
     )
     expect(JSON.parse(incomplete)).toMatchObject({
       failedStep: 'suite:november-interop',
+      pdsServices: {
+        primary: { imageId: `sha256:${'a'.repeat(64)}` },
+        reference: { imageId: `sha256:${'b'.repeat(64)}` },
+      },
       assertionsReached: { 'november-interop': ['journey-pass'] },
       novemberInterop: {
         outstanding: ['journey-followup'],

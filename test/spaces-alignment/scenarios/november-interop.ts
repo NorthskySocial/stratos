@@ -5,8 +5,13 @@ import {
 } from '../november/reference-host.js'
 import { SuiteFailure, validateAssertions } from '../rules.js'
 import { runNovemberCacheEvidence } from './november-cache.driver.js'
+import { runSyncFixture } from './november-sync.driver.js'
+import { syncFixtures } from '../november/sync-fixtures.js'
 import { suite as ordinary } from './ordinary-custody.js'
-import { suite as positive } from './november-positive.js'
+import {
+  runNovemberBrowserScenario,
+  suite as positive,
+} from './november-positive.js'
 import type {
   AssertionResult,
   JourneyEvidence,
@@ -26,6 +31,18 @@ export class NovemberInteropFailure extends SuiteFailure {
       evidence.filter((row) => !row.remainingHostQuestion).map((row) => row.id),
     )
   }
+}
+
+const upstreamMint: ScenarioSuite = {
+  id: 'november-upstream-mint',
+  requiredAssertions: [
+    'member-pds-ready',
+    'personal-space-created',
+    'personal-record-written',
+    'upstream-credential-issued',
+    'upstream-credential-read-verified',
+  ],
+  run: (context) => runNovemberBrowserScenario(context, upstreamMint),
 }
 
 const positiveJourneys = [
@@ -118,6 +135,21 @@ export const suite: ScenarioSuite = {
           ),
       },
       {
+        name: upstreamMint.id,
+        run: () =>
+          observeCarrier(
+            context,
+            upstreamMint,
+            [
+              {
+                id: 'upstream-standard-mint-control',
+                assertions: upstreamMint.requiredAssertions,
+              },
+            ],
+            evidence,
+          ),
+      },
+      {
         name: 'encrypted-cache-migration',
         async run() {
           const { test } = await runNovemberCacheEvidence(context)
@@ -131,14 +163,29 @@ export const suite: ScenarioSuite = {
           })
         },
       },
+      ...syncFixtures.map((fixture) => ({
+        name: fixture.id,
+        async run() {
+          evidence.push(await runSyncFixture(context, fixture))
+        },
+      })),
     ]
 
     const failedGroups: string[] = []
+    const groupProgress: Record<string, readonly string[]> = {}
+    const failedGroupExitCodes: Record<string, number> = {}
     for (const group of groups) {
       try {
         await group.run()
-      } catch {
+      } catch (error) {
         failedGroups.push(group.name)
+        if (error instanceof SuiteFailure && error.suiteId === group.name) {
+          groupProgress[group.name] = error.reachedAssertions
+        }
+        const failure = error instanceof SuiteFailure ? error.cause : error
+        const exitCode = (failure as { exitCode?: unknown } | null)?.exitCode
+        if (typeof exitCode === 'number')
+          failedGroupExitCodes[group.name] = exitCode
       }
     }
 
@@ -146,7 +193,13 @@ export const suite: ScenarioSuite = {
     const outstanding = suite.requiredAssertions.filter(
       (id) => !completed.some((row) => row.id === id),
     )
-    context.recordJourneyReport?.({ outstanding, evidence, failedGroups })
+    context.recordJourneyReport?.({
+      outstanding,
+      evidence,
+      failedGroups,
+      groupProgress,
+      failedGroupExitCodes,
+    })
     if (outstanding.length > 0 || failedGroups.length > 0)
       throw new NovemberInteropFailure(outstanding, evidence, failedGroups)
     return completed.map(({ id }) => ({ id, status: 'passed' }))

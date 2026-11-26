@@ -17,7 +17,7 @@ import {
 import { suite as baseline } from './scenarios/baseline.js'
 import * as cacheEvidence from './scenarios/november-cache.driver.js'
 import { suite as novemberInterop } from './scenarios/november-interop.js'
-import { suite as positive } from './scenarios/november-positive.js'
+import * as positiveBrowser from './scenarios/november-positive.js'
 import { suite as ordinary } from './scenarios/ordinary-custody.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -101,9 +101,9 @@ describe('the prepared november-interop suite', () => {
 
   it('continues after a child failure and credits only completed host observations', async () => {
     const failedPositive = vi
-      .spyOn(positive, 'run')
+      .spyOn(positiveBrowser.suite, 'run')
       .mockRejectedValue(
-        new SuiteFailure('child failed', positive.id, [
+        new SuiteFailure('child failed', positiveBrowser.suite.id, [
           'schema-grant',
           'oauth-create',
           'oauth-read',
@@ -118,6 +118,25 @@ describe('the prepared november-interop suite', () => {
     const failedCache = vi
       .spyOn(cacheEvidence, 'runNovemberCacheEvidence')
       .mockRejectedValue(new Error('test returned no results'))
+    const incompleteUpstream = vi
+      .spyOn(positiveBrowser, 'runNovemberBrowserScenario')
+      .mockRejectedValue(
+        new SuiteFailure(
+          'upstream read failed',
+          'november-upstream-mint',
+          [
+            'personal-space-created',
+            'personal-record-written',
+            'upstream-credential-issued',
+          ],
+          { cause: Object.assign(new Error('child exit'), { exitCode: 7 }) },
+        ),
+      )
+    const failedFixture = vi
+      .spyOn(cacheEvidence, 'runNamedFeedgenTest')
+      .mockResolvedValue()
+      .mockRejectedValueOnce(new Error('named test did not run'))
+    const recordJourneyReport = vi.fn()
     try {
       await expect(
         novemberInterop.run({
@@ -125,6 +144,7 @@ describe('the prepared november-interop suite', () => {
           composeFile: '/sandbox/compose.yaml',
           projectName: 'test',
           scratchDirectory: '/scratch',
+          recordJourneyReport,
           runCommand: async () => {
             throw new Error('unexpected command')
           },
@@ -137,16 +157,48 @@ describe('the prepared november-interop suite', () => {
         ],
         outstanding: expect.arrayContaining([
           'canonical-uri-at-each-boundary',
+          'upstream-standard-mint-control',
           'mixed-cache-migration-preserves-custody',
         ]),
-        failedGroups: ['november-positive', 'encrypted-cache-migration'],
+        failedGroups: [
+          'november-positive',
+          'november-upstream-mint',
+          'encrypted-cache-migration',
+          'terminal-set-hash-mismatch-never-promoted',
+        ],
+        evidence: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'full-page-then-empty-terminal',
+            tier: 'in-process',
+          }),
+        ]),
       })
+      expect(recordJourneyReport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          failedGroupExitCodes: { 'november-upstream-mint': 7 },
+          groupProgress: {
+            'november-positive': [
+              'schema-grant',
+              'oauth-create',
+              'oauth-read',
+              'authorized-feed',
+            ],
+            'november-upstream-mint': [
+              'personal-space-created',
+              'personal-record-written',
+              'upstream-credential-issued',
+            ],
+          },
+        }),
+      )
       expect(passedOrdinary).toHaveBeenCalledOnce()
       expect(failedCache).toHaveBeenCalledOnce()
     } finally {
       failedPositive.mockRestore()
       passedOrdinary.mockRestore()
       failedCache.mockRestore()
+      failedFixture.mockRestore()
+      incompleteUpstream.mockRestore()
     }
   })
 

@@ -351,9 +351,11 @@ async function requestJson(url, options, context) {
   return await response.json()
 }
 
-async function provisionAccount(domain) {
+async function provisionAccount(
+  domain,
+  name = process.env.FEEDGEN_E2E_PDS_ACCOUNT || 'motoko',
+) {
   const pdsUrl = `https://pds-space1.${domain}`
-  const name = process.env.FEEDGEN_E2E_PDS_ACCOUNT || 'motoko'
   assert.match(name, /^(motoko|batou)$/)
   const username = `${name}.pds-space1.${domain}`
   const password = (
@@ -1126,6 +1128,169 @@ async function runNovemberPositive() {
   }
 }
 
+async function runNovemberUpstreamMint() {
+  const domain = required('SANDBOX_DOMAIN')
+  const origin = `https://pds-space1.${domain}`
+  await requestJson(
+    `${origin}/xrpc/_health`,
+    { signal: AbortSignal.timeout(10_000) },
+    'Published member PDS readiness',
+  )
+  reach('member-pds-ready')
+  const account = await provisionAccount(domain, 'batou')
+  const owner = await pdsSession(domain, account)
+  const did = owner.did
+  const ownerHeaders = { authorization: `Bearer ${owner.accessJwt}` }
+  const postJson = (nsid, body, headers = {}) =>
+    requestJson(
+      `${origin}/xrpc/${nsid}`,
+      {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000),
+      },
+      nsid,
+    )
+  const skey = `bebop-${randomUUID()}`
+  const { space } = await postJson(
+    'com.atproto.space.createSpace',
+    {
+      skey,
+      spaceType,
+      policy: { $type: 'com.atproto.personalspace.policy' },
+    },
+    ownerHeaders,
+  )
+  assert.equal(space, spaceUriFromParts(did, skey))
+  reach('personal-space-created')
+
+  const rkey = randomUUID()
+  const text = 'See you space cowboy'
+  const { uri, cid } = await postJson(
+    'com.atproto.space.createRecord',
+    {
+      space,
+      repo: did,
+      collection: postCollection,
+      rkey,
+      validate: false,
+      record: {
+        $type: postCollection,
+        text,
+        createdAt: new Date().toISOString(),
+      },
+    },
+    ownerHeaders,
+  )
+  assert.equal(uri, `${space}/${did}/${postCollection}/${rkey}`)
+  assert.match(cid, /^b[a-z2-7]+$/)
+  reach('personal-record-written')
+
+  const delegationUrl = new URL(
+    '/xrpc/com.atproto.space.getDelegationToken',
+    origin,
+  )
+  delegationUrl.searchParams.set('space', space)
+  const { token } = await requestJson(
+    delegationUrl,
+    { headers: ownerHeaders, signal: AbortSignal.timeout(30_000) },
+    'Upstream delegation issuance',
+  )
+  assert.ok(
+    typeof token === 'string' && token.length > 0,
+    'Missing upstream delegation',
+  )
+  const { proofKey, keyId, presentationHeaders } =
+    await import('/scenario/driver.mjs')
+  const key = proofKey()
+  const credentialKey = keyId(key)
+  const { credential } = await postJson(
+    'com.atproto.space.authorizeSpaceSync',
+    {
+      space,
+      credentialKey,
+      delegationToken: token,
+    },
+  )
+  assert.ok(
+    typeof credential === 'string' && credential.split('.').length === 3,
+    'Missing upstream credential',
+  )
+  const claims = JSON.parse(Buffer.from(credential.split('.')[1], 'base64url'))
+  assert.ok(
+    claims.iss === did &&
+      claims.sub === space &&
+      claims.cnf?.kid === credentialKey,
+    'Upstream credential claims do not match the fixture',
+  )
+  reach('upstream-credential-issued')
+
+  const document = await requestJson(
+    `https://plc.${domain}/${did}`,
+    { signal: AbortSignal.timeout(30_000) },
+    'Upstream authority DID document',
+  )
+  assert.equal(document.id, did)
+  assert.ok(
+    document.service?.some(
+      (service) =>
+        (service.id === '#atproto_pds' ||
+          service.id === `${did}#atproto_pds`) &&
+        new URL(service.serviceEndpoint).origin === origin,
+    ),
+    'Upstream authority resolves to a different PDS',
+  )
+  const kem = document.verificationMethod?.find(
+    (method) =>
+      method.id === '#atproto_kem' || method.id === `${did}#atproto_kem`,
+  )
+  assert.ok(
+    kem?.type === 'Multikey' && typeof kem.publicKeyMultibase === 'string',
+    'Authority KEM key unavailable',
+  )
+  const { encapsulate, formatMacRequest, verifyRecordMac } =
+    await import('/scenario/sdk.mjs')
+  const proof = await encapsulate(`did:key:${kem.publicKeyMultibase}`)
+  const readUrl = new URL('/xrpc/com.atproto.space.getRecord', origin)
+  readUrl.search = new URLSearchParams({
+    space,
+    repo: did,
+    collection: postCollection,
+    rkey,
+  })
+  const read = await fetch(readUrl, {
+    headers: {
+      ...presentationHeaders(credential, key, did),
+      'accept-signature': formatMacRequest(
+        'atproto-space-record',
+        proof.keyShare,
+      ),
+    },
+    signal: AbortSignal.timeout(30_000),
+  })
+  assert.equal(read.status, 200, 'Upstream credential read did not complete')
+  const result = await read.json()
+  assert.ok(
+    result.uri === uri && result.cid === cid && result.value?.text === text,
+    'Upstream credential read did not return the seeded record',
+  )
+  verifyRecordMac(uri, cid, { ...proof, headers: read.headers })
+  reach('upstream-credential-read-verified')
+  console.log(
+    JSON.stringify({
+      suite: activeSuite,
+      assertions: [
+        'member-pds-ready',
+        'personal-space-created',
+        'personal-record-written',
+        'upstream-credential-issued',
+        'upstream-credential-read-verified',
+      ].map((id) => ({ id, status: 'passed' })),
+    }),
+  )
+}
+
 const baselineAssertions = [
   'browser-oauth',
   'stratos-custody',
@@ -1231,6 +1396,7 @@ const journeys = {
   baseline: runBaseline,
   'ordinary-custody': runOrdinaryCustody,
   'november-positive': runNovemberPositive,
+  'november-upstream-mint': runNovemberUpstreamMint,
 }
 
 async function main() {

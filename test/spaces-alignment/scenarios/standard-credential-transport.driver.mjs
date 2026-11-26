@@ -306,7 +306,7 @@ function proof(key, url, method, token) {
   return `${signingInput}.${signature.toString('base64url')}`
 }
 
-function keyId(key) {
+export function keyId(key) {
   const raw = Buffer.concat([
     Buffer.from([4]),
     Buffer.from(key.jwk.x, 'base64url'),

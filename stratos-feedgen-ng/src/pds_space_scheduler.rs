@@ -464,7 +464,8 @@ mod tests {
         pds_space_sync::{
             FailureReason, PdsSpaceSynchronizer, VerifiedSyncOutcome,
             test_host::{
-                ArchiveStep, HostRepo, PageStep, StaticKemKeys, TestClock, TestHost, TestSource,
+                ArchiveStep, HostRepo, PageStep, Request, StaticKemKeys, TestClock, TestHost,
+                TestSource, cid_of,
             },
         },
         readiness::FeedReadinessGate,
@@ -663,6 +664,58 @@ mod tests {
             );
         }
         results
+    }
+
+    #[tokio::test]
+    async fn the_scheduler_only_indexes_a_claimed_boundary_after_authority_membership() {
+        const EDWARD: &str = "did:plc:radicaledward";
+        const OTHER_BOUNDARY: &str = "did:web:stratos.example.test/leadership";
+        let credentials = credentials();
+        let pds = Pds::holding(&[DID, EDWARD], &credentials);
+        let lifecycle = lifecycle();
+        let mut claim = post("Bebop");
+        claim["boundary"] = json!({
+            "$type": "zone.stratos.boundary.defs#domains",
+            "values": [{ "$type": "zone.stratos.boundary.defs#domain", "value": "leadership" }],
+        });
+        let claimed_cid = cid_of(&claim).to_string();
+        pds.host.edit(EDWARD, |repo| {
+            repo.put(3, POST, "redtail", claim);
+        });
+
+        let pass = pass_over(&[DID], 1, &pds, &lifecycle, &credentials).await;
+        assert_eq!(pass[0].0.targets, 1);
+        assert_eq!(pass[0].0.replaced, 1);
+        assert_eq!(
+            pds.host.requests(),
+            [Request::Archive {
+                did: DID.to_owned()
+            }]
+        );
+        assert_eq!(
+            lifecycle.pds_member_generation(BOUNDARY, EDWARD).unwrap(),
+            None
+        );
+        let feed = |boundary| {
+            lifecycle
+                .read(|projection| projection.served_posts(boundary, "1998-04-03T01:00:00.000Z"))
+        };
+        assert_eq!(
+            feed(BOUNDARY),
+            [(
+                format!("{SPACE}/{DID}/{POST}/ein"),
+                cid_of(&post("Woof")).to_string()
+            )]
+        );
+
+        let pass = pass_over(&[DID, EDWARD], 1, &pds, &lifecycle, &credentials).await;
+        assert_eq!(pass[0].0.targets, 2);
+        assert_eq!(pass[0].0.replaced, 1);
+        assert_eq!(pass[0].0.target_failures, 0);
+        assert!(
+            feed(BOUNDARY).contains(&(format!("{SPACE}/{EDWARD}/{POST}/redtail"), claimed_cid))
+        );
+        assert!(feed(OTHER_BOUNDARY).is_empty());
     }
 
     #[test]

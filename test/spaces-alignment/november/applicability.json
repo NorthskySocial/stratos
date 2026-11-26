@@ -493,6 +493,7 @@
         "stratos-feedgen-ng/src/space_archive.rs",
         "stratos-feedgen-ng/src/pds_space_sync.rs",
         "stratos-feedgen-ng/src/pds_space_sync/",
+        "stratos-feedgen-ng/src/server/tests.rs",
         "stratos-feedgen-ng/src/store/space_verification.rs"
       ],
       "workstream": "verified-state",

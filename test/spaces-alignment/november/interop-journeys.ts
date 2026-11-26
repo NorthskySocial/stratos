@@ -5,6 +5,8 @@
  * `unknown` is what only a host can show.
  */
 
+import { syncFixtures } from './sync-fixtures.js'
+
 export const ACCEPTANCE_ROWS = {
   'target-artifact':
     'A pinned upstream build accepts the new space spelling: a record created on it comes back in that spelling, and a credential for it names the same space.',
@@ -126,7 +128,7 @@ export const JOURNEYS: readonly Journey[] = [
     proves:
       "The host's own standard credential exchange works in the same stack, so a failure of the custom mint is not a stack fault.",
     expected:
-      'For a space whose authority is the host, its com.atproto.space.authorizeSpaceSync returns a credential for a delegation token and a P-256 credentialKey. No driver calls it: the reference-host drivers exchange through the Stratos method zone.stratos.space.getSpaceCredential.',
+      'For a space whose authority is the host, its com.atproto.space.authorizeSpaceSync returns a credential for a delegation token and a P-256 credentialKey. The November control uses a separate personal space and compares the credential issuer and subject and the retrieved record CID.',
     unknown: 'The host exchange route at the pinned build.',
     carriedBy: [],
   },
@@ -294,7 +296,7 @@ export const JOURNEYS: readonly Journey[] = [
     proves:
       'While a poll or a whole-repo replacement of a large member repo writes to the store, the feed generator answers /health within two seconds.',
     expected:
-      'No test covers this today. The health handler reads the readiness gate and the scheduler status, not the store.',
+      'The health handler reads the readiness gate and scheduler status independently of the store transaction.',
     unknown:
       'How long a store write takes on a large real repo, and whether /health waits for it.',
     carriedBy: [],
@@ -356,19 +358,26 @@ export function renderJourneyChecklist(
   return journeys
     .map((journey, index) => {
       const carrier = journey.carriedBy[0]
+      const hasFixture = syncFixtures.some(
+        (fixture) => fixture.id === journey.id,
+      )
       const command =
         journey.id === 'canonical-uri-at-each-boundary'
           ? 'Run `november-positive` for the positive journey; the complete suite still requires all journeys.'
-          : carrier
-            ? `Run \`${carrier}\` (command below); it carries this journey in a ported form${
-                journey.carriedBy.length > 1
-                  ? `, as do ${journey.carriedBy
-                      .slice(1)
-                      .map((id) => `\`${id}\``)
-                      .join(' and ')}`
-                  : ''
-              }.`
-            : 'No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.'
+          : journey.id === 'upstream-standard-mint-control'
+            ? 'Run `november-interop` for the published PDS personal-space mint and verified read. Use the per-group progress to locate a host failure.'
+            : carrier
+              ? `Run \`${carrier}\` (command below); it carries this journey in a ported form${
+                  journey.carriedBy.length > 1
+                    ? `, as do ${journey.carriedBy
+                        .slice(1)
+                        .map((id) => `\`${id}\``)
+                        .join(' and ')}`
+                    : ''
+                }.`
+              : hasFixture
+                ? 'Run `november-interop` for fixture evidence. The pinned-host observation remains open.'
+                : 'No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.'
       return [
         `### ${index + 1}. \`${journey.id}\``,
         '',

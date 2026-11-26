@@ -748,29 +748,69 @@ async fn a_tamper_that_keeps_its_cid_in_step_leads_to_one_replacement_to_the_hos
 
 #[tokio::test]
 async fn a_wrong_digest_on_the_last_page_leads_to_one_replacement_and_its_state() {
-    let scene = Scene::with_a_base().await;
+    let scene = with_faye_and_jet_served().await;
+    let before = scene.snapshot();
+    let before_feed = scene.served();
+    let peer = scene.base(JET);
     scene.host.edit(FAYE, |repo| {
         repo.put(4, POST, "redtail", post("Cowboy Bebop"));
     });
+    let ops = scene.wire_ops(FAYE, Some(&tid(3)));
+    scene.host.edit(FAYE, |repo| {
+        repo.remove(5, POST, "redtail");
+        repo.put(6, POST, "hammerhead", post("Bang"));
+    });
+    scene.host.script_pages(
+        FAYE,
+        vec![PageStep::Written {
+            ops,
+            cursor: None,
+            commit_rev: tid(4),
+            commit_data: [9; 32],
+            padding_bytes: 0,
+        }],
+    );
+
+    let gate = Gate::new();
     scene
         .host
-        .script_pages(FAYE, vec![PageStep::WrongDigest([9; 32])]);
+        .script_archives(FAYE, vec![ArchiveStep::Gate(gate.clone())]);
+    let cycle = scene.cycle(FAYE);
+    tokio::pin!(cycle);
+    tokio::select! {
+        outcome = &mut cycle => panic!("the cycle finished before the archive: {outcome:?}"),
+        reached = tokio::time::timeout(Duration::from_secs(2), gate.reached.notified()) => {
+            reached.expect("replacement request did not reach the archive");
+        }
+    }
 
-    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Replaced);
+    assert_eq!(scene.snapshot(), before);
+    assert_eq!(scene.served(), before_feed);
+    assert_eq!(scene.base_rev(FAYE), Some(tid(3)));
+    gate.release.notify_one();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), cycle)
+            .await
+            .unwrap(),
+        VerifiedSyncOutcome::Replaced
+    );
 
     assert_eq!(
         scene.host.archives_requested(),
-        2,
-        "the first sync and this one"
+        3,
+        "two bases and one replacement"
     );
-    assert_eq!(scene.base_rev(FAYE), Some(tid(4)));
+    assert_eq!(scene.base_rev(FAYE), Some(tid(6)));
     assert_eq!(scene.base_digest(FAYE), scene.host_digest(FAYE));
-    assert_eq!(scene.served().len(), 3);
+    assert_eq!(scene.base(JET), peer);
+    let served = scene.served_uris();
+    assert!(!served.contains(&format!("{SPACE}/{FAYE}/{POST}/redtail")));
+    assert!(served.contains(&format!("{SPACE}/{FAYE}/{POST}/hammerhead")));
 }
 
 #[tokio::test]
 async fn a_replacement_whose_digest_is_wrong_fails_and_the_earlier_state_stands() {
-    let scene = Scene::with_a_base().await;
+    let scene = with_faye_and_jet_served().await;
     scene.host.edit(FAYE, |repo| {
         repo.put(4, POST, "redtail", post("Cowboy Bebop"));
     });
@@ -781,6 +821,7 @@ async fn a_replacement_whose_digest_is_wrong_fails_and_the_earlier_state_stands(
         .host
         .script_archives(FAYE, vec![ArchiveStep::WrongDigest([8; 32])]);
     let before = scene.snapshot();
+    let before_feed = scene.served();
 
     assert_eq!(
         scene.cycle(FAYE).await,
@@ -788,11 +829,12 @@ async fn a_replacement_whose_digest_is_wrong_fails_and_the_earlier_state_stands(
     );
 
     assert_eq!(scene.snapshot(), before);
+    assert_eq!(scene.served(), before_feed);
     assert_eq!(scene.base_rev(FAYE), Some(tid(3)));
     assert_eq!(
         scene.host.archives_requested(),
-        2,
-        "one replacement, not two"
+        3,
+        "one replacement after seeding the two bases"
     );
 }
 
@@ -986,6 +1028,8 @@ async fn a_missing_value_on_a_post_path_leads_to_a_replacement_and_on_another_co
     }
 
     let scene = Scene::with_a_base().await;
+    let without_follow = scene.base_digest(FAYE);
+    let feed_before = scene.served();
     scene.host.edit(FAYE, |repo| {
         repo.put(4, FOLLOW, "spike", follow("spikespiegel"));
     });
@@ -994,7 +1038,9 @@ async fn a_missing_value_on_a_post_path_leads_to_a_replacement_and_on_another_co
     assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Promoted);
     assert_eq!(scene.host.archives_requested(), 1);
     assert_eq!(scene.base_digest(FAYE), scene.host_digest(FAYE));
-    assert_eq!(scene.served().len(), 2, "a follow is never served");
+    assert_ne!(scene.base_digest(FAYE), without_follow);
+    assert_eq!(scene.base(FAYE).unwrap().record_count, 3);
+    assert_eq!(scene.served(), feed_before, "a follow is never served");
 }
 
 #[tokio::test]
@@ -2025,6 +2071,9 @@ async fn only_repo_not_found_with_status_400_clears_and_only_invalid_cursor_repl
 #[tokio::test]
 async fn invalid_cursor_on_a_later_page_replaces_the_poll() {
     let scene = with_a_gap_to_recover_from().await;
+    scene.host.edit(FAYE, |repo| {
+        repo.put(5, POST, "hammerhead", post("Bang"));
+    });
     scene.host.set_page_size(1);
     scene.host.script_pages(
         FAYE,
@@ -2037,7 +2086,33 @@ async fn invalid_cursor_on_a_later_page_replaces_the_poll() {
         ],
     );
 
-    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Replaced);
+    let before = scene.snapshot();
+    let gate = Gate::new();
+    scene
+        .host
+        .script_archives(FAYE, vec![ArchiveStep::Gate(gate.clone())]);
+    let cycle = scene.cycle(FAYE);
+    tokio::pin!(cycle);
+    tokio::select! {
+        outcome = &mut cycle => panic!("the cycle finished before recovery: {outcome:?}"),
+        reached = tokio::time::timeout(Duration::from_secs(2), gate.reached.notified()) => {
+            reached.expect("InvalidCursor did not trigger an archive request");
+        }
+    }
+    assert_eq!(
+        pages_of(&scene, FAYE),
+        [(Some(tid(3)), None), (Some(tid(3)), Some("1".to_owned()))]
+    );
+    assert_eq!(scene.snapshot(), before);
+    gate.release.notify_one();
+
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), cycle)
+            .await
+            .unwrap(),
+        VerifiedSyncOutcome::Replaced
+    );
+    assert_eq!(scene.base_rev(FAYE), Some(tid(5)));
     assert_eq!(scene.base_digest(FAYE), scene.host_digest(FAYE));
 }
 
@@ -2081,6 +2156,44 @@ async fn transport_and_authentication_failures_fail_the_target_and_leave_every_r
         assert_eq!(scene.snapshot(), before, "{name}");
         assert_eq!(scene.host.archives_requested(), 1, "{name}");
     }
+}
+
+#[tokio::test]
+async fn suspension_and_unreachability_preserve_the_member_until_a_clean_poll() {
+    let scene = with_faye_and_jet_served().await;
+    let original = scene.snapshot();
+    let peer = scene.base(JET);
+    scene.host.edit(FAYE, |repo| {
+        repo.put(4, POST, "redtail", post("Cowboy Bebop"));
+    });
+    for (step, reason) in [
+        (
+            PageStep::Refused {
+                status: 400,
+                code: Some("RepoSuspended"),
+            },
+            FailureReason::RepoSuspended,
+        ),
+        (
+            PageStep::Failed(Fault::Unreachable),
+            FailureReason::Transport,
+        ),
+    ] {
+        scene.host.script_pages(FAYE, vec![step]);
+        assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Failed(reason));
+        assert_eq!(scene.snapshot(), original);
+        assert_eq!(scene.host.archives_requested(), 2);
+    }
+
+    assert_eq!(scene.cycle(FAYE).await, VerifiedSyncOutcome::Promoted);
+    assert_eq!(scene.base_rev(FAYE), Some(tid(4)));
+    assert_eq!(scene.base_digest(FAYE), scene.host_digest(FAYE));
+    assert_eq!(scene.base(JET), peer);
+    assert!(
+        scene
+            .served_uris()
+            .contains(&format!("{SPACE}/{FAYE}/{POST}/redtail"))
+    );
 }
 
 #[tokio::test]
@@ -2323,15 +2436,20 @@ async fn archive_failures_fail_the_target_and_leave_every_row_as_it_was() {
     let archive_with = |digest: &[u8; 32], pairs: Vec<(String, Vec<u8>)>| {
         ArchiveStep::Raw(star_archive(FAYE, SPACE, &tid(4), digest, pairs))
     };
-    let cases: [(&str, FailureReason); 5] = [
+    let cases: [(&str, FailureReason); 6] = [
         ("an error answer", FailureReason::Other),
         ("a refused record value", FailureReason::RecordRefused),
         ("paths out of order", FailureReason::Archive),
         ("bytes that are no archive", FailureReason::Archive),
+        ("an archive without its end marker", FailureReason::Archive),
         ("a failed transport", FailureReason::Transport),
     ];
     for (name, reason) in cases {
-        let scene = with_a_gap_to_recover_from().await;
+        let scene = with_faye_and_jet_served().await;
+        let value = post("Cowboy Bebop");
+        scene.host.edit(FAYE, |repo| {
+            repo.put(4, POST, "redtail", value.clone());
+        });
         let digest = scene.host_digest(FAYE);
         let step = match name {
             "an error answer" => ArchiveStep::Refused {
@@ -2362,6 +2480,19 @@ async fn archive_failures_fail_the_target_and_leave_every_row_as_it_was() {
                 ArchiveStep::Raw(archive)
             }
             "bytes that are no archive" => ArchiveStep::Raw(vec![0xde, 0xad, 0xbe, 0xef]),
+            "an archive without its end marker" => {
+                let pairs = [
+                    ("ein", post("Woof")),
+                    ("redtail", value),
+                    ("swordfish", post("See you space cowboy")),
+                ]
+                .into_iter()
+                .map(|(key, record)| (format!("{POST}/{key}"), encode_record(&record).unwrap()))
+                .collect();
+                let mut archive = star_archive(FAYE, SPACE, &tid(4), &digest, pairs);
+                assert_eq!(archive.pop(), Some(0));
+                ArchiveStep::Raw(archive)
+            }
             _ => ArchiveStep::Failed(Fault::Unreachable),
         };
         scene
@@ -2369,6 +2500,8 @@ async fn archive_failures_fail_the_target_and_leave_every_row_as_it_was() {
             .script_pages(FAYE, vec![PageStep::WrongDigest([9; 32])]);
         scene.host.script_archives(FAYE, vec![step]);
         let before = scene.snapshot();
+        let before_feed = scene.served();
+        let peer = scene.base(JET);
 
         assert_eq!(
             scene.cycle(FAYE).await,
@@ -2376,6 +2509,20 @@ async fn archive_failures_fail_the_target_and_leave_every_row_as_it_was() {
             "{name}"
         );
         assert_eq!(scene.snapshot(), before, "{name}");
+        assert_eq!(scene.served(), before_feed, "{name}");
+        assert_eq!(scene.host.archives_requested(), 3, "{name}");
+        scene.clock.advance(SPACE_REPLACEMENT_COOLDOWN);
+        scene
+            .host
+            .script_pages(FAYE, vec![PageStep::WrongDigest([9; 32])]);
+        assert_eq!(
+            scene.cycle(FAYE).await,
+            VerifiedSyncOutcome::Replaced,
+            "{name}"
+        );
+        assert_eq!(scene.base_rev(FAYE), Some(tid(4)), "{name}");
+        assert_eq!(scene.base_digest(FAYE), digest, "{name}");
+        assert_eq!(scene.base(JET), peer, "{name}");
     }
 }
 
