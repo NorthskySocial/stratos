@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readdir, readFile } from 'node:fs/promises'
 import { runInNewContext } from 'node:vm'
+import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import { suite } from './ordinary-custody.js'
 import { suite as baseline } from './baseline.js'
@@ -215,6 +216,78 @@ describe('ordinary-custody driver', () => {
     expect(functionBody('main')).toContain(
       "assert.ok(Object.hasOwn(journeys, activeSuite), 'Unknown suite')",
     )
+  })
+
+  describe('inspector request observation', () => {
+    const author = 'https://author.example.test'
+    const recordPath = '/xrpc/com.atproto.space.getRecord'
+
+    function observer(
+      afterDelay?: (context: EventEmitter, elapsed: number) => void,
+    ) {
+      let elapsed = 0
+      const context = new EventEmitter()
+      const observe = runInNewContext(
+        `${functionBody('observeInspectorRequests')}\nobserveInspectorRequests`,
+        {
+          URL,
+          assert,
+          inspectorReadPath: recordPath,
+          performance: { now: () => elapsed },
+          delay: async (ms: number) => {
+            elapsed += ms
+            afterDelay?.(context, elapsed)
+          },
+        },
+      ) as (
+        context: EventEmitter,
+        origin: string,
+      ) => {
+        recordReads: unknown[]
+        waitForIdle(): Promise<void>
+        assertNoAuthorRequests(): Promise<void>
+      }
+      return {
+        context,
+        observation: observe(context, author),
+        elapsed: () => elapsed,
+      }
+    }
+
+    it('rejects an author request after rendering has settled', async () => {
+      const request = { url: () => author + recordPath }
+      const { observation, elapsed } = observer((context, time) => {
+        if (time === 200) {
+          context.emit('request', request)
+          context.emit('requestfinished', request)
+        }
+      })
+      await expect(observation.assertNoAuthorRequests()).rejects.toThrow(
+        'contacted the author PDS',
+      )
+      expect(observation.recordReads).toEqual([request])
+      expect(elapsed()).toBeGreaterThanOrEqual(700)
+    })
+
+    it('extends the quiet window from the end of an unrelated pending request', async () => {
+      const request = { url: () => 'https://viewer.example.test/feed' }
+      const { context, observation, elapsed } = observer((context, time) => {
+        if (time === 750) context.emit('requestfailed', request)
+      })
+      context.emit('request', request)
+      await expect(
+        observation.assertNoAuthorRequests(),
+      ).resolves.toBeUndefined()
+      expect(elapsed()).toBe(1_250)
+    })
+
+    it('times out with an unfinished request instead of accepting the observation', async () => {
+      const { context, observation } = observer()
+      context.emit('request', { url: () => 'https://viewer.example.test/feed' })
+      await expect(observation.assertNoAuthorRequests()).rejects.toThrow(
+        'did not reach request idle',
+      )
+    })
   })
 
   describe('custody URI check', () => {

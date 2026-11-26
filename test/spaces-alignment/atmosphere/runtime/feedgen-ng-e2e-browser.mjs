@@ -1442,18 +1442,60 @@ async function waitForInspectorFeed(page, seed, responses) {
   )
 }
 
+function observeInspectorRequests(context, authorOrigin) {
+  const pending = new Set()
+  const recordReads = []
+  let authorRequests = 0
+  let lastActivity = performance.now()
+  context.on('request', (request) => {
+    pending.add(request)
+    lastActivity = performance.now()
+    const url = new URL(request.url())
+    if (url.origin === authorOrigin) authorRequests += 1
+    if (url.pathname === inspectorReadPath) recordReads.push(request)
+  })
+  const finish = (request) => {
+    if (pending.delete(request)) lastActivity = performance.now()
+  }
+  context.on('requestfinished', finish)
+  context.on('requestfailed', finish)
+
+  async function waitForIdle() {
+    // Require a fresh quiet window after the assertion caller observes the DOM.
+    const started = performance.now()
+    const quietPeriod = 500
+    const deadline = started + 5_000
+    while (performance.now() < deadline) {
+      if (
+        pending.size === 0 &&
+        performance.now() - Math.max(started, lastActivity) >= quietPeriod
+      )
+        return
+      await delay(25)
+    }
+    throw new Error('Inspector browser context did not reach request idle')
+  }
+
+  return {
+    recordReads,
+    waitForIdle,
+    async assertNoAuthorRequests() {
+      await waitForIdle()
+      assert.equal(
+        authorRequests,
+        0,
+        'The viewer browser contacted the author PDS',
+      )
+    },
+  }
+}
+
 async function inspectorSettled(page) {
   const dialog = page.getByRole('dialog', { name: 'Record Inspector' })
   await dialog.waitFor({ timeout: 15_000 })
   await dialog
     .locator('[role="status"]')
     .waitFor({ state: 'hidden', timeout: 15_000 })
-  await page.evaluate(
-    () =>
-      new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve)),
-      ),
-  )
   return dialog
 }
 
@@ -1465,15 +1507,13 @@ async function runNovemberOwnInspector() {
     const account = await provisionAccount(domain, 'batou')
     const seed = await seedInspectorPost(browser, domain, account)
     const context = await browser.newContext({ serviceWorkers: 'block' })
+    const observation = observeInspectorRequests(context, seed.origin)
     const page = await context.newPage()
     const responses = listenForFeedResponses(page)
     await signInToInspectorApp(page, account)
     await waitForInspectorFeed(page, seed, responses)
-    const reads = []
-    context.on('request', (request) => {
-      if (new URL(request.url()).pathname === inspectorReadPath)
-        reads.push(request)
-    })
+    await observation.waitForIdle()
+    const priorReads = observation.recordReads.length
     await inspectorCard(page, seed)
       .getByRole('button', { name: 'Inspect your record on your PDS' })
       .click()
@@ -1486,6 +1526,8 @@ async function runNovemberOwnInspector() {
       'Your record on your PDS',
     )
     assert.equal(await dialog.locator('.panel-address').textContent(), seed.uri)
+    await observation.waitForIdle()
+    const reads = observation.recordReads.slice(priorReads)
     assert.equal(
       reads.length,
       1,
@@ -1550,7 +1592,12 @@ async function runNovemberOwnInspector() {
       await invalidDialog.getByRole('alert').textContent(),
       'This record address is not valid',
     )
-    assert.equal(reads.length, 1, 'The invalid address caused a PDS read')
+    await observation.waitForIdle()
+    assert.equal(
+      observation.recordReads.length,
+      priorReads + 1,
+      'The invalid address caused a PDS read',
+    )
     reach('invalid-address-sends-no-read')
     writeBrowserReceipt([
       'own-record-read-verified',
@@ -1582,11 +1629,7 @@ async function runNovemberSnapshotInspector() {
     }
 
     const context = await browser.newContext({ serviceWorkers: 'block' })
-    const hits = []
-    context.on('request', (request) => {
-      const url = new URL(request.url())
-      if (url.origin === seed.origin) hits.push(url.pathname)
-    })
+    const observation = observeInspectorRequests(context, seed.origin)
     const page = await context.newPage()
     const responses = listenForFeedResponses(page)
     await signInToInspectorApp(page, viewer)
@@ -1604,7 +1647,7 @@ async function runNovemberSnapshotInspector() {
       .locator('.json-block')
       .getByText(seed.text, { exact: false })
       .waitFor({ timeout: 15_000 })
-    assert.equal(hits.length, 0, 'The viewer browser contacted the author PDS')
+    await observation.assertNoAuthorRequests()
     reach('other-author-snapshot-verified')
     writeBrowserReceipt(['other-author-snapshot-verified'])
   } finally {

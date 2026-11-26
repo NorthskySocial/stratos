@@ -61,6 +61,7 @@ async function temporaryAiaBSources(): Promise<string[]> {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
   process.env.PATH = originalPath
   delete process.env.RUNNER_TEST_WRONG_IMAGE
   delete process.env.RUNNER_TEST_FAIL_STEP
@@ -357,6 +358,9 @@ describe('sandbox preflight', () => {
 
   it('exports the reviewed candidate, runs the pinned sandbox steps, and writes a sanitized receipt', async () => {
     const root = await directory()
+    const privateTemp = join(root, 'tmp')
+    await mkdir(privateTemp)
+    vi.stubEnv('TMPDIR', privateTemp)
     const candidateRepo = join(root, 'candidate')
     const sandboxRepo = join(root, 'sandbox')
     const bin = join(root, 'bin')
