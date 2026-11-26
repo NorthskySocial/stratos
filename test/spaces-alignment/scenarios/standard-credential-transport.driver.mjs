@@ -523,6 +523,7 @@ export async function runReferenceReadControls(reach) {
   const browser = await openBrowser()
   try {
     const first = await prepareAccount(browser, 'faye')
+    reach('reference-seed-written')
     const key = proofKey()
     const { credential, claims } = await credentialLifetime(
       await standardExchange(await acquireDelegation(first.page), key),
@@ -534,6 +535,7 @@ export async function runReferenceReadControls(reach) {
         claims.aud === undefined,
       'Reference credential issuer, subject or key differs from the requested credential',
     )
+    reach('reference-credential-issued')
     await assertSeedRead(first)
     reach('reference-mint-read-verified')
 

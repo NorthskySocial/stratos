@@ -244,8 +244,9 @@ describe('ordinary-custody driver', () => {
         origin: string,
       ) => {
         recordReads: unknown[]
-        waitForIdle(): Promise<void>
-        assertNoAuthorRequests(): Promise<void>
+        markInteraction(): number
+        waitForIdle(after?: number): Promise<void>
+        assertNoAuthorRequests(after?: number): Promise<void>
       }
       return {
         context,
@@ -274,19 +275,38 @@ describe('ordinary-custody driver', () => {
       const { context, observation, elapsed } = observer((context, time) => {
         if (time === 750) context.emit('requestfailed', request)
       })
+      const interaction = observation.markInteraction()
       context.emit('request', request)
       await expect(
-        observation.assertNoAuthorRequests(),
+        observation.assertNoAuthorRequests(interaction),
       ).resolves.toBeUndefined()
       expect(elapsed()).toBe(1_250)
     })
 
+    it('observes old requests without waiting for unrelated startup traffic to close', async () => {
+      const { context, observation, elapsed } = observer()
+      context.emit('request', {
+        url: () => 'https://viewer.example.test/background',
+      })
+      const interaction = observation.markInteraction()
+      await expect(
+        observation.assertNoAuthorRequests(interaction),
+      ).resolves.toBeUndefined()
+      expect(elapsed()).toBe(500)
+
+      context.emit('request', { url: () => author + '/startup' })
+      await expect(
+        observation.assertNoAuthorRequests(observation.markInteraction()),
+      ).rejects.toThrow('contacted the author PDS')
+    })
+
     it('times out with an unfinished request instead of accepting the observation', async () => {
       const { context, observation } = observer()
+      const interaction = observation.markInteraction()
       context.emit('request', { url: () => 'https://viewer.example.test/feed' })
-      await expect(observation.assertNoAuthorRequests()).rejects.toThrow(
-        'did not reach request idle',
-      )
+      await expect(
+        observation.assertNoAuthorRequests(interaction),
+      ).rejects.toThrow('did not reach request idle')
     })
   })
 

@@ -1443,12 +1443,13 @@ async function waitForInspectorFeed(page, seed, responses) {
 }
 
 function observeInspectorRequests(context, authorOrigin) {
-  const pending = new Set()
+  const pending = new Map()
   const recordReads = []
   let authorRequests = 0
+  let sequence = 0
   let lastActivity = performance.now()
   context.on('request', (request) => {
-    pending.add(request)
+    pending.set(request, ++sequence)
     lastActivity = performance.now()
     const url = new URL(request.url())
     if (url.origin === authorOrigin) authorRequests += 1
@@ -1460,14 +1461,15 @@ function observeInspectorRequests(context, authorOrigin) {
   context.on('requestfinished', finish)
   context.on('requestfailed', finish)
 
-  async function waitForIdle() {
-    // Require a fresh quiet window after the assertion caller observes the DOM.
+  async function waitForIdle(after = sequence) {
+    // Requests from before this interaction can stay open in the background.
+    // They remain observable; only requests begun in the interaction can block idle.
     const started = performance.now()
     const quietPeriod = 500
     const deadline = started + 5_000
     while (performance.now() < deadline) {
       if (
-        pending.size === 0 &&
+        ![...pending.values()].some((started) => started > after) &&
         performance.now() - Math.max(started, lastActivity) >= quietPeriod
       )
         return
@@ -1478,9 +1480,10 @@ function observeInspectorRequests(context, authorOrigin) {
 
   return {
     recordReads,
+    markInteraction: () => sequence,
     waitForIdle,
-    async assertNoAuthorRequests() {
-      await waitForIdle()
+    async assertNoAuthorRequests(after) {
+      await waitForIdle(after)
       assert.equal(
         authorRequests,
         0,
@@ -1506,14 +1509,17 @@ async function runNovemberOwnInspector() {
   try {
     const account = await provisionAccount(domain, 'batou')
     const seed = await seedInspectorPost(browser, domain, account)
+    reach('inspector-owner-fixture-written')
     const context = await browser.newContext({ serviceWorkers: 'block' })
     const observation = observeInspectorRequests(context, seed.origin)
     const page = await context.newPage()
     const responses = listenForFeedResponses(page)
     await signInToInspectorApp(page, account)
     await waitForInspectorFeed(page, seed, responses)
+    reach('inspector-owner-feed-observed')
     await observation.waitForIdle()
     const priorReads = observation.recordReads.length
+    const ownRead = observation.markInteraction()
     await inspectorCard(page, seed)
       .getByRole('button', { name: 'Inspect your record on your PDS' })
       .click()
@@ -1526,7 +1532,7 @@ async function runNovemberOwnInspector() {
       'Your record on your PDS',
     )
     assert.equal(await dialog.locator('.panel-address').textContent(), seed.uri)
-    await observation.waitForIdle()
+    await observation.waitForIdle(ownRead)
     const reads = observation.recordReads.slice(priorReads)
     assert.equal(
       reads.length,
@@ -1559,6 +1565,7 @@ async function runNovemberOwnInspector() {
     reach('own-record-read-verified')
 
     const invalid = 'Invalid inspector fixture'
+    const invalidRead = observation.markInteraction()
     await page.route(
       `**${feedPath}?*`,
       async (route) => {
@@ -1592,7 +1599,7 @@ async function runNovemberOwnInspector() {
       await invalidDialog.getByRole('alert').textContent(),
       'This record address is not valid',
     )
-    await observation.waitForIdle()
+    await observation.waitForIdle(invalidRead)
     assert.equal(
       observation.recordReads.length,
       priorReads + 1,
@@ -1600,6 +1607,8 @@ async function runNovemberOwnInspector() {
     )
     reach('invalid-address-sends-no-read')
     writeBrowserReceipt([
+      'inspector-owner-fixture-written',
+      'inspector-owner-feed-observed',
       'own-record-read-verified',
       'invalid-address-sends-no-read',
     ])
@@ -1615,6 +1624,7 @@ async function runNovemberSnapshotInspector() {
   try {
     const author = await provisionAccount(domain, 'motoko')
     const seed = await seedInspectorPost(browser, domain, author)
+    reach('snapshot-author-fixture-written')
     const viewer = await ordinaryAccount(domain)
     assert.notEqual(viewer.did, seed.address.repo)
     assert.notEqual(accountPdsUrl(domain, viewer), seed.origin)
@@ -1634,6 +1644,8 @@ async function runNovemberSnapshotInspector() {
     const responses = listenForFeedResponses(page)
     await signInToInspectorApp(page, viewer)
     await waitForInspectorFeed(page, seed, responses)
+    reach('snapshot-viewer-feed-observed')
+    const interaction = observation.markInteraction()
     await inspectorCard(page, seed)
       .getByRole('button', { name: 'Inspect the copy the feed served' })
       .click()
@@ -1647,9 +1659,13 @@ async function runNovemberSnapshotInspector() {
       .locator('.json-block')
       .getByText(seed.text, { exact: false })
       .waitFor({ timeout: 15_000 })
-    await observation.assertNoAuthorRequests()
+    await observation.assertNoAuthorRequests(interaction)
     reach('other-author-snapshot-verified')
-    writeBrowserReceipt(['other-author-snapshot-verified'])
+    writeBrowserReceipt([
+      'snapshot-author-fixture-written',
+      'snapshot-viewer-feed-observed',
+      'other-author-snapshot-verified',
+    ])
   } finally {
     await browser.close()
   }
@@ -1690,6 +1706,8 @@ async function runNovemberReferenceReads() {
   const { runReferenceReadControls } = await import('/scenario/driver.mjs')
   await runReferenceReadControls(reach)
   writeBrowserReceipt([
+    'reference-seed-written',
+    'reference-credential-issued',
     'reference-mint-read-verified',
     'both-reference-owners-read',
   ])

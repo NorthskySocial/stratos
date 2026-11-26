@@ -55,6 +55,8 @@ const upstreamMint: ScenarioSuite = {
 const ownInspector: ScenarioSuite = {
   id: 'november-own-inspector',
   requiredAssertions: [
+    'inspector-owner-fixture-written',
+    'inspector-owner-feed-observed',
     'own-record-read-verified',
     'invalid-address-sends-no-read',
   ],
@@ -63,7 +65,11 @@ const ownInspector: ScenarioSuite = {
 
 const snapshotInspector: ScenarioSuite = {
   id: 'november-snapshot-inspector',
-  requiredAssertions: ['other-author-snapshot-verified'],
+  requiredAssertions: [
+    'snapshot-author-fixture-written',
+    'snapshot-viewer-feed-observed',
+    'other-author-snapshot-verified',
+  ],
   run: (context) => runNovemberBrowserScenario(context, snapshotInspector),
 }
 
@@ -76,6 +82,8 @@ const membershipControl: ScenarioSuite = {
 const referenceReads: ScenarioSuite = {
   id: 'november-reference-reads',
   requiredAssertions: [
+    'reference-seed-written',
+    'reference-credential-issued',
     'reference-mint-read-verified',
     'both-reference-owners-read',
   ],
