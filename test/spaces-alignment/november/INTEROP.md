@@ -513,7 +513,7 @@ save. Walk them in this order.
 - Closes: Real hosts and the real service keep every record inside the boundaries its viewer shares, for both custodies.
 - Proves: Two PDS-custody members on two different hosts are both ingested and served in one boundary feed, each read from its own host.
 - Expected: Host discovery follows the authority override, then the #atproto_pds entry of the member DID document.
-- Unknown: The template provides one reference host; a second host needs its own service and routes.
+- Unknown: The sandbox advertises both PDS origins through the private gateway. Feedgen admits only one configured private origin, so the second origin needs supported routing.
 - Command: No driver exists yet. Write one in `scenarios/november-interop.ts`; until then this item cannot be closed.
 - Save: `receipt.json` (or `failure.json`) from the report directory, kept with the image digest you named.
 

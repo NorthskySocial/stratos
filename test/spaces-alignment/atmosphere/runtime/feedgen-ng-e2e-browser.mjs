@@ -1277,18 +1277,85 @@ async function runNovemberUpstreamMint() {
   )
   verifyRecordMac(uri, cid, { ...proof, headers: read.headers })
   reach('upstream-credential-read-verified')
-  console.log(
-    JSON.stringify({
-      suite: activeSuite,
-      assertions: [
-        'member-pds-ready',
-        'personal-space-created',
-        'personal-record-written',
-        'upstream-credential-issued',
-        'upstream-credential-read-verified',
-      ].map((id) => ({ id, status: 'passed' })),
-    }),
+  const { verifyCommitMac } = await import('/scenario/sdk.mjs')
+  async function readOps(since, cursor) {
+    const url = new URL('/xrpc/com.atproto.space.listRepoOps', origin)
+    url.search = new URLSearchParams({ space, repo: did, limit: '1' })
+    if (since) url.searchParams.set('since', since)
+    if (cursor) url.searchParams.set('cursor', cursor)
+    const pageProof = await encapsulate(`did:key:${kem.publicKeyMultibase}`)
+    const response = await fetch(url, {
+      headers: {
+        ...presentationHeaders(credential, key, did),
+        'accept-signature': formatMacRequest(
+          'atproto-space-commit',
+          pageProof.keyShare,
+        ),
+      },
+      signal: AbortSignal.timeout(30_000),
+    })
+    assert.equal(response.status, 200, 'Pinned host ops read failed')
+    const body = await response.json()
+    assert.ok(Array.isArray(body.ops), 'Pinned host ops response has no page')
+    assert.ok(
+      body.commit?.space === space &&
+        body.commit?.repo === did &&
+        typeof body.commit.rev === 'string',
+      'Pinned host ops commit is for a different target',
+    )
+    const data = Buffer.from(body.commit.data.$bytes, 'base64')
+    assert.equal(data.length, 32)
+    verifyCommitMac(
+      { ...body.commit, data },
+      { ...pageProof, headers: response.headers },
+    )
+    return body
+  }
+
+  const base = (await readOps()).commit.rev
+  const nextKey = randomUUID()
+  const next = await postJson(
+    'com.atproto.space.createRecord',
+    {
+      space,
+      repo: did,
+      collection: postCollection,
+      rkey: nextKey,
+      validate: false,
+      record: {
+        $type: postCollection,
+        text: 'Bang',
+        createdAt: new Date().toISOString(),
+      },
+    },
+    ownerHeaders,
   )
+  const fullPage = await readOps(base)
+  assert.equal(fullPage.ops.length, 1)
+  assert.ok(
+    fullPage.ops[0].rkey === nextKey && fullPage.ops[0].cid === next.cid,
+    'The incremental page omitted the fixture operation',
+  )
+  assert.notEqual(fullPage.commit.rev, base)
+  assert.ok(
+    typeof fullPage.cursor === 'string' && fullPage.cursor.length > 0,
+    'Pinned host ended on the full page',
+  )
+  reach('incremental-full-page-with-continuation')
+  const terminal = await readOps(base, fullPage.cursor)
+  assert.equal(terminal.ops.length, 0)
+  assert.equal(terminal.cursor, undefined)
+  assert.equal(terminal.commit.rev, fullPage.commit.rev)
+  reach('empty-terminal-page-verified')
+  writeBrowserReceipt([
+    'member-pds-ready',
+    'personal-space-created',
+    'personal-record-written',
+    'upstream-credential-issued',
+    'upstream-credential-read-verified',
+    'incremental-full-page-with-continuation',
+    'empty-terminal-page-verified',
+  ])
 }
 
 const inspectorUrl = 'https://webapp-e2e.atmosbox.internal'

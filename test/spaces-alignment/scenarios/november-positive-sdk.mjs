@@ -1,1 +1,6 @@
-export { encapsulate, formatMacRequest, verifyRecordMac } from '@atproto/space'
+export {
+  encapsulate,
+  formatMacRequest,
+  verifyCommitMac,
+  verifyRecordMac,
+} from '@atproto/space'

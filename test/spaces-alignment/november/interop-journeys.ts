@@ -75,7 +75,7 @@ export const JOURNEYS: readonly Journey[] = [
     expected:
       'Host discovery follows the authority override, then the #atproto_pds entry of the member DID document.',
     unknown:
-      'The template provides one reference host; a second host needs its own service and routes.',
+      'The sandbox advertises both PDS origins through the private gateway. Feedgen admits only one configured private origin, so the second origin needs supported routing.',
     carriedBy: [],
   },
   {

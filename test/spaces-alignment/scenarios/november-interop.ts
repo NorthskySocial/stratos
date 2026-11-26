@@ -34,14 +34,20 @@ export class NovemberInteropFailure extends SuiteFailure {
   }
 }
 
+const upstreamMintAssertions = [
+  'member-pds-ready',
+  'personal-space-created',
+  'personal-record-written',
+  'upstream-credential-issued',
+  'upstream-credential-read-verified',
+]
+
 const upstreamMint: ScenarioSuite = {
   id: 'november-upstream-mint',
   requiredAssertions: [
-    'member-pds-ready',
-    'personal-space-created',
-    'personal-record-written',
-    'upstream-credential-issued',
-    'upstream-credential-read-verified',
+    ...upstreamMintAssertions,
+    'incremental-full-page-with-continuation',
+    'empty-terminal-page-verified',
   ],
   run: (context) => runNovemberBrowserScenario(context, upstreamMint),
 }
@@ -170,8 +176,31 @@ export const suite: ScenarioSuite = {
             evidence,
           ),
       },
+      {
+        name: upstreamMint.id,
+        run: () =>
+          observeCarrier(
+            context,
+            upstreamMint,
+            [
+              {
+                id: 'upstream-standard-mint-control',
+                assertions: upstreamMintAssertions,
+              },
+              {
+                id: 'full-page-then-empty-terminal',
+                assertions: [
+                  'incremental-full-page-with-continuation',
+                  'empty-terminal-page-verified',
+                ],
+                remainingHostQuestion:
+                  'The pinned PDS shape was observed at limit one. The production poll and resulting stored checkpoint still need endpoint-backed verification.',
+              },
+            ],
+            evidence,
+          ),
+      },
       ...[
-        { id: 'upstream-standard-mint-control', carrier: upstreamMint },
         {
           id: 'inspector-reads-own-record-through-oauth',
           carrier: ownInspector,
@@ -236,7 +265,8 @@ export const suite: ScenarioSuite = {
           evidence.push({
             id: 'mixed-cache-migration-preserves-custody',
             tier: 'in-process',
-            observation: 'Migrated encrypted store accepted a verified sync.',
+            observation:
+              'A copy of the encrypted cache preserved ordinary custody and its rollback file. The old space rows stayed absent until a verified archive rebuilt the space projection.',
             artifact: test,
             remainingHostQuestion:
               'The migrated cache still needs a verified rebuild from the pinned host.',
