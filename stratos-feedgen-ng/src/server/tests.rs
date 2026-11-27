@@ -429,7 +429,11 @@ async fn health_starts_unavailable() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(
         body,
-        r#"{"ok":false,"feedReady":false,"version":"0.1.0","serviceStreamConnected":false,"actorPoolSize":0}"#
+        concat!(
+            "{\"ok\":false,\"feedReady\":false,\"version\":\"",
+            env!("CARGO_PKG_VERSION"),
+            r#"","serviceStreamConnected":false,"actorPoolSize":0}"#
+        )
     );
 }
 
@@ -452,7 +456,11 @@ async fn health_reports_an_established_authoritative_session() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(
         body,
-        r#"{"ok":false,"feedReady":false,"version":"0.1.0","serviceStreamConnected":true,"actorPoolSize":0}"#
+        concat!(
+            "{\"ok\":false,\"feedReady\":false,\"version\":\"",
+            env!("CARGO_PKG_VERSION"),
+            r#"","serviceStreamConnected":true,"actorPoolSize":0}"#
+        )
     );
 }
 
