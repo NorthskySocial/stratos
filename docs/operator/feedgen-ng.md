@@ -30,9 +30,7 @@ checks the viewer's enrollment first.
 The feed generator is a separate service. It follows one Stratos service, keeps a bounded copy of
 recent posts, and serves that copy as feeds.
 
-The current implementation is the Rust `stratos-feedgen-ng` package. The
-older TypeScript `stratos-feedgen` package stays in the repository for
-rollback only. Its settings and its storage layout do not apply here.
+The feed generator is the Rust `stratos-feedgen-ng` package.
 
 This page is for operators. For the design, read
 [Feed generator design](/architecture/feed-generator). For attachment
@@ -696,11 +694,6 @@ The rehearsal compose file also reads `FEEDGEN_STATE_DIR` and
 `FEEDGEN_STORAGE_KEY_FILE`. Those are host paths for bind mounts. The feed
 generator binary does not read them.
 
-Settings from the TypeScript package have no effect here. That includes
-`FEEDGEN_BOUNDARY_CACHE_*`, `FEEDGEN_BOUNDARY_CATALOG_*`,
-`FEEDGEN_BLOB_CACHE_*`, `FEEDGEN_POSTGRES_*`, `FEEDGEN_SUBSCRIBE_ENROLLMENTS`,
-and `FEEDGEN_MEMBERSHIP_SQLITE_PATH`.
-
 ## Run it
 
 The rehearsal compose file is `stratos-feedgen-ng/compose.rehearsal.yml`. It
@@ -719,6 +712,5 @@ Before you route users to an instance:
 
 See `stratos-feedgen-ng/README.md` for the space credential transport, the
 space sync limits, and the metric list. See `stratos-feedgen-ng/CUTOVER.md`
-for a test switch and rollback, and
-[November upgrade and rollback](./november-upgrade.md) for the upgrade. Do not reuse the TypeScript service's database or
-writer lock.
+for a test switch and rollback. See the
+[November upgrade and rollback](./november-upgrade.md) procedure for in-place upgrades.

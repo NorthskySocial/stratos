@@ -12,8 +12,6 @@ reports/
 .env.local
 .env.*.local
 
-# Local feedgen testing: generated key material
-stratos-feedgen/local/.env.feedgen
 
 *.sqlite
 *.sqlite-journal

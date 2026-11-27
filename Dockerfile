@@ -2,7 +2,6 @@
 #
 # Multi-stage build: compiles TypeScript at build time for fast startup.
 # Target 1 (stratos): Node.js service for storage and XRPC.
-# Target 2 (indexer): Deno-based standalone indexer.
 
 # --- Build stage ---
 FROM node:26-alpine AS builder
@@ -15,10 +14,10 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY stratos-core/package.json ./stratos-core/
 COPY stratos-service/package.json ./stratos-service/
-COPY stratos-indexer/package.json ./stratos-indexer/
 COPY stratos-client/package.json ./stratos-client/
-COPY stratos-feedgen/package.json ./stratos-feedgen/
 COPY webapp/package.json ./webapp/
+COPY stratos-browser/package.json ./stratos-browser/
+COPY clubhouse/package.json ./clubhouse/
 
 # Install all dependencies (including devDependencies for tsc)
 RUN pnpm config set minimumReleaseAge 0 && pnpm config set strictDepBuilds false && pnpm install --frozen-lockfile
@@ -28,7 +27,6 @@ COPY tsconfig.json ./
 COPY stratos-core/ ./stratos-core/
 COPY stratos-service/ ./stratos-service/
 COPY stratos-client/ ./stratos-client/
-COPY stratos-indexer/ ./stratos-indexer/
 COPY lexicons/ ./lexicons/
 COPY lexicons-spaces/ ./lexicons-spaces/
 
@@ -99,47 +97,3 @@ ENV STRATOS_DATA_DIR=/app/data
 # Run compiled JS directly
 WORKDIR /app/stratos-service
 CMD ["node", "dist/bin/stratos.js"]
-
-# --- Production stage for Stratos Indexer ---
-FROM denoland/deno:alpine AS indexer
-
-# Install dependencies for sharp (libstdc++ and libc symlink are required for the native binary)
-RUN apk add --no-cache libstdc++ && \
-    ln -s /lib/libc.musl-$(uname -m).so.1 /lib/libc.so
-
-WORKDIR /app
-
-# Copy built stratos-core from builder (Deno uses its package.json and dist)
-COPY --from=builder /app/stratos-core/ ./stratos-core/
-
-# Copy indexer source files and package.json
-COPY --from=builder /app/stratos-indexer/ ./stratos-indexer/
-
-# Copy package.json for other workspace members to satisfy Deno workspace requirements
-COPY --from=builder /app/stratos-service/package.json ./stratos-service/
-COPY --from=builder /app/stratos-client/package.json ./stratos-client/
-COPY --from=builder /app/stratos-feedgen/package.json ./stratos-feedgen/
-COPY --from=builder /app/webapp/package.json ./webapp/
-
-# Copy workspace files for Deno to resolve dependencies correctly.
-# The indexer runs in its own container without pnpm-managed node_modules, so it
-# uses a dedicated Deno config with `nodeModulesDir: auto` (the root deno.json
-# uses `none` to coexist with pnpm on the host / in the test e2e scripts).
-COPY deno.indexer.json ./deno.json
-COPY deno.lock ./
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-
-# Copy lexicons (needed at runtime by stratos-core)
-COPY lexicons/ ./lexicons/
-
-# Deno needs wget for health checks in this setup (alpine base has it or we add it)
-# The official deno:alpine image comes with wget.
-
-# Expose default port for health server
-EXPOSE 3002
-
-# Set default environment
-ENV BSKY_DB_POOL_SIZE=20
-
-# Command to run the indexer main script
-CMD ["run", "--allow-all", "--sloppy-imports", "/app/stratos-indexer/src/bin/main.ts"]

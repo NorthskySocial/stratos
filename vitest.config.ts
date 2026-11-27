@@ -25,8 +25,6 @@ export default defineConfig({
         'stratos-core/src/**/*.ts',
         'stratos-service/src/**/*.ts',
         'stratos-client/src/**/*.ts',
-        'stratos-indexer/src/**/*.ts',
-        'stratos-feedgen/src/**/*.ts',
         'webapp/src/**/*.{ts,svelte,js}',
       ],
       exclude: [
@@ -41,8 +39,6 @@ export default defineConfig({
       nodeProject('stratos-core'),
       nodeProject('stratos-service'),
       nodeProject('stratos-client'),
-      nodeProject('stratos-indexer'),
-      nodeProject('stratos-feedgen'),
       join(rootDir, 'stratos-browser/vitest.config.ts'),
       join(rootDir, 'webapp/vite.config.ts'),
     ],

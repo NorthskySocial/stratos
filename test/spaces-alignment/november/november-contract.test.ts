@@ -208,8 +208,6 @@ const SPACE_URI_MARKERS = [
 const LEGACY_LINE_ROOTS = [
   ...SWEEP_ROOTS,
   'test/spaces-alignment',
-  'stratos-feedgen',
-  'stratos-indexer',
   '.github',
   'scripts',
   'docs/.vitepress',
@@ -218,14 +216,12 @@ const LEGACY_LINE_ROOTS = [
   'test/README.md',
   'Dockerfile',
   'docker-compose.yml',
-  'docker-compose.feedgen.yml',
   '.env.example',
   'test/.env.example',
   'package.json',
   'pnpm-workspace.yaml',
   'Cargo.toml',
   'deno.json',
-  'deno.indexer.json',
   'project.json',
   'tsconfig.json',
   'vitest.config.ts',
@@ -353,8 +349,6 @@ const SUPPORTING_IDS = [
   'tests-spike-and-harness',
   'tests-e2e-scripts',
   'deno-lock-pins-retired-oauth-scopes',
-  'deprecated-stratos-feedgen',
-  'deprecated-stratos-indexer',
   'deprecated-atproto-stratos',
 ]
 
@@ -367,11 +361,7 @@ const REQUIRED_IDS = [
   ...SUPPORTING_IDS,
 ]
 
-const DEPRECATED_IDS = [
-  'deprecated-stratos-feedgen',
-  'deprecated-stratos-indexer',
-  'deprecated-atproto-stratos',
-]
+const DEPRECATED_IDS = ['deprecated-atproto-stratos']
 
 function sweepFiles(
   directory: string,
@@ -666,19 +656,17 @@ describe('november applicability ledger', () => {
     expect(unnamed).toEqual([])
   })
 
-  it('sweeps the whole test tree, the deprecated feed generator, the docs site source and the root pages', () => {
+  it('sweeps the whole test tree, the docs site source and the root pages', () => {
     const swept = new Set(legacyLineFiles())
     for (const file of [
       'test/spaces-alignment/run-sandbox.ts',
       'test/spaces-alignment/scenarios/baseline.ts',
       'test/spaces-alignment/atmosphere/runtime/feedgen-ng-e2e-browser.mjs',
-      'stratos-feedgen/tests/upstream.test.ts',
       'docs/.vitepress/theme/components/RecordUri.vue',
       'AGENTS.md',
       'README.md',
       'test/README.md',
       '.github/workflows/test.yml',
-      'stratos-indexer/src/indexer.ts',
       'webapp/scripts/e2e-docker.sh',
       'clubhouse/index.html',
       'stratos-feedgen-ng/Dockerfile',

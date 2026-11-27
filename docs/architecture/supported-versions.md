@@ -99,8 +99,7 @@ and Clubhouse use these interfaces.
   does remove posts.
 - **A consumer that applies no labels keeps a taken-down account's copies.**
   Stratos stops serving the account's records and blobs, and it sends no event.
-  The Rust feed generator applies account labels from the label log. The
-  TypeScript feed generator and the indexer do not.
+  The Rust feed generator applies account labels from the label log.
 - **A wider label scope closes every feed for a while.** When a served boundary
   joins the feed generator's label scope, it reads the label log again from
   the start. Every feed is closed until that read reaches the head. The scope

@@ -2,8 +2,6 @@ packages:
   - 'stratos-core'
   - 'stratos-service'
   - 'stratos-client'
-  - 'stratos-indexer'
-  - 'stratos-feedgen'
   - 'stratos-browser'
   - 'webapp'
   - 'clubhouse'

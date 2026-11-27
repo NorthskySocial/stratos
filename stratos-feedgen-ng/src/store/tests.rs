@@ -632,7 +632,7 @@ fn rejects_space_posts_from_the_actor_projection_path() {
 #[test]
 fn follows_the_shared_tied_timestamp_ordering_fixture() {
     let fixture: FeedOrderFixture = serde_json::from_str(include_str!(
-        "../../../stratos-feedgen/testdata/conformance/v1/feed-order.json"
+        "../../../test/feedgen-harness/fixtures/feed-order.json"
     ))
     .unwrap();
     assert_eq!(fixture.version, 1);

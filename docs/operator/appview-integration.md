@@ -7,10 +7,7 @@ status: legacy
 # AppView integration <Badge type="warning" text="legacy" />
 
 ::: danger Legacy integration path
-No maintained AppView consumes this stream. The only consumer in this
-repository, `stratos-indexer`, is deprecated and cannot authenticate to the
-current Stratos service as shipped. See
-[AppView indexer](/architecture/appview-indexer).
+No maintained AppView consumes this stream.
 
 The supported way to serve boundary-scoped feeds is the
 [Run the feed generator](/operator/feedgen-ng). Read this page only if you build your

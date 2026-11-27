@@ -12,7 +12,7 @@ import { inspectCgroupResources } from './resources.js'
 
 interface OracleReport {
   command: 'oracle'
-  implementation: 'ts' | 'rust'
+  implementation: 'rust'
   reportPath: string
   fixture: {
     actors: number
@@ -28,8 +28,8 @@ interface CompareReport {
   reportPath: string
   outcome: 'matched' | 'mismatch'
   reason?: string
-  tsStatus: number
-  rustStatus: number
+  baselineStatus: number
+  candidateStatus: number
 }
 
 interface ContractReport {
@@ -48,14 +48,14 @@ async function main(args: readonly string[]): Promise<void> {
     throw new Error(
       'Supported commands: oracle, limits, compare, privacy, recovery',
     )
-  const implementation = implementationFrom(args)
+  requireRustImplementation(args)
   const fixture = createSmallOracleFixture()
   const directory = await mkdtemp(join(tmpdir(), 'stratos-feedgen-harness-'))
   await chmod(directory, 0o700)
   const path = join(directory, 'oracle.json')
   const report: OracleReport = {
     command: 'oracle',
-    implementation,
+    implementation: 'rust',
     reportPath: path,
     fixture: {
       actors: fixture.actors.length,
@@ -73,9 +73,7 @@ async function reportRustContracts(
   kind: RustContractKind,
   args: readonly string[],
 ): Promise<void> {
-  if (implementationFrom(args) !== 'rust') {
-    throw new Error(`${kind} supports only --implementation rust`)
-  }
+  requireRustImplementation(args)
   const assertions = await runRustContracts(kind)
   const directory = await mkdtemp(join(tmpdir(), 'stratos-feedgen-harness-'))
   await chmod(directory, 0o700)
@@ -91,8 +89,8 @@ async function reportRustContracts(
 }
 
 async function reportComparison(args: readonly string[]): Promise<void> {
-  const tsBaseUrl = requiredOption(args, '--ts-url')
-  const rustBaseUrl = requiredOption(args, '--rust-url')
+  const baselineBaseUrl = requiredOption(args, '--baseline-url')
+  const candidateBaseUrl = requiredOption(args, '--candidate-url')
   const authorization = await readPrivateAuthorization(
     requiredOption(args, '--authorization-file'),
   )
@@ -104,8 +102,8 @@ async function reportComparison(args: readonly string[]): Promise<void> {
     throw new Error('--timeout-ms must not exceed 30000')
   }
   const comparison = await compareFeedEndpoints({
-    tsBaseUrl,
-    rustBaseUrl,
+    baselineBaseUrl,
+    candidateBaseUrl,
     authorization,
     feed,
     cursor,
@@ -135,13 +133,10 @@ async function reportLimits(args: readonly string[]): Promise<void> {
   if (!result.passed) process.exitCode = 1
 }
 
-function implementationFrom(args: readonly string[]): 'ts' | 'rust' {
-  const position = args.indexOf('--implementation')
-  const value = position === -1 ? undefined : args[position + 1]
-  if (value === 'ts' || value === 'rust') return value
-  throw new Error(
-    'oracle requires --implementation ts or --implementation rust',
-  )
+function requireRustImplementation(args: readonly string[]): void {
+  if (optionalOption(args, '--implementation') !== 'rust') {
+    throw new Error('this command requires --implementation rust')
+  }
 }
 
 function requiredOption(args: readonly string[], name: string): string {

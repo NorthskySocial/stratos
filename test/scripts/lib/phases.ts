@@ -34,14 +34,6 @@ export function spacesPdsRequested(): boolean {
   return Deno.env.get(SPACES_PDS_ENV) === 'true'
 }
 
-const SPACES_PDS_PHASES: Phase[] = [
-  { name: 'Mixed Mode: Spaces PDS Custody', script: 'test-mixed-mode.ts' },
-  {
-    name: 'Webapp: Browser Mixed Custody',
-    script: 'test-webapp-mixed-mode.ts',
-  },
-]
-
 export function phasesFor(options: RunOptions): Phase[] {
   return [
     {
@@ -62,7 +54,14 @@ export function phasesFor(options: RunOptions): Phase[] {
     ...(options.appview
       ? [{ name: 'AppView Service-Auth Feed', script: 'test-appview-feed.ts' }]
       : []),
-    ...(options.spacesPds ? SPACES_PDS_PHASES : []),
+    ...(options.spacesPds
+      ? [
+          {
+            name: 'Mixed Mode: Spaces PDS Custody',
+            script: 'test-mixed-mode.ts',
+          },
+        ]
+      : []),
     { name: 'Admin API: Boundary Management', script: 'test-admin-api.ts' },
     { name: 'Admin UI: SPA Smoke Tests', script: 'test-admin-ui.ts' },
     { name: 'Unenrollment', script: 'test-unenrollment.ts' },

@@ -1,7 +1,6 @@
 {
   "workspace": [
     "./stratos-core",
-    "./stratos-indexer",
     "./stratos-service",
     "./stratos-client",
     "./webapp"

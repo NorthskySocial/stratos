@@ -123,25 +123,27 @@ deno run -A scripts/run-all.ts
 Runs the stages in order. On any stage failure the remaining stages (except teardown) are
 skipped. The default run starts no spaces PDS.
 
+The standard Deno E2E run builds the Rust feed generator with Cargo. It checks feed
+discovery, read authorization, and reconstruction of the in-memory projection on restart.
+
 ### Spaces PDS phases (opt-in)
 
-Two phases drive a member whose repository lives on a spaces PDS: `test-mixed-mode.ts` and
-`test-webapp-mixed-mode.ts`. They run only when the run asks for them:
+Run the low-level mixed-custody phase against a spaces PDS with:
 
 ```bash
 deno run -A scripts/run-all.ts --spaces-pds
 ```
 
-With `--spaces-pds`, `setup.ts` also starts the `pds-spaces` service (compose profile
-`spaces-pds`), waits for it and creates its two fixture accounts. The pinned image refuses the
-`at:space/` URI spelling, so these two phases cannot pass against it; they are there for the day a
-host that accepts the spelling is pinned. To run `setup.ts` on its own with the same choice, set
-`STRATOS_E2E_SPACES_PDS=true` in the environment.
+With `--spaces-pds`, `setup.ts` starts the `pds-spaces` service, waits for it and
+creates its two fixture accounts. The pinned image refuses the current `at:space/`
+URI spelling. The mixed-custody phase requires a host that accepts it. To run
+`setup.ts` on its own with the same choice, set `STRATOS_E2E_SPACES_PDS=true`.
 
-The admin phases (`test-admin-api.ts`, `test-admin-ui.ts`) check the PDS-custody member only when
-the run asks for a spaces PDS, so a default run needs nothing those two phases create. A deno test
-in `test/scripts/lib/phases.test.ts` holds that: it fails if a default-run script reads the PDS
-fixture, or calls its PDS-custody check, outside the option.
+The admin phases check the PDS-custody member only with this option.
+`test/scripts/lib/phases.test.ts` verifies that default runs need no PDS-custody fixtures.
+
+Run the browser custody checks with the [Spaces alignment sandbox gate](spaces-alignment/README.md#baseline-and-ordinary-custody).
+The gate uses the Rust feed generator and an HTTPS sandbox PDS.
 
 ### Host-free checks
 
@@ -486,3 +488,53 @@ The stage needs a working admin OAuth login (the operator DID is injected into
 **"No valid session for user" on API calls**
 The `Bearer <did>` auth validates against OAuth sessions first, then falls back to enrollment check.
 Re-run `test-enrollment.ts` if authentication fails.
+
+## Mutation testing for TypeScript changes
+
+Mutation testing (StrykerJS) exists to validate that tests actually catch regressions — it is the
+primary gate for trusting AI-generated code and the tests that accompany it. It is **not**
+CI-enforced; it is a local verification step the agent is responsible for running.
+
+**Scope the run to the files you changed.** Do not run the whole package config
+(`pnpm --filter <package> mutation`): a full `stratos-service` sweep is 5,600+ mutants and takes
+about three hours, and it reports overwhelmingly on code you did not touch. Scope it instead:
+
+```bash
+cd <package> && pnpm exec stryker run --mutate 'src/a/changed.ts,src/b/changed.ts' \
+  > stratos-mutation.log 2>&1
+```
+
+Do not append `; echo exit=$?`. That reports the status of `echo`, which always succeeds, so a
+Stryker run that broke the threshold looks green. Let the command return its own status.
+
+Three traps that make a scoped run lie to you:
+
+- **Repeated `--mutate` flags do not accumulate — the last one silently wins.** Passing
+  `--mutate 'a.ts' --mutate 'b.ts'` mutates only `b.ts` and still reports a healthy score. Use ONE
+  flag with a comma-separated list, then confirm every expected filename appears in the results
+  table before believing the number.
+- **`--mutate` replaces the configured `mutate` list, including its exclusions.** Stryker merges CLI
+  options over the config file, and an array override wins whole, so `!src/**/index.ts` and
+  `!src/**/*.d.ts` stop applying. Name only the changed source files you mean to mutate; a barrel or
+  a declaration file passed by hand will be mutated.
+- The configs set `inPlace: true`, so Stryker rewrites sources on disk while it runs. Never pipe its
+  output into `head`/`grep` — the closed pipe kills it mid-run and leaves mutated files behind.
+  Always redirect to a file. Delete a stale `<package>/reports/stryker-incremental.json` first, or it
+  will serve results from a previous, differently-scoped run.
+
+When a change requires adding or running tests to validate behaviour, you MUST:
+
+- Run scoped mutation testing on the files you changed and address surviving mutants before
+  considering the work done. A green test suite alone is insufficient.
+- Judge survivors **on the lines your change touched**. Pulling a file into `mutate` scope for the
+  first time surfaces its pre-existing survivors too; those are not yours to fix, and they are not a
+  reason to abandon the gate.
+- Check whether the `mutate` globs in `stryker.config.json` already cover a new file you added
+  (broad globs like `src/auth/**/*.ts` usually do) and add an entry only if none matches.
+- Treat surviving mutants in changed code as a signal that the tests are weak — strengthen the tests,
+  or review the code and improve it. Never weaken the thresholds. If a mutant is unkillable because
+  the branch is genuinely unreachable, delete the dead branch rather than testing around it.
+
+Note: `stratos-service`'s package-wide score is currently **below** its `break: 60` threshold
+(pre-existing, dominated by uncovered dead code). A failing full-package run is therefore not by
+itself evidence that your change regressed anything.

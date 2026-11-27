@@ -17,7 +17,7 @@ through `zone.stratos.actor.enrollment` records.
 | **Enrollment**     | User registration with a Stratos service via OAuth. Creates profile record on user's PDS.                                                                                                       |
 | **Hydration**      | Clients or AppViews fetch Stratos-backed records and filter by viewer boundaries.                                                                                                               |
 | **Profile Record** | `zone.stratos.actor.enrollment` - published to user's PDS for endpoint discovery and enrollment verification.                                                                                   |
-| **Sync Stream**    | `zone.stratos.sync.subscribeRecords` - actor-scoped WebSocket stream consumed by sync clients (the standalone `stratos-indexer`, `stratos-feedgen`, and `stratos-feedgen-ng` services).         |
+| **Sync Stream**    | `zone.stratos.sync.subscribeRecords` - WebSocket stream with service-level enrollment and actor-level record modes, consumed by `stratos-feedgen-ng`.                                           |
 | **Custody**        | Which party holds a user's records. `stratos` = Stratos hosts the repo and signs. `pds` = the user's own spaces-capable PDS hosts the repo and the user signs.                                  |
 | **Space**          | An upstream permissioned-data container (proposal 0016). Stratos is always the space **authority**. For a `pds`-custody user it is only the authority, and the user's PDS is the repo **host**. |
 
@@ -45,8 +45,7 @@ spelling, and no host has accepted the new one; Stratos's own parsers and a
 hand-written corpus check it.
 
 1. **Never trust a boundary on a `pds`-custody record.** A repo host does not
-   authorize writes against the space authority. Any account can write records
-   into a Stratos-owned space URI in its own repo. A boundary on such a record is
+   authorize writes against the space authority. A repo host may accept records written into a Stratos-owned space URI in the writer’s own repo. A boundary on such a record is
    a user-supplied claim. Always re-derive the boundary from Stratos enrollment
    state. The Rust feed generator reads these records in
    `stratos-feedgen-ng/src/pds_space_sync.rs`, and its store writes each post
@@ -69,230 +68,22 @@ it grants a space scope. If the record is missing, authorization fails with
 The interop checklist is `test/spaces-alignment/november/INTEROP.md`. Work through
 it when you change credentials, host discovery, or ingest.
 
-### Packages
+### Packages and detailed guidance
 
-```
-stratos/
-├── stratos-core/       # Domain logic, ports (interfaces)
-├── stratos-service/    # HTTP service, adapters (implementations)
-├── stratos-client/     # Client library (discovery, routing, verification, scopes)
-├── stratos-indexer/    # Deprecated AppView indexer
-├── stratos-feedgen/    # Deprecated TypeScript feed generator; rollback reference
-├── stratos-feedgen-ng/ # Rust feed generator; encrypted local projection and scoped feeds
-├── lexicons/           # ATProto lexicon definitions
-└── docs/               # Technical documentation
-```
+- [Core domain and ports](stratos-core/README.md)
+- [Service, adapters, storage and authorization](stratos-service/README.md)
+- [Client library](stratos-client/README.md)
+- [Rust feed generator](stratos-feedgen-ng/README.md)
+- [Lexicons and code generation](lexicons/README.md)
+- [Testing and mutation testing](test/README.md)
 
----
+## Design and coding conventions
 
-## Clean Code
+Keep features cohesive: domain rules and ports belong in core; adapters and HTTP handlers belong in the service. The Rust feed generator separates domain rules from network and storage adapters. Use simple designs, descriptive names, explanatory variables and explicit boundary conditions. Keep configuration at composition boundaries. Avoid boolean flag arguments; expose separate operations instead.
 
-Follow Clean code design patterns and prioritize the following parts fo it:
+Use strict TypeScript, named exports, explicit type exports, interfaces for public APIs, and `unknown` instead of `any`. Use kebab-case filenames, PascalCase types and interfaces, camelCase functions and SCREAMING_SNAKE_CASE constants. Use domain-specific errors extending `StratosError`. Comment why, not what; avoid commented-out code, redundant JSDoc, divider comments and TODOs without issue references.
 
-- Keep it simple stupid. Simpler is always better. Reduce complexity as much as possible.
-- Keep configurable data at high levels
-- Use explanatory variables
-- Encapsulate boundary conditions
-- Choose descriptive and unambiguous names
-- Don't use flag arguments. Split method into several independent methods that can be called from
-  the client without the flag.
-
-## Feature-Sliced Architecture
-
-Each feature is self-contained with its own:
-
-- **Port** (interface in stratos-core)
-- **Domain logic** (business rules in stratos-core)
-- **Adapter** (implementation in stratos-service)
-- **Handler** (XRPC/HTTP endpoints in stratos-service)
-- **Tests** (unit in stratos-core, integration in stratos-service)
-
-### Feature Patterns
-
-Features in stratos-core follow one of two patterns:
-
-**Port/Domain pattern** (enrollment, hydration):
-
-```
-stratos-core/src/{feature}/
-├── index.ts          # Public exports
-├── port.ts           # Interface definition
-├── domain.ts         # Business logic (pure functions)
-└── types.ts          # Feature-specific types
-```
-
-**Reader/Transactor pattern** (record, repo, blob):
-
-```
-stratos-core/src/{feature}/
-├── index.ts          # Public exports
-├── reader.ts         # Read-only operations (with caching)
-└── transactor.ts     # Write operations (extends reader)
-```
-
-Service-side features in `stratos-service/src/features/`:
-
-```
-stratos-service/src/features/{feature}/
-├── index.ts          # Public exports
-├── adapter.ts        # Port implementation
-└── handler.ts        # XRPC handlers (if applicable)
-```
-
-The standalone Rust `stratos-feedgen-ng` crate uses the same separation of
-responsibilities without copying the TypeScript package layout. Keep domain
-rules and validation apart from network/storage adapters, put HTTP handlers in
-`server/`, and keep storage operations grouped by concern in `store/`. Rust
-traits may live beside their consumers. Keep unit tests beside Rust modules;
-use the shared feedgen harness for cross-implementation contracts. Do not add
-boolean flag arguments or put unrelated handlers and storage operations back
-into one large module.
-
-### Module Layout
-
-**Core domain modules** (`stratos-core/src/`):
-
-| Module        | Pattern           | Description                                                                                                                                                            |
-| ------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enrollment`  | Port/Domain       | OAuth enrollment validation and business logic                                                                                                                         |
-| `hydration`   | Port/Domain       | Boundary-aware record hydration for AppViews and clients                                                                                                               |
-| `attestation` | Utility           | Deterministic attestation payload construction (`createAttestationPayload` in `domain.ts`; callers sign and verify; no port)                                           |
-| `record`      | Reader/Transactor | Record metadata read/write operations                                                                                                                                  |
-| `repo`        | Reader/Transactor | Repository block storage operations (IPLD blocks)                                                                                                                      |
-| `blob`        | Reader/Transactor | Blob metadata and content read/write operations                                                                                                                        |
-| `mst`         | Utility           | Merkle Search Tree commit builder (`builder.ts`)                                                                                                                       |
-| `validation`  | Utility           | Stratos-specific validation rules for boundaries and records, including the like, repost and subject rules (`like-rule.ts`, `repost-rule.ts`, `subject.ts`)            |
-| `spaces`      | Utility           | Pure parsing, validation, and formatting of space/record `at:space/` URIs, plus boundary-to-space-URI mapping (`domain.ts`)                                            |
-| `atproto`     | Utility           | CBOR record encoding, CID computation/parsing, CAR block reading, commit-op decoding, and boundary extraction (`index.ts`)                                             |
-| `config`      | Infrastructure    | Zod schemas for storage backend, logging, and Redis env config, plus comma-list helpers (`parseCommaList`, `commaListSchema`) (`index.ts`)                             |
-| `lexicons`    | Infrastructure    | `DefaultLexiconProvider` bundling Stratos + embedded `com.atproto.*` lexicons, plus vendored `app.bsky.feed.like` and `app.bsky.feed.repost` (`index.ts`, `vendored/`) |
-| `storage`     | Ports             | Enrollment store port, blob-content port and cache interfaces; the actor store contract is in stratos-service                                                          |
-| `db`          | Infrastructure    | Database schema (Drizzle), SQLite + Postgres support, migrations                                                                                                       |
-| `shared`      | Infrastructure    | Shared error types and domain-specific exceptions                                                                                                                      |
-
-**Service feature modules** (`stratos-service/src/features/`):
-
-| Module               | Files                                                                                               | Description                                                                                                                                                                                                                                                                                                                                |
-| -------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `blob`               | `adapter.ts`, `index.ts`, `init.ts`                                                                 | Blob access checks (`BlobAuthServiceImpl`): the owner may read; any other viewer needs access to a record that references the blob, judged by that record's stored boundaries (orphaned blobs are denied)                                                                                                                                  |
-| `enrollment`         | `adapter.ts`, `handler.ts`, `holds.ts`, `index.ts`, `init.ts`, `internal/`, `service-reconciler.ts` | Enrollment port implementation and XRPC handlers; `holds.ts` recomputes `active` from the operator hold and the takedown hold                                                                                                                                                                                                              |
-| `hydration`          | `adapter.ts`, `handler.ts`, `index.ts`, `init.ts`                                                   | Hydration adapter and batch/single record endpoints                                                                                                                                                                                                                                                                                        |
-| `mst`                | `index.ts`, `init.ts`, `internal/`                                                                  | MST signer and storage adapter (`internal/signer.ts`, `internal/storage-adapter.ts`, `internal/adapters.ts`; no handlers)                                                                                                                                                                                                                  |
-| `pull-sync`          | `handler.ts`, `index.ts`, `oplog.ts`, `recovery.ts`                                                 | Serves `listRepoOps` (signed-commit oplog with truncation detection) and its full-state recovery fallback `listRecordPaths` to callers holding either inter-service auth or a space credential                                                                                                                                             |
-| `repo-update-notice` | `handler.ts`, `index.ts`                                                                            | Accepts `com.atproto.space.notifyRepoUpdate` from a `pds`-custody member's PDS as a plain express route (no pinned package ships that lexicon). It checks the notice and answers 200; it stores and forwards nothing, because the feed generator polls. A PDS finds the route through the `#atproto_pds` entry of the service DID document |
-| `repo`               | `index.ts`, `init.ts`                                                                               | Builds the repo write context (write rate limiter, per-repo write locks) consumed by record CRUD                                                                                                                                                                                                                                           |
-| `space-credential`   | `app-access.ts`, `handler.ts`, `index.ts`, `minter.ts`                                              | Mints and serves `zone.stratos.space.getSpaceCredential` — signed, multi-use JWTs granting space access; always requires an active enrollment carrying the space's boundary, plus an opt-in per-space client allow-list (`appAccess`, default open)                                                                                        |
-| `space-read`         | `handler.ts`, `index.ts`                                                                            | Serves `zone.stratos.space.getRecord` for space-scoped record reads                                                                                                                                                                                                                                                                        |
-| `sync`               | `adapter.ts`, `handler.ts`, `index.ts`, `init.ts`                                                   | `SyncService` (`getBlob`) implementation and `getBlob`/pull-sync XRPC handler registration                                                                                                                                                                                                                                                 |
-
-**Service infrastructure** (`stratos-service/src/`):
-
-| Module             | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api/`             | XRPC handler registration (`handlers.ts`; `index.ts` is a barrel); `records/` (record CRUD: `create.ts`, `update.ts`, `delete.ts`, `read.ts`, `batch.ts`, plus `validation.ts`/`util.ts`/`types.ts`; boundary writes: `boundary-writes.ts`, `custody.ts`, `lexicon-validation.ts`, `references.ts`, `scope-check.ts`); `handlers/` (`describe-repo-handlers.ts`, `repo-read-handlers.ts`, `repo-write-handlers.ts`, `repo-boundary-write-handlers.ts`, `blob-handlers.ts`); root helpers `types.ts`, `util.ts`, `varint.ts` |
-| `infra/auth/`      | DPoP verification (`dpop-verifier.ts`), token introspection (`introspection-client.ts`), auth verifiers (`verifier.ts`, `verifiers.ts`), service JWTs (`jwt.ts`, `jwks-resolver.ts`), space-credential/delegation/client-attestation verifiers, credential-scope resolution (`credential-scope.ts`), replay store (`replay-store.ts`)                                                                                                                                                                                       |
-| `oauth/`           | OAuth client (`client.ts`), enrollment authorization routes (`routes.ts`), admin authorization routes (`admin-routes.ts`), admin web-session store (`admin-session-store.ts`), admin flow handlers (`handlers/admin-authorize.ts`, `handlers/admin-callback.ts`), space-grant parsing and capability detection (`spaces-capability.ts`)                                                                                                                                                                                     |
-| `subscription/`    | WebSocket firehose (`subscribe-records.ts`) for Stratos sync consumers                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `infra/blobstore/` | Blob storage backends: disk (`disk.ts`), S3 (`s3.ts`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `infra/signing/`   | Per-actor signing seam (`ActorSigner` in `actor-signer.ts`); raw private key material never leaves this module                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `storage/`         | SQLite storage adapters (`sqlite/`: `actor-store.ts`, `enrollment-store.ts`, `sequence-ops.ts`)                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `infra/storage/`   | Postgres storage adapters (`postgres/`); `cached-enrollment-store.ts` (enrollment read cache); `reserved-domain-enrollment-store.ts` (decorator that force-includes the reserved all-members domain — invariant chokepoint, no cache); `redis-cache.ts` (general-purpose `RedisCache implements Cache`, also used by the space-credential `ReplayStore`)                                                                                                                                                                    |
-| `db/`              | Service-level Drizzle schema and connections: `schema.ts` (sqlite tables `oauth_session`, `oauth_state`, `admin_session`, `admin_user`, `enrollment`, `enrollment_boundary`), `pg-schema.ts` (Postgres twins), `pg.ts`, `index.ts`                                                                                                                                                                                                                                                                                          |
-| `shared/`          | Cross-feature service utilities: `rate-limiter.ts` and `repo-write-lock.ts` (consumed by the `repo` feature's write context), `domainless-invariant.ts`, `space-type-registry.ts` (the hosted space type and its collections), `user-agent.ts`                                                                                                                                                                                                                                                                              |
-| `bin/`             | Service entry point (`stratos.ts`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-
-**Client library** (`stratos-client/src/`):
-
-| File              | Description                                                                                                                     |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `discovery.ts`    | Enrollment discovery from user PDS; locates Stratos service endpoint                                                            |
-| `routing.ts`      | Service routing; directs requests to correct Stratos instance                                                                   |
-| `writes.ts`       | Write helpers that route by custody: `createBoundaryRecord`, `putBoundaryRecord`, `deleteBoundaryRecord`, `applyBoundaryWrites` |
-| `space-uri.ts`    | Space URI and record address grammar: `boundaryToSpaceUri`, `parseSpaceUri`, `parseSpaceRecordUri`, `parseRecordAddress`        |
-| `verification.ts` | Record verification with inclusion proofs and user/service key signature checks                                                 |
-| `scopes.ts`       | OAuth scope declarations                                                                                                        |
-| `types.ts`        | Client type definitions                                                                                                         |
-| `lexicons.ts`     | Stable entry re-exporting the generated `zone.stratos.*` bundle (`./lexicons`)                                                  |
-| `lexicons.gen.ts` | Auto-generated LexiconDoc bundle; regenerate with `pnpm lexgen`                                                                 |
-
-**Indexer** (`stratos-indexer/src/`):
-
-| File                        | Description                                                                                                                                                                        |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `indexer.ts`                | Main Indexer class — health server, lifecycle management                                                                                                                           |
-| `config.ts`                 | IndexerConfig interface, environment variable loading                                                                                                                              |
-| `index.ts`                  | Package barrel exporting the public indexer API                                                                                                                                    |
-| `backfill.ts`               | Backfill existing repos on startup                                                                                                                                                 |
-| `bin/main.ts`               | CLI entry point with signal handling                                                                                                                                               |
-| `pds/pds-firehose.ts`       | Connects to the PDS firehose and discovers enrollment records                                                                                                                      |
-| `pds/pds-subscriber.ts`     | Wires PDS firehose work into the indexing service, handle dedup, and the worker pool                                                                                               |
-| `storage/cursor-manager.ts` | Manages PDS and Stratos sync cursors with periodic flush                                                                                                                           |
-| `storage/db.ts`             | Kysely Postgres connection setup, DID-resolver cache, legacy lowercase-column migration                                                                                            |
-| `storage/schema.ts`         | Kysely table types for sync cursors, enrollments, indexed records, record boundaries, and posts                                                                                    |
-| `sync/stratos-sync.ts`      | Service and actor-level WebSocket subscription handlers                                                                                                                            |
-| `sync/actor-syncer.ts`      | Decodes per-actor sync frames; upserts every record into the AppView database (`stratos_record` + `stratos_record_boundary`, plus a `post` row for feed posts) and applies deletes |
-| `sync/sync-manager.ts`      | Coordinates the service subscription and per-actor syncers                                                                                                                         |
-| `util/record-decoder.ts`    | Decodes CBOR records, extracts boundaries                                                                                                                                          |
-| `util/worker-pool.ts`       | Thread pool for concurrent processing                                                                                                                                              |
-| `util/handle-dedup.ts`      | TTL cache that skips redundant `indexHandle` calls for recently-seen DIDs                                                                                                          |
-
-**Feed generator** (`stratos-feedgen-ng/src/`):
-
-The standalone Rust service subscribes to Stratos-custody actors and polls only
-authority-listed PDS-custody space members. Every space response carries a MAC
-(`space_kem.rs`, `space_mac.rs`). Op pages (`space_ops.rs`) and `getRepo`
-archives (`space_archive.rs`) are trusted only when their set hash
-(`space_set_hash.rs`) equals the commit's `data`. The store keeps verified state
-per member and space (`store/space_verification.rs`) and writes each poll or
-archive in one transaction; nothing is staged. Posts, boundaries, and cursors
-live in a local SQLCipher projection. A viewer service-auth JWT identifies
-the requester; current authority enrollment determines readable boundaries.
-Outbound Stratos calls use feedgen-minted service-auth JWTs. The TypeScript
-`stratos-feedgen` remains available for rollback, but new design work belongs
-in the Rust feed generator.
-
-| File / dir                                                            | Responsibility                                                                            |
-| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `main.rs`, `config.rs`                                                | Process composition and validated high-level configuration                                |
-| `server.rs`, `server/`                                                | Router, feed/blob handlers, identity endpoints, response policy, and viewer authorization |
-| `authority.rs`, `identity.rs`, `space_host.rs`, `space_membership.rs` | Bounded upstream adapters and identity resolution                                         |
-| `service_stream.rs`, `actor_stream.rs`, `pds_space_sync.rs`           | Custody-specific ingestion and verified space polling                                     |
-| `membership_reconciler.rs`, `space_sync.rs`, `space_ops.rs`           | Authority membership, space record admission, and op page decoding                        |
-| `feed_service.rs`, `service.rs`, `lifecycle.rs`                       | Boundary-scoped feed reads, projection admission, and readiness transitions               |
-| `store.rs`, `store/`                                                  | SQLCipher key handling and actor, space, read, and retention storage operations           |
-| `blob_cache.rs`, `blob_service.rs`, `blob_upstream.rs`                | Bounded in-memory blob cache and authenticated upstream download                          |
-| `label_poller.rs`, `moderation_label.rs`, `store/labels.rs`           | Moderation label polling, label page validation, and the label cursor and takedown set    |
-
-Feed lexicons live in `lexicons/zone/stratos/feedgen/`. See
-`stratos-feedgen-ng/README.md` for runtime configuration and
-`stratos-feedgen-ng/CUTOVER.md` for rehearsal and rollback.
-
-### Storage Architecture
-
-`stratos-core/src/storage/` holds the enrollment store port (`EnrollmentStoreReader` /
-`EnrollmentStoreWriter`, plus `StoredEnrollment`), the `BlobContentStore` blob-content port and the
-`Cache` interfaces. The per-actor store contract (`ActorStore` and its record, repo, blob and
-sequence interfaces) lives in `stratos-service/src/actor-store-types.ts`, with two implementations:
-SQLite in `stratos-service/src/storage/sqlite/` and Postgres in
-`stratos-service/src/infra/storage/postgres/`. Enrollment has a SQLite and a Postgres store in the
-same directories. Read the interface files directly for method signatures.
-
-**Enrollment** uses a dual-type pattern: `Enrollment` (domain, with `Date`) vs `StoredEnrollment` (
-storage, with string dates).
-
----
-
-## Coding Conventions
-
-### TypeScript
-
-- Use strict TypeScript (`strict: true`)
-- Prefer interfaces over types for public APIs
-- Use `unknown` over `any`
-- Export types explicitly from index files
-- Use named exports (no default exports)
-
-#### Two compilers
+### Two compilers
 
 The workspace installs two TypeScript compilers. `package.json` cannot hold
 comments, so the arrangement is recorded here.
@@ -313,210 +104,9 @@ TypeScript 7 semantics. The two compilers can narrow a type differently. Trust
 Remove the `typescript` alias and use one compiler when typescript-eslint
 supports TypeScript 7.
 
-### Naming
-
-| Item       | Convention      | Example                 |
-| ---------- | --------------- | ----------------------- |
-| Files      | kebab-case      | `enrollment-service.ts` |
-| Interfaces | PascalCase      | `EnrollmentService`     |
-| Types      | PascalCase      | `EnrollmentConfig`      |
-| Functions  | camelCase       | `createEnrollment`      |
-| Constants  | SCREAMING_SNAKE | `DEFAULT_TIMEOUT`       |
-
-### Ports & Adapters
-
-Follow the pattern in `stratos-core/src/enrollment/port.ts` (port) and
-`stratos-service/src/features/enrollment/adapter.ts` (adapter).
-
-### Error Handling
-
-Use domain-specific error classes extending `StratosError`. See `stratos-core/src/shared/errors.ts`.
-
----
-
 ## Testing
 
-Unit tests in `stratos-core/tests/`, integration tests in `stratos-service/tests/`, indexer tests in
-`stratos-indexer/tests/`. Uses vitest. Follow patterns in existing test files. Run:
-`pnpm exec vitest run`. When creating mock data, use names and places from popular 90s anime.
-
-Feed generator unit tests are colocated in Rust modules. Run `cargo fmt --all --check`,
-`cargo clippy --locked -p stratos-feedgen-ng --all-targets -- -D warnings`, and
-`cargo test --locked -p stratos-feedgen-ng`. Use `test/feedgen-harness/` for
-privacy, recovery, and parity contracts. The Stryker instructions below apply
-to changed TypeScript source; they are not a Rust mutation-testing command.
-
-### Mutation testing (validating AI-generated code)
-
-Mutation testing (StrykerJS) exists to validate that tests actually catch regressions — it is the
-primary gate for trusting AI-generated code and the tests that accompany it. It is **not**
-CI-enforced; it is a local verification step the agent is responsible for running.
-
-**Scope the run to the files you changed.** Do not run the whole package config
-(`pnpm --filter <package> mutation`): a full `stratos-service` sweep is 5,600+ mutants and takes
-about three hours, and it reports overwhelmingly on code you did not touch. Scope it instead:
-
-```bash
-cd <package> && pnpm exec stryker run --mutate 'src/a/changed.ts,src/b/changed.ts' \
-  > /tmp/mut.log 2>&1
-```
-
-Do not append `; echo exit=$?`. That reports the status of `echo`, which always succeeds, so a
-Stryker run that broke the threshold looks green. Let the command return its own status.
-
-Three traps that make a scoped run lie to you:
-
-- **Repeated `--mutate` flags do not accumulate — the last one silently wins.** Passing
-  `--mutate 'a.ts' --mutate 'b.ts'` mutates only `b.ts` and still reports a healthy score. Use ONE
-  flag with a comma-separated list, then confirm every expected filename appears in the results
-  table before believing the number.
-- **`--mutate` replaces the configured `mutate` list, including its exclusions.** Stryker merges CLI
-  options over the config file, and an array override wins whole, so `!src/**/index.ts` and
-  `!src/**/*.d.ts` stop applying. Name only the changed source files you mean to mutate; a barrel or
-  a declaration file passed by hand will be mutated.
-- The configs set `inPlace: true`, so Stryker rewrites sources on disk while it runs. Never pipe its
-  output into `head`/`grep` — the closed pipe kills it mid-run and leaves mutated files behind.
-  Always redirect to a file. Delete a stale `<package>/reports/stryker-incremental.json` first, or it
-  will serve results from a previous, differently-scoped run.
-
-When a change requires adding or running tests to validate behaviour, you MUST:
-
-- Run scoped mutation testing on the files you changed and address surviving mutants before
-  considering the work done. A green test suite alone is insufficient.
-- Judge survivors **on the lines your change touched**. Pulling a file into `mutate` scope for the
-  first time surfaces its pre-existing survivors too; those are not yours to fix, and they are not a
-  reason to abandon the gate.
-- Check whether the `mutate` globs in `stryker.config.json` already cover a new file you added
-  (broad globs like `src/auth/**/*.ts` usually do) and add an entry only if none matches.
-- Treat surviving mutants in changed code as a signal that the tests are weak — strengthen the tests,
-  or review the code and improve it. Never weaken the thresholds. If a mutant is unkillable because
-  the branch is genuinely unreachable, delete the dead branch rather than testing around it.
-
-Note: `stratos-service`'s package-wide score is currently **below** its `break: 60` threshold
-(pre-existing, dominated by uncovered dead code). A failing full-package run is therefore not by
-itself evidence that your change regressed anything.
-
----
-
-## Database
-
-Per-actor SQLite databases at `{dataDir}/actors/{did-prefix}/{did}/stratos.sqlite` (tables:
-`stratos_record`, `stratos_blob`, `stratos_repo_block`, `stratos_repo_root`, `stratos_seq`) when
-using the `sqlite` backend. With the `postgres` backend, actor data is stored in per-actor schemas.
-Service-level data lives in `{dataDir}/service.sqlite` for sqlite-backed deployments, with schema
-definitions in `stratos-core/src/db/schema/` and Postgres-specific tables in
-`stratos-core/src/db/schema/pg-tables.ts`.
-
----
-
-## XRPC Handlers
-
-Follow the pattern in `stratos-service/src/api/records/create.ts` (a representative handler module) for handler structure.
-
-Auth verifier options: `ctx.authVerifier.standard` (OAuth), `.optionalStandard`, `.service` (
-inter-service JWT), `.admin` (OAuth-authorized operator via server-side session cookie; see Admin
-Authorization below), `.spaceCredential` (space-credential JWT), and the fallback compositions
-`.standardOrSpaceCredential`, `.optionalStandardOrSpaceCredential`, `.serviceOrSpaceCredential`.
-The repo update notice uses `createRepoHostNoticeVerifier` (`infra/auth/verifiers.ts`) instead: its
-`lxm` must be the method, its `aud` the service DID or `<service DID>#atproto_pds`, and only the
-issuer's `#atproto` key verifies it. The other upstream `com.atproto.space.*` routes stay unserved
-and answer 501.
-
----
-
-## Admin Authorization
-
-Admin access is OAuth-only — there is no shared admin password. An operator logs in through the
-normal ATProto OAuth flow with identity-only scope (`OAUTH_ADMIN_SCOPE = 'atproto'`, no repo
-writes), and their DID must be an **effective admin**: on the `STRATOS_ADMIN_DIDS` config list
-(comma-separated env var, parsed into `config.adminDids`) or granted at runtime through the admin
-management API (`admin_user` table via `AdminUserStore`). The union is decided by one predicate,
-`isEffectiveAdmin` (`oauth/admin-user-store.ts`), used by login, session resolution, and the
-request-time verifier alike. Config-listed DIDs are the un-revocable recovery floor and bootstrap
-path — the only write into `admin_user` is itself admin-gated, so a blank config list with an empty
-table locks everyone out.
-
-**Flow** (routes in `stratos-service/src/oauth/admin-routes.ts`, mounted at `/admin/oauth`):
-
-| Route                        | Handler                       | Purpose                                                     |
-| ---------------------------- | ----------------------------- | ----------------------------------------------------------- |
-| `GET /admin/oauth/authorize` | `handlers/admin-authorize.ts` | Starts OAuth; pins `redirect_uri` to the admin callback     |
-| `GET /admin/oauth/callback`  | `handlers/admin-callback.ts`  | Token exchange, effective-admin check, establishes session  |
-| `GET /admin/whoami`          | inline in `admin-routes.ts`   | Returns `{ did, isAdmin }` for the active session, else 401 |
-| `POST /admin/oauth/logout`   | inline in `admin-routes.ts`   | Deletes the session and clears the cookie                   |
-
-**Session model**: the callback enforces effective-admin membership (revoking the OAuth session and
-returning `403 NotAdmin` on a miss), then mints an opaque server-side session via `AdminSessionStore`
-(`admin-session-store.ts`; `SqliteAdminSessionStore` / `PgAdminSessionStore`). The only value placed
-in the `stratos_admin_session` HttpOnly cookie is a 32-byte random key — the DID and expiry live in
-the `admin_session` table. Sessions expire after `ADMIN_SESSION_TTL_MS` (12 hours) and are deleted on
-read once expired.
-
-**Request-time verification**: the `.admin` XRPC verifier (`createAdminVerifier` in
-`infra/auth/verifiers.ts`) reads the cookie at the raw `IncomingMessage` level, requires a valid
-unexpired session whose DID is still an effective admin, and applies a CSRF origin check
-(cross-origin requests are rejected). On success it yields `{ type: 'admin', did }`.
-
----
-
-## Lexicons
-
-Lexicon files live in `lexicons/zone/stratos/`. Key lexicons:
-
-| Lexicon                              | Type         | Description                                                 |
-| ------------------------------------ | ------------ | ----------------------------------------------------------- |
-| `zone.stratos.actor.enrollment`      | record       | User's Stratos service enrollments                          |
-| `zone.stratos.boundary.defs`         | defs         | Domain/Domains type definitions                             |
-| `zone.stratos.feed.post`             | record       | Post with boundary                                          |
-| `zone.stratos.repo.hydrateRecord`    | query        | Single record hydration endpoint                            |
-| `zone.stratos.repo.hydrateRecords`   | procedure    | Batch hydration endpoint (up to 100 records)                |
-| `zone.stratos.repo.createRecord`     | procedure    | Create one record in a boundary                             |
-| `zone.stratos.repo.putRecord`        | procedure    | Create or update one record in a boundary                   |
-| `zone.stratos.repo.deleteRecord`     | procedure    | Delete one record from a boundary                           |
-| `zone.stratos.repo.applyWrites`      | procedure    | Apply 1 to 200 writes in a boundary as one commit           |
-| `zone.stratos.sync.subscribeRecords` | subscription | WebSocket firehose                                          |
-| `zone.stratos.sync.getRepo`          | query        | Export full repository as CAR file                          |
-| `zone.stratos.repo.importRepo`       | procedure    | Import repository from CAR file                             |
-| `zone.stratos.feedgen.getFeed`       | query        | Authenticated; returns fully-hydrated boundary-scoped posts |
-| `zone.stratos.feedgen.describeFeed`  | query        | Unauthenticated; returns the configured feed list           |
-
-### Adding New Lexicons
-
-1. Create JSON file in `lexicons/zone/stratos/{namespace}/{name}.json`
-2. Run codegen: `pnpm run codegen` (if configured)
-3. Import generated types in handlers
-
----
-
-## Common Tasks
-
-### Adding a New Feature
-
-1. Create port in `stratos-core/src/{feature}/port.ts`
-2. Implement domain logic in `stratos-core/src/{feature}/domain.ts`
-3. Add unit tests in `stratos-core/tests/{feature}.test.ts`
-4. Create adapter in `stratos-service/src/features/{feature}/adapter.ts`
-5. Add handlers in `stratos-service/src/features/{feature}/handler.ts`
-6. Register handlers in `stratos-service/src/api/index.ts`
-7. Add integration tests in `stratos-service/tests/{feature}.integration.test.ts`
-
-### Adding a New Boundary Type
-
-1. Update `zone.stratos.boundary.defs` lexicon
-2. Add validation in `stratos-core/src/validation/stratos-validation.ts`
-3. Update boundary extraction in record handlers
-4. Add tests
-
-When modifying `stratos-client/` exports or XRPC endpoints, update `stratos-client/README.md`.
-
----
-
-## Comment Guidelines
-
-Minimal comments. Only explain _why_, not _what_. Never generate: commented-out code, restated
-JSDoc, section divider comments (`// ====`), or TODOs without issue refs.
-
----
+Run `pnpm exec vitest run` for TypeScript tests. For Rust feedgen changes, run `cargo fmt --all --check`, `cargo clippy --locked -p stratos-feedgen-ng --all-targets -- -D warnings`, and `cargo test --locked -p stratos-feedgen-ng`. Use `test/feedgen-harness/` for privacy, recovery and parity contracts. When creating mock data, use names and places from popular 90s anime. For behavioral TypeScript changes requiring tests, follow the scoped mutation-testing gate in [test/README.md](test/README.md#mutation-testing-for-typescript-changes).
 
 ## Commit and Pull Request Guidelines
 

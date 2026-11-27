@@ -922,7 +922,7 @@ async fn rejects_out_of_range_limits_with_a_private_response() {
 #[tokio::test]
 async fn follows_the_shared_feed_limit_fixture() {
     let fixture: FeedLimitFixture = serde_json::from_str(include_str!(
-        "../../../stratos-feedgen/testdata/conformance/v1/feed-limits.json"
+        "../../../test/feedgen-harness/fixtures/feed-limits.json"
     ))
     .unwrap();
     assert_eq!(fixture.version, 1);

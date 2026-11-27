@@ -57,7 +57,9 @@ async function getFeed(
   const headers: Record<string, string> = {}
   if (token) headers['Authorization'] = `Bearer ${token}`
   const res = await fetch(
-    `${FEEDGEN_URL}/xrpc/zone.stratos.feedgen.getFeed?${new URLSearchParams({ feed })}`,
+    `${FEEDGEN_URL}/xrpc/zone.stratos.feedgen.getFeed?${new URLSearchParams({
+      feed,
+    })}`,
     { headers },
   )
   return {
@@ -120,49 +122,25 @@ async function run(): Promise<void> {
     finish()
   }
   if (!(await buildFeedgen())) {
-    fail('stratos-feedgen bundle')
+    fail('stratos-feedgen-ng build')
     finish()
   }
-  pass('stratos-feedgen bundled')
+  pass('stratos-feedgen-ng built')
 
-  const feedgen = await FeedgenHarness.create()
+  const feedgen = new FeedgenHarness(FEEDGEN_PORT)
   try {
-    await feedgen.start({ port: FEEDGEN_PORT })
-    await assertFeedgenWarmup(feedgen, 'initial')
+    feedgen.start()
     const replay = await exerciseFeedgen(feedgen, { rei, sakura, kaoruko })
     if (replay) {
       await feedgen.stop()
-      await feedgen.start({ port: FEEDGEN_PORT })
-      await assertFeedgenWarmup(feedgen, 'restart')
+      feedgen.start()
       await verifyReplay(feedgen, replay)
       await verifyReplayAuthorization(feedgen, replay, adminSessionCookie)
     }
   } finally {
-    await feedgen.cleanup()
+    await feedgen.stop()
   }
   finish()
-}
-
-async function assertFeedgenWarmup(
-  feedgen: FeedgenHarness,
-  phase: string,
-): Promise<void> {
-  const warmup = await feedgen.waitForWarmup(30_000)
-  assert(
-    warmup.attempted === 2,
-    `${phase} credential warm-up attempts both configured boundaries`,
-    String(warmup.attempted),
-  )
-  assert(
-    warmup.acquired === 2,
-    `${phase} credential warm-up acquires both configured boundaries`,
-    String(warmup.acquired),
-  )
-  assert(
-    warmup.failed === 0,
-    `${phase} credential warm-up has no failed boundary`,
-    String(warmup.failed),
-  )
 }
 
 async function exerciseFeedgen(
@@ -173,7 +151,7 @@ async function exerciseFeedgen(
     kaoruko: { handle: string; password: string }
   },
 ): Promise<ReplayCheck | null> {
-  if (!(await feedgen.waitForHealth(FEEDGEN_PORT, 30_000))) {
+  if (!(await feedgen.waitForHealth(30_000))) {
     fail('feedgen /health did not become ready within 30s')
     return null
   }
@@ -273,8 +251,8 @@ async function verifyReplay(
   feedgen: FeedgenHarness,
   replay: ReplayCheck,
 ): Promise<void> {
-  section('Restart replay rebuilds the in-memory feed index')
-  if (!(await feedgen.waitForHealth(FEEDGEN_PORT, 30_000))) {
+  section('Restart replay rebuilds the in-memory feed projection')
+  if (!(await feedgen.waitForHealth(30_000))) {
     fail('restarted feedgen /health did not become ready within 30s')
     return
   }
@@ -324,9 +302,8 @@ async function verifyReplayAuthorization(
     )
     if (!boundariesChanged) return
 
-    await feedgen.start({ port: FEEDGEN_PORT })
-    await assertFeedgenWarmup(feedgen, 'stale-membership replay')
-    if (!(await feedgen.waitForHealth(FEEDGEN_PORT, 30_000))) {
+    feedgen.start()
+    if (!(await feedgen.waitForHealth(30_000))) {
       fail('feedgen /health did not become ready for replay authorization')
       return
     }

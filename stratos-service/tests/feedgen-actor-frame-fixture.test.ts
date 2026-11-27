@@ -39,7 +39,7 @@ import {
 // the two sides cannot drift apart unnoticed. Set WRITE_ACTOR_FRAME_FIXTURE=1
 // to regenerate it from real subscriber traffic, then run prettier on it.
 const FIXTURE_URL = new URL(
-  '../../stratos-feedgen/testdata/conformance/v1/actor-commit-frames.json',
+  '../../test/feedgen-harness/fixtures/actor-commit-frames.json',
   import.meta.url,
 )
 const REGENERATE = process.env.WRITE_ACTOR_FRAME_FIXTURE === '1'

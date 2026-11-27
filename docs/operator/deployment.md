@@ -197,9 +197,9 @@ you configured.
 ## Add the Feed Generator
 
 To serve private feeds, deploy the Rust `stratos-feedgen-ng` service with its
-own DID, signing key, feed list, and encrypted data volume. Do not reuse the
-older TypeScript feed generator's database. See [Run the feed generator](/operator/feedgen-ng)
-for how it collects posts, checks membership, and protects local data.
+own DID, signing key, feed list, and encrypted data volume. See
+[Run the feed generator](/operator/feedgen-ng) for how it collects posts, checks membership,
+and protects local data.
 
 > Before startup, the feed generator's `did:web` **must be under the
 > Stratos-controlled space domain**. For example, if Stratos uses

@@ -34,12 +34,12 @@ async function stopDockerCompose() {
       '-f',
       'docker-compose.test.yml',
       '--profile',
-      'browser-e2e',
-      '--profile',
       SPACES_PDS_PROFILE,
     ]
     if (isAppview()) composeArgs.push('-f', 'docker-compose.e2e.yml')
-    else if (isPostgres()) composeArgs.push('-f', 'docker-compose.postgres.yml')
+    else if (isPostgres()) {
+      composeArgs.push('-f', 'docker-compose.postgres.yml')
+    }
     composeArgs.push('stop')
     const compose = new Deno.Command('docker', {
       args: composeArgs,
