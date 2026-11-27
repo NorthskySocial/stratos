@@ -250,8 +250,7 @@ A label subject URI is read with the `@atproto/syntax` rules. A collection such
 as `com.123.post` is valid, because only the first segment and the last
 segment of an NSID must start with a letter.
 
-The TypeScript feed generator does not apply labels. Label logs and metrics
-carry fixed event names only. They never carry a DID, record URI or CID.
+Label logs and metrics carry fixed event names only. They never carry a DID, record URI or CID.
 
 ## Space sync and limits
 
@@ -340,29 +339,25 @@ request. No public `/metrics` endpoint is served.
 
 The resource `service.name` is fixed to `stratos-feedgen-ng`, and the scope is
 `stratos.feedgen.ng`; the metric namespace is
-`stratos.feedgen.*` for comparison with the previous TypeScript Feed Generator. The
-Collector adds `otel_scope_name=stratos.feedgen.ng`, allowing Rust and
-TypeScript series to be selected separately without changing metric names.
+`stratos.feedgen.*`. The Collector adds `otel_scope_name=stratos.feedgen.ng`.
 The exporter has no listener of its own: route the private Collector to its
 existing private Prometheus exporter/scrape path, never through this service.
 
-| Metric                                                                                                                  | Rust Feed Generator behavior                                                                                 | TypeScript comparison                                                                                          |
-| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `stratos.telemetry.heartbeat`, `stratos.feedgen.ready`                                                                  | 60-second callback gauges, including idle processes                                                          | Same name and intent                                                                                           |
-| `stratos.feedgen.subscription.connected`, `stratos.feedgen.subscription.reconnects`                                     | Service-stream WebSocket state plus service and failed actor-worker reconnects                               | Same name; intentional actor idle/lease rotation is not counted                                                |
-| `stratos.feedgen.subscription.oversized_frames`                                                                         | Actor commit frames refused for exceeding `MAX_ACTOR_FRAME_BYTES`                                            | Rust only; the TypeScript reader has no frame limit                                                            |
-| `stratos.feedgen.actor_pool`                                                                                            | Active, waiting, and configured-capacity gauges after authoritative pool changes                             | Same name and labels                                                                                           |
-| `http.server.request.duration`, `http.server.active_requests`                                                           | Static method, route, and status dimensions for public routes                                                | Same name and bounded dimensions                                                                               |
-| `stratos.feedgen.feed.requests`, `stratos.feedgen.feed.posts_returned`                                                  | Completed projection reads; post count is carried from the bounded response before serialization             | Same name and intent                                                                                           |
-| `stratos.feedgen.cache.requests`                                                                                        | Viewer-authorization cache hits and authority-resolution misses                                              | Same name and intent                                                                                           |
-| `stratos.feedgen.index.operations`                                                                                      | Actor projection upserts and deletes after commit validation                                                 | Same name and intent                                                                                           |
-| `stratos.feedgen.reconciliation.duration`, `stratos.feedgen.reconciliation.outcomes`                                    | Authority-session reconciliation                                                                             | Same name and intent                                                                                           |
-| `stratos.feedgen.space_sync.duration`, `stratos.feedgen.space_sync.outcomes`, `stratos.feedgen.space_sync.last_success` | Authority-listed PDS target passes and outcomes                                                              | Same name; Rust distinguishes promoted, unchanged, replaced, cleared, deferred and failed member results       |
-| `process.resident_memory`, `process.cpu.time`                                                                           | Linux-only current RSS bytes from `/proc/self/statm` and process CPU seconds from `CLOCK_PROCESS_CPUTIME_ID` | Matches the standard OTel runtime metric names; Collector Prometheus naming follows its configured translation |
+| Metric                                                                                                                  | Rust Feed Generator behavior                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `stratos.telemetry.heartbeat`, `stratos.feedgen.ready`                                                                  | 60-second callback gauges, including idle processes                                                          |
+| `stratos.feedgen.subscription.connected`, `stratos.feedgen.subscription.reconnects`                                     | Service-stream WebSocket state plus service and failed actor-worker reconnects                               |
+| `stratos.feedgen.subscription.oversized_frames`                                                                         | Actor commit frames refused for exceeding `MAX_ACTOR_FRAME_BYTES`                                            |
+| `stratos.feedgen.actor_pool`                                                                                            | Active, waiting, and configured-capacity gauges after authoritative pool changes                             |
+| `http.server.request.duration`, `http.server.active_requests`                                                           | Static method, route, and status dimensions for public routes                                                |
+| `stratos.feedgen.feed.requests`, `stratos.feedgen.feed.posts_returned`                                                  | Completed projection reads; post count is carried from the bounded response before serialization             |
+| `stratos.feedgen.cache.requests`                                                                                        | Viewer-authorization cache hits and authority-resolution misses                                              |
+| `stratos.feedgen.index.operations`                                                                                      | Actor projection upserts and deletes after commit validation                                                 |
+| `stratos.feedgen.reconciliation.duration`, `stratos.feedgen.reconciliation.outcomes`                                    | Authority-session reconciliation                                                                             |
+| `stratos.feedgen.space_sync.duration`, `stratos.feedgen.space_sync.outcomes`, `stratos.feedgen.space_sync.last_success` | Authority-listed PDS target passes and outcomes                                                              |
+| `process.resident_memory`, `process.cpu.time`                                                                           | Linux-only current RSS bytes from `/proc/self/statm` and process CPU seconds from `CLOCK_PROCESS_CPUTIME_ID` |
 
-`stratos.feedgen.shadow_feed.reads` is TypeScript-only: the Rust service is
-the production implementation and has no shadow comparison path. Process RSS
-and CPU metrics are emitted only on Linux. Other platforms emit no process
+Process RSS and CPU metrics are emitted only on Linux. Other platforms emit no process
 resource series because a portable Rust source would not provide a current,
 semantically comparable value (`getrusage` RSS is only a high-water mark).
 Obtain portable container resource telemetry from the Collector or orchestrator.
@@ -401,3 +396,33 @@ Use an operator-provisioned encrypted volume for `FEEDGEN_STATE_DIR`. The
 container does not create encryption, copy the projection, or perform an
 automatic traffic switch. A failed process intentionally leaves its writer
 lock in place for operator recovery.
+
+## Contributor module map
+
+The standalone Rust service subscribes to Stratos-custody actors and polls only
+authority-listed PDS-custody space members. Data responses are authenticated with a MAC
+(`space_kem.rs`, `space_mac.rs`). An unauthenticated `RepoNotFound` response clears a member's
+state only after the host repeats it for the confirmation period. Op pages (`space_ops.rs`) and `getRepo`
+archives (`space_archive.rs`) are trusted only when their set hash
+(`space_set_hash.rs`) equals the commit's `data`. The store keeps verified state
+per member and space (`store/space_verification.rs`) and writes each poll or
+archive in one transaction; nothing is staged. Posts, boundaries, and cursors
+live in a local SQLCipher projection. A viewer service-auth JWT identifies
+the requester; current authority enrollment determines readable boundaries.
+Outbound Stratos calls use feedgen-minted service-auth JWTs.
+
+| File / dir                                                            | Responsibility                                                                            |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `main.rs`, `config.rs`                                                | Process composition and validated high-level configuration                                |
+| `server.rs`, `server/`                                                | Router, feed/blob handlers, identity endpoints, response policy, and viewer authorization |
+| `authority.rs`, `identity.rs`, `space_host.rs`, `space_membership.rs` | Bounded upstream adapters and identity resolution                                         |
+| `service_stream.rs`, `actor_stream.rs`, `pds_space_sync.rs`           | Custody-specific ingestion and verified space polling                                     |
+| `membership_reconciler.rs`, `space_sync.rs`, `space_ops.rs`           | Authority membership, space record admission, and op page decoding                        |
+| `feed_service.rs`, `service.rs`, `lifecycle.rs`                       | Boundary-scoped feed reads, projection admission, and readiness transitions               |
+| `store.rs`, `store/`                                                  | SQLCipher key handling and actor, space, read, and retention storage operations           |
+| `blob_cache.rs`, `blob_service.rs`, `blob_upstream.rs`                | Bounded in-memory blob cache and authenticated upstream download                          |
+| `label_poller.rs`, `moderation_label.rs`, `store/labels.rs`           | Moderation label polling, label page validation, and the label cursor and takedown set    |
+
+Feed lexicons live in `lexicons/zone/stratos/feedgen/`. See `CUTOVER.md` for rehearsal guidance.
+
+Keep domain rules and validation apart from network and storage adapters. Put HTTP handlers in `server/`, group storage operations by concern in `store/`, and keep unit tests beside Rust modules. Use the shared feedgen harness for cross-implementation contracts.

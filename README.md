@@ -1,15 +1,15 @@
 # Stratos
 
-Stratos is a private, boundary-aware data layer for AT Protocol. It keeps private records off the
-user's PDS, publishes enrollment metadata back to the PDS for discovery, and lets downstream
-AppViews serve boundary-filtered content without inventing a separate identity model.
+Stratos is a private, boundary-aware data layer for AT Protocol. Depending on custody, private
+records are hosted by Stratos or by the user's spaces-capable PDS. Enrollment metadata is
+published to the user's PDS for discovery, and AppViews can serve boundary-filtered content.
 
 ## Documentation
 
 For full documentation, including architecture deep-dives, operator guides, and client integration, visit the [Stratos Homepage](https://stratos.zone/) (or browse the `docs/` directory).
 
 - [**Introduction**](./docs/guide/introduction.md) — What is Stratos and how does it work?
-- [**Quick Start (Docker)**](#quick-start-docker) — Get running in minutes.
+- [**Quick Start**](#quick-start) — Get running in minutes.
 - [**Client Integration**](./docs/client/getting-started.md) — Add Stratos to your ATProtocol app.
 - [**Operator Guide**](./docs/operator/overview.md) — Deploy and manage a Stratos service.
 - [**Architecture**](./docs/architecture/hydration.md) — Technical details on repositories and hydration.
@@ -17,76 +17,41 @@ For full documentation, including architecture deep-dives, operator guides, and 
 
 ## What the Repository Contains
 
-| Package           | Purpose                                                                                 |
-| ----------------- | --------------------------------------------------------------------------------------- |
-| `stratos-core`    | Domain logic, storage interfaces, schema, validation, MST commit builder                |
-| `stratos-service` | HTTP/XRPC service, OAuth enrollment flow, repo CRUD, sync export, adapters              |
-| `stratos-client`  | Discovery, routing, verification, and OAuth scope helpers for clients                   |
-| `stratos-indexer` | Standalone indexer that consumes PDS + Stratos streams and writes to AppView PostgreSQL |
-| `webapp`          | Svelte demo client for enrollment and private posting                                   |
-| `docs`            | Full project documentation                                                              |
+| Package           | Purpose                                                                    |
+| ----------------- | -------------------------------------------------------------------------- |
+| `stratos-core`    | Domain logic, storage interfaces, schema, validation, MST commit builder   |
+| `stratos-service` | HTTP/XRPC service, OAuth enrollment flow, repo CRUD, sync export, adapters |
+| `stratos-client`  | Discovery, routing, verification, and OAuth scope helpers for clients      |
+| `webapp`          | Svelte demo client for enrollment and private posting                      |
+| `docs`            | Full project documentation                                                 |
 
-## Quick Start (Docker)
-
-The easiest way to get the full stack running (Service + Indexer + Postgres) is using Docker Compose:
-
-```bash
-cp .env.example .env
-# Edit .env and set required variables:
-# STRATOS_SERVICE_DID=did:web:localhost
-# STRATOS_PUBLIC_URL=http://localhost:3100
-# STRATOS_ALLOWED_DOMAINS=example.com
-
-docker compose up --build
-```
-
-### Manual Setup
+## Quick Start
 
 1. **Install dependencies and build packages:**
 
    ```bash
    pnpm install
-   pnpm build
+   pnpm --filter @northskysocial/stratos-service... --filter @northskysocial/stratos-webapp... build
    ```
 
 2. **Configure the environment:**
 
-   ```bash
-   cp .env.example .env
-   # Edit .env with your local settings
-   ```
+   Copy `.env.example` to `.env` and set `STRATOS_SERVICE_DID` and the other values for your environment. The service loads this file when started with the command below. Configure `STRATOS_VALKEY_URL` for
+   space-credential and client-attestation operations. For OAuth with a remote PDS, configure
+   reachable HTTPS URLs and a service DID that resolves to the service. See the
+   [operator guide](./docs/operator/overview.md) for deployment details.
 
-3. **Start for Local Development (with localtunnel):**
-
-   This is the recommended way to develop locally, as it automatically sets up HTTPS tunnels required for ATProto OAuth.
-
-   ```bash
-   pnpm dev:local
-   ```
-
-   This will start both the Stratos Service and the Web UI, and provide you with public URLs.
-
-   > [!NOTE]
-   > This command runs in the foreground. Open a separate terminal for any other commands (like starting the indexer or running tests).
-
-4. **Start the Stratos Service (Direct):**
+3. **Start the Stratos service:**
 
    ```bash
    pnpm --filter @northskysocial/stratos-service dev
    ```
 
-5. **Start the Indexer (requires Deno):**
+4. **Configure and start the Web UI in a separate terminal:**
 
    ```bash
-   # In a separate terminal
-   cd stratos-indexer
-   deno run --allow-all src/bin/main.ts
-   ```
-
-6. **Start the Web UI (Direct):**
-
-   ```bash
-   # In a separate terminal
+   cp webapp/.env.example webapp/.env.local
+   # Set VITE_STRATOS_URL and VITE_STRATOS_SERVICE_DID to match the service.
    pnpm --filter @northskysocial/stratos-webapp dev
    ```
 
@@ -101,13 +66,13 @@ docker compose up --build
 
 The service reads its configuration from environment variables in `stratos-service/src/config.ts`.
 
-### Required
+### Identity and boundaries
 
-| Variable                  | Description                                   |
-| ------------------------- | --------------------------------------------- |
-| `STRATOS_SERVICE_DID`     | Service DID, typically `did:web:<host>`       |
-| `STRATOS_PUBLIC_URL`      | Public base URL for the service               |
-| `STRATOS_ALLOWED_DOMAINS` | Comma-separated list of valid boundary values |
+| Variable                  | Description                                      | Default                 |
+| ------------------------- | ------------------------------------------------ | ----------------------- |
+| `STRATOS_SERVICE_DID`     | Required service DID, typically `did:web:<host>` | none                    |
+| `STRATOS_PUBLIC_URL`      | Public base URL for the service                  | `http://localhost:3100` |
+| `STRATOS_ALLOWED_DOMAINS` | Comma-separated list of valid boundary values    | empty                   |
 
 ### Storage
 
@@ -124,7 +89,7 @@ The service reads its configuration from environment variables in `stratos-servi
 
 | Variable                        | Description                                                                                                                                          | Default     |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `STRATOS_ENROLLMENT_MODE`       | `open` or `allowlist`                                                                                                                                | `allowlist` |
+| `STRATOS_ENROLLMENT_MODE`       | `open`, `allowlist`, or `closed`                                                                                                                     | `allowlist` |
 | `STRATOS_ALLOWED_DIDS`          | Allowed DIDs when running in allowlist mode                                                                                                          | empty       |
 | `STRATOS_ALLOWED_PDS_ENDPOINTS` | Allowed PDS origins when running in allowlist mode                                                                                                   | empty       |
 | `STRATOS_AUTO_ENROLL_DOMAINS`   | Domains automatically assigned at enrollment time                                                                                                    | empty       |
@@ -161,19 +126,9 @@ Stratos supports two repo storage modes:
 
 Blob content is stored separately through the configured blob provider (`local` or `s3`).
 
-## Indexing Model
+## Feed generation
 
-The AppView-facing indexing path is not embedded in `stratos-service` or the AppView fork. The
-standalone `stratos-indexer` package is responsible for:
-
-- reading PDS enrollment events,
-- connecting to `zone.stratos.sync.subscribeRecords`,
-- decoding commit payloads,
-- writing `stratos_post`, `stratos_post_boundary`, `stratos_enrollment`, and `stratos_sync_cursor`
-  rows into the AppView database.
-
-That separation matters when updating docs or deployment plans: query-time Stratos behavior lives in
-`atproto-stratos`, while ingestion lives here in `stratos-indexer`.
+The [Rust feed generator](stratos-feedgen-ng/README.md) ingests records and serves boundary-scoped feeds.
 
 ## Related Docs
 
