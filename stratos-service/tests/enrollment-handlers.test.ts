@@ -4,6 +4,7 @@ import * as fc from 'fast-check'
 import type { Server as XrpcServer } from '@atproto/xrpc-server'
 import type { AppContext } from '../src'
 import { registerEnrollmentHandlers } from '../src/features'
+import { RepoWriteLocks } from '../src/shared/repo-write-lock.js'
 import type { Enrollment } from '@northskysocial/stratos-core'
 
 function didArb(): fc.Arbitrary<string> {
@@ -337,6 +338,7 @@ describe('Unenroll endpoint', () => {
       pdsSyncWorker: {
         cancel: cancelSpy,
       },
+      repoWriteLocks: new RepoWriteLocks(),
       authVerifier: {
         standard: vi.fn(),
       },
@@ -499,6 +501,7 @@ describe('Unenroll endpoint', () => {
       pdsSyncWorker: {
         cancel: vi.fn().mockResolvedValue(undefined),
       },
+      repoWriteLocks: new RepoWriteLocks(),
       authVerifier: {
         standard: vi.fn(),
       },
@@ -569,6 +572,7 @@ describe('Unenroll endpoint', () => {
       pdsSyncWorker: {
         cancel: vi.fn().mockResolvedValue(undefined),
       },
+      repoWriteLocks: new RepoWriteLocks(),
       authVerifier: {
         standard: vi.fn(),
       },
@@ -611,7 +615,10 @@ describe('Unenroll endpoint', () => {
     const ctx = {
       enrollmentEvents: new EventEmitter(),
       enrollmentStore: {
-        getEnrollment: vi.fn().mockRejectedValue(new Error('store down')),
+        getEnrollment: vi
+          .fn()
+          .mockRejectedValueOnce(new Error('store down'))
+          .mockResolvedValue({ did, active: true }),
       },
       enrollmentService: {
         unenroll: vi.fn().mockResolvedValue(undefined),
@@ -628,6 +635,7 @@ describe('Unenroll endpoint', () => {
       pdsSyncWorker: {
         cancel: vi.fn().mockResolvedValue(undefined),
       },
+      repoWriteLocks: new RepoWriteLocks(),
       authVerifier: {
         standard: vi.fn(),
       },

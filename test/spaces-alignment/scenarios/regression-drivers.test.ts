@@ -2,14 +2,16 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
+import { spaceUriFromParts } from './standard-credential-transport.driver.mjs'
 
 const authorityDid = 'did:web:stratos-e2e.sandbox.test'
 const did = 'did:plc:motoko'
-const space = `at://${authorityDid}/space/zone.stratos.space.feed/general`
+const space = spaceUriFromParts(authorityDid, 'general')
+const legacyAudience = `${authorityDid}#atproto_space_host`
 const payload = {
   iss: did,
   sub: space,
-  aud: `${authorityDid}#atproto_space_host`,
+  aud: `${authorityDid}#atproto_pds`,
 }
 const token = (claims: object) =>
   `header.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`
@@ -66,7 +68,9 @@ async function driver(
       }),
     },
     proofKey: () => ({}),
-    signedHeaders: () => ({}),
+    exchangeHeaders: () => ({}),
+    presentationHeaders: () => ({}),
+    spaceUriFromParts,
     fetch: async () => {
       const reply = replies[requests++]
       if (!reply) throw new Error('Unexpected request')
@@ -248,6 +252,25 @@ describe('executable delegation and lifetime driver contracts', () => {
         logs: [],
         requests: 0,
       })
+    },
+  )
+  it.each(['delegation-transport', 'credential-lifetime'])(
+    'refuses the earlier host audience in %s without printing claims',
+    async (name) => {
+      const result = await driver(name, [], { ...payload, aud: legacyAudience })
+      expect(result).toEqual({
+        outcome: JSON.stringify({ label: 'delegation-aud', status: 'failed' }),
+        logs: [],
+        requests: 0,
+      })
+    },
+  )
+  it.each(['delegation-transport', 'credential-lifetime'])(
+    'accepts the PDS audience in %s and reaches the first request',
+    async (name) => {
+      const result = await driver(name, [response(500, { message: 'stop' })])
+      expect(JSON.parse(result.outcome!).label).toBe('credential-mint')
+      expect(result.requests).toBe(1)
     },
   )
   it.each(['iss', 'sub'])(

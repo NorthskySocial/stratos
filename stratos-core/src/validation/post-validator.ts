@@ -1,10 +1,10 @@
-import { AtUri } from '@atproto/syntax'
 import { StratosValidationError } from '../types.js'
 import { BaseValidator, type RepoRecord } from './base.js'
+import { isBskyUri, isStratosUri } from './post-rules.js'
 
 interface ReplyRef {
-  root: { uri: string; cid: string }
-  parent: { uri: string; cid: string }
+  root?: { uri?: unknown }
+  parent?: { uri?: unknown }
 }
 
 /**
@@ -24,7 +24,7 @@ export class PostValidator extends BaseValidator {
     this.validateBoundaryDomains(record.boundary)
 
     if (record.reply) {
-      this.assertReplyIsolation(record.reply as ReplyRef)
+      this.assertReplyIsolation(record.reply)
       this.assertReplyBoundaryConsistency(
         record.boundary as { values: Array<{ value: string }> },
         parentBoundaries,
@@ -43,12 +43,13 @@ export class PostValidator extends BaseValidator {
    * @private
    */
   private assertReplyIsolation(reply: ReplyRef): void {
-    const parentUri = new AtUri(reply.parent.uri)
-    const rootUri = new AtUri(reply.root.uri)
-
+    const parentUri = reply.parent?.uri
+    const rootUri = reply.root?.uri
     if (
-      !parentUri.collection.startsWith('zone.stratos.') ||
-      !rootUri.collection.startsWith('zone.stratos.')
+      typeof parentUri !== 'string' ||
+      typeof rootUri !== 'string' ||
+      !isStratosUri(parentUri) ||
+      !isStratosUri(rootUri)
     ) {
       throw new StratosValidationError(
         'Replies cannot cross namespace boundaries',
@@ -92,17 +93,16 @@ export class PostValidator extends BaseValidator {
     if (!embed || typeof embed !== 'object') return
     const e = embed as { record?: { uri?: string }; images?: unknown[] }
 
-    if (e.record?.uri) {
-      const uri = new AtUri(e.record.uri)
-      const isStratos = uri.collection.startsWith('zone.stratos.')
-
-      if (namespace === 'stratos' && !isStratos) {
+    const embeddedUri = e.record?.uri
+    if (embeddedUri) {
+      // Same answer as the post rule, which is the check the service runs.
+      if (namespace === 'stratos' && isBskyUri(embeddedUri)) {
         throw new StratosValidationError(
           'Stratos records cannot embed non-Stratos content',
           'CrossNamespaceEmbed',
         )
       }
-      if (namespace === 'bsky' && isStratos) {
+      if (namespace === 'bsky' && isStratosUri(embeddedUri)) {
         throw new StratosValidationError(
           'Non-Stratos records cannot embed Stratos content',
           'CrossNamespaceEmbed',

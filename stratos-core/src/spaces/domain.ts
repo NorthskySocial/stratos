@@ -2,25 +2,26 @@
  * Pure, dependency-light library for parsing, serializing, validating, and
  * mapping permissioned space/record URIs and Stratos boundaries.
  *
- * Space and record URIs reuse the standard `at://` scheme with a fixed literal
- * `space` marker segment sitting where a collection NSID appears in a public
- * atproto URI. This module is the single source of truth for that addressing:
- * no other code should parse these URIs.
+ * Space and record URIs use their own `at:space/` prefix, distinct from the
+ * `at://` form of public and custody record URIs. This module is the single
+ * source of truth for that addressing: no other code should parse these URIs,
+ * and a space URI must never be handed to a public-only parser such as
+ * `AtUri`.
  *
  * URI grammar (byte-exact, no normalization):
- *   - space URI:  `at://{spaceDid}/space/{spaceType}/{skey}`
- *   - record URI: `at://{spaceDid}/space/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`
+ *   - space URI:  `at:space/{spaceDid}/{spaceType}/{skey}`
+ *   - record URI: `at:space/{spaceDid}/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`
  *
- * The marker disambiguates these from public `at://` URIs by construction: a
- * public collection segment is an NSID (always at least two dots) and never the
- * bare word `space`, so a public-shaped URI is always reported as
- * `invalid-space-marker` and can never be mistaken for a space URI. A URI that
- * does carry `space` in the marker position but has the wrong segment count
- * reports `invalid-component-count`.
+ * After the exact prefix `at:space/` the text is split on `/` into exactly
+ * three (space) or six (record) parts, each validated on its own. A string
+ * that does not start with `at:` is reported as `invalid-scheme`; one that
+ * starts with `at:` but not with `at:space/` is reported as
+ * `invalid-space-marker`; the wrong number of parts is reported as
+ * `invalid-component-count`. No other spelling is recognised.
  *
  * Canonical form is strict string equality: two URIs address the same resource
  * iff their strings are byte-equal. There is no case folding, no relative form,
- * and no DID compression.
+ * no percent-decoding, and no DID compression.
  *
  * Error convention: the rest of `stratos-core` signals failures by throwing
  * typed `StratosError` subclasses, but parsing untrusted URIs is a routine,
@@ -30,11 +31,12 @@
  * booleans.
  *
  * DID validation is syntactic only (`did:` + method + non-empty
- * method-specific id), delegated to `@atproto/syntax`'s `isValidDid`. NSID and
- * record-key validation are likewise delegated to `@atproto/syntax`. The skey
- * byte-length rule is enforced independently by {@link utf8ByteLength} because
- * the atproto record-key check counts UTF-16 code units, whereas the skey spec
- * requires 1-512 UTF-8 bytes.
+ * method-specific id), delegated to `@atproto/syntax`'s `isValidDid`; inside a
+ * space or record URI every `%` must additionally be followed by two hex
+ * digits. NSID and record-key validation are likewise delegated to
+ * `@atproto/syntax`. The skey byte-length rule is enforced independently by
+ * {@link utf8ByteLength} because the atproto record-key check counts UTF-16
+ * code units, whereas the skey spec requires 1-512 UTF-8 bytes.
  */
 import { isValidDid, isValidNsid, isValidRecordKey } from '@atproto/syntax'
 
@@ -49,12 +51,13 @@ import type {
 /** The URI scheme shared with public atproto addresses. */
 export const AT_SCHEME = 'at://'
 
-/**
- * The literal marker segment that identifies a space/record URI. It sits in the
- * position a collection NSID occupies in a public `at://` URI and, unlike an
- * NSID, contains no dots.
- */
-export const SPACE_SEGMENT = 'space'
+/** The exact prefix every space and record URI starts with. */
+export const SPACE_URI_PREFIX = 'at:space/'
+
+const URI_SCHEME_PREFIX = 'at:'
+const SPACE_PART_COUNT = 3
+const RECORD_PART_COUNT = 6
+const UNESCAPED_PERCENT = /%(?![0-9A-Fa-f]{2})/
 
 /** Minimum skey length in UTF-8 bytes (inclusive). */
 export const SKEY_MIN_BYTES = 1
@@ -134,51 +137,46 @@ export function isValidRkey(s: string): boolean {
 }
 
 /**
- * Splits the authority-and-path portion (everything after `at://`) of a URI
- * into its raw `/`-separated components, or reports a scheme error. Empty
- * components are preserved so that callers can reject them explicitly.
+ * Splits a space or record URI into its `/`-separated parts after the
+ * `at:space/` prefix and requires an exact part count. Empty parts are kept so
+ * that the part validators reject them. `label` ("space URI" / "record URI")
+ * keeps the error messages per-kind.
  */
-function splitAtUri(s: string): SpacesResult<string[]> {
-  if (!s.startsWith(AT_SCHEME)) {
-    return err('invalid-scheme', `URI must start with "${AT_SCHEME}"`)
-  }
-  const rest = s.slice(AT_SCHEME.length)
-  return ok(rest.split('/'))
-}
-
-/**
- * Splits an `at://` URI, requires the literal `space` marker in the segment
- * after the authority, and requires an exact component count. The marker is
- * checked before the count so a public-shaped URI without it is reported as
- * `invalid-space-marker` rather than a count mismatch. `label` ("space URI" /
- * "record URI") and `expectedCount` keep the error messages per-kind.
- */
-function parseAtUriHeader(
+function splitSpaceUri(
   s: string,
   expectedCount: number,
   label: string,
 ): SpacesResult<string[]> {
-  const split = splitAtUri(s)
-  if (!split.ok) return split
-  const parts = split.value
-  if (parts[1] !== SPACE_SEGMENT) {
+  if (!s.startsWith(URI_SCHEME_PREFIX)) {
     return err(
-      'invalid-space-marker',
-      `${label} must have "${SPACE_SEGMENT}" as the segment after the authority`,
+      'invalid-scheme',
+      `${label} must start with "${SPACE_URI_PREFIX}"`,
     )
   }
+  if (!s.startsWith(SPACE_URI_PREFIX)) {
+    return err(
+      'invalid-space-marker',
+      `${label} must start with "${SPACE_URI_PREFIX}"`,
+    )
+  }
+  const parts = s.slice(SPACE_URI_PREFIX.length).split('/')
   if (parts.length !== expectedCount) {
     return err(
       'invalid-component-count',
-      `${label} must have ${expectedCount} components, got ${parts.length}`,
+      `${label} must have ${expectedCount} components after "${SPACE_URI_PREFIX}", got ${parts.length}`,
     )
   }
   return ok(parts)
 }
 
+/** A DID as it may appear in a space or record URI. */
+function isUriDid(s: string): boolean {
+  return isSyntacticDid(s) && !UNESCAPED_PERCENT.test(s)
+}
+
 /** Validates the space-addressing fields shared by space and record URIs. */
 function validateSpaceParts(parts: SpaceUri): SpacesResult<SpaceUri> {
-  if (!isSyntacticDid(parts.spaceDid)) {
+  if (!isUriDid(parts.spaceDid)) {
     return err('invalid-space-did', `invalid space DID: "${parts.spaceDid}"`)
   }
   if (!isValidNsidStr(parts.spaceType)) {
@@ -199,7 +197,7 @@ function validateRecordExtras(parts: {
   collection: string
   rkey: string
 }): SpacesResult<void> {
-  if (!isSyntacticDid(parts.authorDid)) {
+  if (!isUriDid(parts.authorDid)) {
     return err('invalid-author-did', `invalid author DID: "${parts.authorDid}"`)
   }
   if (!isValidNsidStr(parts.collection)) {
@@ -215,26 +213,25 @@ function validateRecordExtras(parts: {
 }
 
 /**
- * Parses a space URI: `at://{spaceDid}/space/{spaceType}/{skey}` (4 components,
- * with `space` as the segment following the authority).
+ * Parses a space URI: `at:space/{spaceDid}/{spaceType}/{skey}` (3 components
+ * after the prefix).
  */
 export function parseSpaceUri(s: string): SpacesResult<SpaceUri> {
-  const header = parseAtUriHeader(s, 4, 'space URI')
-  if (!header.ok) return header
-  const [spaceDid, , spaceType, skey] = header.value
+  const split = splitSpaceUri(s, SPACE_PART_COUNT, 'space URI')
+  if (!split.ok) return split
+  const [spaceDid, spaceType, skey] = split.value
   return validateSpaceParts({ spaceDid, spaceType, skey })
 }
 
 /**
  * Parses a record URI:
- * `at://{spaceDid}/space/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`
- * (7 components, with `space` as the segment following the authority).
+ * `at:space/{spaceDid}/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`
+ * (6 components after the prefix).
  */
 export function parseRecordUri(s: string): SpacesResult<RecordUri> {
-  const header = parseAtUriHeader(s, 7, 'record URI')
-  if (!header.ok) return header
-  const [spaceDid, , spaceType, skey, authorDid, collection, rkey] =
-    header.value
+  const split = splitSpaceUri(s, RECORD_PART_COUNT, 'record URI')
+  if (!split.ok) return split
+  const [spaceDid, spaceType, skey, authorDid, collection, rkey] = split.value
   const space = validateSpaceParts({ spaceDid, spaceType, skey })
   if (!space.ok) return space
   const extras = validateRecordExtras({ authorDid, collection, rkey })
@@ -243,7 +240,7 @@ export function parseRecordUri(s: string): SpacesResult<RecordUri> {
 }
 
 /**
- * Serializes space URI parts into `at://{spaceDid}/space/{spaceType}/{skey}`.
+ * Serializes space URI parts into `at:space/{spaceDid}/{spaceType}/{skey}`.
  * Byte-exact inverse of {@link parseSpaceUri}: `parse(format(x)) === x` for
  * valid parts, and `format(parse(s)) === s` for valid URIs.
  *
@@ -253,13 +250,13 @@ export function formatSpaceUri(parts: SpaceUri): SpacesResult<string> {
   const valid = validateSpaceParts(parts)
   if (!valid.ok) return valid
   return ok(
-    `${AT_SCHEME}${parts.spaceDid}/${SPACE_SEGMENT}/${parts.spaceType}/${parts.skey}`,
+    `${SPACE_URI_PREFIX}${parts.spaceDid}/${parts.spaceType}/${parts.skey}`,
   )
 }
 
 /**
  * Serializes record URI parts into
- * `at://{spaceDid}/space/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`.
+ * `at:space/{spaceDid}/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`.
  * Byte-exact inverse of {@link parseRecordUri}.
  *
  * Validates the parts and returns a result; invalid parts never throw.
@@ -270,7 +267,7 @@ export function formatRecordUri(parts: RecordUri): SpacesResult<string> {
   const extras = validateRecordExtras(parts)
   if (!extras.ok) return extras
   return ok(
-    `${AT_SCHEME}${parts.spaceDid}/${SPACE_SEGMENT}/${parts.spaceType}/${parts.skey}/${parts.authorDid}/${parts.collection}/${parts.rkey}`,
+    `${SPACE_URI_PREFIX}${parts.spaceDid}/${parts.spaceType}/${parts.skey}/${parts.authorDid}/${parts.collection}/${parts.rkey}`,
   )
 }
 

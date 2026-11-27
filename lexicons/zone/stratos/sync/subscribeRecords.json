@@ -89,6 +89,27 @@
         "record": {
           "type": "unknown",
           "description": "The record content. Present for create and update operations."
+        },
+        "boundary": {
+          "type": "ref",
+          "ref": "#opBoundary",
+          "description": "The boundary the op belongs to; present on create, update and scoped removal ops written by current servers; absent on ops written before it existed, where consumers fall back to the record body."
+        },
+        "excludeBoundary": {
+          "type": "ref",
+          "ref": "#opBoundary",
+          "description": "Present on a scoped removal that is half of a move: the boundary the record moved into. A subscriber that holds one of these boundaries still sees the record and does not receive the removal."
+        }
+      }
+    },
+    "opBoundary": {
+      "type": "object",
+      "description": "The boundaries of a sync op. Unlike a record's boundary, it can list several values, because the removal op for a record written before the one-boundary rule names every boundary the record had.",
+      "required": ["values"],
+      "properties": {
+        "values": {
+          "type": "array",
+          "items": { "type": "ref", "ref": "zone.stratos.boundary.defs#Domain" }
         }
       }
     },

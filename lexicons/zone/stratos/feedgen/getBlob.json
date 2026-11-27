@@ -11,7 +11,7 @@
         "properties": {
           "uri": {
             "type": "string",
-            "description": "Exact indexed post URI, including space record URIs."
+            "description": "Exact indexed post URI: at://{did}/{collection}/{rkey}, or at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey} for a space record."
           },
           "cid": {
             "type": "string",

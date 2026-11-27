@@ -5,6 +5,7 @@ import type { WebSocket } from 'ws'
 import type { AppContext, EnrollmentEvent } from '../context.js'
 import type { EnrollmentStoreReader } from '@northskysocial/stratos-core'
 import { SEQUENCE_DB_PAGE_SIZE } from './sequence-paging.js'
+import { resolveHiddenUris } from './takedown-filter.js'
 import { serviceMetrics } from '../observability/metrics.js'
 
 const WS_PING_INTERVAL_MS = 30_000
@@ -146,21 +147,14 @@ function createActorSubscriptionHandler(ctx: AppContext) {
       // Drain every retained page, not just the first: a single page would
       // leave the rest of the backlog waiting on the next write signal or the
       // 30 s timeout, pacing catch-up at one page per wake.
-      while (!signal.aborted) {
-        const catchUp = await getEventsSince(ctx, did, lastSeq)
-        for (const event of catchUp) {
-          if (signal.aborted) return
-          const message = emitEvent(ctx, event, callerBoundaries, domain)
-          if (message) {
-            serviceMetrics.recordSyncEvent('applied')
-            yield message
-          } else {
-            serviceMetrics.recordSyncEvent('dropped')
-          }
-          lastSeq = event.seq
-        }
-        if (catchUp.length < SEQUENCE_DB_PAGE_SIZE) break
-      }
+      lastSeq = yield* drainPages(
+        ctx,
+        did,
+        lastSeq,
+        domain,
+        callerBoundaries,
+        signal,
+      )
     }
 
     yield* streamNewEvents(ctx, did, lastSeq, domain, callerBoundaries, signal)
@@ -168,31 +162,105 @@ function createActorSubscriptionHandler(ctx: AppContext) {
 }
 
 /**
- * Decode an event once and return its commit message if the event is in scope
- * for the caller's boundaries, otherwise `undefined`. Undecodable events are
- * dropped (fail closed) and logged.
- * @param ctx - Application context
- * @param event - Sequence event to evaluate
- * @param callerBoundaries - Boundaries the subscribing service is enrolled in
- * @param domain - Optional single-boundary narrowing within the shared set
- * @returns The commit message to emit, or undefined to skip the event
+ * Yield the commit messages for every page after `startSeq` until the log is
+ * exhausted or the connection aborts.
+ *
+ * Both the connect-time catch-up and the per-wake drain run through here so
+ * they share one page step and cannot drift apart. Returns the sequence
+ * number of the last event passed over.
  */
-function emitEvent(
+async function* drainPages(
   ctx: AppContext,
-  event: SeqEvent,
+  did: string,
+  startSeq: number,
+  domain: string | undefined,
+  callerBoundaries: ReadonlySet<string>,
+  signal: AbortSignal,
+): AsyncGenerator<SubscriptionMessage, number> {
+  let lastSeq = startSeq
+  while (!signal.aborted) {
+    const page = await getEventsSince(ctx, did, lastSeq)
+    const messages = await commitMessagesForPage(
+      ctx,
+      did,
+      page,
+      callerBoundaries,
+      domain,
+    )
+    for (const [index, event] of page.entries()) {
+      if (signal.aborted) return lastSeq
+      const message = messages[index]
+      if (message) {
+        serviceMetrics.recordSyncEvent('applied')
+        yield message
+      } else {
+        serviceMetrics.recordSyncEvent('dropped')
+      }
+      lastSeq = event.seq
+    }
+    if (page.length < SEQUENCE_DB_PAGE_SIZE) break
+  }
+  return lastSeq
+}
+
+/**
+ * Turn one page of sequence events into commit messages, index-aligned with
+ * the page; `undefined` marks an event that must not be sent.
+ *
+ * Undecodable events are dropped (fail closed) and logged. Events outside the
+ * caller's scope are dropped. The takedown lookup then runs once for the whole
+ * page (see {@link resolveHiddenUris}), and only for events that passed the
+ * scope gate.
+ *
+ * A sync consumer must never receive a taken-down record's value, nor a create
+ * or update op without a value. So those ops are removed from the frame, and an
+ * event left with no ops is skipped. Deletes pass through so a consumer can
+ * still remove the record. The frame is rebuilt from decoded ops, so nothing
+ * signed is touched.
+ */
+async function commitMessagesForPage(
+  ctx: AppContext,
+  did: string,
+  page: SeqEvent[],
   callerBoundaries: ReadonlySet<string>,
   domain: string | undefined,
-): CommitMessage | undefined {
-  const decoded = decodeEvent(event)
-  if (!decoded.decodeOk) {
-    ctx.logger?.warn(
-      { did: event.did, seq: event.seq },
-      'subscribeRecords: dropping undecodable event (fail closed)',
-    )
-    return undefined
+): Promise<Array<CommitMessage | undefined>> {
+  const inScopeOps = page.map((event): RecordOp[] | undefined => {
+    const decoded = decodeEvent(event)
+    if (!decoded.decodeOk) {
+      ctx.logger?.warn(
+        { did: event.did, seq: event.seq },
+        'subscribeRecords: dropping undecodable event (fail closed)',
+      )
+      return undefined
+    }
+    return eventInScope(decoded, callerBoundaries, domain)
+      ? decoded.ops
+      : undefined
+  })
+
+  const valueOpUris = new Set<string>()
+  for (const ops of inScopeOps) {
+    for (const op of ops ?? []) {
+      if (op.action !== 'delete') valueOpUris.add(`at://${did}/${op.path}`)
+    }
   }
-  if (!eventInScope(decoded, callerBoundaries, domain)) return undefined
-  return formatEvent(event, decoded.ops)
+  let hidden: Set<string>
+  try {
+    hidden = await resolveHiddenUris(ctx, did, valueOpUris)
+  } catch (err) {
+    ctx.logger?.warn({ did, err }, 'takedown lookup failed')
+    throw err
+  }
+
+  return page.map((event, index) => {
+    const ops = inScopeOps[index]
+    if (!ops) return undefined
+    const keptOps = ops.filter(
+      (op) => op.action === 'delete' || !hidden.has(`at://${did}/${op.path}`),
+    )
+    return keptOps.length === 0 ? undefined : formatEvent(event, keptOps)
+  })
 }
 
 /**
@@ -220,21 +288,14 @@ async function* streamNewEvents(
     // One wake drains everything currently readable; the 30 s timeout is a
     // safety net, never the pace at which a backlog is delivered. The drain
     // loop's own guard covers a wake caused by the abort itself.
-    while (!signal.aborted) {
-      const newEvents = await getEventsSince(ctx, did, lastSeq)
-      for (const event of newEvents) {
-        if (signal.aborted) return
-        const message = emitEvent(ctx, event, callerBoundaries, domain)
-        if (message) {
-          serviceMetrics.recordSyncEvent('applied')
-          yield message
-        } else {
-          serviceMetrics.recordSyncEvent('dropped')
-        }
-        lastSeq = event.seq
-      }
-      if (newEvents.length < SEQUENCE_DB_PAGE_SIZE) break
-    }
+    lastSeq = yield* drainPages(
+      ctx,
+      did,
+      lastSeq,
+      domain,
+      callerBoundaries,
+      signal,
+    )
   }
 }
 
@@ -589,8 +650,7 @@ export function decodeEvent(event: SeqEvent): DecodedEvent {
       const record = op.record as Record<string, unknown> | undefined
       const opBoundary = op.boundary as Record<string, unknown> | undefined
       const recordBoundary = record?.boundary as
-        | Record<string, unknown>
-        | undefined
+        Record<string, unknown> | undefined
       const boundary = opBoundary ?? recordBoundary
       const values = boundary?.values as Array<{ value: string }> | undefined
       if (values) {
@@ -600,11 +660,9 @@ export function decodeEvent(event: SeqEvent): DecodedEvent {
       // subscriber that shares one of those still sees the record and must be
       // excluded from this removal.
       const excludeBoundary = op.excludeBoundary as
-        | Record<string, unknown>
-        | undefined
+        Record<string, unknown> | undefined
       const excludeValues = excludeBoundary?.values as
-        | Array<{ value: string }>
-        | undefined
+        Array<{ value: string }> | undefined
       if (excludeValues) {
         for (const v of excludeValues) excludeBoundaries.add(v.value)
       }

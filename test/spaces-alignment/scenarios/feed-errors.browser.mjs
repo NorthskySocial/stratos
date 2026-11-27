@@ -176,7 +176,7 @@ async function createFixtures(account, domain) {
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      space: `at://did:web:stratos-e2e.${domain}/space/zone.stratos.space.feed/general`,
+      space: `at:space/did:web:stratos-e2e.${domain}/zone.stratos.space.feed/general`,
       repo: session.did,
       collection: 'zone.stratos.feed.post',
       record: {

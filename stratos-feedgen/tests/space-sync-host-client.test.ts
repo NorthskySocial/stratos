@@ -96,8 +96,7 @@ function decodeJwt(token: string): {
 }
 
 const CREDENTIAL = 'held-space-credential-jwt'
-const SPACE_URI =
-  'at://did:web:stratos.test/space/zone.stratos.space.feed/bebop'
+const SPACE_URI = 'at:space/did:web:stratos.test/zone.stratos.space.feed/bebop'
 const REPO_DID = 'did:plc:spike'
 
 /** Mirrors `SpaceCredentialManager`'s real `toHeld()` binding, not a stub string. */

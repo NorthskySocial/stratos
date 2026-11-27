@@ -1,0 +1,55 @@
+{
+  "header": {
+    "classification": "rfc",
+    "oracle": {
+      "source": "RFC 9180 test vectors (CFRG HPKE)",
+      "url": "https://raw.githubusercontent.com/cfrg/draft-irtf-cfrg-hpke/b1f7cb0cdeab6906c61b3d6574e8bdfdbe1cd3fb/test-vectors.json",
+      "commit": "b1f7cb0cdeab6906c61b3d6574e8bdfdbe1cd3fb",
+      "sha256": "61fc662f01996cd06d713dacf5e133167bd309a1f329442d53f1e21a47b3ede6"
+    },
+    "generator": {
+      "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
+      "sha256": "a42fa7432ecb9f61a0fddc1abd16f2cb47de69b10f302d8f39c2c84c6465dec5"
+    },
+    "upstreamVerified": false,
+    "reproducible": true
+  },
+  "rfcEntry": {
+    "mode": 0,
+    "kem_id": 16,
+    "kdf_id": 1,
+    "aead_id": 65535,
+    "info": "4f6465206f6e2061204772656369616e2055726e",
+    "ikmR": "c6638d8079a235ea4054885355a7caefee67151c6ff2a04f4ba26d099c3a8b02",
+    "ikmE": "3800bb050bb4882791fc6b2361d7adc2543e4e0abbac367cf00a0c4251844350",
+    "skRm": "62c3868357a464f8461d03aa0182c7cebcde841036aea7230ddc7339f1088346",
+    "skEm": "2f18b059576a0ec5a17121c0fe7ec8f00ea86f7b046fa3889ac8f21f89dbd484",
+    "pkRm": "046c6bb9e1976402c692fef72552f4aaeedd83a5e5079de3d7ae732da0f397b15921fb9c52c9866affc8e29c0271a35937023a9245982ec18bab1eb157cf16fc33",
+    "pkEm": "04d804370b7e24b94749eb1dc8df6d4d4a5d75f9effad01739ebcad5c54a40d57aaa8b4190fc124dbde2e4f1e1d1b012a3bc4038157dc29b55533a932306d8d38d",
+    "enc": "04d804370b7e24b94749eb1dc8df6d4d4a5d75f9effad01739ebcad5c54a40d57aaa8b4190fc124dbde2e4f1e1d1b012a3bc4038157dc29b55533a932306d8d38d",
+    "shared_secret": "7e5b6dd51bca56d4f30c95ff658af26c08eb0c073aa7180686cc4dbeabcb34f1",
+    "key_schedule_context": "00fbfdc9526168162fadfd17fe227356e9ffe3afbfc682ca8f7e2c2fa25fbc0879667157ef6a763236715d0cdfae0492d26fb4f02e2c8397d5fc765a529a167374",
+    "secret": "f0e51682347bc2d57dbc613ee6b2be6b0eeef155cb1d3e6ac09035981ac5d7ec",
+    "key": "",
+    "base_nonce": "",
+    "exporter_secret": "7c0347d69a219f33301056411e78672ae2d78698d10ee067f883ba266ef586a1",
+    "encryptions": [],
+    "exports": [
+      {
+        "exporter_context": "",
+        "L": 32,
+        "exported_value": "8cf837d5bf1994f0fac3ee1faa671d07e9a38b7f6153bdbb8a66b90159ef7d13"
+      },
+      {
+        "exporter_context": "00",
+        "L": 32,
+        "exported_value": "3c7708f8ae1f510f4439fa514deb1c7ece7a29085a2e8270a84b6ad6481cc0b4"
+      },
+      {
+        "exporter_context": "54657374436f6e74657874",
+        "L": 32,
+        "exported_value": "f53fb127f67dabf35b14fae14b53e6ce5c49e572f95eb4ef7a3b3cb9cd85f12b"
+      }
+    ]
+  }
+}

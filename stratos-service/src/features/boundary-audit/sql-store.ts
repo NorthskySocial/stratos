@@ -7,7 +7,7 @@ import {
 } from './model.js'
 
 export interface BoundaryAuditSql {
-  all: <T>(statement: SQL) => Promise<T[]>
+  all: <T extends object>(statement: SQL) => Promise<T[]>
   execute: (statement: SQL) => Promise<void>
 }
 

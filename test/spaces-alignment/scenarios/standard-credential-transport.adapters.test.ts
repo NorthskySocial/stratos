@@ -30,8 +30,8 @@ vi.mock('node:timers/promises', () => ({
 const domain = 'bebop.test'
 const clubhouse = 'https://clubhouse-e2e.atmosbox.internal'
 const authority = 'https://stratos-e2e.atmosbox.internal'
-const pds = `https://october-pds-e2e.${domain}`
-const space = `at://did:web:stratos-e2e.${domain}/space/zone.stratos.space.feed/general`
+const pds = `https://reference-pds-e2e.${domain}`
+const space = `at:space/did:web:stratos-e2e.${domain}/zone.stratos.space.feed/general`
 let driver: typeof import('./standard-credential-transport.driver.mjs')
 beforeEach(async () => {
   vi.resetModules()
@@ -45,7 +45,7 @@ beforeEach(async () => {
   mocks.readFile.mockImplementation(async (file: string) => {
     if (file === '/ca/root.crt') return Buffer.from('public test certificate')
     if (file === '/run/sandbox-secrets/browser-password') return ' swordfish \n'
-    if (file === '/run/sandbox-secrets/october-admin-password')
+    if (file === '/run/sandbox-secrets/reference-admin-password')
       return ' redtail \n'
     throw new Error(`Unexpected fixture file ${file}`)
   })
@@ -108,7 +108,7 @@ function pageFixture(fault = '', join = false) {
     fill: async (value: string) => {
       if (selector.includes('username')) {
         expect(['no-username', 'username-detached']).not.toContain(fault)
-        expect(value).toBe('faye.october-pds-e2e.bebop.test')
+        expect(value).toBe('faye.reference-pds-e2e.bebop.test')
       }
       events.push(['fill', selector, value])
       if (selector === '#room-post') {
@@ -167,7 +167,7 @@ function pageFixture(fault = '', join = false) {
         ? null
         : fault === 'note'
           ? 'signed in as ed'
-          : 'faye.october-pds-e2e.bebop.test',
+          : 'faye.reference-pds-e2e.bebop.test',
     getByRole: (role: string, options: { name: string }) => {
       expect(role).toBe('button')
       expect(['Open room', 'Join room']).toContain(options.name)
@@ -310,7 +310,7 @@ function accountFetch(status = 200, fault = '') {
     if (input.endsWith('.createSession')) {
       expect(input).toBe(pds + '/xrpc/com.atproto.server.createSession')
       expect(body).toEqual({
-        identifier: 'faye.october-pds-e2e.bebop.test',
+        identifier: 'faye.reference-pds-e2e.bebop.test',
         password: 'swordfish',
       })
       return new Response(JSON.stringify({ did: 'did:plc:faye' }), { status })
@@ -328,8 +328,8 @@ function accountFetch(status = 200, fault = '') {
     }
     expect(input).toBe(pds + '/xrpc/com.atproto.server.createAccount')
     expect(body).toEqual({
-      email: 'faye@october-pds-e2e.bebop.test',
-      handle: 'faye.october-pds-e2e.bebop.test',
+      email: 'faye@reference-pds-e2e.bebop.test',
+      handle: 'faye.reference-pds-e2e.bebop.test',
       password: 'swordfish',
       inviteCode: 'ein',
     })
@@ -405,27 +405,28 @@ describe('real standard browser adapter bodies', () => {
       const result = await driver.prepareAccount(fixture.browser, 'faye')
       expect(result).toEqual({
         account: {
-          username: 'faye.october-pds-e2e.bebop.test',
+          username: 'faye.reference-pds-e2e.bebop.test',
           password: 'swordfish',
           did: 'did:plc:faye',
           seedText: fixture.text(),
         },
         page: fixture.page,
+        seed: fixture.seed,
       })
-      expect(fixture.text()).toMatch(/^Plan014 did:plc:faye [0-9a-f-]{36}$/)
+      expect(fixture.text()).toMatch(/^Bebop did:plc:faye [0-9a-f-]{36}$/)
       expect(fetch).toHaveBeenCalledTimes(join ? 3 : 1)
       expect(mocks.readFile).toHaveBeenCalledWith(
         '/run/sandbox-secrets/browser-password',
         'utf8',
       )
       expect(mocks.readFile).toHaveBeenCalledWith(
-        '/run/sandbox-secrets/october-admin-password',
+        '/run/sandbox-secrets/reference-admin-password',
         'utf8',
       )
       expect(fixture.events).toContainEqual([
         'fill',
         'input[name="username"]:not([readonly]):not([disabled]), input[name="identifier"]:not([readonly]):not([disabled])',
-        'faye.october-pds-e2e.bebop.test',
+        'faye.reference-pds-e2e.bebop.test',
       ])
       expect(fixture.events.some((e) => e[0] === 'key')).toBe(false)
       expect(fixture.events).toContainEqual([
@@ -436,7 +437,7 @@ describe('real standard browser adapter bodies', () => {
       expect(fixture.events).toContainEqual([
         'fill',
         '#handle',
-        'faye.october-pds-e2e.bebop.test',
+        'faye.reference-pds-e2e.bebop.test',
       ])
       expect(fixture.events).toContainEqual([
         'fill',

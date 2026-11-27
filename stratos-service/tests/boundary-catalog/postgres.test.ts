@@ -26,7 +26,7 @@ describe('Postgres boundary catalog', () => {
   beforeAll(async () => {
     const connection = process.env.BOUNDARY_TEST_POSTGRES_URL
     if (!connection)
-      container = await new PostgreSqlContainer('postgres:18-alpine').start()
+      container = await new PostgreSqlContainer('postgres:19-alpine').start()
     const url = connection ?? container!.getConnectionUri()
     db = createServicePgDb(url)
     otherDb = createServicePgDb(url)
@@ -52,7 +52,7 @@ describe('Postgres boundary catalog', () => {
     if (db) await closeServicePgDb(db)
     if (otherDb) await closeServicePgDb(otherDb)
     await container?.stop()
-  })
+  }, 60_000)
   it('persists definitions, optimistic revisions, queues, and irreversible removal', async () => {
     const raw = new PgEnrollmentStoreWriter(db)
     const did = 'did:plc:spike'

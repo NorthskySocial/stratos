@@ -30,27 +30,30 @@
     "test:integration:appview": "pnpm e2etestappview"
   },
   "devDependencies": {
+    "@atproto/crypto": "0.0.0-spaces-alpha-20261124235736",
+    "@atproto/space": "0.0.0-spaces-alpha-20261124235736",
     "@eslint/js": "^10.0.1",
-    "@stryker-mutator/core": "^9.6.1",
-    "@stryker-mutator/vitest-runner": "^9.6.1",
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/vitest-runner": "^10.1.1",
     "@types/deno": "^2.7.0",
-    "@types/node": "^25.9.12",
+    "@types/node": "^26.6.11",
     "@typescript-eslint/eslint-plugin": "^8.74.0",
     "@typescript-eslint/parser": "^8.74.0",
-    "concurrently": "^9.2.5",
+    "concurrently": "^10.0.7",
     "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.8",
+    "fast-check": "4.11.0",
     "globals": "^17.14.0",
-    "jsdom": "^29.1.1",
+    "jsdom": "^31.0.1",
     "prettier": "^3.10.1",
     "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@~6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
     "typescript-eslint": "^8.74.0",
-    "vitest": "^4.1.12"
+    "vitest": "^5.1.2"
   },
   "dependencies": {
-    "@vitest/coverage-v8": "^4.1.12",
-    "dotenv": "^17.4.2"
+    "@vitest/coverage-v8": "^5.1.2",
+    "dotenv": "^18.0.10"
   }
 }

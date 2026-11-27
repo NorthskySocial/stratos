@@ -6,8 +6,12 @@
       "type": "space",
       "description": "A members-only Stratos post feed",
       "key": "any",
-      "name": "Stratos Feed",
-      "collections": ["zone.stratos.feed.post"]
+      "title": "Stratos Feed",
+      "collections": [
+        "zone.stratos.feed.post",
+        "app.bsky.feed.like",
+        "app.bsky.feed.repost"
+      ]
     }
   }
 }

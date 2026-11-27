@@ -18,21 +18,46 @@ import { buildAlphaPds } from './build-alpha-pds.js'
 import type { PdsBuildReceipt, PdsSourcePin } from './build-alpha-pds.js'
 import { CommandFailure, executeCommand, sha256File } from './command.js'
 import {
+  assertImageDigest,
+  loadNovemberSources,
+  manifestReadinessProblems,
+  referenceHostPin,
+} from './november/reference-host.js'
+import type { NovemberSources } from './november/reference-host.js'
+import {
+  assertionsReachedBy,
   suiteExecutionOrder,
   validateAssertions,
   validateReviewReceipt,
 } from './rules.js'
-import type { AssertionResult, ReviewReceipt, ScenarioSuite } from './rules.js'
+import type {
+  AssertionResult,
+  JourneyReport,
+  ReviewReceipt,
+  ScenarioSuite,
+} from './rules.js'
+
+export const MEMBER_PDS_IMAGE =
+  'ghcr.io/bluesky-social/atproto:pds-spaces-alpha@sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350'
 
 const harnessDirectory = dirname(fileURLToPath(import.meta.url))
-const octoberPdsSuites = new Set([
-  'writer-sync-contract',
-  'credential-revocation-contract',
+const referencePdsSuites = new Set([
   'standard-credential-transport',
   'rust-production-interop',
-  'october-interop',
+  'november-interop',
 ])
-const rustProbeSuites = new Set(['rust-production-interop', 'october-interop'])
+const NOVEMBER_INSPECTOR_OWNER_HANDLE = 'user1.pds-space1.atmosbox.test'
+
+/**
+ * Suites that are written but never run by default: each refuses to start
+ * until the caller names the reference PDS image by digest and the November
+ * manifest says that host accepts the new spelling.
+ */
+export const PREPARED_SUITE_IDS: ReadonlySet<string> = new Set([
+  'november-interop',
+  'november-positive',
+])
+const rustProbeSuites = new Set(['rust-production-interop'])
 interface SourcePins {
   atmosphereInABox: {
     url: string
@@ -40,7 +65,6 @@ interface SourcePins {
     sha256: Record<string, string>
     archivePaths: string[]
   }
-  octoberSpacesPds?: PdsSourcePin
 }
 
 const sources = JSON.parse(
@@ -49,6 +73,7 @@ const sources = JSON.parse(
 
 export interface RunnerDependencies {
   sourcePins?: SourcePins
+  novemberSources?: NovemberSources
   runnerSource?: string
   buildPds?: (
     pin: PdsSourcePin,
@@ -63,6 +88,7 @@ interface Options {
   reportDirectory: string
   evidenceMode: 'review' | 'ci'
   reviewReceipt?: string
+  pdsImageDigest?: string
 }
 
 /**
@@ -92,6 +118,7 @@ export function parseOptions(args: string[]): Options {
     '--suite': 'suite',
     '--report-dir': 'reportDirectory',
     '--review-receipt': 'reviewReceipt',
+    '--pds-image-digest': 'pdsImageDigest',
   }
   const options: Partial<Options> = {}
   let ciEvidence = false
@@ -118,6 +145,7 @@ export function parseOptions(args: string[]): Options {
   }
   if (!options.suite || !/^[a-z][a-z0-9-]*$/.test(options.suite))
     throw new Error('Invalid suite ID')
+  if (options.pdsImageDigest) assertImageDigest(options.pdsImageDigest)
   if (ciEvidence && options.reviewReceipt)
     throw new Error('--ci-evidence and --review-receipt are mutually exclusive')
   if (ciEvidence && process.env.GITHUB_ACTIONS !== 'true')
@@ -192,6 +220,7 @@ export class SandboxCommandFailure extends Error {
     readonly stdout: string,
     readonly stderr: string,
     message: string,
+    readonly exitCode?: number,
   ) {
     super(message)
   }
@@ -215,6 +244,7 @@ export async function command(
         error.stdout,
         error.stderr,
         `${file} ${args[0] ?? ''} exited ${error.code ?? 'unknown'}`,
+        typeof error.code === 'number' ? error.code : undefined,
       )
     }
     throw new Error(`${file} ${args[0] ?? ''} exited unknown`)
@@ -458,6 +488,10 @@ export async function installAtmosphereAssets(
   assets: string,
   atmosphere: string,
 ): Promise<Record<string, string>> {
+  const pdsPath = join(atmosphere, 'compose/pds.yaml')
+  const pdsTemplate = await readFile(pdsPath, 'utf8')
+  if (pdsTemplate.split(MEMBER_PDS_IMAGE).length !== 2)
+    throw new Error('Pinned AiaB spaces PDS image is missing or ambiguous')
   const componentsPath = join(atmosphere, 'stacks/components.json')
   const componentsData = JSON.parse(
     await readFile(componentsPath, 'utf8'),
@@ -478,7 +512,9 @@ export async function installAtmosphereAssets(
   if (existingPreset !== undefined && !sameJson(existingPreset, feedgenPreset))
     throw new Error('AiaB preset ID conflicts with feedgen-ng-e2e')
 
-  const hashes: Record<string, string> = {}
+  const hashes: Record<string, string> = {
+    'compose/pds.yaml': await sha256File(pdsPath),
+  }
   for (const path of [
     'stacks/lexicon-authority.definition.json',
     'examples/lexicon-fixtures/zone.stratos.space.feed.json',
@@ -528,49 +564,27 @@ async function labelContainerFiles(
   await command('chcon', ['-t', 'container_file_t', ...paths], cwd)
 }
 
-async function initializeSpacePdsData(
-  composeFile: string,
-  projectName: string,
-  atmosphere: string,
-  env: NodeJS.ProcessEnv,
-): Promise<void> {
-  try {
-    await command(
-      'docker',
-      [
-        'compose',
-        '--file',
-        composeFile,
-        '--project-name',
-        projectName,
-        '--project-directory',
-        atmosphere,
-        'run',
-        '--rm',
-        '--no-deps',
-        '--user',
-        '0:0',
-        '--entrypoint',
-        'sh',
-        'pds-space1',
-        '-ec',
-        `owner=$(stat -c %u:%g /data)
-test "$owner" = 0:0
-contents=$(find /data -mindepth 1 -maxdepth 1 -print -quit)
-test -z "$contents"
-chmod 0750 /data
-chown 1000:1000 /data`,
-      ],
-      atmosphere,
-      env,
-    )
-  } catch (error) {
+/**
+ * A prepared suite starts only when the caller names the reference PDS image
+ * by digest and the November manifest records the cutover evidence for it.
+ */
+export function requirePreparedRunConditions(
+  suiteId: string,
+  pdsImageDigest: string | undefined,
+  sources: NovemberSources,
+): void {
+  if (!pdsImageDigest)
     throw new Error(
-      `Space PDS volume initialization failed: ${
-        error instanceof Error ? error.message : 'unknown error'
-      }`,
+      `${suiteId} is prepared and runs only with --pds-image-digest naming the reference PDS image`,
     )
-  }
+  const problems = manifestReadinessProblems(sources)
+  const probedDigest = sources.cutoverEvidence.uriProbe?.imageDigest
+  if (problems.length === 0 && probedDigest !== pdsImageDigest)
+    problems.push('--pds-image-digest differs from uriProbe.imageDigest')
+  if (problems.length > 0)
+    throw new Error(
+      `${suiteId} is prepared and the November manifest is not ready: ${problems.join('; ')}`,
+    )
 }
 
 export async function runSandbox(
@@ -595,6 +609,13 @@ export async function runSandbox(
     options.suite,
     await discoverSuites(source),
   )
+  const novemberSources = dependencies.novemberSources ?? loadNovemberSources()
+  if (PREPARED_SUITE_IDS.has(options.suite))
+    requirePreparedRunConditions(
+      options.suite,
+      options.pdsImageDigest,
+      novemberSources,
+    )
   const sandbox = await pinnedCheckout(
     options.sandboxDirectory,
     pins.atmosphereInABox,
@@ -622,7 +643,10 @@ export async function runSandbox(
   const childEnvironment = sandboxEnvironment(dockerConfig)
   const steps: Array<{ name: string; exitCode: 0 }> = []
   const results: Record<string, AssertionResult[]> = {}
-  let octoberPds: PdsBuildReceipt | undefined
+  const assertionsReached: Record<string, readonly string[]> = {}
+  let novemberInterop: JourneyReport | undefined
+  let pdsServices: Record<string, unknown> | undefined
+  let referencePds: PdsBuildReceipt | undefined
   let failedStep = 'docker-config'
   let gateError: unknown
   let summary: Record<string, unknown> | undefined
@@ -663,15 +687,43 @@ export async function runSandbox(
       workspace,
       pins,
     )
-    if (suites.some((suite) => octoberPdsSuites.has(suite.id))) {
-      failedStep = 'build-october-pds'
-      if (!pins.octoberSpacesPds)
-        throw new Error('October PDS source pin is missing')
-      const octoberReport = join(workspace, 'october-pds')
-      await mkdir(octoberReport, { mode: 0o700 })
-      octoberPds = await (dependencies.buildPds ?? buildAlphaPds)(
-        pins.octoberSpacesPds,
-        octoberReport,
+    failedStep = 'detect-docker-security'
+    const securityOptions = JSON.parse(
+      (
+        await command(
+          'docker',
+          ['info', '--format', '{{json .SecurityOptions}}'],
+          atmosphere,
+          childEnvironment,
+        )
+      ).output,
+    ) as unknown
+    if (
+      !Array.isArray(securityOptions) ||
+      !securityOptions.every((item) => typeof item === 'string')
+    )
+      throw new Error('Docker security options are invalid')
+    if (securityOptions.some((item: string) => item === 'name=rootless')) {
+      const rendererPath = join(atmosphere, 'lib/components.mjs')
+      const renderer = await readFile(rendererPath, 'utf8')
+      const runnerUser =
+        'runner.user = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`'
+      if (renderer.split(runnerUser).length !== 2)
+        throw new Error('AiaB runner user setting is missing or ambiguous')
+      await writeFile(
+        rendererPath,
+        renderer.replace(runnerUser, "runner.user = '0:0'"),
+      )
+      templateHashes['lib/components.mjs'] = await sha256File(rendererPath)
+    }
+    if (suites.some((suite) => referencePdsSuites.has(suite.id))) {
+      failedStep = 'build-reference-pds'
+      const referencePin = referenceHostPin(novemberSources)
+      const referenceReport = join(workspace, 'reference-pds')
+      await mkdir(referenceReport, { mode: 0o700 })
+      referencePds = await (dependencies.buildPds ?? buildAlphaPds)(
+        referencePin,
+        referenceReport,
       )
     }
     if (rustProbeSuites.has(options.suite)) {
@@ -722,29 +774,77 @@ export async function runSandbox(
       : sourceStack
     await writeFile(stackPath, stack)
 
-    if (octoberPds) {
-      const octoberImageId = octoberPds.imageId
-      const octoberStack = await readFile(
+    if (options.suite === 'november-interop') {
+      failedStep = 'prepare-november-webapp'
+      const templates = join(
+        workspace,
+        'stratos/test/spaces-alignment/templates',
+      )
+      const webappStack = join(templates, 'november-webapp.yaml')
+      const webappDefinition = join(
+        templates,
+        'november-webapp.definition.json',
+      )
+      const stack = await readFile(stackPath, 'utf8')
+      if (stack.split('\nvolumes:\n').length !== 2)
+        throw new Error('Sandbox stack does not contain one volume declaration')
+      const service = (await readFile(webappStack, 'utf8'))
+        .trimEnd()
+        .split('\n')
+        .map((line) => `  ${line}`)
+        .join('\n')
+      await writeFile(
+        stackPath,
+        stack
+          .replace('\nvolumes:\n', `\n${service}\n\nvolumes:\n`)
+          .replace(
+            'IDENTITY_PRIVATE_ORIGINS: ',
+            `IDENTITY_PRIVATE_ORIGINS: https://${NOVEMBER_INSPECTOR_OWNER_HANDLE},`,
+          ),
+      )
+
+      const definitionPath = join(
+        atmosphere,
+        'stacks/feedgen-ng-e2e.definition.json',
+      )
+      const definition = JSON.parse(
+        await readFile(definitionPath, 'utf8'),
+      ) as Record<string, unknown[]>
+      const extra = JSON.parse(
+        await readFile(webappDefinition, 'utf8'),
+      ) as Record<string, unknown[]>
+      for (const key of ['services', 'routes'])
+        definition[key].push(...extra[key])
+      await writeFile(definitionPath, JSON.stringify(definition))
+      templateHashes['stacks/november-webapp.yaml'] =
+        await sha256File(webappStack)
+      templateHashes['stacks/november-webapp.definition.json'] =
+        await sha256File(webappDefinition)
+    }
+
+    if (referencePds) {
+      const referenceImageId = referencePds.imageId
+      const referenceStack = await readFile(
         join(
           workspace,
-          'stratos/test/spaces-alignment/templates/october-pds.yaml',
+          'stratos/test/spaces-alignment/templates/reference-pds.yaml',
         ),
         'utf8',
       )
-      if (!octoberStack.includes('${OCTOBER_PDS_IMAGE_ID}'))
-        throw new Error('October PDS image placeholder is missing')
+      if (!referenceStack.includes('${REFERENCE_PDS_IMAGE_ID}'))
+        throw new Error('Reference PDS image placeholder is missing')
       await writeFile(
         stackPath,
         (await readFile(stackPath, 'utf8')).replace(
           '\nvolumes:\n',
           () =>
             '\n' +
-            octoberStack
-              .replace('${OCTOBER_PDS_IMAGE_ID}', octoberImageId)
+            referenceStack
+              .replace('${REFERENCE_PDS_IMAGE_ID}', referenceImageId)
               .split('\n')
               .map((line) => (line ? '  ' + line : line))
               .join('\n') +
-            '\nvolumes:\n  feedgen-e2e-pds-october-data: {}\n',
+            '\nvolumes:\n  feedgen-e2e-pds-reference-data: {}\n',
         ),
       )
       const definitionPath = join(
@@ -756,7 +856,7 @@ export async function runSandbox(
       ) as Record<string, unknown[]>
       const extraPath = join(
         workspace,
-        'stratos/test/spaces-alignment/templates/october-pds.definition.json',
+        'stratos/test/spaces-alignment/templates/reference-pds.definition.json',
       )
       const extra = JSON.parse(await readFile(extraPath, 'utf8')) as Record<
         string,
@@ -779,24 +879,24 @@ export async function runSandbox(
         })
       }
       browser.secretFiles!.push({
-        secret: 'feedgen-e2e-october-admin',
-        name: 'october-admin-password',
+        secret: 'feedgen-e2e-reference-admin',
+        name: 'reference-admin-password',
         uid: 1001,
         gid: 1001,
       })
       await writeFile(definitionPath, JSON.stringify(definition))
       const updatedStack = (await readFile(stackPath, 'utf8')).replace(
         'IDENTITY_PRIVATE_ORIGINS: ',
-        'IDENTITY_PRIVATE_ORIGINS: https://october-pds-e2e.atmosbox.test,https://faye.october-pds-e2e.atmosbox.test,https://edward.october-pds-e2e.atmosbox.test,https://rustfaye.october-pds-e2e.atmosbox.test,https://rustedward.october-pds-e2e.atmosbox.test,',
+        'IDENTITY_PRIVATE_ORIGINS: https://reference-pds-e2e.atmosbox.test,https://faye.reference-pds-e2e.atmosbox.test,https://edward.reference-pds-e2e.atmosbox.test,https://rustfaye.reference-pds-e2e.atmosbox.test,https://rustedward.reference-pds-e2e.atmosbox.test,',
       )
       await writeFile(stackPath, updatedStack)
-      templateHashes['stacks/october-pds.yaml'] = await sha256File(
+      templateHashes['stacks/reference-pds.yaml'] = await sha256File(
         join(
           workspace,
-          'stratos/test/spaces-alignment/templates/october-pds.yaml',
+          'stratos/test/spaces-alignment/templates/reference-pds.yaml',
         ),
       )
-      templateHashes['stacks/october-pds.definition.json'] =
+      templateHashes['stacks/reference-pds.definition.json'] =
         await sha256File(extraPath)
     }
 
@@ -855,13 +955,6 @@ export async function runSandbox(
       [join(atmosphere, 'state/browser-pds-admin'), ...applicationSecrets],
       atmosphere,
     )
-    failedStep = 'initialize-space-pds'
-    await initializeSpacePdsData(
-      composeFile,
-      projectName,
-      atmosphere,
-      childEnvironment,
-    )
     await runStep('check', 'deno', ['task', 'sandbox', 'check'])
     await runStep('build-tools', 'docker', [
       'compose',
@@ -877,6 +970,69 @@ export async function runSandbox(
       'runner',
     ])
     await runStep('up', 'deno', ['task', 'sandbox', 'up', '--build'])
+    failedStep = 'verify-pds-images'
+    const inspectService = async (service: string, image: string) => {
+      const container = (
+        await command(
+          'docker',
+          [
+            'compose',
+            '--file',
+            composeFile,
+            '--project-name',
+            projectName,
+            '--project-directory',
+            atmosphere,
+            'ps',
+            '-q',
+            service,
+          ],
+          atmosphere,
+          childEnvironment,
+        )
+      ).output.trim()
+      if (!container)
+        throw new Error(`Missing running container for ${service}`)
+      const actual = (
+        await command(
+          'docker',
+          ['inspect', '--format', '{{.Image}}', container],
+          atmosphere,
+          childEnvironment,
+        )
+      ).output.trim()
+      const expected = (
+        await command(
+          'docker',
+          ['image', 'inspect', '--format', '{{.Id}}', image],
+          atmosphere,
+          childEnvironment,
+        )
+      ).output.trim()
+      if (!/^sha256:[0-9a-f]{64}$/.test(actual) || actual !== expected)
+        throw new Error(`Running ${service} image does not match ${image}`)
+      return actual
+    }
+    const memberImageId = await inspectService('pds-space1', MEMBER_PDS_IMAGE)
+    const referenceImageId = referencePds
+      ? await inspectService('feedgen-e2e-pds-reference', referencePds.imageId)
+      : undefined
+    pdsServices = {
+      primary: {
+        service: 'pds-space1',
+        image: MEMBER_PDS_IMAGE,
+        imageId: memberImageId,
+      },
+      ...(referencePds
+        ? {
+            reference: {
+              service: 'feedgen-e2e-pds-reference',
+              imageId: referenceImageId,
+              build: referencePds,
+            },
+          }
+        : {}),
+    }
     await runStep('seed', 'deno', ['task', 'sandbox', 'seed'])
     failedStep = 'prepare-browser-accounts'
     const state = JSON.parse(
@@ -900,24 +1056,48 @@ export async function runSandbox(
     ) {
       throw new Error('AiaB did not seed both ordinary PDS accounts')
     }
+    const accounts = { ...ordinaryAccounts }
+    if (options.suite === 'november-interop') {
+      const owner = state.accounts?.[NOVEMBER_INSPECTOR_OWNER_HANDLE]
+      if (!owner?.did || !owner.password)
+        throw new Error('AiaB did not seed the alpha PDS inspector owner')
+      accounts[NOVEMBER_INSPECTOR_OWNER_HANDLE] = {
+        did: owner.did,
+        password: owner.password,
+      }
+    }
     const browserAccounts = join(atmosphere, 'state/browser-accounts.json')
-    await writeFile(
-      browserAccounts,
-      JSON.stringify({ accounts: ordinaryAccounts }),
-      { mode: 0o444 },
-    )
+    await writeFile(browserAccounts, JSON.stringify({ accounts }), {
+      mode: 0o444,
+    })
     await chmod(browserAccounts, 0o444)
     for (const suite of suites) {
       failedStep = `suite:${suite.id}`
       console.log(`AiaB [suite:${suite.id}]`)
-      results[suite.id] = await suite.run({
-        sandboxDirectory: atmosphere,
-        composeFile,
-        projectName,
-        scratchDirectory: workspace,
-        runCommand: async (file, args, cwd) =>
-          (await command(file, args, cwd, childEnvironment)).output,
-      })
+      try {
+        results[suite.id] = await suite.run({
+          sandboxDirectory: atmosphere,
+          composeFile,
+          projectName,
+          scratchDirectory: workspace,
+          ...(suite.id === 'november-interop'
+            ? {
+                recordJourneyReport: (report: JourneyReport) => {
+                  novemberInterop = report
+                },
+              }
+            : {}),
+          runCommand: async (file, args, cwd) =>
+            (await command(file, args, cwd, childEnvironment)).output,
+        })
+      } catch (error) {
+        const reached = assertionsReachedBy(error)
+        if (reached)
+          assertionsReached[suite.id] = reached.filter((id) =>
+            suite.requiredAssertions.includes(id),
+          )
+        throw error
+      }
       validateAssertions(suite, results[suite.id])
     }
     failedStep = 'write-receipt'
@@ -935,22 +1115,14 @@ export async function runSandbox(
       atmosphereSourceSha: pins.atmosphereInABox.revision,
       atmosphereFingerprint,
       templateHashes,
-      octoberPds,
-      pdsServices: {
-        primary: { service: 'pds-space1' },
-        ...(octoberPds
-          ? {
-              october: {
-                service: 'feedgen-e2e-pds-october',
-                build: octoberPds,
-              },
-            }
-          : {}),
-      },
+      referencePds,
+      pdsServices,
       projectName,
+      ...(novemberInterop ? { novemberInterop } : {}),
       suites: suites.map((suite) => ({
         id: suite.id,
         requiredAssertions: suite.requiredAssertions,
+        ...(suite.coverage ? { coverage: suite.coverage } : {}),
         passed: results[suite.id].length,
         skipped: 0,
         failed: 0,
@@ -992,7 +1164,9 @@ export async function runSandbox(
   } else {
     cleanup.compose = { status: 'not-needed' }
   }
-  for (const [imageKind, image] of [['octoberImage', octoberPds]] as const) {
+  for (const [imageKind, image] of [
+    ['referenceImage', referencePds],
+  ] as const) {
     if (image) {
       try {
         await command(
@@ -1043,6 +1217,9 @@ export async function runSandbox(
           projectName,
           failedStep,
           completedSteps: steps,
+          assertionsReached,
+          ...(pdsServices ? { pdsServices } : {}),
+          ...(novemberInterop ? { novemberInterop } : {}),
           error: 'Sandbox gate failed',
           cleanup,
         },

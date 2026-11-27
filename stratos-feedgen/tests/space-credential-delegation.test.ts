@@ -20,8 +20,7 @@ function decodeJwt(token: string): {
 
 const FEEDGEN_DID = 'did:web:feedgen.test'
 const STRATOS_DID = 'did:web:stratos.test'
-const SPACE_URI =
-  'at://did:web:stratos.test/space/zone.stratos.space.feed/spike'
+const SPACE_URI = 'at:space/did:web:stratos.test/zone.stratos.space.feed/spike'
 
 describe('mintDelegationToken', () => {
   it('produces the shape verifyDelegationToken expects', async () => {
@@ -43,7 +42,7 @@ describe('mintDelegationToken', () => {
     })
     expect(payload.iss).toBe(FEEDGEN_DID)
     expect(payload.sub).toBe(SPACE_URI)
-    expect(payload.aud).toBe(`${STRATOS_DID}#atproto_space_host`)
+    expect(payload.aud).toBe(`${STRATOS_DID}#atproto_pds`)
     expect(typeof payload.jti).toBe('string')
     expect(payload.iat).toBeGreaterThanOrEqual(before)
     expect(payload.iat).toBeLessThanOrEqual(after)

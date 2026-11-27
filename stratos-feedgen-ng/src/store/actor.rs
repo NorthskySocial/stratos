@@ -1,6 +1,8 @@
 use super::*;
 
-fn load_actor_enrollment(
+const EMPTY_BOUNDARIES_JSON: &[u8] = b"[]";
+
+pub(super) fn load_actor_enrollment(
     transaction: &rusqlite::Transaction<'_>,
     did: &str,
 ) -> Result<Option<StoredActorEnrollment>, StoreError> {
@@ -9,7 +11,8 @@ fn load_actor_enrollment(
             "SELECT did, boundaries_json, observed_at, enrolled FROM actor_enrollment WHERE did = ?1",
             [did],
             |row| {
-                let boundaries: Vec<String> = serde_json::from_slice(&row.get::<_, Vec<u8>>(1)?)
+                // Projections written before unenrollment bound a blob hold the empty list as text.
+                let boundaries: Vec<String> = serde_json::from_slice(row.get_ref(1)?.as_bytes()?)
                     .map_err(|_| rusqlite::Error::InvalidQuery)?;
                 let observed_at: String = row.get(2)?;
                 let enrolled: bool = row.get(3)?;
@@ -47,6 +50,63 @@ fn validate_actor_enrollment(enrollment: &ActorEnrollment) -> Result<(), StoreEr
     Ok(())
 }
 
+pub(super) struct UnenrolledActor {
+    pub removed_boundaries: Vec<String>,
+    pub pds_boundaries: Vec<String>,
+    pub removed_posts: u64,
+}
+
+pub(super) fn unenroll_actor(
+    transaction: &rusqlite::Transaction<'_>,
+    did: &str,
+    previous: Option<StoredActorEnrollment>,
+    observed_at: &str,
+) -> Result<UnenrolledActor, StoreError> {
+    let removed_boundaries = previous
+        .and_then(|previous| previous.enrollment)
+        .map(|previous| previous.boundaries)
+        .unwrap_or_default();
+    let pds_boundaries = transaction
+        .prepare("SELECT boundary FROM membership_baseline WHERE did = ?1 AND custody = 'pds'")
+        .map_err(StoreError::Open)?
+        .query_map([did], |row| row.get::<_, String>(0))
+        .map_err(StoreError::Open)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StoreError::Open)?;
+    for boundary in removed_boundaries
+        .iter()
+        .chain(pds_boundaries.iter())
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        super::space::invalidate_pds_member(transaction, boundary, did)?;
+    }
+    let removed_posts = transaction
+        .execute("DELETE FROM post WHERE author_did = ?1", [did])
+        .map_err(StoreError::Open)? as u64;
+    super::interactions::delete_actor_interactions(transaction, did)?;
+    transaction
+        .execute("DELETE FROM actor_cursor WHERE did = ?1", [did])
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute("DELETE FROM source_coverage WHERE source_id = ?1", [did])
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute("DELETE FROM suppression_marker WHERE source_id = ?1", [did])
+        .map_err(StoreError::Open)?;
+    transaction
+            .execute(
+                "INSERT INTO actor_enrollment (did, boundaries_json, observed_at, enrolled) VALUES (?1, ?2, ?3, 0)
+                 ON CONFLICT(did) DO UPDATE SET boundaries_json = excluded.boundaries_json, observed_at = excluded.observed_at, enrolled = excluded.enrolled",
+                params![did, EMPTY_BOUNDARIES_JSON, observed_at],
+            )
+            .map_err(StoreError::Open)?;
+    Ok(UnenrolledActor {
+        removed_boundaries,
+        pds_boundaries,
+        removed_posts,
+    })
+}
+
 impl EncryptedStore {
     pub fn apply_actor_page(&mut self, page: ActorPage) -> Result<(), StoreError> {
         validate_actor_page(&page)?;
@@ -69,6 +129,10 @@ impl EncryptedStore {
             return Err(StoreError::StaleCursor);
         }
         for post in &page.upserts {
+            // A replay or a later update must not re-admit a taken-down post.
+            if super::labels::record_taken_down(&transaction, &post.uri)? {
+                continue;
+            }
             transaction
                 .execute(
                     "INSERT INTO post (uri, author_did, cid, sort_at, indexed_at, retained_at, projection_bytes, record_json, blob_refs_json, row_version)
@@ -106,6 +170,12 @@ impl EncryptedStore {
             transaction
                 .execute("DELETE FROM post WHERE uri = ?1", [uri])
                 .map_err(StoreError::Open)?;
+        }
+        for interaction in &page.interactions.upserts {
+            super::interactions::upsert_interaction(&transaction, interaction)?;
+        }
+        for uri in &page.interactions.deletes {
+            super::interactions::delete_interaction(&transaction, uri)?;
         }
         transaction
             .execute(
@@ -187,6 +257,16 @@ impl EncryptedStore {
         Ok(Some(ActorSyncState { boundaries, cursor }))
     }
 
+    pub fn reset_actor_cursor(&mut self, authority_did: &str, did: &str) -> Result<(), StoreError> {
+        self.connection
+            .execute(
+                "DELETE FROM actor_cursor WHERE authority_did = ?1 AND did = ?2",
+                params![authority_did, did],
+            )
+            .map_err(StoreError::Open)?;
+        Ok(())
+    }
+
     pub fn reconcile_actor_enrollment(
         &mut self,
         did: &str,
@@ -209,20 +289,33 @@ impl EncryptedStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StoreError::Open)?;
         let previous = load_actor_enrollment(&transaction, did)?;
-        if let Some(previous) = &previous {
-            if previous.observed_at.as_str() > observed_at {
-                return Err(StoreError::StaleCursor);
+        if let Some(previous) = &previous
+            && previous.observed_at.as_str() > observed_at
+        {
+            return Err(StoreError::StaleCursor);
+        }
+        // The service stream replays `enroll` for every inactive member too, so
+        // an account takedown has to outrank an enrollment signal.
+        if enrollment.is_some() && super::labels::account_taken_down(&transaction, did)? {
+            let unenrolled = unenroll_actor(&transaction, did, previous, observed_at)?;
+            transaction.commit().map_err(StoreError::Open)?;
+            return Ok(EnrollmentReconciliation {
+                removed_boundaries: unenrolled.removed_boundaries,
+                removed_posts: unenrolled.removed_posts,
+                enrolled: false,
+            });
+        }
+        if let Some(previous) = &previous
+            && previous.observed_at == observed_at
+        {
+            if previous.enrollment.as_ref() == enrollment.as_ref() {
+                return Ok(EnrollmentReconciliation {
+                    removed_boundaries: Vec::new(),
+                    removed_posts: 0,
+                    enrolled: enrollment.is_some(),
+                });
             }
-            if previous.observed_at == observed_at {
-                if previous.enrollment.as_ref() == enrollment.as_ref() {
-                    return Ok(EnrollmentReconciliation {
-                        removed_boundaries: Vec::new(),
-                        removed_posts: 0,
-                        enrolled: enrollment.is_some(),
-                    });
-                }
-                return Err(StoreError::EnrollmentConflict);
-            }
+            return Err(StoreError::EnrollmentConflict);
         }
         let (removed_boundaries, removed_posts, enrolled) = match enrollment {
             Some(entry) => {
@@ -265,33 +358,14 @@ impl EncryptedStore {
                             params![boundary, did],
                         )
                         .map_err(StoreError::Open)?;
+                    super::interactions::delete_actor_boundary_interactions(
+                        &transaction,
+                        did,
+                        boundary,
+                    )?;
                     transaction
                         .execute(
                             "DELETE FROM source_coverage WHERE source_id = ?1 AND boundary = ?2",
-                            params![did, boundary],
-                        )
-                        .map_err(StoreError::Open)?;
-                    transaction
-                        .execute(
-                            "DELETE FROM space_cursor WHERE did = ?1 AND (boundary = ?2 OR boundary = '')",
-                            params![did, boundary],
-                        )
-                        .map_err(StoreError::Open)?;
-                    transaction
-                        .execute(
-                            "DELETE FROM space_sync_stage_cursor WHERE did = ?1 AND boundary = ?2",
-                            params![did, boundary],
-                        )
-                        .map_err(StoreError::Open)?;
-                    transaction
-                        .execute(
-                            "DELETE FROM space_sync_pending_verification WHERE did = ?1 AND (boundary = ?2 OR boundary = '')",
-                            params![did, boundary],
-                        )
-                        .map_err(StoreError::Open)?;
-                    transaction
-                        .execute(
-                            "DELETE FROM space_sync_stage WHERE did = ?1 AND boundary = ?2",
                             params![did, boundary],
                         )
                         .map_err(StoreError::Open)?;
@@ -318,59 +392,12 @@ impl EncryptedStore {
                 )
             }
             None => {
-                let removed_boundaries = previous
-                    .and_then(|previous| previous.enrollment)
-                    .map(|previous| previous.boundaries)
-                    .unwrap_or_default();
-                let pds_boundaries = transaction
-                    .prepare("SELECT boundary FROM membership_baseline WHERE did = ?1 AND custody = 'pds'")
-                    .map_err(StoreError::Open)?
-                    .query_map([did], |row| row.get::<_, String>(0))
-                    .map_err(StoreError::Open)?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(StoreError::Open)?;
-                for boundary in removed_boundaries
-                    .iter()
-                    .chain(pds_boundaries.iter())
-                    .collect::<std::collections::BTreeSet<_>>()
-                {
-                    super::space::invalidate_pds_member(&transaction, boundary, did)?;
-                }
-                let removed_posts = transaction
-                    .execute("DELETE FROM post WHERE author_did = ?1", [did])
-                    .map_err(StoreError::Open)? as u64;
-                transaction
-                    .execute("DELETE FROM actor_cursor WHERE did = ?1", [did])
-                    .map_err(StoreError::Open)?;
-                transaction
-                    .execute("DELETE FROM source_coverage WHERE source_id = ?1", [did])
-                    .map_err(StoreError::Open)?;
-                transaction
-                    .execute("DELETE FROM suppression_marker WHERE source_id = ?1", [did])
-                    .map_err(StoreError::Open)?;
-                transaction
-                    .execute("DELETE FROM space_cursor WHERE did = ?1", [did])
-                    .map_err(StoreError::Open)?;
-                transaction
-                    .execute("DELETE FROM space_sync_stage_cursor WHERE did = ?1", [did])
-                    .map_err(StoreError::Open)?;
-                transaction
-                    .execute(
-                        "DELETE FROM space_sync_pending_verification WHERE did = ?1",
-                        [did],
-                    )
-                    .map_err(StoreError::Open)?;
-                transaction
-                    .execute("DELETE FROM space_sync_stage WHERE did = ?1", [did])
-                    .map_err(StoreError::Open)?;
-                transaction
-                    .execute(
-                        "INSERT INTO actor_enrollment (did, boundaries_json, observed_at, enrolled) VALUES (?1, '[]', ?2, 0)
-                         ON CONFLICT(did) DO UPDATE SET boundaries_json = excluded.boundaries_json, observed_at = excluded.observed_at, enrolled = excluded.enrolled",
-                        params![did, observed_at],
-                    )
-                    .map_err(StoreError::Open)?;
-                (removed_boundaries, removed_posts, false)
+                let unenrolled = unenroll_actor(&transaction, did, previous, observed_at)?;
+                (
+                    unenrolled.removed_boundaries,
+                    unenrolled.removed_posts,
+                    false,
+                )
             }
         };
         transaction.commit().map_err(StoreError::Open)?;

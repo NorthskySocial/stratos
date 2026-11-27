@@ -8,9 +8,9 @@ import {
   UnsupportedDidMethodError,
   UnsupportedDidWebPathError,
 } from '@atproto/identity'
-import { expand as hkdfExpand } from '@noble/hashes/hkdf'
-import { hmac } from '@noble/hashes/hmac'
-import { sha256 } from '@noble/hashes/sha256'
+import { expand as hkdfExpand } from '@noble/hashes/hkdf.js'
+import { hmac } from '@noble/hashes/hmac.js'
+import { sha256 } from '@noble/hashes/sha2.js'
 import {
   CommitVerifier,
   type CommitVerifierDeps,
@@ -18,7 +18,7 @@ import {
 
 // 90s-anime crew DIDs and space, matching the space-sync test fixtures.
 const SPACE_URI =
-  'at://did:web:stratos.test/space/zone.stratos.space.feed/bebop-crew'
+  'at:space/did:web:stratos.test/zone.stratos.space.feed/bebop-crew'
 const SPIKE_DID = 'did:plc:spikespiegel'
 const REV = '3juwxyz'
 
@@ -124,9 +124,9 @@ function buildVerifier(
 }
 
 describe('CommitVerifier', () => {
-  it('accepts a validly signed commit', async () => {
+  it('accepts a validly signed commit with 32 bytes of ikm', async () => {
     const keypair = await Secp256k1Keypair.create({ exportable: true })
-    const commit = await signTestCommit(keypair)
+    const commit = await signTestCommit(keypair, { ikm: randomBytes(32) })
     const verifier = buildVerifier(stubResolver(async () => keypair.did()))
 
     const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
@@ -328,6 +328,14 @@ describe('CommitVerifier', () => {
       { ...validCommitFields(), ikm: 'not-bytes' },
     ],
     [
+      'empty ikm',
+      { ...validCommitFields(), ikm: bytesField(new Uint8Array(0)) },
+    ],
+    [
+      '31-byte ikm',
+      { ...validCommitFields(), ikm: bytesField(new Uint8Array(31)) },
+    ],
+    [
       'mac not bytes, other fields valid',
       { ...validCommitFields(), mac: 'not-bytes' },
     ],
@@ -490,7 +498,7 @@ describe('CommitVerifier', () => {
   it('binds the space into the signed context, rejecting cross-space replay', async () => {
     const keypair = await Secp256k1Keypair.create({ exportable: true })
     const otherSpace =
-      'at://did:web:stratos.test/space/zone.stratos.space.feed/nerv-pilots'
+      'at:space/did:web:stratos.test/zone.stratos.space.feed/nerv-pilots'
     const commit = await signTestCommit(keypair, { space: otherSpace })
     const verifier = buildVerifier(stubResolver(async () => keypair.did()))
 

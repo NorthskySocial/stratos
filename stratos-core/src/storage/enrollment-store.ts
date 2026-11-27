@@ -25,6 +25,12 @@ export interface StoredEnrollment {
    * migration or audit pass can find, instead of it living only in a log line.
    */
   capabilityVerdict?: SpacesCapability
+  /**
+   * An operator deactivated this enrollment by hand. Stored apart from
+   * `active` so lifting a takedown cannot reactivate an operator-held member.
+   * Absent on write means false.
+   */
+  operatorHold?: boolean
 }
 
 /**

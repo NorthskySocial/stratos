@@ -6,6 +6,7 @@ import { SPACE_WRITE_SCOPE } from '../src/lib/auth'
 import type { FeedPost } from '../src/lib/feed'
 
 const DID = 'did:plc:misato'
+const LEGACY_SPACE_POST = `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`
 
 function post(overrides: Partial<FeedPost> = {}): FeedPost {
   return {
@@ -88,7 +89,7 @@ describe('deletePost', () => {
 
     await deletePost({
       post: post({
-        uri: `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
+        uri: `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
         isPrivate: true,
       }),
       session: session(fetchHandler),
@@ -106,7 +107,7 @@ describe('deletePost', () => {
       headers: { 'content-type': 'application/json' },
     })
     expect(JSON.parse(request.body)).toEqual({
-      space: 'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve',
+      space: 'at:space/did:web:stratos.example/zone.stratos.space.feed/nerve',
       repo: DID,
       collection: 'zone.stratos.feed.post',
       rkey: 'three',
@@ -142,11 +143,110 @@ describe('deletePost', () => {
     expect(deleteRecord).not.toHaveBeenCalled()
   })
 
+  it('rejects a space post written by another author without a request', async () => {
+    const fetchHandler = vi.fn()
+
+    await expect(
+      deletePost({
+        post: post({
+          uri: `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/three`,
+          isPrivate: true,
+        }),
+        session: session(fetchHandler),
+        publicAgent: agent(),
+        stratosAgent: null,
+      }),
+    ).rejects.toThrow('You can only delete your own posts.')
+    expect(fetchHandler).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['an earlier-spelling record', LEGACY_SPACE_POST],
+    ['an empty string', ''],
+    ['plain text', 'the captain'],
+  ])(
+    'rejects %s as an invalid post URI without a request',
+    async (_label, uri) => {
+      const fetchHandler = vi.fn()
+      const publicDelete = vi.fn()
+
+      await expect(
+        deletePost({
+          post: post({ uri, isPrivate: true }),
+          session: session(fetchHandler),
+          publicAgent: agent(publicDelete),
+          stratosAgent: agent(publicDelete),
+        }),
+      ).rejects.toThrow('The post URI is invalid.')
+      expect(fetchHandler).not.toHaveBeenCalled()
+      expect(publicDelete).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([
+    [
+      'a space record of another collection',
+      `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/app.bsky.feed.like/three`,
+      true,
+    ],
+    [
+      'a space record of the public post collection',
+      `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/app.bsky.feed.post/three`,
+      true,
+    ],
+    [
+      'a private custody record of another collection',
+      `at://${DID}/app.bsky.feed.like/two`,
+      true,
+    ],
+    [
+      'a private custody record of the public post collection',
+      `at://${DID}/app.bsky.feed.post/two`,
+      true,
+    ],
+    [
+      'a public record of another collection',
+      `at://${DID}/app.bsky.feed.like/one`,
+      false,
+    ],
+    [
+      'a public record of the private post collection',
+      `at://${DID}/zone.stratos.feed.post/one`,
+      false,
+    ],
+  ])(
+    'rejects %s as an invalid post URI before any request',
+    async (_label, uri, isPrivate) => {
+      const fetchHandler = vi.fn()
+      const publicDelete = vi.fn()
+      const stratosDelete = vi.fn()
+      const globalFetch = vi.fn()
+      vi.stubGlobal('fetch', globalFetch)
+
+      try {
+        await expect(
+          deletePost({
+            post: post({ uri, isPrivate }),
+            session: session(fetchHandler),
+            publicAgent: agent(publicDelete),
+            stratosAgent: agent(stratosDelete),
+          }),
+        ).rejects.toThrow('The post URI is invalid.')
+      } finally {
+        vi.unstubAllGlobals()
+      }
+      expect(fetchHandler).not.toHaveBeenCalled()
+      expect(globalFetch).not.toHaveBeenCalled()
+      expect(publicDelete).not.toHaveBeenCalled()
+      expect(stratosDelete).not.toHaveBeenCalled()
+    },
+  )
+
   it('reports a failed PDS space deletion', async () => {
     await expect(
       deletePost({
         post: post({
-          uri: `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
+          uri: `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
           isPrivate: true,
         }),
         session: session(
@@ -163,7 +263,7 @@ describe('deletePost', () => {
     await expect(
       deletePost({
         post: post({
-          uri: `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
+          uri: `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
           isPrivate: true,
         }),
         session: session(
@@ -186,7 +286,7 @@ describe('deletePost', () => {
     await expect(
       deletePost({
         post: post({
-          uri: `at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
+          uri: `at:space/did:web:stratos.example/zone.stratos.space.feed/nerve/${DID}/zone.stratos.feed.post/three`,
           isPrivate: true,
         }),
         session: staleSession,

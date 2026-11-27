@@ -1,3 +1,5 @@
+import { parseRecordAddress } from '@northskysocial/stratos-client'
+
 const ROOM_ROUTE = /^\/rooms\/([^/?#]+)\/?$/
 
 /** Build the durable room route. Only the public feed ID enters the URL. */
@@ -19,17 +21,27 @@ export function roomIdFromPath(pathname: string): string | null {
   }
 }
 
-/** Build a shareable topic URL while keeping the authoritative AT URI intact. */
+/** Build a shareable topic URL while keeping the authoritative record address intact. */
 export function topicPath(roomId: string, topicUri: string): string {
-  if (!topicUri.startsWith('at://'))
-    throw new Error('A topic AT URI is required')
+  if (!parseRecordAddress(topicUri).ok)
+    throw new Error('A topic record address is required')
   return `${roomPath(roomId)}?topic=${encodeURIComponent(topicUri)}`
 }
 
-/** Read the selected topic AT URI from a room URL. */
-export function topicUriFromPath(path: string): string | null {
+function topicParam(path: string): string | null {
   const query = path.indexOf('?')
   if (query < 0 || !roomIdFromPath(path)) return null
-  const topic = new URLSearchParams(path.slice(query + 1)).get('topic')
-  return topic?.startsWith('at://') ? topic : null
+  return new URLSearchParams(path.slice(query + 1)).get('topic')
+}
+
+/** Read the selected topic record address from a room URL; null when absent or refused. */
+export function topicUriFromPath(path: string): string | null {
+  const topic = topicParam(path)
+  return topic !== null && parseRecordAddress(topic).ok ? topic : null
+}
+
+/** A room URL carries a topic value that is not a record address. */
+export function topicLinkIsRefused(path: string): boolean {
+  const topic = topicParam(path)
+  return topic !== null && !parseRecordAddress(topic).ok
 }

@@ -110,6 +110,40 @@ impl SpaceSyncOutcome {
     }
 }
 
+/// How many members of one pass ended each way.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SpaceSyncCounts {
+    pub promoted: usize,
+    pub unchanged: usize,
+    pub replaced: usize,
+    pub cleared: usize,
+    pub deferred: usize,
+    pub failed: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LabelPollOutcome {
+    Ok,
+    CaughtUp,
+    Unavailable,
+    Authentication,
+    Rejected,
+    Store,
+}
+
+impl LabelPollOutcome {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::CaughtUp => "caught_up",
+            Self::Unavailable => "unavailable",
+            Self::Authentication => "authentication",
+            Self::Rejected => "rejected",
+            Self::Store => "store",
+        }
+    }
+}
+
 #[derive(Default)]
 struct RuntimeState {
     ready: AtomicBool,
@@ -119,6 +153,7 @@ struct RuntimeState {
     actor_capacity: AtomicU64,
     last_space_sync_success: AtomicU64,
     actor_reconnects: AtomicU64,
+    oversized_actor_frames: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -130,12 +165,14 @@ pub struct FeedTelemetry {
     feed_requests: Option<Counter<u64>>,
     posts_returned: Option<Histogram<u64>>,
     reconnects: Option<Counter<u64>>,
+    oversized_actor_frames: Option<Counter<u64>>,
     index_operations: Option<Counter<u64>>,
     cache_requests: Option<Counter<u64>>,
     reconciliation_duration: Option<Histogram<f64>>,
     reconciliation_outcomes: Option<Counter<u64>>,
     space_sync_duration: Option<Histogram<f64>>,
     space_sync_outcomes: Option<Counter<u64>>,
+    label_polls: Option<Counter<u64>>,
     // These keep observable callbacks alive for the provider lifetime.
     _heartbeat: Option<ObservableGauge<u64>>,
     _readiness: Option<ObservableGauge<u64>>,
@@ -156,12 +193,14 @@ impl FeedTelemetry {
             feed_requests: None,
             posts_returned: None,
             reconnects: None,
+            oversized_actor_frames: None,
             index_operations: None,
             cache_requests: None,
             reconciliation_duration: None,
             reconciliation_outcomes: None,
             space_sync_duration: None,
             space_sync_outcomes: None,
+            label_polls: None,
             _heartbeat: None,
             _readiness: None,
             _connected: None,
@@ -172,7 +211,7 @@ impl FeedTelemetry {
         }
     }
 
-    fn enabled(provider: &SdkMeterProvider) -> Self {
+    pub(crate) fn enabled(provider: &SdkMeterProvider) -> Self {
         let meter = provider.meter(METER_SCOPE);
         let state = Arc::new(RuntimeState::default());
         let heartbeat_state = Arc::clone(&state);
@@ -221,6 +260,12 @@ impl FeedTelemetry {
                     .with_description("Scheduled subscription reconnects.")
                     .build(),
             ),
+            oversized_actor_frames: Some(
+                meter
+                    .u64_counter("stratos.feedgen.subscription.oversized_frames")
+                    .with_description("Actor commit frames refused for exceeding the frame limit.")
+                    .build(),
+            ),
             index_operations: Some(
                 meter
                     .u64_counter("stratos.feedgen.index.operations")
@@ -257,6 +302,12 @@ impl FeedTelemetry {
                 meter
                     .u64_counter("stratos.feedgen.space_sync.outcomes")
                     .with_description("Space-sync pass and member outcomes.")
+                    .build(),
+            ),
+            label_polls: Some(
+                meter
+                    .u64_counter("stratos.feedgen.label_poll")
+                    .with_description("Moderation label poll outcomes.")
                     .build(),
             ),
             _heartbeat: Some(
@@ -384,6 +435,18 @@ impl FeedTelemetry {
     pub(crate) fn actor_reconnects(&self) -> u64 {
         self.state.actor_reconnects.load(Ordering::Relaxed)
     }
+    pub fn record_oversized_actor_frame(&self) {
+        self.state
+            .oversized_actor_frames
+            .fetch_add(1, Ordering::Relaxed);
+        if let Some(metric) = &self.oversized_actor_frames {
+            metric.add(1, &[]);
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn oversized_actor_frames(&self) -> u64 {
+        self.state.oversized_actor_frames.load(Ordering::Relaxed)
+    }
     pub fn record_cache(&self, outcome: &'static str) {
         if let Some(metric) = &self.cache_requests {
             metric.add(1, &[KeyValue::new("outcome", outcome)]);
@@ -425,10 +488,7 @@ impl FeedTelemetry {
         &self,
         outcome: SpaceSyncOutcome,
         elapsed: Duration,
-        succeeded: usize,
-        failed: usize,
-        deferred: usize,
-        rejected: usize,
+        counts: SpaceSyncCounts,
     ) {
         if let Some(metric) = &self.space_sync_duration {
             metric.record(
@@ -438,29 +498,28 @@ impl FeedTelemetry {
         }
         if let Some(metric) = &self.space_sync_outcomes {
             metric.add(1, &[KeyValue::new("outcome", "pass")]);
-            if succeeded != 0 {
-                metric.add(succeeded as u64, &[KeyValue::new("outcome", "member_ok")]);
-            }
-            if failed != 0 {
-                metric.add(failed as u64, &[KeyValue::new("outcome", "member_error")]);
-            }
-            if deferred != 0 {
-                metric.add(
-                    deferred as u64,
-                    &[KeyValue::new("outcome", "member_deferred")],
-                );
-            }
-            if rejected != 0 {
-                metric.add(
-                    rejected as u64,
-                    &[KeyValue::new("outcome", "member_rejected")],
-                );
+            for (members, label) in [
+                (counts.promoted, "member_ok"),
+                (counts.unchanged, "member_unchanged"),
+                (counts.replaced, "member_replaced"),
+                (counts.cleared, "member_cleared"),
+                (counts.failed, "member_error"),
+                (counts.deferred, "member_deferred"),
+            ] {
+                if members != 0 {
+                    metric.add(members as u64, &[KeyValue::new("outcome", label)]);
+                }
             }
         }
         if outcome == SpaceSyncOutcome::Ok {
             self.state
                 .last_space_sync_success
                 .store(unix_seconds(), Ordering::Relaxed);
+        }
+    }
+    pub fn record_label_poll(&self, outcome: LabelPollOutcome) {
+        if let Some(metric) = &self.label_polls {
+            metric.add(1, &[KeyValue::new("outcome", outcome.label())]);
         }
     }
     pub fn start(&self, stage: FeedReadStage) -> FeedReadStageTimer<'_> {
@@ -712,7 +771,17 @@ mod tests {
         telemetry.record_reconnect("actor");
         telemetry.record_index_operations(2, 1, "ok");
         telemetry.record_reconciliation(ReconciliationOutcome::Ok, Duration::from_millis(1));
-        telemetry.record_space_sync(SpaceSyncOutcome::Ok, Duration::from_millis(1), 1, 0, 0, 0);
+        telemetry.record_space_sync(
+            SpaceSyncOutcome::Ok,
+            Duration::from_millis(1),
+            SpaceSyncCounts {
+                promoted: 1,
+                unchanged: 1,
+                replaced: 1,
+                cleared: 1,
+                ..SpaceSyncCounts::default()
+            },
+        );
         telemetry
             .start(FeedReadStage::VerifyAuthorization)
             .finish(FeedReadStageOutcome::Success);
@@ -730,6 +799,7 @@ mod tests {
             "stratos.feedgen.cache.requests",
             "stratos.feedgen.reconciliation.duration",
             "stratos.feedgen.space_sync.duration",
+            "stratos.feedgen.space_sync.outcomes",
         ] {
             assert!(metrics.contains(name), "missing metric {name}");
         }
@@ -741,9 +811,14 @@ mod tests {
             "waiting",
             "capacity",
             "verify_authorization",
+            "member_ok",
+            "member_unchanged",
+            "member_replaced",
+            "member_cleared",
         ] {
             assert!(metrics.contains(label), "missing fixed label {label}");
         }
+        assert!(!metrics.contains("member_rejected"));
         #[cfg(target_os = "linux")]
         {
             assert!(metrics.contains("process.resident_memory"));

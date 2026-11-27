@@ -3,7 +3,7 @@
   "valid": [
     {
       "name": "keeps the space authority distinct from the post author",
-      "input": "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/see-you",
+      "input": "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/see-you",
       "expected": {
         "spaceDid": "did:web:stratos.example.test",
         "spaceType": "zone.stratos.space.feed",
@@ -15,7 +15,7 @@
     },
     {
       "name": "preserves an uppercase NSID label",
-      "input": "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/Zone.stratos.feed.post/see-you",
+      "input": "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/Zone.stratos.feed.post/see-you",
       "expected": {
         "spaceDid": "did:web:stratos.example.test",
         "spaceType": "zone.stratos.space.feed",
@@ -33,7 +33,7 @@
     },
     {
       "name": "rejects a missing record component",
-      "input": "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post"
+      "input": "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post"
     },
     {
       "name": "rejects a non-space scheme",
@@ -41,7 +41,7 @@
     },
     {
       "name": "rejects an empty NSID label",
-      "input": "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone..post/see-you"
+      "input": "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone..post/see-you"
     }
   ]
 }

@@ -111,8 +111,8 @@ trusted hosts.
 
 ### 3. Write the post
 
-Branch on `target.kind`. The Stratos branch writes a three-segment record. The
-PDS branch writes into a space.
+Branch on `target.kind`. The Stratos branch writes a record in a Stratos
+repository, addressed by an `at://` URI. The PDS branch writes into a space.
 
 ```typescript
 import { Agent } from '@atproto/api'
@@ -182,7 +182,7 @@ async function createPrivatePost(
 
 `boundary` is one of the user's boundaries, such as
 `did:web:stratos.example.com/general`. `spaceUri` is the same boundary as a
-space: `at://did:web:stratos.example.com/space/zone.stratos.space.feed/general`.
+space: `at:space/did:web:stratos.example.com/zone.stratos.space.feed/general`.
 
 Three rules apply to the Stratos branch:
 

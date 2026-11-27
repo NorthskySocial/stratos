@@ -5,22 +5,25 @@ serves authenticated boundary-scoped feeds, and stays closed until the
 authority stream has reconciled.
 
 It also refreshes authority-derived PDS-space membership and synchronizes only
-those targets. Pages are staged locally and become visible only after their
-terminal commit verifies. Requests use `STRATOS_SERVICE_URL` for network
+those targets. A member's records become visible only after the set hash of
+the member's repo equals the `data` of a MAC-authenticated commit. Requests use `STRATOS_SERVICE_URL` for network
 reachability. `STRATOS_PUBLIC_URL` remains validated configuration for the
 authority public endpoint; space signatures do not bind a URL.
 
 ## Space credential transport
 
-The Rust client requires the standard HTTP-signature receiver from Plan 014
-(PR #218) and an October-compatible spaces PDS. It sends its existing
-service-signed delegation as `Authorization: Bearer`, signs that header with a
-fresh P-256 `did:key`, and sends only `space` in JSON. Authority service-member
-and app admission still apply. Ordinary service JWTs and caller authentication
-are unchanged; this is not the independent DPoP ADR in PR #217.
+The Rust client gets each space credential from the authority's
+`zone.stratos.space.getSpaceCredential`, which accepts the HTTP-signature
+exchange, and reads a member's repo from the member's PDS under the November
+space contract. It sends its service-signed delegation as
+`Authorization: Bearer`, signs that header with a fresh P-256 `did:key`, and
+sends only `space` in JSON. Authority service-member and app admission still
+apply. Ordinary service JWTs and caller authentication are unchanged; the
+exchange uses no DPoP proof.
 
-Read requests use `Authorization: Atproto-Space`, `Atproto-Space-Audience`,
-`Signature-Input`, and `Signature`. Repo operations name the actual repo owner
+Read requests use `Authorization: Atproto-Space-Credential`,
+`Atproto-Space-Audience`, `Signature-Input`, and `Signature`. The signature
+carries `tag="atproto-space-credential"`. Repo operations name the actual repo owner
 DID; authority membership listing names the space authority DID. Neither a host
 nor a service fragment is a read audience. Presentations may be reused at the
 same audience until the credential expires; no method or URL proof is added.
@@ -34,35 +37,45 @@ the authority, space, and generated key, with a positive lifetime of at most
 3,600 seconds and issuance no more than five seconds in the future.
 
 Restart the receiver and Rust client together to discard old cached grants.
-The receiver can coexist with legacy OAuth/DPoP clients; the Rust client has no
-legacy transport fallback. The AiaB primary PDS now uses the pinned October
-source. Deployed images must still be traced to that source revision and an
-immutable image digest; a source checkout alone does not prove what is running.
+The receiver also serves OAuth/DPoP clients; the Rust client has no other
+transport to fall back to. No pinned PDS accepts the new space URI spelling yet,
+so the client has not read from a real host. Trace a deployed image to its
+source revision and an immutable image digest; a source checkout alone does not
+prove what is running.
 
 ## Architecture
 
 `main.rs` composes the runtime from authority and identity clients, custody
 sync workers, the lifecycle, and an encrypted projection. The HTTP router in
 `server.rs` delegates feed, blob, identity, viewer authorization, and private
-response handling to focused `server/` modules. `feed_service.rs` and
-`space_sync.rs` enforce read and space-target rules; `service.rs` coordinates
-projection admission and invalidation. `store.rs` defines the SQLCipher store
-and shared types; `store/` groups connection, actor, space, read, and retention
-operations. Rust traits live near the consumers that need them.
+response handling to focused `server/` modules. `feed_service.rs` enforces
+read rules. `space_sync.rs` holds the predicates that decide what a space
+record admits, and the store's target check in `store/space_verification.rs`
+enforces the space-target rules. `service.rs` coordinates projection admission
+and invalidation. `pds_space_scheduler.rs` runs the
+passes over PDS-custody members, and `pds_space_sync.rs` synchronizes one
+member's repo in one space. `space_host.rs` makes the authenticated reads,
+`space_kem.rs` and `space_mac.rs` derive and check the response MAC, and
+`space_archive.rs` reads the `getRepo` archive. `store.rs` defines the
+SQLCipher store and shared types; `store/` groups connection, actor, space,
+read, and retention operations, and `store/space_verification.rs` keeps the
+verified state of each member's repo and promotes changes to it. `label_poller.rs` follows the authority's moderation label log and
+applies takedowns and their negations; `moderation_label.rs` validates label
+pages; `store/labels.rs` keeps the label cursor and the subjects under
+takedown. Rust traits live near the consumers that need them.
 
 Stratos-custody actors arrive through authenticated subscriptions. PDS-custody
 repos are selected from current authority membership, not record claims or
-writer discovery. Foreign pages stay unqueryable until their terminal commit
-verifies. A current viewer enrollment is required before local posts or blobs
+writer discovery. Foreign records stay unqueryable until their set hash
+matches the commit. A current viewer enrollment is required before local posts or blobs
 can be returned. The projection is bounded and rebuildable; its encrypted disk
 contents are not an independent authorization source. Blob content uses a
 bounded in-memory cache and never enters the projection.
 
 Authority membership selects PDS repositories and current viewer enrollment
 gates feed responses. Removing a member does not stop writes at that member's
-PDS. In-flight foreign synchronization also needs a durable generation fence
-so a page fetched before removal cannot be promoted afterward; deploy the
-Feedgen version with that fence before relying on this guarantee. An
+PDS. A foreign synchronization carries the membership generation it started
+under, so a poll read before a removal cannot be promoted afterward. An
 outstanding credential accepted by a foreign host can remain usable until its
 expiry. See [the current spaces contract](../docs/architecture/spaces-alignment.md).
 
@@ -100,33 +113,218 @@ To poll a PDS on a private network, set both
 `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS` (the same CIDR format). This grant is
 separate from PLC trust and applies to that PDS origin only.
 
-## Staged space limits
+## Actor commit frames
 
-The validated `FEEDGEN_PROJECTION_MAX_BYTES` budget includes published posts,
-staged private payloads, and stage checkpoints. The memory profile uses its
-fixed 16 MiB projection budget; an encrypted volume requires an explicit
+Stratos sends each commit of an actor as one `#commit` frame. The worker
+parses every op of the frame first, then writes the ops and the new cursor in
+one SQLite transaction. An unreadable post refuses the whole frame, and a
+store error rolls the transaction back, so the cursor moves only when every op
+applied. An unreadable like or repost is skipped, as before.
+
+`MAX_ACTOR_FRAME_BYTES` in `config.rs` is 2,359,296 bytes. Stratos refuses a
+commit whose frame is larger (`MAX_COMMIT_FRAME_BYTES` in stratos-service), so
+the two numbers must stay equal. The value covers the largest frame a boundary
+`applyWrites` can produce, 200 writes in a body of at most 1,000,000 bytes:
+
+| Part                                                           | Bytes at most |
+| -------------------------------------------------------------- | ------------- |
+| Records: 9 bytes of CBOR for every 4 bytes of JSON             | 2,250,000     |
+| Per op: CID, op boundary of 253 bytes, record key, field names | 45,300        |
+| Frame header, sequence, time, revision, a DID of 2,048 bytes   | 2,139         |
+| Total                                                          | 2,297,439     |
+
+An integer of 2^32 or more written as `5e9` takes 3 bytes of JSON and 9 of
+CBOR, the largest growth of any JSON value. With its separating comma that is
+4 bytes of body for 9 bytes of frame. The records row counts the whole body at
+that rate. The per-op row is what each op adds beyond that: at most 393 bytes,
+less 2.25 times the 74 bytes its write's own `$type`, `collection` and `value`
+fields took. The limit leaves 61,857 bytes above the total. A body built to
+reach the total measured 2,274,539 bytes.
+
+A frame over the limit ends the connection, and the worker reconnects at the
+same cursor. It logs `event=actor_frame_too_large limit_bytes=<n>` and counts
+`stratos.feedgen.subscription.oversized_frames` each time. The log line names
+no DID, record URI, or CID.
+
+Each connection holds at most one frame. At the 64-connection maximum that is
+144 MiB of frames, and 18 MiB at the default of 8; at 32 KiB it was 2 MiB and
+256 KiB. Parsing runs under the lifecycle lock, so one frame is decoded at a
+time. A frame decodes to one `serde_cbor::Value` of 32 bytes per CBOR item. A
+frame at the limit made of one-byte items is about 75 MB of values, and up to
+twice that while a vector grows; at 32 KiB it was about 1 MB. A commit Stratos
+accepts holds at most about 500,000 items, because each takes at least 2 bytes
+of the body: about 16 MB of values.
+
+## Moderation labels
+
+The feed generator reads the authority's moderation label log every 10 seconds.
+It applies takedown labels to its local projection.
+
+Feeds open only after the feed generator has read the label log to its head.
+Feeds return `FeedNotReady` once 50 seconds, which is five polls, pass without
+such a read. A separate task enforces this. It holds while a poll is still
+running, when polls stop at their limit of 50 pages, and when the polling task
+has died. Feeds reopen without a restart once the log is read to its head
+again.
+
+A takedown therefore stays in feeds for at most 50 seconds after the authority
+records it. With a reachable log it normally leaves within one poll. While
+lifted account takedowns are being checked, a poll first spends up to 10
+seconds asking the authority about them, plus one 5-second request already
+started. That delays the label pages by up to 15 seconds.
+
+The feed generator DID needs a service enrollment that covers every boundary it
+serves. With no service enrollment, the authority refuses its label queries and
+its feeds never open. An enrollment that covers only some served boundaries
+gives no error. The authority returns only the labels of the covered
+boundaries, and its cursor moves past the labels of the others.
+
+The store therefore keeps the label scope with the cursor. The scope is the
+served feed boundaries that the authority's enrollment answer for the feed
+generator DID covers. Each poll first asks the authority for that answer. It is
+one request of at most 5 seconds, and a failed request fails the poll. The
+comparison uses the full `did/name` form of a boundary, so write served
+boundaries in that form.
+
+When the scope gains a boundary, through a new feed or a wider enrollment, the
+feed generator reads the whole label log again from the start. Every feed
+returns `FeedNotReady` until that read reaches the head, so a new boundary
+serves nothing first. A long log takes several polls, at most 50 pages each. A
+scope that only shrinks keeps the cursor and replays nothing.
+
+A replay applies only the labels it has not applied before. Posts, members and
+pending reinstatements that the first read handled stay as they are. To make
+that possible, the store keeps a row for every lifted takedown.
+
+The authority can answer for the feed generator DID from its cache for up to 60
+seconds. A boundary that leaves the enrollment and comes back within that time
+can lose the labels recorded in between.
+
+An account takedown removes the member's posts, sync position and viewer
+authorization. It also stops the member's worker. This happens even when the
+negation of the takedown is on the same page of the log. A replayed `enroll`
+event or a space poll already in flight does not re-admit the member while the
+takedown stands. An enrollment answer for the member as a viewer grants no
+feed or blob reads while the takedown stands, including an answer that was
+already in flight when the takedown was applied.
+
+When an account takedown is lifted, the feed generator asks the authority
+whether the member is enrolled again. It asks on up to 6 polls. If another hold
+remains, the member returns to feeds only after a new enrollment event. If the
+member's worker cannot start because the actor pool is at its limit of 4,096
+tracked actors, the reinstatement stays pending. The next poll asks again and
+costs no attempt.
+
+A record takedown removes the post and evicts its cached blobs. Later updates
+and replays of that post are refused while the takedown stands.
+
+When a record takedown is lifted, the feed generator reads the author again.
+For a Stratos-hosted author, it replays the author from the start of the stream.
+The replayed author takes the next free connection slot ahead of authors that
+are waiting their turn. A running worker is not interrupted. For a self-hosted
+author, it clears the verified space state. The next pass then reads the whole
+repo as an archive. A sync of that author already in flight is refused, so it
+cannot store its old state after the reset.
+
+The post returns within these bounds, with a reachable authority:
+
+- Stratos-hosted author: two polls (20 seconds) to see the negation and act on
+  it, plus at most one worker lease (15 seconds) for a slot, plus the replay.
+- Self-hosted author: two polls (20 seconds), plus the wait for the next space
+  pass (up to 30 seconds), plus that pass, including its archive read.
+
+Each poll can add up to 15 seconds while lifted account takedowns are being
+checked. The bounds assume the replay or listing finishes within one worker
+lease or one pass. A longer history continues on later turns. The bounds do not
+apply when the actor pool is at its limit of 4,096 tracked actors. The replay is
+then retried on later polls.
+
+A post returns only if the stream or the host still carries it. Other taken-down
+posts of the same author stay refused.
+
+With several Stratos processes, another process can report a member as enrolled
+for up to 60 seconds after a takedown. It answers from its own cache. The feed
+generator refuses that answer while the takedown stands.
+
+A label subject URI is read with the `@atproto/syntax` rules. A collection such
+as `com.123.post` is valid, because only the first segment and the last
+segment of an NSID must start with a letter.
+
+The TypeScript feed generator does not apply labels. Label logs and metrics
+carry fixed event names only. They never carry a DID, record URI or CID.
+
+## Space sync and limits
+
+For each PDS-custody member and space, the store keeps the last verified
+revision, a set-hash state, and the CID at every record path. Each cycle reads
+`listRepoOps` pages with `since` set to the verified revision. Every response
+is authenticated by a MAC keyed with a secret that HPKE (export only) derives
+from a one-time key and the member's `#atproto_kem` key. The cycle applies the
+ops of all pages together and promotes them in one transaction only when the
+set hash it computes equals the `data` of the last page's commit. Nothing is
+staged: the ops of a poll stay in memory until that write.
+
+When incremental sync cannot work, the cycle reads the whole repo as an
+archive (`getRepo`, STAR format, authenticated the same way) and replaces the
+member's state. That happens when there is no verified state yet, when the
+host or the membership generation changed, when the ops do not follow the
+stored records, when the digest does not match, when the host went back to an
+older revision, when the host refuses the cursor, when a poll passes its
+limits, and when a post, like or repost changed without its value. Only one
+archive is read at a time across members. After a failed archive read, that
+member gets no archive read for `SPACE_REPLACEMENT_COOLDOWN` (10 minutes).
+
+A `RepoNotFound` answer with status 400 from the member's host clears that
+member's records in that space only after the host has given the same answer
+for `SPACE_REPO_NOT_FOUND_CONFIRMATION` (1 hour). Until then the member fails
+as `repo_not_found` and nothing is changed. Any other end of that member's
+cycle, a good poll or another failure, starts the hour again. So does an
+answer from another host, to a new membership generation, or more than
+`SPACE_REPO_NOT_FOUND_MAX_GAP` (20 minutes) after the answer before it. The
+hour is kept in memory, so a restart starts it again. Every other failure leaves the stored
+rows as they were. Values of records in collections the feed does not project
+(anything but posts, likes and reposts) are checked against their CID and
+dropped.
+
+These limits apply:
+
+- A poll reads at most `MAX_POLL_OPS` (1,000) ops, `MAX_POLL_PAGES` (1,000)
+  pages, and `MAX_SPACE_POLL_BODY_BYTES` (16 MiB) of page bodies. A poll that
+  passes one recovers from the archive.
+- `MAX_SPACE_REPO_RECORDS` allows 20,000 records per member per space.
+- `MAX_SPACE_VERIFICATION_ROWS` allows 500,000 record paths in the store. Path
+  rows do not count against the projection budget and retention never deletes
+  them.
+- An archive is at most `MAX_SPACE_ARCHIVE_BYTES` (16 MiB), with records of at
+  most `MAX_SPACE_ARCHIVE_VALUE_BYTES` (1 MiB).
+- A member's cycle holds at most `MAX_SPACE_CYCLE_VALUES` (2,000,000) decoded
+  JSON values, and runs under the `SPACE_TARGET_DEADLINE` of 60 seconds.
+
+A member that passes a limit other than the poll limits is a failed target.
+The store is never left truncated.
+
+The validated `FEEDGEN_PROJECTION_MAX_BYTES` budget covers published posts and
+interactions. Each compaction pass brings published bytes to that maximum less
+`FEEDGEN_SPACE_WRITE_RESERVE_BYTES` or under, which leaves the reserve free for
+space writes. The reserve defaults to half the maximum and must be positive
+and below it. A space write that would push the projection over the whole
+maximum is refused and changes nothing. The memory profile uses its fixed
+16 MiB projection budget; an encrypted volume requires an explicit
 positive byte budget and `FEEDGEN_PROJECTION_MAX_AGE_MS` in whole seconds,
-with a minimum of one second. `FEEDGEN_STAGE_TARGET_MAX_ROWS` (default 1,024),
-`FEEDGEN_STAGE_GLOBAL_MAX_ROWS` (default 8,192),
-`FEEDGEN_STAGE_TARGET_MAX_BYTES` (default one quarter of the projection budget,
-up to 8 MiB), and `FEEDGEN_STAGE_GLOBAL_MAX_BYTES` (default half the projection
-budget) set the staging caps. All four values must be positive; the target caps
-must fit within the global caps, the target row cap cannot exceed 1,024, the
-target byte cap cannot exceed 8 MiB, and the global byte cap cannot exceed half
-the projection budget. The compactor preserves that global byte allowance for
-staged data by evicting the oldest published posts as needed. Checkpoints
-count as rows, including those for pages without posts. The byte and row caps
-persist across sync passes and restarts. A rejected page rolls back, and the
-sync worker discards that target's incomplete stage.
+with a minimum of one second. `FEEDGEN_STAGE_TARGET_MAX_ROWS`,
+`FEEDGEN_STAGE_GLOBAL_MAX_ROWS`, `FEEDGEN_STAGE_TARGET_MAX_BYTES` and
+`FEEDGEN_STAGE_GLOBAL_MAX_BYTES` are no longer read, and a set one is ignored.
 
-Stages expire after the configured projection age from creation or the last
-actual progress, whichever occurs first. Replaying the same cursor and data
-does not extend that age. The compactor removes expired rows, checkpoints, and
-pending verification together in bounded batches at startup and every minute.
-Promotion is atomic and has a fixed work ceiling of 1,024 staged rows
-(including checkpoints) and 8 MiB of staged bytes. The validated target caps
-fit within that ceiling, so accepted stages remain promotable. Cleanup logs
-contain aggregate counts only.
+The store is at schema version 12. Migration 12 adds the label scope to the
+cursor, and an existing cursor has none. The first poll after the upgrade
+therefore reads the label log again from the start, once, and feeds stay closed
+until it reaches the head. An older binary refuses a migrated database.
+
+Each pass logs `event=pds_space_sync_pass` with the counts `promoted`,
+`unchanged`, `replaced`, `cleared`, `deferred` and `target_failures`, and the
+scheduler status reports the same counts. Each cycle with failed targets also logs one line,
+`event=pds_space_target_failures <reason>=<count> ...`, with reasons from a
+fixed list. Logs carry no DID, URI or host text.
 
 ## Private metrics export
 
@@ -152,13 +350,14 @@ existing private Prometheus exporter/scrape path, never through this service.
 | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `stratos.telemetry.heartbeat`, `stratos.feedgen.ready`                                                                  | 60-second callback gauges, including idle processes                                                          | Same name and intent                                                                                           |
 | `stratos.feedgen.subscription.connected`, `stratos.feedgen.subscription.reconnects`                                     | Service-stream WebSocket state plus service and failed actor-worker reconnects                               | Same name; intentional actor idle/lease rotation is not counted                                                |
+| `stratos.feedgen.subscription.oversized_frames`                                                                         | Actor commit frames refused for exceeding `MAX_ACTOR_FRAME_BYTES`                                            | Rust only; the TypeScript reader has no frame limit                                                            |
 | `stratos.feedgen.actor_pool`                                                                                            | Active, waiting, and configured-capacity gauges after authoritative pool changes                             | Same name and labels                                                                                           |
 | `http.server.request.duration`, `http.server.active_requests`                                                           | Static method, route, and status dimensions for public routes                                                | Same name and bounded dimensions                                                                               |
 | `stratos.feedgen.feed.requests`, `stratos.feedgen.feed.posts_returned`                                                  | Completed projection reads; post count is carried from the bounded response before serialization             | Same name and intent                                                                                           |
 | `stratos.feedgen.cache.requests`                                                                                        | Viewer-authorization cache hits and authority-resolution misses                                              | Same name and intent                                                                                           |
 | `stratos.feedgen.index.operations`                                                                                      | Actor projection upserts and deletes after commit validation                                                 | Same name and intent                                                                                           |
 | `stratos.feedgen.reconciliation.duration`, `stratos.feedgen.reconciliation.outcomes`                                    | Authority-session reconciliation                                                                             | Same name and intent                                                                                           |
-| `stratos.feedgen.space_sync.duration`, `stratos.feedgen.space_sync.outcomes`, `stratos.feedgen.space_sync.last_success` | Authority-listed PDS target passes and outcomes                                                              | Same name; Rust distinguishes deferred and rejected member results                                             |
+| `stratos.feedgen.space_sync.duration`, `stratos.feedgen.space_sync.outcomes`, `stratos.feedgen.space_sync.last_success` | Authority-listed PDS target passes and outcomes                                                              | Same name; Rust distinguishes promoted, unchanged, replaced, cleared, deferred and failed member results       |
 | `process.resident_memory`, `process.cpu.time`                                                                           | Linux-only current RSS bytes from `/proc/self/statm` and process CPU seconds from `CLOCK_PROCESS_CPUTIME_ID` | Matches the standard OTel runtime metric names; Collector Prometheus naming follows its configured translation |
 
 `stratos.feedgen.shadow_feed.reads` is TypeScript-only: the Rust service is

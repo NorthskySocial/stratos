@@ -52,8 +52,41 @@ export {
   type VerifyAttestationOptions,
 } from './attestation.js'
 export {
+  boundaryToSpaceUri,
+  parseRecordAddress,
+  parseSpaceRecordUri,
+  parseSpaceUri,
+  type BoundarySpaceUriResult,
+  type CustodyRecordAddress,
+  type RecordAddress,
+  type SpaceRecordAddress,
+  type SpaceRecordUriParts,
+  type SpaceUriParseResult,
+  type SpaceUriParts,
+} from './space-uri.js'
+export {
   STRATOS_SCOPES,
   buildCollectionScope,
   buildRpcScope,
   buildStratosScopes,
 } from './scopes.js'
+export {
+  applyBoundaryWrites,
+  BoundaryWriteError,
+  createBoundaryRecord,
+  deleteBoundaryRecord,
+  putBoundaryRecord,
+  ScopeUpgradeRequiredError,
+  type ApplyBoundaryWritesInput,
+  type ApplyBoundaryWritesOutput,
+  type BoundaryWriteAction,
+  type BoundaryWriteClient,
+  type BoundaryWriteOperation,
+  type BoundaryWriteRefusal,
+  type BoundaryWriteResult,
+  type CreateBoundaryRecordInput,
+  type DeleteBoundaryRecordInput,
+  type PutBoundaryRecordInput,
+  type RecordWriteOutput,
+  type UnresolvedReason,
+} from './writes.js'

@@ -76,7 +76,7 @@ describe('SpaceCredentialManager', () => {
           const delegation = decodeJwt(opts.delegationToken)
           expect(delegation.iss).toBe(FEEDGEN_DID)
           expect(delegation.sub).toBe(opts.space)
-          expect(delegation.aud).toBe(`${STRATOS_DID}#atproto_space_host`)
+          expect(delegation.aud).toBe(`${STRATOS_DID}#atproto_pds`)
 
           const mintProof = await opts.buildMintProof(
             'https://stratos.test/xrpc/zone.stratos.space.getSpaceCredential',

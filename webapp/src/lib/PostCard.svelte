@@ -1,20 +1,28 @@
 <script lang="ts">
   import {Agent} from '@atproto/api'
+  import type {OAuthSession} from '@atproto/oauth-client-browser'
   import {authorFromUri, type FeedPost} from './feed'
   import {displayBoundary} from './boundary-display'
   import RecordInspector from './RecordInspector.svelte'
+  import {chooseInspectorSource, type InspectorSource} from './inspector'
   import {getCid, type StratosImage} from './utils/cid'
+  import LikeButton from './LikeButton.svelte'
+  import type {StratosEnrollment} from './stratos'
 
   interface Props {
     post: FeedPost
     stratosAgent: Agent | null
     publicAgent?: Agent | null
     currentDid: string
+    session?: OAuthSession | null
+    enrollment?: StratosEnrollment | null
+    attestationVerified?: boolean | null
     onreply: (post: FeedPost) => void
     ondelete: (post: FeedPost) => Promise<void>
+    onrefresh?: () => Promise<void>
   }
 
-  let {post, stratosAgent, publicAgent, currentDid, onreply, ondelete}: Props = $props()
+  let {post, stratosAgent, publicAgent, currentDid, session, enrollment, attestationVerified = null, onreply, ondelete, onrefresh}: Props = $props()
 
   let inspectorOpen = $state(false)
   let imageUrls = $state<Record<string, string>>({})
@@ -22,6 +30,16 @@
   let deleting = $state(false)
   let deleteError = $state('')
   let canDelete = $derived(post.author === currentDid)
+
+  const INSPECTOR_OPENER_LABELS: Record<InspectorSource, string> = {
+    custody: 'Inspect the public and private records',
+    'own-space': 'Inspect your record on your PDS',
+    'feed-snapshot': 'Inspect the copy the feed served',
+    invalid: 'Inspect this record',
+  }
+  let inspectorOpenerLabel = $derived(
+    INSPECTOR_OPENER_LABELS[chooseInspectorSource(post, currentDid)],
+  )
 
   const HTTP_PROTOCOLS = ['https:', 'http:'] as const
   const HTTP_OR_BLOB_PROTOCOLS = [...HTTP_PROTOCOLS, 'blob:'] as const
@@ -271,7 +289,7 @@
 <article class="post-card" class:private={post.isPrivate}>
     {#if post.reply}
         <div class="reply-context">
-            ↩ replying to {shortDid(authorFromUri(post.reply.parent.uri))}
+            ↩ replying to {shortDid(authorFromUri(post.reply.parent.uri)) || 'a post'}
         </div>
     {/if}
 
@@ -330,6 +348,9 @@
 
     <div class="post-actions">
         <button class="reply-btn" onclick={() => onreply(post)}>Reply</button>
+        {#if post.isPrivate && session && enrollment}
+            <LikeButton {post} {session} {enrollment} {attestationVerified} {onrefresh}/>
+        {/if}
         {#if canDelete}
             <button
                     class="delete-btn"
@@ -344,8 +365,8 @@
                     class="inspect-btn"
                     class:active={inspectorOpen}
                     onclick={() => inspectorOpen = !inspectorOpen}
-                    title="Inspect PDS stub vs Stratos record"
-                    aria-label="Inspect record custody"
+                    title={inspectorOpenerLabel}
+                    aria-label={inspectorOpenerLabel}
                     aria-expanded={inspectorOpen}
             >🔍
             </button>
@@ -353,7 +374,7 @@
     </div>
 
     {#if inspectorOpen}
-        <RecordInspector uri={post.uri} onclose={() => inspectorOpen = false}/>
+        <RecordInspector uri={post.uri} cid={post.cid} record={post.record} indexedAt={post.indexedAt} onclose={() => inspectorOpen = false}/>
     {/if}
 
     {#if deleteError}

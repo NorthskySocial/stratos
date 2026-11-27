@@ -4,6 +4,9 @@ use serde::Serialize;
 
 pub const SERVICE_JWT_LIFETIME_SECONDS: u64 = 60;
 pub const SPACE_DELEGATION_LIFETIME_SECONDS: u64 = 60;
+/// Names the authority's host as the audience of a delegation, as the upstream
+/// spaces contract does for the authority's PDS.
+pub const SPACE_HOST_AUDIENCE_FRAGMENT: &str = "#atproto_pds";
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct ServiceSigningKey([u8; 32]);
@@ -112,7 +115,7 @@ pub fn mint_space_delegation(
     let claims = encode_json(&DelegationClaims {
         issuer: claims.issuer,
         subject: claims.space_uri,
-        audience: &format!("{}#atproto_space_host", claims.authority_did),
+        audience: &format!("{}{SPACE_HOST_AUDIENCE_FRAGMENT}", claims.authority_did),
         issued_at: now,
         expires_at: now.saturating_add(SPACE_DELEGATION_LIFETIME_SECONDS),
         jti: claims.jti,
@@ -186,6 +189,7 @@ struct DelegationClaims<'a> {
 mod tests {
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use k256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+    use k256::elliptic_curve::scalar::IsHigh;
     use serde::Deserialize;
 
     use super::{
@@ -261,7 +265,7 @@ mod tests {
             &key,
             SpaceDelegationClaims {
                 issuer: "did:web:feedgen.example.test",
-                space_uri: "at://did:web:stratos.example.test/space/zone.stratos.space.feed/crew",
+                space_uri: "at:space/did:web:stratos.example.test/zone.stratos.space.feed/crew",
                 authority_did: "did:web:stratos.example.test",
                 jti: "nonce",
             },
@@ -296,6 +300,81 @@ mod tests {
     }
 
     #[test]
+    fn a_delegation_for_a_boundary_names_the_space_the_boundary_maps_to() {
+        let key = ServiceSigningKey::from_hex(
+            "2fe8e925727a16e4970a5b0a556d9f8263b7c6b894885ca2857c8878938aa97b",
+        )
+        .unwrap();
+        let boundary = "did:web:stratos.example.test/crew";
+        let space_uri = crate::credential_manager::boundary_to_space_uri(boundary).unwrap();
+        let token = mint_space_delegation(
+            &key,
+            SpaceDelegationClaims {
+                issuer: "did:web:feedgen.example.test",
+                space_uri: &space_uri,
+                authority_did: "did:web:stratos.example.test",
+                jti: "nonce",
+            },
+            1_000,
+        )
+        .unwrap();
+        let encoded_claims = token.split('.').nth(1).unwrap();
+        let claims: serde_json::Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded_claims).unwrap()).unwrap();
+        assert_eq!(
+            claims["sub"],
+            crate::credential_manager::boundary_to_space_uri(boundary).unwrap()
+        );
+        assert_eq!(
+            claims["sub"],
+            "at:space/did:web:stratos.example.test/zone.stratos.space.feed/crew"
+        );
+    }
+
+    const PORT_AUTHORITY_DID: &str = "did:web:localhost%3A3100";
+    const PORT_AUTHORITY_SPACE: &str =
+        "at:space/did:web:localhost%3A3100/zone.stratos.space.feed/nerv";
+    const TEST_ONLY_SIGNING_KEY: &str =
+        "2fe8e925727a16e4970a5b0a556d9f8263b7c6b894885ca2857c8878938aa97b";
+    const FIXED_DELEGATION_TOKEN: &str = "eyJhbGciOiJFUzI1NksiLCJ0eXAiOiJhdHByb3RvLXNwYWNlLWRlbGVnYXRpb24rand0Iiwia2lkIjoiI2F0cHJvdG8ifQ.eyJpc3MiOiJkaWQ6d2ViOmZlZWRnZW4uZXhhbXBsZS50ZXN0Iiwic3ViIjoiYXQ6c3BhY2UvZGlkOndlYjpsb2NhbGhvc3QlM0EzMTAwL3pvbmUuc3RyYXRvcy5zcGFjZS5mZWVkL25lcnYiLCJhdWQiOiJkaWQ6d2ViOmxvY2FsaG9zdCUzQTMxMDAjYXRwcm90b19wZHMiLCJpYXQiOjEwMDAsImV4cCI6MTA2MCwianRpIjoibm9uY2UifQ.dBaNYuvHe_V--AayTy6vQusFWf4r00gbbEvpJ4AeWRMdbpTrWDB-rdlEsvpczXAEmkcGkHlsAqhu67xtN11EJA";
+
+    fn port_authority_delegation(key: &ServiceSigningKey) -> String {
+        mint_space_delegation(
+            key,
+            SpaceDelegationClaims {
+                issuer: "did:web:feedgen.example.test",
+                space_uri: PORT_AUTHORITY_SPACE,
+                authority_did: PORT_AUTHORITY_DID,
+                jti: "nonce",
+            },
+            1_000,
+        )
+        .unwrap()
+    }
+
+    fn decoded_segment(token: &str, index: usize) -> serde_json::Value {
+        let encoded = token.split('.').nth(index).unwrap();
+        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_delegation_names_the_authority_host_service_as_its_audience() {
+        let key = ServiceSigningKey::from_hex(TEST_ONLY_SIGNING_KEY).unwrap();
+        let token = port_authority_delegation(&key);
+        let claims = decoded_segment(&token, 1);
+        assert_eq!(claims["aud"], "did:web:localhost%3A3100#atproto_pds");
+        assert_eq!(claims["iss"], "did:web:feedgen.example.test");
+        assert_eq!(claims["sub"], PORT_AUTHORITY_SPACE);
+        assert_eq!(decoded_segment(&token, 0)["kid"], "#atproto");
+    }
+
+    #[test]
+    fn a_delegation_for_fixed_inputs_is_byte_for_byte_stable() {
+        let key = ServiceSigningKey::from_hex(TEST_ONLY_SIGNING_KEY).unwrap();
+        assert_eq!(port_authority_delegation(&key), FIXED_DELEGATION_TOKEN);
+    }
+
+    #[test]
     fn rejects_invalid_space_delegation_claims_before_signing() {
         let key = ServiceSigningKey::from_hex(
             "2fe8e925727a16e4970a5b0a556d9f8263b7c6b894885ca2857c8878938aa97b",
@@ -306,7 +385,7 @@ mod tests {
                 &key,
                 SpaceDelegationClaims {
                     issuer: "",
-                    space_uri: "at://did:web:stratos.example.test/space/zone.stratos.space.feed/crew",
+                    space_uri: "at:space/did:web:stratos.example.test/zone.stratos.space.feed/crew",
                     authority_did: "did:web:stratos.example.test",
                     jti: "nonce",
                 },
@@ -314,6 +393,65 @@ mod tests {
             ),
             Err(super::ServiceAuthError::InvalidDelegationClaims)
         );
+    }
+
+    const MANY_DELEGATION_COUNT: u64 = 96;
+
+    fn many_delegations() -> Vec<(String, String)> {
+        use sha2::{Digest, Sha256};
+        let names = [
+            "spike", "faye", "jet", "ed", "rei", "asuka", "shinji", "misato",
+        ];
+        (0..MANY_DELEGATION_COUNT)
+            .map(|index| {
+                let seed = Sha256::digest(format!("cowboy-bebop-session-{index}"));
+                let key_hex: String = seed.iter().map(|byte| format!("{byte:02x}")).collect();
+                let key = ServiceSigningKey::from_hex(&key_hex).unwrap();
+                let name = names[index as usize % names.len()];
+                let space_uri = format!(
+                    "at:space/did:web:stratos.example.test/zone.stratos.space.feed/{name}{index}"
+                );
+                let token = mint_space_delegation(
+                    &key,
+                    SpaceDelegationClaims {
+                        issuer: &format!("did:web:{name}{index}.example.test"),
+                        space_uri: &space_uri,
+                        authority_did: "did:web:stratos.example.test",
+                        jti: &format!("jti-{name}-{index}"),
+                    },
+                    1_000 + index * 37,
+                )
+                .unwrap();
+                (key_hex, token)
+            })
+            .collect()
+    }
+
+    // Upstream verifies token JWTs without the allowance for high-S
+    // signatures, so every delegation this minter can emit must be low-S.
+    #[test]
+    fn every_delegation_signature_is_in_low_s_form() {
+        let delegations = many_delegations();
+        assert_eq!(delegations.len() as u64, MANY_DELEGATION_COUNT);
+        for (_, token) in &delegations {
+            let encoded_signature = token.rsplit('.').next().unwrap();
+            let signature =
+                Signature::from_slice(&URL_SAFE_NO_PAD.decode(encoded_signature).unwrap()).unwrap();
+            assert!(!bool::from(signature.s().is_high()));
+            assert_eq!(signature.normalize_s(), signature);
+        }
+    }
+
+    #[test]
+    fn the_low_s_check_recognises_a_high_s_signature() {
+        let key = ServiceSigningKey::from_hex(TEST_ONLY_SIGNING_KEY).unwrap();
+        let token = port_authority_delegation(&key);
+        let encoded_signature = token.rsplit('.').next().unwrap();
+        let signature =
+            Signature::from_slice(&URL_SAFE_NO_PAD.decode(encoded_signature).unwrap()).unwrap();
+        let flipped = Signature::from_scalars(*signature.r(), -*signature.s()).unwrap();
+        assert!(bool::from(flipped.s().is_high()));
+        assert_ne!(flipped.normalize_s(), flipped);
     }
 
     fn hex_bytes(value: &str) -> [u8; 32] {

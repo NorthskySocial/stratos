@@ -114,7 +114,7 @@ export interface ListSpaceReposOptions {
   limit?: number
 }
 
-/** Spec-shaped mirror of a `com.atproto.space.listRepos` entry, extended with `host`/`hostSource`. */
+/** One repo of Stratos's own `zone.stratos.space.listRepos` answer: its custody and, for a PDS-custody repo, `host`/`hostSource`. */
 export interface SpaceRepoEntry {
   did: string
   /** Fail-closed normalization: anything except an explicit `pds` is `stratos`. */
@@ -331,7 +331,8 @@ export class UpstreamStratosClient {
 
   /**
    * List the members of a space this feedgen is syncing, via the Stratos
-   * mirror of `com.atproto.space.listRepos`. Authenticated with a space
+   * method `zone.stratos.space.listRepos`, which is not the upstream
+   * `com.atproto.space.listWriters`. Authenticated with a space
    * credential, presented the same way a foreign host later verifies it: a
    * `DPoP <credential>` authorization header plus a fresh presentation proof.
    */

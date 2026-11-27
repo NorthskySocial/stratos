@@ -16,9 +16,10 @@ This page describes how Stratos answers it.
 ## Why this is Stratos's convention, not upstream's
 
 The upstream spaces methods report who wrote into a space. They do not say
-where each writer's repository is hosted. The only convention upstream has is
-bare DID → `#atproto_pds`, and it applies that to notify targets, not to repo
-hosts. Stratos fills the gap with its own rule.
+where each writer's repository is hosted. Upstream uses the fragment
+`#atproto_pds` of the space authority's DID as the audience of credentials and
+delegations (`spaceHostAud` in `packages/space/src/credential.ts` at the
+reference revision). Stratos fills the gap for repo hosts with its own rule.
 
 ## The convention
 
@@ -47,7 +48,8 @@ resolver for `pds`-custody members only, and returns the result as `host` and
 repository is on Stratos.
 
 The [feed generator](./feed-generator.md) takes the host from that listing.
-It does not resolve a member's DID document itself.
+It does not resolve a member's host itself. It does read the member's DID
+document to find the `#atproto_kem` key that authenticates the host's answers.
 
 The DID-document lookup refuses private and local `did:web` hosts.
 
@@ -81,8 +83,8 @@ operator debugging a bad route can see which arm answered. The "never throws"
 guarantee is enforced once inside the resolver (`settleToUndefined`). It is
 not left to every future reader implementation.
 
-## Prototype
+## Tests
 
-We proved the convention first against the live alpha PDS in
-`test/spike/spaces/a4-host-discovery.ts` (Spike A4). Both arms resolve, and an
-unresolvable member yields `undefined`.
+`stratos-core/tests/host-discovery.test.ts` covers both arms, the order of the
+two, and the rule that an unresolvable member yields `undefined`. The tests
+run without a PDS.

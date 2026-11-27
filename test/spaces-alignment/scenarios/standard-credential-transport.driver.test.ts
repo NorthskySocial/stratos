@@ -1,6 +1,12 @@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { createHash, createPublicKey, ECDH, verify } from 'node:crypto'
+import {
+  createHash,
+  createPublicKey,
+  ECDH,
+  verify,
+  type KeyObject,
+} from 'node:crypto'
 import {
   afterAll,
   afterEach,
@@ -17,6 +23,11 @@ import {
   credentialLifetime,
   deniedRenewal,
   denied,
+  exchangeHeaders,
+  presentationAuthorization,
+  presentationHeaders,
+  proofKey,
+  spaceUriFromParts,
 } from './standard-credential-transport.driver.mjs'
 const now = Math.floor(Date.now() / 1000)
 let status = 200
@@ -322,31 +333,77 @@ function publicKey(kid: string) {
     },
   })
 }
-function checkSignature(headers: Headers, audience?: string) {
-  const input = headers.get('signature-input')!
-  const kid = /;keyid="([^"]+)"$/.exec(input)![1]
-  const fields = audience
-    ? ['authorization', 'atproto-space-audience']
-    : ['authorization']
-  const params = input.slice('atproto-space='.length)
-  expect(params).toBe(
-    `(${fields.map((field) => `"${field}"`).join(' ')});keyid="${kid}"`,
-  )
-  expect(headers.get('atproto-space-audience')).toBe(audience ?? null)
-  const canonical =
+function signedBase(headers: Headers, fields: string[], params: string) {
+  return (
     fields.map((field) => `"${field}": ${headers.get(field)}`).join('\n') +
     `\n"@signature-params": ${params}`
-  const signature = headers.get('signature')!
-  expect(signature).toMatch(/^atproto-space=:[A-Za-z0-9+/=]+:$/)
+  )
+}
+function verifies(
+  base: string,
+  signatureHeader: string,
+  label: string,
+  key: KeyObject,
+) {
+  const prefix = `${label}=:`
+  expect(signatureHeader.startsWith(prefix)).toBe(true)
+  expect(signatureHeader.endsWith(':')).toBe(true)
+  return verify(
+    'sha256',
+    Buffer.from(base),
+    { key, dsaEncoding: 'ieee-p1363' },
+    Buffer.from(signatureHeader.slice(prefix.length, -1), 'base64'),
+  )
+}
+function checkExchangeSignature(headers: Headers) {
+  const input = headers.get('signature-input')!
+  const kid = /;keyid="([^"]+)"$/.exec(input)![1]
+  const params = input.slice('atproto-space='.length)
+  expect(params).toBe(`("authorization");keyid="${kid}"`)
+  expect(headers.get('atproto-space-audience')).toBeNull()
   expect(
-    verify(
-      'sha256',
-      Buffer.from(canonical),
-      { key: publicKey(kid), dsaEncoding: 'ieee-p1363' },
-      Buffer.from(signature.slice(15, -1), 'base64'),
+    verifies(
+      signedBase(headers, ['authorization'], params),
+      headers.get('signature')!,
+      'atproto-space',
+      publicKey(kid),
     ),
   ).toBe(true)
   return kid
+}
+const presentationTag = 'atproto-space-credential'
+const presentationFields = ['authorization', 'atproto-space-audience']
+// The presented signature is the member whose tag parameter names the
+// credential presentation, whatever label it carries.
+function findPresentation(headers: Headers) {
+  const members = headers
+    .get('signature-input')!
+    .split(/,\s*/)
+    .map((member) => /^([a-z0-9-]+)=(.*)$/.exec(member)!)
+    .filter(([, , params]) => params.endsWith(`;tag="${presentationTag}"`))
+  expect(members).toHaveLength(1)
+  return { label: members[0][1], params: members[0][2] }
+}
+function readPresentation(headers: Headers) {
+  const { label, params } = findPresentation(headers)
+  expect(params).toBe(
+    `(${presentationFields.map((field) => `"${field}"`).join(' ')});tag="${presentationTag}"`,
+  )
+  expect(headers.get('authorization')).toMatch(/^Atproto-Space-Credential \S+$/)
+  expect(headers.get('atproto-space-audience')).toEqual(expect.any(String))
+  return { label, params }
+}
+function presentationVerifies(headers: Headers, boundKid: string | undefined) {
+  const { label, params } = readPresentation(headers)
+  return (
+    boundKid !== undefined &&
+    verifies(
+      signedBase(headers, presentationFields, params),
+      headers.get('signature')!,
+      label,
+      publicKey(boundKid),
+    )
+  )
 }
 function checkDpop(headers: Headers, target: string, token?: string) {
   const parts = headers.get('dpop')!.split('.')
@@ -378,7 +435,7 @@ function checkDpop(headers: Headers, target: string, token?: string) {
 }
 function orchestrationFixture(fault = '') {
   const authorityDid = 'did:web:stratos-e2e.undefined'
-  const space = `at://${authorityDid}/space/zone.stratos.space.feed/general`
+  const space = spaceUriFromParts(authorityDid, 'general')
   const events: string[] = []
   const requests: { url: URL; headers: Headers; options: RequestInit }[] = []
   let removed = false
@@ -445,13 +502,7 @@ function orchestrationFixture(fault = '') {
             400,
           )
         used.add(authorization)
-        if (!headers.has('signature'))
-          return json({
-            credential: token({
-              cnf: { jkt: fault === 'legacy-key' ? 42 : 'thumbprint' },
-            }),
-          })
-        const kid = checkSignature(headers)
+        const kid = checkExchangeSignature(headers)
         const claims: Record<string, unknown> = {
           iat: now,
           exp: now + 600,
@@ -472,14 +523,13 @@ function orchestrationFixture(fault = '') {
       }
       expect(options.method).toBeUndefined()
       const authorization = headers.get('authorization')!
-      if (authorization.startsWith('DPoP ')) {
-        checkDpop(headers, url.origin + url.pathname, authorization.slice(5))
-        return json({})
-      }
-      expect(authorization).toMatch(/^Atproto-Space /)
-      const credential = authorization.slice('Atproto-Space '.length)
+      expect(authorization).toMatch(/^Atproto-Space-Credential /)
+      const credential = authorization.slice('Atproto-Space-Credential '.length)
       const audience = headers.get('atproto-space-audience')!
-      const kid = checkSignature(headers, audience)
+      const signatureValid = presentationVerifies(
+        headers,
+        issued.get(credential),
+      )
       if (index === 7) {
         const changed = JSON.parse(
           Buffer.from(credential.split('.')[1], 'base64url').toString(),
@@ -493,9 +543,9 @@ function orchestrationFixture(fault = '') {
       }
       if (index === 8)
         expect(url.searchParams.get('space')).toBe(
-          space.replace('/general', '/other'),
+          spaceUriFromParts(authorityDid, 'other'),
         )
-      if (issued.get(credential) !== kid)
+      if (!signatureValid)
         return json(
           index === 7
             ? { error: 'BadJwtSignature', message: 'invalid token signature' }
@@ -511,7 +561,7 @@ function orchestrationFixture(fault = '') {
         expect([...url.searchParams]).toEqual([['space', space]])
         return json({})
       }
-      expect(url.origin).toBe('https://october-pds-e2e.undefined')
+      expect(url.origin).toBe('https://reference-pds-e2e.undefined')
       expect(url.pathname).toBe('/xrpc/com.atproto.space.listRecords')
       expect(url.searchParams.get('collection')).toBe('zone.stratos.feed.post')
       if (url.searchParams.get('repo') !== audience)
@@ -596,7 +646,7 @@ function orchestrationFixture(fault = '') {
 }
 afterEach(() => vi.unstubAllGlobals())
 describe('standard driver orchestration', () => {
-  it('uses account labels that meet the October PDS three-character minimum', async () => {
+  it('uses account labels that meet the reference PDS three-character minimum', async () => {
     const fixture = orchestrationFixture()
     const prepare = vi.fn(fixture.adapters.prepare)
     await runScenario({ ...fixture.adapters, prepare })
@@ -614,7 +664,7 @@ describe('standard driver orchestration', () => {
     [8, 'cross-space-denied'],
     [12, 'delegation-replay-denied'],
     [13, 'conflicting-proof-denied'],
-    [17, 'renewal-after-removal-denied'],
+    [15, 'renewal-after-removal-denied'],
   ] as const)(
     'attributes wrong status and error at request %i to %s',
     async (index, name) => {
@@ -635,7 +685,7 @@ describe('standard driver orchestration', () => {
       assertions: [
         'standard-exchange',
         'default-lifetime-600',
-        'october-pds-read',
+        'reference-pds-read',
         'same-signature-reused',
         'wrong-owner-denied',
         'two-owners-one-host',
@@ -646,11 +696,10 @@ describe('standard driver orchestration', () => {
         'renewal-fresh-key',
         'delegation-replay-denied',
         'conflicting-proof-denied',
-        'legacy-compatible',
         'renewal-after-removal-denied',
       ].map((id) => ({ id, status: 'passed' })),
     })
-    expect(fixture.requests).toHaveLength(17)
+    expect(fixture.requests).toHaveLength(15)
     expect([...fixture.requests[1].headers]).toEqual([
       ...fixture.requests[2].headers,
     ])
@@ -678,8 +727,8 @@ describe('standard driver orchestration', () => {
     ])
   })
   it.each([
-    ...Array.from({ length: 17 }, (_, i) => `http-${i + 1}`),
-    ...[1, 2, 5, 10, 14, 16].map((i) => `body-${i}`),
+    ...Array.from({ length: 15 }, (_, i) => `http-${i + 1}`),
+    ...[1, 2, 5, 10, 14].map((i) => `body-${i}`),
     'issuer',
     'subject',
     'binding',
@@ -689,7 +738,6 @@ describe('standard driver orchestration', () => {
     'seed-faye',
     'seed-edward',
     'denial',
-    'legacy-key',
     'cross-space-401',
     'cross-space-403',
     'cross-space-error-type',
@@ -708,12 +756,61 @@ describe('standard driver orchestration', () => {
     const fixture = orchestrationFixture(fault)
     const messages: Record<string, string> = {
       'http-10': 'Standard exchange failed',
-      'http-2': 'October PDS rejected Stratos credential',
-      'seed-faye': 'October read omitted seeded record',
+      'http-2': 'Reference PDS rejected Stratos credential',
+      'seed-faye': 'Reference read omitted seeded record',
       'seed-edward': 'Second owner read omitted seeded record',
     }
     await expect(runScenario(fixture.adapters)).rejects.toThrow(messages[fault])
     expect(fixture.events.at(-1)).toBe('close')
     expect(fixture.events.filter((event) => event === 'close')).toHaveLength(1)
+  })
+})
+
+const legacyPresentationScheme = 'Atproto-Space'
+const legacyPresentationLabel = 'atproto-space'
+describe('credential presentation headers', () => {
+  const credential = 'header.payload.signature'
+  it('presents under the credential scheme with a tagged signature', () => {
+    const key = proofKey()
+    const headers = new Headers(
+      presentationHeaders(credential, key, 'did:plc:faye'),
+    )
+    expect(headers.get('authorization')).toBe(
+      presentationAuthorization(credential),
+    )
+    expect(headers.get('authorization')).toBe(
+      `Atproto-Space-Credential ${credential}`,
+    )
+    const { label, params } = readPresentation(headers)
+    expect(label).not.toBe(legacyPresentationLabel)
+    expect(
+      verifies(
+        signedBase(headers, presentationFields, params),
+        headers.get('signature')!,
+        label,
+        createPublicKey({ format: 'jwk', key: key.jwk }),
+      ),
+    ).toBe(true)
+  })
+  it('refuses a presentation under the earlier scheme and untagged label', () => {
+    const key = proofKey()
+    const earlier = new Headers(
+      exchangeHeaders(`${legacyPresentationScheme} ${credential}`, key),
+    )
+    expect(earlier.get('authorization')).toBe(
+      `${legacyPresentationScheme} ${credential}`,
+    )
+    expect(() => readPresentation(earlier)).toThrow()
+    expect(() => findPresentation(earlier)).toThrow()
+  })
+  it('refuses a presentation whose tag names another purpose', () => {
+    const headers = new Headers(
+      presentationHeaders(credential, proofKey(), 'did:plc:faye'),
+    )
+    headers.set(
+      'signature-input',
+      headers.get('signature-input')!.replace(presentationTag, 'other-purpose'),
+    )
+    expect(() => findPresentation(headers)).toThrow()
   })
 })

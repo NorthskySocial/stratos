@@ -599,13 +599,13 @@ describe('GET /xrpc/zone.stratos.admin.getRepoHost', () => {
       resolutions: [
         {
           boundary: `${NERV}/general`,
-          spaceUri: `at://${NERV}/space/zone.stratos.space.feed/general`,
+          spaceUri: `at:space/${NERV}/zone.stratos.space.feed/general`,
           host: 'https://override.example',
           source: 'authority-override',
         },
         {
           boundary: `${NERV}/swordsmith`,
-          spaceUri: `at://${NERV}/space/zone.stratos.space.feed/swordsmith`,
+          spaceUri: `at:space/${NERV}/zone.stratos.space.feed/swordsmith`,
           host: 'https://override.example',
           source: 'authority-override',
         },
@@ -648,13 +648,13 @@ describe('GET /xrpc/zone.stratos.admin.getRepoHost', () => {
       resolutions: [
         {
           boundary: `${NERV}/general`,
-          spaceUri: `at://${NERV}/space/zone.stratos.space.feed/general`,
+          spaceUri: `at:space/${NERV}/zone.stratos.space.feed/general`,
           host: 'https://pds.rei.example',
           source: 'did-document',
         },
         {
           boundary: `${NERV}/swordsmith`,
-          spaceUri: `at://${NERV}/space/zone.stratos.space.feed/swordsmith`,
+          spaceUri: `at:space/${NERV}/zone.stratos.space.feed/swordsmith`,
           host: 'https://pds.rei.example',
           source: 'did-document',
         },
@@ -679,7 +679,7 @@ describe('GET /xrpc/zone.stratos.admin.getRepoHost', () => {
       resolutions: [
         {
           boundary: `${NERV}/general`,
-          spaceUri: `at://${NERV}/space/zone.stratos.space.feed/general`,
+          spaceUri: `at:space/${NERV}/zone.stratos.space.feed/general`,
         },
       ],
     })

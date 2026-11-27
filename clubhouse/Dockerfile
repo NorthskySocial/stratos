@@ -3,9 +3,9 @@
 # Build from the workspace root because Clubhouse consumes the workspace-local
 # stratos-browser and stratos-client packages:
 #   docker build -f clubhouse/Dockerfile -t clubhouse .
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN npm install --global pnpm@12.23.0
 
 WORKDIR /app
 
@@ -90,7 +90,7 @@ RUN node -e "\
   }, null, 2) + '\\n'); \
 "
 
-FROM nginx:1.29-alpine AS clubhouse
+FROM nginx:1.31-alpine AS clubhouse
 
 COPY clubhouse/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/clubhouse/dist/ /usr/share/nginx/html/

@@ -24,7 +24,7 @@ const STRATOS_DID = 'did:web:stratos.test'
 const CREW_BOUNDARY = `${STRATOS_DID}/crew`
 const BOUNTY_BOUNDARY = `${STRATOS_DID}/bounty`
 const BOUNTY_SPACE =
-  'at://did:web:stratos.test/space/zone.stratos.space.feed/bounty'
+  'at:space/did:web:stratos.test/zone.stratos.space.feed/bounty'
 
 let store: FeedgenStore
 const tmpDirs: string[] = []

@@ -14,7 +14,7 @@ import type { AssertionResult, ScenarioSuite } from '../rules.js'
 
 const FEEDGEN_DID = 'did:web:feedgen-e2e.atmosbox.test'
 const AUTHORITY_DID = 'did:web:stratos-e2e.atmosbox.test'
-const SERVICE_LXM = 'com.atproto.space.listRepos'
+const SERVICE_LXM = 'zone.stratos.space.listRepos'
 const SECP256K1_ORDER = BigInt(
   '0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141',
 )
@@ -94,7 +94,7 @@ export const suite: ScenarioSuite = {
       bundle: true,
       platform: 'node',
       format: 'esm',
-      target: 'node24',
+      target: 'node26',
     })
     const script = fileURLToPath(
       new URL('./client-custody.mjs', import.meta.url),

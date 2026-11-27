@@ -7,34 +7,38 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-axum = "0.8"
-async-trait = "0.1"
-base64 = "0.22"
-bs58 = "0.5"
-cid = "0.11"
-futures-util = "0.3"
-libc = "0.2"
-p256 = { version = "0.13", features = ["ecdsa"] }
-k256 = { version = "0.13", features = ["ecdsa"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
-serde = { version = "1", features = ["derive"] }
-serde_cbor = { version = "0.11", features = ["tags"] }
-serde_json = "1"
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
-tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
-rusqlite = { version = "0.32", features = ["bundled-sqlcipher"] }
+axum = "0.8.9"
+async-trait = "0.1.92"
+base64 = "0.23.1"
+blake3 = "1.8.7"
+bs58 = "0.5.1"
+cid = "0.11.3"
+futures-util = "0.3.34"
+libc = "0.2.191"
+p256 = { version = "0.14.0", features = ["ecdh", "ecdsa", "getrandom"] }
+k256 = { version = "0.14.0", features = ["ecdsa"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_cbor = { version = "0.11.2", features = ["tags"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+rusqlite = { version = "0.43.0", features = ["bundled-sqlcipher"] }
 serde_yaml = "0.9.34"
-time = { version = "0.3", features = ["parsing"] }
-url = "2"
-serde_urlencoded = "0.7"
-sha2 = "0.10"
-hmac = "0.12"
-multihash = "0.19"
-opentelemetry = { version = "0.33", features = ["metrics"] }
-opentelemetry_sdk = { version = "0.33", default-features = false, features = ["metrics"] }
-opentelemetry-otlp = { version = "0.33", default-features = false, features = ["metrics", "http-proto", "reqwest-blocking-client"] }
+time = { version = "0.3.55", features = ["parsing"] }
+url = "2.5.9"
+serde_urlencoded = "0.7.1"
+sha2 = "0.11.2"
+hmac = "0.13.0"
+hkdf = "0.13.0"
+sfv = "0.16.1"
+zeroize = "1.9.2"
+multihash = "0.19.5"
+opentelemetry = { version = "0.33.1", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["metrics"] }
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["metrics", "http-proto", "reqwest-blocking-client"] }
 
 [dev-dependencies]
-http-body-util = "0.1"
-opentelemetry_sdk = { version = "0.33", default-features = false, features = ["metrics", "testing"] }
-tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1.5"
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["metrics", "testing"] }
+tower = { version = "0.5.3", features = ["util"] }

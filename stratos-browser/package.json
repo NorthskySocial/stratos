@@ -25,17 +25,17 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@atproto/api": "^0.20.41",
-    "@atproto/lexicon": "^0.7.11",
-    "@atproto/oauth-client-browser": "^0.5.3",
-    "@atproto/oauth-types": "^0.7.5",
+    "@atproto/api": "^0.32.7",
+    "@atproto/lexicon": "^0.7.22",
+    "@atproto/oauth-client-browser": "^0.5.19",
+    "@atproto/oauth-types": "^0.8.0",
     "@northskysocial/stratos-client": "workspace:*"
   },
   "devDependencies": {
-    "@stryker-mutator/core": "^9.6.1",
-    "@stryker-mutator/vitest-runner": "^9.6.1",
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/vitest-runner": "^10.1.1",
     "typescript": "npm:@typescript/typescript6@~6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^4.0.18"
+    "vitest": "^5.1.2"
   }
 }

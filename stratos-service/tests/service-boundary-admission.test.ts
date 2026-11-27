@@ -19,9 +19,9 @@ const RESERVED = `${AUTHORITY}/general`
 const SECOND = `${AUTHORITY}/test.com`
 const UNASSIGNED = `${AUTHORITY}/example.com`
 const ACTOR = 'did:plc:rei-ayanami'
-const SPACE = `at://${AUTHORITY}/space/zone.stratos.space.feed/general`
-const SECOND_SPACE = `at://${AUTHORITY}/space/zone.stratos.space.feed/test.com`
-const UNASSIGNED_SPACE = `at://${AUTHORITY}/space/zone.stratos.space.feed/example.com`
+const SPACE = `at:space/${AUTHORITY}/zone.stratos.space.feed/general`
+const SECOND_SPACE = `at:space/${AUTHORITY}/zone.stratos.space.feed/test.com`
+const UNASSIGNED_SPACE = `at:space/${AUTHORITY}/zone.stratos.space.feed/example.com`
 const METHODS = [
   'zone.stratos.sync.listRepoOps',
   'zone.stratos.sync.listRecordPaths',
@@ -221,7 +221,7 @@ describe('PostgreSQL reserved boundary admission', () => {
   afterAll(async () => {
     await db?.$client.end()
     if (pgUrl) await stopPostgresContainer()
-  })
+  }, 60_000)
 
   it('checks the enrollment before decorated PostgreSQL boundaries', async () => {
     const store = new ReservedDomainEnrollmentStore(

@@ -157,7 +157,7 @@ _Note: If boundary extraction from record values is too slow, we may consider de
 
 1. **Stratos-Core**:
    - Add `BlobAuthService` interface and implementation.
-   - Update `BlobMetadataReader` if needed for batch boundary lookups.
+   - Batch boundary lookups (as built: `ActorBlobReader.getRecordsForBlob` in `stratos-service/src/actor-store-types.ts`; the core `BlobMetadataReader` port was removed).
 2. **Stratos-Service**:
    - Implement `com.atproto.sync.getBlob` handler in `src/api/handlers/` (as built: `blob-handlers.ts`).
    - Integrate `BlobAuthService` into the XRPC handler.

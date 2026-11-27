@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleRevoke } from '../src/oauth/handlers/revoke.js'
+import { RepoWriteLocks } from '../src/shared/repo-write-lock.js'
 
 describe('OAuth Revoke Handler', () => {
   const mockEnrollmentStore = {
@@ -10,6 +11,12 @@ describe('OAuth Revoke Handler', () => {
   const mockOauthClient = {
     restore: vi.fn(),
     revoke: vi.fn(),
+  }
+
+  const mockPdsSyncWorker = {
+    cancel: vi.fn(),
+    enqueue: vi.fn(),
+    kick: vi.fn(),
   }
 
   const mockLogger = {
@@ -26,6 +33,8 @@ describe('OAuth Revoke Handler', () => {
     initRepo: vi.fn(),
     createSigningKey: vi.fn(),
     createAttestation: vi.fn(),
+    repoWriteLocks: new RepoWriteLocks(),
+    pdsSyncWorker: mockPdsSyncWorker,
   }
 
   const authenticateRequest = vi.fn()
@@ -53,6 +62,7 @@ describe('OAuth Revoke Handler', () => {
 
     await handler(req, res)
 
+    expect(mockPdsSyncWorker.cancel).toHaveBeenCalledWith(did)
     expect(mockEnrollmentStore.unenroll).toHaveBeenCalledWith(did)
     expect(mockOauthClient.revoke).toHaveBeenCalledWith(did)
     expect(res.json).toHaveBeenCalledWith(

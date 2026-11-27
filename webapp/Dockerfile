@@ -1,7 +1,7 @@
 # Build stage: Install dependencies and build webapp
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN npm install --global pnpm@12.23.0
 
 WORKDIR /build
 

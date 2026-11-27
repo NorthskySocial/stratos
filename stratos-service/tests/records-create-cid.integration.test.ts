@@ -31,7 +31,11 @@ import {
   getRecord,
   updateRecord,
 } from '../src/api/records/index.js'
-import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import {
+  createEmptyLabelLog,
+  createMockBlobStore,
+  createTestConfig,
+} from './utils/index.js'
 
 const DOMAIN = 'did:web:nerv.tokyo.jp/engineering'
 
@@ -79,6 +83,7 @@ describe('Create record CID derivation', () => {
           .fn()
           .mockResolvedValue({ active: true, isService: false }),
       },
+      labelStore: createEmptyLabelLog(),
       serviceDid,
       writeRateLimiter: { assertWriteAllowed: vi.fn() },
       actorSigner: {

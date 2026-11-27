@@ -41,13 +41,6 @@ impl DidVerificationKey {
                 .map(|signature| key.verify(message, &signature).is_ok()),
         }
     }
-
-    pub(crate) fn verifies_any(&self, message: &[u8], signature: &[u8]) -> Option<bool> {
-        match self {
-            Self::P256(_) => self.verifies_p256(message, signature),
-            Self::Secp256k1(_) => self.verifies_secp256k1(message, signature),
-        }
-    }
 }
 
 pub(crate) fn decode_multicodec(bytes: &[u8]) -> Option<(u64, &[u8])> {

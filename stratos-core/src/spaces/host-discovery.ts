@@ -1,9 +1,9 @@
 /**
  * Repo-host discovery for permissioned spaces.
  *
- * Upstream has no answer to "which host holds this member's repo":
- * `com.atproto.space.listRepos` returns only `{did, rev, hash}`, and no space
- * lexicon or table carries a host field. Stratos sets its own convention:
+ * No upstream space method returns the host that holds a member's repo:
+ * `com.atproto.space.listWriters` gives each writer's revision and data, and
+ * no space lexicon has a host field. Stratos sets its own convention:
  *
  *   1. An authority-recorded override, if Stratos holds one for this member.
  *   2. Otherwise the `#atproto_pds` service endpoint in the member's DID
@@ -13,13 +13,12 @@
  * live on the PDS named in their DID document.
  *
  * This module is pure: both dependencies are injected ports, so resolution is
- * unit-testable without network access. Prototype:
- * `test/spike/spaces/a4-host-discovery.ts`.
+ * unit-testable without network access.
  */
 
 /**
- * How a repo host was determined. Surfaced by MM-08 so an operator debugging
- * a bad route can see which arm answered.
+ * How a repo host was determined. The membership listing returns it so an
+ * operator debugging a bad route can see which arm answered.
  */
 export type HostSource = 'authority-override' | 'did-document'
 

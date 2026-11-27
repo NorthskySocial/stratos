@@ -19,6 +19,8 @@ pub enum AuthorizationError {
     EmptyBoundary,
     Expired,
     CapacityExceeded,
+    AccountTakenDown,
+    TakedownStateUnavailable,
 }
 
 impl std::fmt::Display for AuthorizationError {
@@ -28,6 +30,8 @@ impl std::fmt::Display for AuthorizationError {
             Self::EmptyBoundary => "viewer authorization contains an empty boundary",
             Self::Expired => "viewer authorization is already expired",
             Self::CapacityExceeded => "viewer authorization capacity is exhausted",
+            Self::AccountTakenDown => "viewer account is under takedown",
+            Self::TakedownStateUnavailable => "viewer takedown state could not be read",
         })
     }
 }

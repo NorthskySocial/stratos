@@ -299,8 +299,7 @@ async function testOwnerAccess(
     )
 
     const boundary = value.boundary as
-      | { values: Array<{ value: string }> }
-      | undefined
+      { values: Array<{ value: string }> } | undefined
     assertTrue(
       boundary?.values?.[0]?.value === DOMAINS.swordsmith,
       'Rei reads own post — boundary is swordsmith',

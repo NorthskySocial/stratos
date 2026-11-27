@@ -22,6 +22,8 @@ export interface RepoWrite {
   rkey: string
   record?: unknown
   cid?: Cid
+  /** Authorized boundary sequenced on the op; set on create and update, never on delete. */
+  boundary?: string
 }
 
 /** Service for signing repository commits. */

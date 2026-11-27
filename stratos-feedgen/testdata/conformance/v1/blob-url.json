@@ -11,7 +11,7 @@
     {
       "name": "never projects a PDS space blob through Feedgen",
       "baseUrl": "https://feedgen.example.test",
-      "uri": "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/see-you",
+      "uri": "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/see-you",
       "cid": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku",
       "expectedUrl": null
     },

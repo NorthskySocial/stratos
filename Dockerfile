@@ -5,9 +5,9 @@
 # Target 2 (indexer): Deno-based standalone indexer.
 
 # --- Build stage ---
-FROM node:24-alpine AS builder
+FROM node:26-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN npm install --global pnpm@12.23.0
 
 WORKDIR /app
 
@@ -52,11 +52,11 @@ RUN node -e " \
 "
 
 # --- Production stage for Stratos Service ---
-FROM node:24-alpine AS stratos
+FROM node:26-alpine AS stratos
 
 RUN apk add --no-cache flock
 
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN npm install --global pnpm@12.23.0
 
 WORKDIR /app
 
@@ -76,6 +76,7 @@ COPY --from=builder /app/stratos-client/dist/ ./stratos-client/dist/
 
 # Copy lexicons (needed at runtime for validation)
 COPY lexicons/ ./lexicons/
+COPY lexicons-spaces/ ./lexicons-spaces/
 
 # Create data directory structure
 RUN mkdir -p /app/data/assets && chown -R node:node /app/data
@@ -125,6 +126,7 @@ COPY --from=builder /app/webapp/package.json ./webapp/
 # uses a dedicated Deno config with `nodeModulesDir: auto` (the root deno.json
 # uses `none` to coexist with pnpm on the host / in the test e2e scripts).
 COPY deno.indexer.json ./deno.json
+COPY deno.lock ./
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 
 # Copy lexicons (needed at runtime by stratos-core)

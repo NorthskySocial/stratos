@@ -34,7 +34,7 @@ describe('Postgres boundary audit transactions', () => {
   }
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer('postgres:18-alpine').start()
+    container = await new PostgreSqlContainer('postgres:19-alpine').start()
     db = createServicePgDb(container.getConnectionUri())
     secondDb = createServicePgDb(container.getConnectionUri())
     await migrateServicePgDb(db)
@@ -66,7 +66,7 @@ describe('Postgres boundary audit transactions', () => {
     if (db) await closeServicePgDb(db)
     if (secondDb) await closeServicePgDb(secondDb)
     await container?.stop()
-  })
+  }, 60_000)
 
   it('serializes writers using independent connections and suppresses duplicate membership', async () => {
     const did = 'did:plc:rei'

@@ -4,18 +4,24 @@ import {
   type BoundaryResolver,
   canAccessRecord,
   type Logger,
-  StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from '../../actor-store-types.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
+import {
+  type AccountTakedownLog,
+  isAccountTakenDown,
+} from '../../subscription/takedown-filter.js'
 
 /**
- * Implementation of BlobAuthService that uses ActorStore to check record boundaries.
+ * Implementation of BlobAuthService that uses ActorStore to check record
+ * boundaries. No blob of a taken-down account is served, not even to the
+ * owner, whose own reads its hold already refuses.
  */
 export class BlobAuthServiceImpl implements BlobAuthService {
   constructor(
     private actorStore: ActorStore,
     private boundaryResolver: BoundaryResolver,
+    private takedownLog: AccountTakedownLog,
     private logger?: Logger,
   ) {}
 
@@ -32,14 +38,18 @@ export class BlobAuthServiceImpl implements BlobAuthService {
     actorDid: string,
     blobCid: Cid,
   ): Promise<boolean> {
-    // 1. Ownership Bypass: If the viewer is the actor owning the repository, access is granted.
-    if (viewerDid && viewerDid === actorDid) {
-      return true
-    }
-
-    // 2. Unauthenticated viewers cannot access private blobs (Stratos default)
+    // 1. Unauthenticated viewers cannot access private blobs (Stratos default)
     if (!viewerDid) {
       return false
+    }
+
+    if (await isAccountTakenDown(this.takedownLog, actorDid)) {
+      return false
+    }
+
+    // 2. Ownership Bypass: If the viewer is the actor owning the repository, access is granted.
+    if (viewerDid === actorDid) {
+      return true
     }
 
     // 3. Resolve viewer boundaries
@@ -52,21 +62,7 @@ export class BlobAuthServiceImpl implements BlobAuthService {
     }
 
     return this.actorStore.read(actorDid, async (store) => {
-      // Find all records that reference this blob
-      // Note: We need a way to find records by blob CID.
-      // The `stratosRecordBlob` table in the database handles this.
-      // We should use a method from the actor store that queries this association.
-
-      // For now, let's assume we have a way to get record URIs for a blob CID.
-      // Looking at `BlobMetadataReader`, it has `listBlobsForRecord`, but not `listRecordsForBlob`.
-      // We might need to add this to the storage layer or use the DB directly if available.
-
-      // In the current architecture, ActorStore provides access to specialized stores.
-      // Let's use the underlying DB from the store if possible, or assume a new method.
-
-      // Since I'm implementing the adapter, I should check how to query the association.
-      // The `SqliteBlobMetadataReader` has access to `this.db`.
-
+      // Access follows the records that reference the blob; none means orphaned
       const recordUris = await store.blob.getRecordsForBlob(blobCid)
 
       if (!recordUris || recordUris.length === 0) {
@@ -77,11 +73,9 @@ export class BlobAuthServiceImpl implements BlobAuthService {
 
       // 5. Check if viewer has access to ANY of the records
       for (const uri of recordUris) {
-        const record = await store.record.getRecord(uri, null)
-        if (record) {
-          const recordBoundaries = StratosValidator.extractBoundaryDomains(
-            record.value,
-          )
+        const found = await store.record.getVisibleRecordWithBoundaries(uri)
+        if (found) {
+          const recordBoundaries = found.boundaries
           logDomainlessInvariant(this.logger, recordBoundaries, {
             uri: uri.toString(),
             ownerDid: actorDid,
@@ -118,21 +112,25 @@ export class BlobAuthServiceImpl implements BlobAuthService {
     blobCids: Cid[],
   ): Promise<Map<string, boolean>> {
     const results = new Map<string, boolean>()
-
-    // Ownership bypass: if viewer is the actor owning the repository, access is granted for all blobs.
-    if (viewerDid && viewerDid === actorDid) {
+    const answerAll = (access: boolean) => {
       for (const cid of blobCids) {
-        results.set(cid.toString(), true)
+        results.set(cid.toString(), access)
       }
       return results
     }
 
     // Unauthenticated viewers cannot access private blobs (Stratos default)
     if (!viewerDid) {
-      for (const cid of blobCids) {
-        results.set(cid.toString(), false)
-      }
-      return results
+      return answerAll(false)
+    }
+
+    if (await isAccountTakenDown(this.takedownLog, actorDid)) {
+      return answerAll(false)
+    }
+
+    // Ownership bypass: if viewer is the actor owning the repository, access is granted for all blobs.
+    if (viewerDid === actorDid) {
+      return answerAll(true)
     }
 
     // Optimization: Resolve boundaries once for the batch
@@ -175,11 +173,9 @@ export class BlobAuthServiceImpl implements BlobAuthService {
       if (!recordUris || recordUris.length === 0) return false
 
       for (const uri of recordUris) {
-        const record = await store.record.getRecord(uri, null)
-        if (record) {
-          const recordBoundaries = StratosValidator.extractBoundaryDomains(
-            record.value,
-          )
+        const found = await store.record.getVisibleRecordWithBoundaries(uri)
+        if (found) {
+          const recordBoundaries = found.boundaries
           logDomainlessInvariant(this.logger, recordBoundaries, {
             uri: uri.toString(),
             ownerDid: actorDid,

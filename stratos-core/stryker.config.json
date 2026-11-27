@@ -18,6 +18,7 @@
     "src/validation/**/*.ts",
     "src/storage/enrollment-store.ts",
     "src/repo/export.ts",
+    "src/moderation/**/*.ts",
     "!src/**/index.ts",
     "!src/**/*.d.ts"
   ],

@@ -1,0 +1,20 @@
+{
+  "sourceReceiptSha256": "14df3afee935aba074f5ce9ab27519a46a08bbb929ec089c56d88f931178f7c6",
+  "publishedPdsDigest": "sha256:7edcfdfe1c6e2638de00b1d718d8702bce321389595711aab9f8008b3e269350",
+  "dottedAuthority": [
+    {
+      "test": "OAuth create and read returned exact URI and CID",
+      "uri": "at:space/did:web:stratos-e2e.atmosbox.test/zone.stratos.space.feed/general/did:plc:uoamhgblsem4ldntnqco4e3k/zone.stratos.feed.post/verify1795648138766",
+      "cid": "bafyreigtr76g2cilthnska3o3nwq5czk74r42ry255mrc5ciptwjdtrypm"
+    },
+    {
+      "test": "Stratos minted bound credential for exact dotted space",
+      "space": "at:space/did:web:stratos-e2e.atmosbox.test/zone.stratos.space.feed/general"
+    },
+    {
+      "test": "Published PDS accepted Stratos credential and returned a verified record MAC",
+      "uri": "at:space/did:web:stratos-e2e.atmosbox.test/zone.stratos.space.feed/general/did:plc:uoamhgblsem4ldntnqco4e3k/zone.stratos.feed.post/verify1795648138766",
+      "cid": "bafyreigtr76g2cilthnska3o3nwq5czk74r42ry255mrc5ciptwjdtrypm"
+    }
+  ]
+}

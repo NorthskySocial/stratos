@@ -9,11 +9,14 @@ and boundary-based access control against a real PDS and a Dockerized Stratos in
 - Docker Compose
 - Playwright Chromium (for OAuth browser automation)
 
-Install Playwright's Chromium browser (one-time):
+Install Playwright's Chromium browser:
 
 ```bash
 npx playwright install chromium
 ```
+
+Run it again whenever the `playwright` version in the scripts changes. Each
+Playwright release needs its own browser build.
 
 ## Test Users
 
@@ -65,12 +68,14 @@ the [project README](../README.md) for the full list of available variables.
 A standalone compose file (does **not** inherit from `docker-compose.yml`) that builds and runs
 Stratos for testing:
 
-The compose file defines three services:
+The compose file defines these services:
 
 - ssl-init — one-shot Alpine container that generates a self-signed TLS certificate (stored in a
   `ssl-certs` volume).
 - nginx — reverse proxy that terminates TLS on port `8443` and forwards to Stratos.
 - stratos — the Stratos service itself, built from the project `Dockerfile`.
+- pds-spaces — a spaces-capable PDS pinned by digest, behind the `spaces-pds` compose profile. It
+  starts only for a run that asks for it (see [Spaces PDS phases](#spaces-pds-phases-opt-in)).
 
 Key design choices:
 
@@ -115,8 +120,43 @@ authentication goes through OAuth and the Stratos API.
 deno run -A scripts/run-all.ts
 ```
 
-Runs all five stages in order. On any stage failure the remaining stages (except teardown) are
-skipped.
+Runs the stages in order. On any stage failure the remaining stages (except teardown) are
+skipped. The default run starts no spaces PDS.
+
+### Spaces PDS phases (opt-in)
+
+Two phases drive a member whose repository lives on a spaces PDS: `test-mixed-mode.ts` and
+`test-webapp-mixed-mode.ts`. They run only when the run asks for them:
+
+```bash
+deno run -A scripts/run-all.ts --spaces-pds
+```
+
+With `--spaces-pds`, `setup.ts` also starts the `pds-spaces` service (compose profile
+`spaces-pds`), waits for it and creates its two fixture accounts. The pinned image refuses the
+`at:space/` URI spelling, so these two phases cannot pass against it; they are there for the day a
+host that accepts the spelling is pinned. To run `setup.ts` on its own with the same choice, set
+`STRATOS_E2E_SPACES_PDS=true` in the environment.
+
+The admin phases (`test-admin-api.ts`, `test-admin-ui.ts`) check the PDS-custody member only when
+the run asks for a spaces PDS, so a default run needs nothing those two phases create. A deno test
+in `test/scripts/lib/phases.test.ts` holds that: it fails if a default-run script reads the PDS
+fixture, or calls its PDS-custody check, outside the option.
+
+### Host-free checks
+
+Type-check the scripts and run their unit tests from `test/scripts`. That directory's own
+`deno.json` is not a member of the repository's Deno workspace, so these commands use
+`test/scripts/deno.lock` and leave it unchanged:
+
+```bash
+cd test/scripts
+deno check *.ts lib/*.ts
+deno test --allow-read --allow-env lib
+```
+
+Run from the repository root, `deno check` uses the root `deno.json` workspace and `deno.lock`
+instead.
 
 ### Public-alpha Clubhouse release check
 
@@ -152,7 +192,7 @@ deno run -A scripts/run-all.ts --postgres
 
 This mode:
 
-1. Starts a `postgres:18-alpine` container alongside Stratos via `docker-compose.postgres.yml`
+1. Starts a `postgres:19-alpine` container alongside Stratos via `docker-compose.postgres.yml`
    overlay
 2. Configures the Stratos container with `STORAGE_BACKEND=postgres` and `STRATOS_POSTGRES_URL`
 
@@ -369,7 +409,7 @@ Stratos** (Reading A: Stratos is the repo host).
 | --- | ----------------------------------------------- | ---------------------------------------------------------- |
 | 1   | Member obtains a space credential               | membership → `getSpaceCredential` → JWT + expiry           |
 | 2   | Non-member is denied a credential               | `NotEnrolled` gating                                       |
-| 3   | Foreign / malformed space URIs rejected         | merged `at://…/space/…` addressing enforced                |
+| 3   | Foreign / malformed space URIs rejected         | `at:space/…` addressing enforced                           |
 | 4   | Credential-authed read of a member record       | credential admits the space, not a user identity           |
 | 5   | Credential fails closed on out-of-space records | no cross-space leakage                                     |
 | 6   | Pull sync (`listRepoOps`) with a credential     | syncer flow: boundary-gated ops + signed head commit       |
@@ -419,7 +459,10 @@ Teardown
         ├── admin-login.ts             # Admin OAuth login via Playwright
         ├── backend.ts                 # Storage backend / appview env switches
         ├── config.ts                  # Test constants and user definitions
+        ├── config.test.ts             # Host-free test of the space URI formatter
         ├── log.ts                     # Colored test output helpers
+        ├── phases.ts                  # Ordered phase list and the --spaces-pds option
+        ├── phases.test.ts             # Host-free test of the phase list in both modes
         ├── pds.ts                     # PDS admin API (invite codes, accounts)
         ├── state.ts                   # Test state persistence between stages
         └── stratos.ts                 # Stratos XRPC API helpers

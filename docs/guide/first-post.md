@@ -127,14 +127,14 @@ if (target.kind === 'stratos') {
   })
 
   console.log(res.data.uri)
-  // at://did:plc:…/zone.stratos.feed.post/3k…
+  // at://did:plc:ewvi7nxzyoun6zhxrhs64oiz/zone.stratos.feed.post/3kq2xwmhefc2a
 }
 ```
 
 ```typescript [PDS custody]
 if (target.kind === 'pds') {
   // The space URI is the boundary, spelled the protocol's way.
-  const space = `at://${STRATOS_DID}/space/zone.stratos.space.feed/engineering`
+  const space = `at:space/${STRATOS_DID}/zone.stratos.space.feed/engineering`
 
   const res = await session.fetchHandler(
     new URL('/xrpc/com.atproto.space.createRecord', target.url).href,
@@ -163,11 +163,11 @@ service, and the user must hold it. Otherwise Stratos rejects the write.
 
 **PDS custody.** Write into the boundary's _space_ on the PDS. The record
 carries no `boundary` field. The space it is written into is its boundary.
-The address of the new record has seven segments and starts with the
-Stratos DID, not the author:
+The address of the new record is `at:space/` plus six parts and starts with
+the Stratos DID, not the author:
 
 ```text
-at://did:web:stratos.example.com/space/zone.stratos.space.feed/engineering/did:plc:…/zone.stratos.feed.post/3k…
+at:space/did:web:stratos.example.com/zone.stratos.space.feed/engineering/did:plc:ewvi7nxzyoun6zhxrhs64oiz/zone.stratos.feed.post/3kq2xwmhefc2a
 ```
 
 Your OAuth session needs the space scope for this write. See

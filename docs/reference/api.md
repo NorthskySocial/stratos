@@ -11,13 +11,13 @@ authentication each accepts, and the errors each returns.
 
 ## Authentication
 
-| Name             | Headers                                                                                    | Who uses it                                                          |
-| ---------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| DPoP             | `Authorization: DPoP <access_token>` and `DPoP: <proof>`                                   | A user's AT Protocol OAuth session                                   |
-| Optional DPoP    | The same, or no `Authorization` header                                                     | Anonymous callers are allowed, and see no private data               |
-| Service JWT      | `Authorization: Bearer <service-jwt>`                                                      | Another service, such as the feed generator                          |
-| Space credential | `Authorization: Atproto-Space <credential>` with HTTP signature, or the legacy `DPoP` form | A syncing service or app with a credential from `getSpaceCredential` |
-| Admin            | A server-side session cookie                                                               | Operators                                                            |
+| Name             | Headers                                                                                               | Who uses it                                                          |
+| ---------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| DPoP             | `Authorization: DPoP <access_token>` and `DPoP: <proof>`                                              | A user's AT Protocol OAuth session                                   |
+| Optional DPoP    | The same, or no `Authorization` header                                                                | Anonymous callers are allowed, and see no private data               |
+| Service JWT      | `Authorization: Bearer <service-jwt>`                                                                 | Another service, such as the feed generator, or a member's PDS       |
+| Space credential | `Authorization: Atproto-Space-Credential <credential>` with HTTP signature, or the legacy `DPoP` form | A syncing service or app with a credential from `getSpaceCredential` |
+| Admin            | A server-side session cookie                                                                          | Operators                                                            |
 
 Stratos does not accept `Authorization: Bearer <access_token>` from a user.
 A user request without a DPoP proof answers `401 AuthenticationRequired`.
@@ -48,6 +48,10 @@ These serve `stratos` custody. Stratos hosts the repo.
 | `com.atproto.repo.createRecord`    | procedure | DPoP                               |
 | `com.atproto.repo.deleteRecord`    | procedure | DPoP                               |
 | `com.atproto.repo.applyWrites`     | procedure | DPoP                               |
+| `zone.stratos.repo.createRecord`   | procedure | DPoP                               |
+| `zone.stratos.repo.putRecord`      | procedure | DPoP                               |
+| `zone.stratos.repo.deleteRecord`   | procedure | DPoP                               |
+| `zone.stratos.repo.applyWrites`    | procedure | DPoP                               |
 | `com.atproto.repo.uploadBlob`      | procedure | DPoP                               |
 | `zone.stratos.repo.uploadBlob`     | procedure | DPoP                               |
 | `com.atproto.repo.getRecord`       | query     | Optional DPoP                      |
@@ -76,6 +80,7 @@ These serve `stratos` custody. Stratos hosts the repo.
 | `zone.stratos.space.getRecord`          | query     | DPoP (space member), or space credential                |
 | `zone.stratos.space.listBlobs`          | query     | DPoP (space member), or space credential                |
 | `zone.stratos.space.listRepos`          | query     | Service JWT, or space credential. Never a user session. |
+| `com.atproto.space.notifyRepoUpdate`    | procedure | Service JWT from the member's PDS, bound to this method |
 
 ### Enrollment, identity, and server methods
 
@@ -93,13 +98,13 @@ These serve `stratos` custody. Stratos hosts the repo.
 
 ### Not served by Stratos
 
-| Method                         | Note                                                                                 |
-| ------------------------------ | ------------------------------------------------------------------------------------ |
-| `com.atproto.repo.putRecord`   | Use an `update` action in `applyWrites`.                                             |
-| `com.atproto.sync.getRecord`   | Removed. Stratos serves no single-record proof.                                      |
-| `zone.stratos.repo.importRepo` | A lexicon exists. No handler is registered.                                          |
-| `zone.stratos.feedgen.*`       | Served by the feed generator. See [Private Feed Attachments](/client/feedgen-blobs). |
-| `com.atproto.space.*`          | Served by a spaces-capable PDS, for `pds` custody.                                   |
+| Method                                              | Note                                                                                                                                                                                  |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `com.atproto.repo.putRecord`                        | Use `zone.stratos.repo.putRecord`, or an `update` action in `applyWrites`.                                                                                                            |
+| `com.atproto.sync.getRecord`                        | Removed. Stratos serves no single-record proof.                                                                                                                                       |
+| `zone.stratos.repo.importRepo`                      | A lexicon exists. No handler is registered.                                                                                                                                           |
+| `zone.stratos.feedgen.*`                            | Served by the feed generator. See [Private Feed Attachments](/client/feedgen-blobs).                                                                                                  |
+| `com.atproto.space.*` other than `notifyRepoUpdate` | Served by a spaces-capable PDS, for `pds` custody. Stratos answers each with 501 `MethodNotImplemented`, `listWriters`, `notifyCredentialsRevoked` and `authorizeSpaceSync` included. |
 
 ## Records
 
@@ -170,6 +175,138 @@ Content-Type: application/json
 
 Each write is `{ action, collection, rkey, record }`. This is not the
 upstream `$type` and `value` shape.
+
+### Boundary Records
+
+The `zone.stratos.repo` procedures write into one boundary. The boundary is a
+parameter, in the form `{serviceDid}/{domainName}`, and the record body does not
+need to carry it. They serve `stratos` custody. They allow three collections:
+`zone.stratos.feed.post`, `app.bsky.feed.like` and `app.bsky.feed.repost`.
+`repo` must be the caller's DID. A `pds`-custody user gets
+`PdsCustodyWriteForbidden`.
+
+```http
+POST /xrpc/zone.stratos.repo.createRecord
+Authorization: DPoP <access_token>
+DPoP: <proof>
+Content-Type: application/json
+
+{
+  "boundary": "did:web:stratos.example.com/general",
+  "repo": "<user-did>",
+  "collection": "zone.stratos.feed.post",
+  "record": { "$type": "zone.stratos.feed.post", ... }
+}
+```
+
+| Procedure                        | Input                                                                   | Output                             |
+| -------------------------------- | ----------------------------------------------------------------------- | ---------------------------------- |
+| `zone.stratos.repo.createRecord` | `boundary`, `repo`, `collection`, `record`; optional `rkey`, `validate` | `uri`, `cid`, `validationStatus`   |
+| `zone.stratos.repo.putRecord`    | `boundary`, `repo`, `collection`, `rkey`, `record`; optional `validate` | `uri`, `cid`, `validationStatus`   |
+| `zone.stratos.repo.deleteRecord` | `boundary`, `repo`, `collection`, `rkey`                                | `{}`                               |
+| `zone.stratos.repo.applyWrites`  | `boundary`, `repo`, `writes` (1 to 200); optional `validate`            | `results`, one per write, in order |
+
+- `createRecord` fails with `RecordAlreadyExists` when the key is taken.
+- `putRecord` creates the record or replaces it. It never overwrites a record
+  in another boundary or a record that was taken down.
+- `deleteRecord` succeeds when the record is missing or is in another
+  boundary.
+- `applyWrites` is one commit. Each write has a `$type` of
+  `zone.stratos.repo.applyWrites#create`, `#update` or `#delete`, and
+  `collection`, `rkey` and `value`. A `create` may leave out `rkey`. A `delete`
+  has no `value`. Each result has the type `#createResult`, `#updateResult` or
+  `#deleteResult`.
+- Each call of these procedures is one commit and one sync event.
+  `subscribeRecords` sends the event as one `#commit` frame, with the ops in
+  the order of the writes. `listRepoOps` never splits it across pages. A delete
+  is one op, scoped to the boundary.
+- Stratos refuses a commit whose frame would be larger than 2,359,296 bytes
+  with 413 `PayloadTooLarge`, and stores nothing. A body within the
+  1,000,000-byte limit cannot reach that size.
+
+The errors are listed under
+[Writing into a boundary](/reference/errors#writing-into-a-boundary). The client library wraps all
+four procedures in `createBoundaryRecord`, `putBoundaryRecord`,
+`deleteBoundaryRecord` and `applyBoundaryWrites`. These helpers also route
+`pds` custody to the PDS. Their target resolver, `resolveRepositoryTarget`,
+accepts only https origins. A service on a local `http` address needs a
+`resolveTarget` of your own.
+
+#### When `ScopeUpgradeRequired` is returned
+
+Stratos returns `ScopeUpgradeRequired` for a like or repost, when the member's
+stored OAuth grant has a space grant for this service that does not allow
+creating that collection. The client starts OAuth authorization for the member
+again, then repeats the write. Stratos does not return it when the member has
+no stored session, when the stored scope has no space grant for this service,
+or when the scope cannot be read. Posts are not checked.
+
+#### Likes and reposts
+
+[Creating Records](/client/creating-records#likes-and-reposts) has the rules.
+The `subject` must be a post in the same boundary. A member has one like or
+repost per post. Any wrong subject, including one that is not a `{ uri, cid }`
+reference, returns `InvalidRecord` with the message
+`The subject must be a post in this boundary`, whatever the `validate` value.
+For a post by a member who hosts their own repo, Stratos does not hold the
+record. It checks neither that the record exists nor its CID. `subject.cid`
+must still be a valid CID. Stratos checks that the author is an
+active member of the boundary who hosts their own repo, and that the URI is
+well formed for that boundary.
+
+#### Differences from the upstream procedures
+
+The procedures follow `com.atproto.space.createRecord`, `putRecord`,
+`deleteRecord` and `applyWrites`, with `boundary` in place of `space`. These
+differences are on purpose.
+
+- `$type` is required, and must equal the collection. Upstream fills in a
+  missing `$type`.
+- Stratos does not require `tid` keys and has no slur check. It checks the
+  record-key syntax only.
+- A record that breaks a rule is `InvalidRecord`. Upstream answers
+  `InvalidRequest`. The message text is not the same.
+- The body limit is 1,000,000 bytes per request. There is no cap per record.
+  Upstream has a size cap for a space.
+- `applyWrites` takes 1 to 200 writes. The upstream lexicon declares no limit.
+  The reference PDS enforces 200. A batch that names the same record twice is
+  refused. When several writes fail validation, the error returned is that of
+  the first failing write, in order. The collection, duplicate-key and grant checks run for the whole batch first, then the checks on each record's `boundary` claim and `$type`, and only then the lexicon and subject checks.
+- `deleteRecord` of a record that is missing, or that is in another boundary,
+  succeeds with `{}`. It writes no commit and sends no event.
+- A boundary the caller does not hold returns `ForbiddenBoundary`, whether or
+  not it exists. `BoundaryNotFound` is returned only for a boundary the caller
+  holds that is absent or inactive in the catalog. `putRecord`
+  returns `RecordAlreadyExists` when the key holds a record in another boundary
+  or a record that was taken down.
+- A subject may be a space URI where the lexicon says `at-uri`. Stratos parses
+  it itself.
+- A subject URI must be canonical. A repo URI has a DID authority and equals
+  its re-parsed form. A space URI equals the URI rebuilt from its parts. Any
+  other spelling is refused.
+- A member has one like or repost per post. A like that was taken down
+  still blocks a second one. Upstream does not limit this.
+- `ScopeUpgradeRequired` exists only on Stratos.
+- `via` on a repost is not resolved and not indexed. When `validate` is not
+  `false`, its shape is checked.
+- A `boundary` claim in the record body must be `{ values: [{ value }] }` with
+  one entry, whose `value` is the request's boundary. It may carry a `$type` of
+  `zone.stratos.boundary.defs#Domains`. An entry with its own `$type` is a
+  `BoundaryMismatch`.
+
+#### Feed view fields
+
+`zone.stratos.feedgen.getFeed` returns `likeCount` and `repostCount` on each
+post, the number of members who like or repost it in the feed's boundary. It
+returns `viewer` with `like` and `repost`, the URIs of the viewer's own
+records. A key is absent when the viewer has no such record.
+
+#### Deploy order
+
+Deploy the Rust feed generator before any client calls these procedures. It
+reads the boundary of each write from the sync stream and serves the fields
+above. After clients use the procedures, do not roll back to the TypeScript
+feed generator.
 
 ### Get Record
 
@@ -272,17 +409,18 @@ Errors: `BlobBlocked`, `RepoNotFound`, `BlobNotFound`.
 ### Get Space Record
 
 ```http
-GET /xrpc/zone.stratos.space.getRecord?space=<at-uri>&repo=<did>&collection=<nsid>&rkey=<rkey>
-Authorization: DPoP <access_token> | Atproto-Space <space-credential> | DPoP <space-credential>
+GET /xrpc/zone.stratos.space.getRecord?space=<space-uri>&repo=<did>&collection=<nsid>&rkey=<rkey>
+Authorization: DPoP <access_token> | Atproto-Space-Credential <space-credential> | DPoP <space-credential>
 DPoP: <proof>   (user sessions and legacy cnf.jkt credentials)
 Response: { "uri": "...", "cid": "...", "value": { ... } }
 ```
 
-Get a single record from a permissioned space (spec-shaped mirror of
-`com.atproto.space.getRecord`). Callable with standard user auth - the caller
-must be a member of the space - or with a space credential for that space (for
-syncing services). Standard `cnf.kid` credentials use `Atproto-Space` with HTTP
-signatures as described under Get Space Credential. A legacy credential is
+Get a single record from a permissioned space. This is a Stratos method, not the
+upstream `com.atproto.space.getRecord` of a similar name. Callable with standard
+user auth - the caller must be a member of the space - or with a space
+credential for that space (for syncing services). Standard `cnf.kid`
+credentials use `Atproto-Space-Credential` with HTTP signatures as described
+under Get Space Credential. A legacy credential is
 DPoP-key-bound (`cnf.jkt`): present it
 under the `DPoP` scheme with a per-request proof signed by the bound key and
 hash-bound to the credential (`ath`). The record must belong to the requested
@@ -295,14 +433,15 @@ This method reads records that Stratos hosts. It does not read a
 ### List Space Blobs
 
 ```http
-GET /xrpc/zone.stratos.space.listBlobs?space=<at-uri>&repo=<did>[&since=<rev>][&limit=<n>][&cursor=<cursor>]
-Authorization: DPoP <access_token> | Atproto-Space <space-credential> | DPoP <space-credential>
+GET /xrpc/zone.stratos.space.listBlobs?space=<space-uri>&repo=<did>[&since=<rev>][&limit=<n>][&cursor=<cursor>]
+Authorization: DPoP <access_token> | Atproto-Space-Credential <space-credential> | DPoP <space-credential>
 DPoP: <proof>   (user sessions and legacy cnf.jkt credentials)
 Response: { "cids": ["..."], "cursor": "..." }
 ```
 
 List the CIDs of blobs referenced by an account's records within a permissioned
-space (spec-shaped mirror of `com.atproto.space.listBlobs`). The same access
+space. This is a Stratos method, not the upstream `com.atproto.space.listBlobs`
+of a similar name. The same access
 rules as Get Space Record apply: standard user auth requires space membership, or
 a space credential for that space. `limit` is 1-1000 (default 500); a `cursor`
 is returned when a page is full.
@@ -310,8 +449,8 @@ is returned when a page is full.
 ### List Space Repos
 
 ```http
-GET /xrpc/zone.stratos.space.listRepos?space=<at-uri>[&limit=<n>][&cursor=<cursor>]
-Authorization: Bearer <service-jwt> | Atproto-Space <space-credential>
+GET /xrpc/zone.stratos.space.listRepos?space=<space-uri>[&limit=<n>][&cursor=<cursor>]
+Authorization: Bearer <service-jwt> | Atproto-Space-Credential <space-credential>
 Response: { "repos": [{ "did": "...", "custody": "...", "rev": "...", "host": "...", "hostSource": "..." }], "cursor": "..." }
 ```
 
@@ -328,7 +467,7 @@ POST /xrpc/zone.stratos.space.getSpaceCredential
 Authorization: DPoP <access_token>
 DPoP: <proof>
 Content-Type: application/json
-Body: { "space": "at://<space-did>/space/<type>/<skey>"[, "delegationToken": "<jwt>"][, "clientAttestation": "<jwt>"] }
+Body: { "space": "at:space/<space-did>/<type>/<skey>"[, "delegationToken": "<jwt>"][, "clientAttestation": "<jwt>"] }
 Response: { "credential": "<jwt>", "expiresAt": "<datetime>" }
 ```
 
@@ -351,16 +490,21 @@ Authorization: Bearer <delegation JWT>
 Signature-Input: atproto-space=("authorization");keyid="<P-256 did:key>"
 Signature: atproto-space=:<base64 compact signature>:
 Content-Type: application/json
-Body: { "space": "at://<authority-did>/space/<type>/<skey>" }
+Body: { "space": "at:space/<authority-did>/<type>/<skey>" }
 ```
+
+A delegation token and a client attestation carry the audience
+`<authority-did>#atproto_pds`. A bare DID, any other fragment and another
+authority's DID are refused.
 
 Do not combine HTTP signatures with a DPoP proof. Standard credentials bind
 `cnf.kid` and use a separate default-600/max-3600-second TTL. Legacy session,
 body-delegation, and Bearer-delegation-plus-DPoP minting remain supported with
 their existing TTL configuration, default 7200 seconds.
 
-For standard reads, send `Authorization: Atproto-Space <credential JWT>` and
-sign exactly `authorization` then `atproto-space-audience`. Set
+For standard reads, send `Authorization: Atproto-Space-Credential <credential JWT>`
+and sign exactly `authorization` then `atproto-space-audience`. The signature
+carries `tag="atproto-space-credential"`. Set
 `Atproto-Space-Audience` to the actual repo owner's DID, not its host, for repo
 operations. Use the bare authority DID for `zone.stratos.space.listRepos`.
 The same signature is reusable for the same credential and audience until
@@ -371,7 +515,60 @@ renew both together. Ordinary OAuth DPoP remains unchanged.
 This does not add an upstream `com.atproto.space.*` authority endpoint.
 Member removal prevents renewal but does not automatically revoke credentials
 already accepted by a foreign PDS. See the
-[compatibility and rollout limits](/operator/upgrades/october-spaces).
+[known gaps](/architecture/supported-versions#known-gaps).
+
+### Notify Repo Update
+
+```http
+POST /xrpc/com.atproto.space.notifyRepoUpdate
+Authorization: Bearer <service-jwt>
+Content-Type: application/json
+Body: { "space": "at:space/<service-did>/<type>/<skey>", "repo": "<did>", "repoRev": "<tid>", "data": { "$bytes": "<base64>" } }
+Response: 200, empty body
+```
+
+A member whose repo is on their own PDS writes there, and the PDS sends this
+notice to the space host. The PDS finds this route through the `#atproto_pds`
+service of the Stratos DID document. This is the upstream method, served as
+upstream declares it.
+
+Stratos checks the notice and acknowledges it. It stores nothing and forwards
+nothing; the feed generator still polls the member's PDS on its own schedule.
+
+The token is a service JWT signed by the `#atproto` key of the writing
+account. Its `iss` must equal `repo`, its `lxm` must be
+`com.atproto.space.notifyRepoUpdate`, and its `aud` must be the Stratos DID or
+`<Stratos DID>#atproto_pds`. Its `exp` must be a finite number, and a token typed as an
+access token, a refresh token or a DPoP proof is refused. A missing or refused
+token answers `401 AuthenticationRequired`, as other service JWT routes do.
+
+The checks, in order:
+
+| Check                                                                                         | Answer                       |
+| --------------------------------------------------------------------------------------------- | ---------------------------- |
+| The body is JSON in a UTF charset, in a content encoding the parser reads, and at most 100 kB | `400`, `415` or `413`        |
+| The token verifies                                                                            | `401 AuthenticationRequired` |
+| The body has a string `space`, a DID `repo`, a TID `repoRev` and bytes `data`                 | `400 InvalidRequest`         |
+| `iss` equals `repo`                                                                           | `403 Forbidden`              |
+| `space` is an `at:space/` URI of this service, of type `zone.stratos.space.feed`              | `400 SpaceNotFound`          |
+| `repo` is an active member with `pds` custody, not a service, who holds the space's boundary  | `403 Forbidden`              |
+| The writer is under 1,500 notices an hour and 10,000 a day                                    | `429 RateLimitExceeded`      |
+| The boundary is active                                                                        | `403 Forbidden`              |
+| `repoRev` is at most five minutes ahead of the clock                                          | `400 FutureRev`              |
+
+Every check after the member check answers only a writer of the space. A
+notice from anyone else for a boundary they do not hold gets the same answer,
+`403 Forbidden` with the message
+`Repo is not authorized to write to the space`, whether the boundary is
+active, deactivating or unknown and whatever the revision. So does a
+deactivating boundary its member still holds. Only a writer counts against the
+rate limits.
+
+A body that the parser refuses is answered before the token is checked: not
+JSON is `400 InvalidRequest`, another charset or content encoding is
+`415 UnsupportedMediaType`, and more than 100 kB is `413 PayloadTooLarge`. A
+space URI in the earlier `at://` spelling is `SpaceNotFound`. A member whose
+records Stratos hosts is refused with 403, because their repo is not on a PDS.
 
 ## Export
 
@@ -469,15 +666,22 @@ A WebSocket stream of Stratos-hosted record changes. Messages are `#commit`,
 the newest event. A cursor older than the kept events receives an
 `OutdatedCursor` info message. A user session is not accepted.
 
+A commit of the `zone.stratos.repo` write procedures is one `#commit` frame
+that carries all of its ops. A `#commit` frame is at most 2,359,296 bytes. Read
+frames up to that size: a reader that refuses a frame and reconnects at the same
+cursor meets the same frame again. The `com.atproto.repo` methods send each op
+as a frame of its own.
+
 ### Pull Sync: List Repo Operations
 
 ```http
 GET /xrpc/zone.stratos.sync.listRepoOps?did=<did>[&since=<rev>][&limit=<n>][&cursor=<c>][&excludeValues=true]
-Authorization: Bearer <service-jwt> | Atproto-Space <space-credential>
+Authorization: Bearer <service-jwt> | Atproto-Space-Credential <space-credential>
 ```
 
-Incremental pull sync of a repo's operation log, mirroring `com.atproto.space.listRepoOps`
-semantics. Returns record operations after the `since` revision, boundary-gated to the
+Incremental pull sync of a repo's operation log. This is a Stratos method, not the
+upstream `com.atproto.space.listRepoOps` of a similar name, and it does not take or
+return what that method does. Returns record operations after the `since` revision, boundary-gated to the
 caller's enrolled boundaries, with current record values inlined by default. Each op carries
 required-nullable `cid` and `prev` fields: `cid` null means delete, `prev` null means create
 (or that the superseded value predates the returned window). The response reaches the head
@@ -487,7 +691,8 @@ write is detected, the response instead carries a cursor with no commit. Such a 
 carry no ops and repeat the cursor you sent, so poll again while a cursor is present, and do
 not read an unchanged cursor as a stall. Under continuous writes the head may never be
 reached. A write that commits after the head probe is not detected; it falls outside this
-snapshot and arrives on a later poll. `cursor` takes precedence over `since` when both are
+snapshot and arrives on a later poll. The ops of one `zone.stratos.repo` commit always arrive
+in the same page, so a page can hold more ops than `limit`. `cursor` takes precedence over `since` when both are
 supplied. The `OplogTruncated` error (stricter than upstream, which silently restarts) means
 the oplog cannot serve your position truthfully - fall back to full-state recovery below. It
 is returned when the cursor is malformed, predates retained history (compaction passed it),
@@ -500,7 +705,7 @@ that fails the record-key format).
 
 ```http
 GET /xrpc/zone.stratos.sync.listRecordPaths?did=<did>[&collection=<nsid>][&limit=<n>][&cursor=<c>][&excludeValues=true]
-Authorization: Bearer <service-jwt> | Atproto-Space <space-credential>
+Authorization: Bearer <service-jwt> | Atproto-Space-Credential <space-credential>
 ```
 
 Enumerates a repo's record paths with their current CIDs (values inlined by default),

@@ -116,20 +116,21 @@ the authority URL. It does not select a repository host.
 ## Two record addresses
 
 Custody also decides the shape of a record URI. A `stratos`-custody record
-keeps the familiar three segments. A `pds`-custody record lives in a space.
-Its URI has seven segments and starts with the authority. The author is the
-fifth segment.
+keeps the familiar `at://` address with three parts. A `pds`-custody record
+lives in a space. Its URI is `at:space/` plus six parts and starts with the
+authority. The author is the fourth part.
 
 <RecordUri kind="space" />
 
-The space itself is the first four segments. The boundary
+The space itself is the first three parts. The boundary
 `did:web:stratos.example.com/engineering` is the space
-`at://did:web:stratos.example.com/space/zone.stratos.space.feed/engineering`.
+`at:space/did:web:stratos.example.com/zone.stratos.space.feed/engineering`.
 [Permissioned Spaces](/architecture/permissioned-spaces) explains the mapping.
 
-`stratos-client` does not export a space URI parser. The grammar lives in
-`@northskysocial/stratos-core/spaces` (`boundaryToSpaceUri`, `parseRecordUri`,
-`formatSpaceUri`). The webapp imports it from there.
+`stratos-client` exports `boundaryToSpaceUri`, `parseSpaceUri`,
+`parseSpaceRecordUri` and `parseRecordAddress`. `parseRecordAddress` tells a
+custody record address from a space record address and returns the author of
+either. Parse the address; do not split it by hand.
 
 ## Writing by custody
 
@@ -158,6 +159,9 @@ the access token and the DPoP proof. Call this only when
 
 Stratos refuses repo writes from a `pds`-custody user. `createRecord`,
 `deleteRecord`, and `applyWrites` all answer `400 PdsCustodyWriteForbidden`.
+This holds for the `com.atproto.repo` methods and for the `zone.stratos.repo`
+procedures. The write helpers in `stratos-client` route by custody, so you do
+not choose between them. See [Creating Records](/client/creating-records).
 
 ### PDS custody
 
@@ -232,6 +236,11 @@ space:zone.stratos.space.feed?authority={serviceDid}&collection=zone.stratos.fee
 Add `action=delete` to let users delete their posts. Build the string with
 `buildSpaceWriteScope` instead of typing it. The authority DID must be
 percent-encoded, and the helper does that.
+
+To like or repost, the scope also needs `collection=app.bsky.feed.like` and
+`collection=app.bsky.feed.repost`. A member who hosts their own repo cannot
+like or repost until the `zone.stratos.space.feed` declaration is published
+with those collections and the client's scope lists them.
 
 A PDS without spaces support ignores the scope. Check the granted scope before
 you offer a PDS-custody write.

@@ -8,7 +8,7 @@ import { TestServer } from './helpers/test-server.js'
 const SPIKE = 'did:plc:spikespiegel0repro'
 const SERVICE_DID = 'did:web:test.stratos.actor'
 const DOMAIN = `${SERVICE_DID}/test.com`
-const SPACE = `at://${SERVICE_DID}/space/zone.stratos.space.feed/test.com`
+const SPACE = `at:space/${SERVICE_DID}/zone.stratos.space.feed/test.com`
 
 describe('HTTP repro: credential-authed pull sync', () => {
   let ts: TestServer

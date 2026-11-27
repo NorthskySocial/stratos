@@ -146,8 +146,8 @@ export default defineConfig({
           text: 'Upgrades',
           items: [
             {
-              text: 'October spaces rollout',
-              link: '/operator/upgrades/october-spaces',
+              text: 'November upgrade and rollback',
+              link: '/operator/november-upgrade',
             },
           ],
         },
@@ -198,16 +198,12 @@ export default defineConfig({
           text: 'Decisions',
           items: [
             {
-              text: `Spaces: current contract ${badge('partial', 'warning')}`,
+              text: `Spaces alignment ${badge('partial', 'warning')}`,
               link: '/architecture/spaces-alignment',
             },
             {
-              text: `Credential revocation contract ${badge('accepted', 'tip')}`,
-              link: '/architecture/credential-revocation-contract',
-            },
-            {
-              text: `October writer sync contract ${badge('proposed', 'info')}`,
-              link: '/architecture/october-writer-sync-contract',
+              text: 'Supported versions',
+              link: '/architecture/supported-versions',
             },
             {
               text: 'Service key history',
@@ -222,6 +218,26 @@ export default defineConfig({
             {
               text: `AppView indexer ${badge('legacy', 'warning')}`,
               link: '/architecture/appview-indexer',
+            },
+          ],
+        },
+      ],
+      '/history/': [
+        {
+          text: 'History',
+          items: [
+            { text: 'About this section', link: '/history/' },
+            {
+              text: 'October writer sync contract',
+              link: '/history/october-writer-sync-contract',
+            },
+            {
+              text: 'Credential revocation contract',
+              link: '/history/credential-revocation-contract',
+            },
+            {
+              text: 'October spaces rollout',
+              link: '/history/october-spaces',
             },
           ],
         },

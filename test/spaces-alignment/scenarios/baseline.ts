@@ -1,3 +1,4 @@
+import { runDriverCommand } from '../rules.js'
 import type { AssertionResult, ScenarioSuite } from '../rules.js'
 
 const requiredAssertions = [
@@ -17,23 +18,25 @@ export const suite: ScenarioSuite = {
   id: 'baseline',
   requiredAssertions,
   async run(context): Promise<AssertionResult[]> {
-    const output = await context.runCommand(
-      'docker',
-      [
-        'compose',
-        '--file',
-        context.composeFile,
-        '--project-name',
-        context.projectName,
-        '--project-directory',
+    const output = await runDriverCommand(suite, () =>
+      context.runCommand(
+        'docker',
+        [
+          'compose',
+          '--file',
+          context.composeFile,
+          '--project-name',
+          context.projectName,
+          '--project-directory',
+          context.sandboxDirectory,
+          'run',
+          '--build',
+          '--rm',
+          '--no-deps',
+          'feedgen-e2e-browser',
+        ],
         context.sandboxDirectory,
-        'run',
-        '--build',
-        '--rm',
-        '--no-deps',
-        'feedgen-e2e-browser',
-      ],
-      context.sandboxDirectory,
+      ),
     )
     const lines = output
       .split('\n')

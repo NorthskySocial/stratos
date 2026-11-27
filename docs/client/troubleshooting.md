@@ -140,6 +140,10 @@ Also check custody. Stratos read methods serve only Stratos-hosted records.
 A `pds`-custody author's posts are on their PDS; read them through the feed
 generator.
 
+A moderation service may have taken down the record or the author's account.
+Both read as a missing record, for every viewer. A service with a service
+enrollment can read the label with `zone.stratos.moderation.queryLabels`.
+
 ## fetchAndVerifyRecord fails
 
 `fetchAndVerifyRecord` calls `com.atproto.sync.getRecord`, which the Stratos
@@ -229,8 +233,9 @@ state setter in your component.
 ### Reading the author from a space URI
 
 A space record URI starts with the authority DID, not the author. The author
-is the fifth segment. Code that splits a URI and takes the first part shows
-the Stratos service as the author of every PDS-hosted post.
+is the fourth part after `at:space/`. Code that splits a URI and takes the
+first part shows the Stratos service as the author of every PDS-hosted post.
+Use `parseRecordAddress` from `@northskysocial/stratos-client`.
 
 ### Verification level ambiguity
 

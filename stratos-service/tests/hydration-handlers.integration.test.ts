@@ -22,7 +22,11 @@ import {
   ServiceDb,
 } from '../src/db'
 import { initHydration, registerHydrationHandlers } from '../src/features'
-import { createMockBlobStore, createTestConfig } from './utils'
+import {
+  createEmptyLabelLog,
+  createMockBlobStore,
+  createTestConfig,
+} from './utils'
 
 describe('Hydration Handlers', () => {
   let dataDir: string
@@ -57,7 +61,11 @@ describe('Hydration Handlers', () => {
       cborToRecord: (content) => decode(content) as Record<string, unknown>,
     })
 
-    const hydrationCtx = initHydration(actorStore, enrollmentStore)
+    const hydrationCtx = initHydration(
+      actorStore,
+      enrollmentStore,
+      createEmptyLabelLog(),
+    )
 
     ctx = {
       cfg: {

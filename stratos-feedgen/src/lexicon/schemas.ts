@@ -73,7 +73,8 @@ export const getFeedLexicon: LexiconDoc = {
       properties: {
         uri: {
           type: 'string',
-          description: 'AT URI or permissioned space record URI.',
+          description:
+            'Record URI: at://{did}/{collection}/{rkey} for a Stratos-hosted post, or at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey} for a permissioned space record.',
         },
         cid: {
           type: 'string',
@@ -105,6 +106,35 @@ export const getFeedLexicon: LexiconDoc = {
           },
           description:
             'Authenticated feedgen blob URLs. Record blob refs remain unchanged. Absent for custody whose blobs must be read from the host.',
+        },
+        likeCount: {
+          type: 'integer',
+          minimum: 0,
+          description:
+            "Number of distinct actors who like this post in the feed's boundary.",
+        },
+        repostCount: {
+          type: 'integer',
+          minimum: 0,
+          description:
+            "Number of distinct actors who repost this post in the feed's boundary.",
+        },
+        viewer: {
+          type: 'ref',
+          ref: '#viewerState',
+        },
+      },
+    },
+    viewerState: {
+      type: 'object',
+      properties: {
+        like: {
+          type: 'string',
+          description: "URI of the viewer's like record.",
+        },
+        repost: {
+          type: 'string',
+          description: "URI of the viewer's repost record.",
         },
       },
     },
@@ -204,7 +234,8 @@ export const getBlobLexicon: LexiconDoc = {
         properties: {
           uri: {
             type: 'string',
-            description: 'Exact indexed post URI, including space record URIs.',
+            description:
+              'Exact indexed post URI: at://{did}/{collection}/{rkey}, or at:space/{authority}/{type}/{skey}/{author}/{collection}/{rkey} for a space record.',
           },
           cid: {
             type: 'string',

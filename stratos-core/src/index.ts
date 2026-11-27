@@ -8,7 +8,7 @@ export * from './repo/index.js'
 export * from './record/index.js'
 export * from './mst/index.js'
 
-// Blob - export with renamed BlobMetadata to avoid conflict
+// Blob. The metadata type keeps the name BlobInfo that consumers already import.
 export {
   StratosBlobReader,
   StratosBlobTransactor,
@@ -23,6 +23,7 @@ export * from './hydration/index.js'
 // Attestation
 export * from './attestation/index.js'
 export * from './spaces/index.js'
+export * from './moderation/index.js'
 export * from './atproto/index.js'
 export * from './config/index.js'
 export * from './lexicons/index.js'

@@ -11,6 +11,7 @@ import {
   readSequencePage,
   SEQUENCE_DB_PAGE_SIZE,
 } from '../../subscription/sequence-paging.js'
+import { resolveHiddenUris } from '../../subscription/takedown-filter.js'
 
 /**
  * Distinct error signalling that the oplog cannot serve the requested window
@@ -235,6 +236,22 @@ function expandEventOps(
   })
 }
 
+interface InScopeEvent {
+  seq: number
+  rev: string
+  decoded: DecodedEvent
+}
+
+function valueOpUris(did: string, events: InScopeEvent[]): Set<string> {
+  const uris = new Set<string>()
+  for (const { decoded } of events) {
+    for (const op of decoded.ops) {
+      if (op.action !== 'delete') uris.add(`at://${did}/${op.path}`)
+    }
+  }
+  return uris
+}
+
 /**
  * Page the actor sequence log for {@link listRepoOps}, applying the `since`
  * start-mapping, boundary gating (fail-closed, including delete-filtering) and
@@ -271,9 +288,10 @@ async function collectOps(
       break
     }
 
+    // Decode each event once, applying the `since` start-mapping and boundary
+    // gating, so one takedown lookup can cover the whole page.
+    const inScope: InScopeEvent[] = []
     for (const event of page) {
-      afterSeq = event.seq
-
       // Fail closed on a malformed revision: an event whose `rev` did not
       // decode to a valid TID (rev === '') cannot be ordered against `since`
       // nor emitted as a lexicon-valid op — drop it entirely.
@@ -295,9 +313,28 @@ async function collectOps(
       // a move's scoped removal for callers who still see the record.
       if (!eventInScope(decoded, callerBoundaries)) continue
 
+      inScope.push({ seq: event.seq, rev: event.rev, decoded })
+    }
+
+    const hidden = await resolveHiddenUris(ctx, did, valueOpUris(did, inScope))
+
+    // Events that were skipped above still advance the cursor, as before.
+    const pageLastSeq = page[page.length - 1].seq
+    for (const { seq, rev, decoded } of inScope) {
+      afterSeq = seq
+      // A sync consumer must never see a taken-down record's value or a
+      // valueless create/update op. A consumer that applies labels drops the
+      // record by URI. Deletes pass through so consumers can still remove it.
+      // Expansion keeps its fail-closed truncation before the filter runs.
+      const ops = expandEventOps(ctx, did, decoded, rev).filter(
+        (op) =>
+          op.cid === null ||
+          !hidden.has(`at://${did}/${op.collection}/${op.rkey}`),
+      )
+
       // Emit a whole event's ops atomically (they share one rev); never split a
       // batch across a page boundary.
-      collected.push(...expandEventOps(ctx, did, decoded, event.rev))
+      collected.push(...ops)
 
       if (collected.length >= limit) {
         hitLimit = true
@@ -306,6 +343,7 @@ async function collectOps(
     }
 
     if (hitLimit) break
+    afterSeq = pageLastSeq
 
     if (page.length < SEQUENCE_DB_PAGE_SIZE) {
       drained = true

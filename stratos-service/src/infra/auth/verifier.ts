@@ -1,7 +1,8 @@
-import { InvalidRequestError } from '@atproto/xrpc-server'
+import { InvalidRequestError, verifyJwt } from '@atproto/xrpc-server'
 import {
   type DidDocument,
   getDidKeyFromMultibase,
+  getKey,
   IdResolver,
 } from '@atproto/identity'
 import * as crypto from '@atproto/crypto'
@@ -245,4 +246,75 @@ export async function verifyServiceAuth(
     lxm: payload.lxm,
     exp: payload.exp,
   }
+}
+
+/** The audiences and method a method-bound service token must name. */
+export interface MethodBinding {
+  audiences: readonly string[]
+  lxm: string
+}
+
+/**
+ * Verify a service-auth JWT bound to one method, as an account's host sends
+ * it on the account's behalf.
+ *
+ * The pinned upstream verifier checks the token's shape, type, expiry, method
+ * and signature, and refetches the issuer's DID document once when the
+ * signature does not verify, as after a key rotation. Narrower than
+ * {@link verifyServiceAuth}: `aud` must be one of the bound audiences, the
+ * expiry must be a finite number, and only the `#atproto` signing key of the
+ * account itself, never a service of it, verifies the signature.
+ *
+ * @throws Error if any claim or the signature does not verify
+ */
+export async function verifyMethodBoundServiceAuth(
+  authHeader: string,
+  binding: MethodBinding,
+  idResolver: IdResolver,
+): Promise<ServiceAuthResult> {
+  const { token } = parseAuthToken(authHeader)
+
+  const payload = await verifyJwt(
+    token,
+    null,
+    binding.lxm,
+    async (iss, forceRefresh) => {
+      if (iss.includes('#')) {
+        throw new InvalidRequestError('Invalid iss claim')
+      }
+      const didDoc = await idResolver.did.resolve(iss, forceRefresh)
+      const signingKey = didDoc ? getKey(didDoc) : undefined
+      if (!signingKey) {
+        throw new InvalidRequestError('Could not resolve issuer signing key')
+      }
+      return signingKey
+    },
+    verifyLowSSignature,
+  )
+  if (!binding.audiences.includes(payload.aud)) {
+    throw new InvalidRequestError('Invalid aud claim')
+  }
+  // JSON reads an exponent too large for a double as Infinity, which the
+  // upstream expiry comparison never refuses.
+  if (!Number.isFinite(payload.exp)) {
+    throw new InvalidRequestError('Invalid exp claim')
+  }
+
+  return {
+    iss: payload.iss,
+    aud: payload.aud,
+    lxm: payload.lxm,
+    exp: payload.exp,
+  }
+}
+
+// Upstream accepts a high-S signature on a service token; this keeps the
+// crypto package's default, which refuses one.
+async function verifyLowSSignature(
+  key: string,
+  msgBytes: Uint8Array,
+  sigBytes: Uint8Array,
+  alg: string,
+): Promise<boolean> {
+  return crypto.verifySignature(key, msgBytes, sigBytes, { jwtAlg: alg })
 }

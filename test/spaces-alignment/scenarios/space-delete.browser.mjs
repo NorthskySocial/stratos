@@ -163,9 +163,31 @@ async function waitForFeed(page, responses, uri, text) {
   throw new Error('Rust feed did not show the space post')
 }
 
+const spaceUriPrefix = 'at:space/'
+
+function spaceUriFromParts({ authority, spaceType, skey }) {
+  return `${spaceUriPrefix}${authority}/${spaceType}/${skey}`
+}
+
+function recordUriParts(uri) {
+  assert.ok(uri.startsWith(spaceUriPrefix), 'Not a space record URI')
+  const [authority, spaceType, skey, author, collection, rkey, ...extra] = uri
+    .slice(spaceUriPrefix.length)
+    .split('/')
+  assert.ok(rkey && extra.length === 0, 'Space record URI needs six parts')
+  return { authority, spaceType, skey, author, collection, rkey }
+}
+
+function recordUriFromParts(parts) {
+  return `${spaceUriFromParts(parts)}/${parts.author}/${parts.collection}/${parts.rkey}`
+}
+
 async function createPrivateFixture(pds, session, text) {
-  const space =
-    'at://did:web:stratos-e2e.atmosbox.test/space/zone.stratos.space.feed/general'
+  const space = spaceUriFromParts({
+    authority: 'did:web:stratos-e2e.atmosbox.test',
+    spaceType: 'zone.stratos.space.feed',
+    skey: 'general',
+  })
   const created = await requestJson(`${pds}${createPath}`, {
     method: 'POST',
     headers: {
@@ -390,12 +412,12 @@ async function main() {
 
     await assertStratosDelete(browser, domain, appUrl)
 
-    const parts = target.slice('at://'.length).split('/')
+    const targetParts = recordUriParts(target)
     const deleteTarget = {
-      space: `at://${parts.slice(0, 4).join('/')}`,
+      space: spaceUriFromParts(targetParts),
       repo: session.did,
       collection,
-      rkey: parts[6],
+      rkey: targetParts.rkey,
     }
     await deletePrivatePost(page, targetText, deleteTarget)
     await waitForRemoval(page, feedResponses, target, retained, retainedText)
@@ -403,7 +425,10 @@ async function main() {
     const other = await createSecondAccount(domain, password)
     const otherPage = await browser.newPage()
     const syntheticText = `Other actor delete probe ${randomUUID()}`
-    const syntheticUri = retained.replace(`/${session.did}/`, `/${other.did}/`)
+    const syntheticUri = recordUriFromParts({
+      ...recordUriParts(retained),
+      author: other.did,
+    })
     assert.notEqual(syntheticUri, retained)
     // The second actor has no Stratos membership. Supply one local UI fixture so
     // its real webapp OAuth session can issue a delete request to the PDS.

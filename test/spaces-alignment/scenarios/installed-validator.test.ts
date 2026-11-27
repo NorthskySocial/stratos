@@ -34,13 +34,13 @@ const schema = {
 
 describe('installed service space-ref validator', () => {
   it('records the installed version and accepts a space-ref schema', () => {
-    expect(installed.version).toBe('0.7.11')
+    expect(installed.version).toBe('0.7.22')
     expect(() => new Lexicons([schema])).not.toThrow()
   })
   it.each([
-    ['at://did:plc:motoko/space/zone.stratos.space.feed/general', true],
+    ['at:space/did:plc:motoko/zone.stratos.space.feed/general', true],
     ['not a space', false],
-    ['at://did:plc:motoko/space/zone.stratos.space.feed', false],
+    ['at:space/did:plc:motoko/zone.stratos.space.feed', false],
   ])(
     'does not enforce string format for %s; runtime parsing remains strict',
     (space, valid) => {

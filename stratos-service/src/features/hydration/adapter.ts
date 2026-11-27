@@ -13,16 +13,24 @@ import {
   canAccessRecord,
   hydrateRecordBlobs,
   type Logger,
-  StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from '../../actor-store-types.js'
+import { readVisibleRecordsInChunks } from '../../api/records/read.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
+import {
+  type AccountTakedownLog,
+  isAccountTakenDown,
+} from '../../subscription/takedown-filter.js'
 
 /**
- * Implementation of RecordResolver port using actor store
+ * Implementation of RecordResolver port using actor store. A record of a
+ * taken-down account resolves as missing, as a taken-down record does.
  */
 export class ActorStoreRecordResolver implements RecordResolver {
-  constructor(private actorStore: ActorStore) {}
+  constructor(
+    private actorStore: ActorStore,
+    private takedownLog: AccountTakedownLog,
+  ) {}
 
   /**
    * Retrieve a record from the actor store for a given owner DID and URI.
@@ -40,23 +48,23 @@ export class ActorStoreRecordResolver implements RecordResolver {
     boundaries: string[]
   } | null> {
     const exists = await this.actorStore.exists(ownerDid)
-    if (!exists) {
+    if (!exists || (await isAccountTakenDown(this.takedownLog, ownerDid))) {
       return null
     }
 
     return this.actorStore.read(ownerDid, async (store) => {
-      const atUri = new AtUriSyntax(uri)
-      const record = await store.record.getRecord(atUri, null)
-      if (!record) {
+      const found = await store.record.getVisibleRecordWithBoundaries(
+        new AtUriSyntax(uri),
+      )
+      if (!found) {
         return null
       }
 
-      const boundaries = StratosValidator.extractBoundaryDomains(record.value)
       return {
-        uri: record.uri,
-        cid: record.cid,
-        value: record.value,
-        boundaries,
+        uri: found.record.uri,
+        cid: found.record.cid,
+        value: found.record.value,
+        boundaries: found.boundaries,
       }
     })
   }
@@ -92,24 +100,20 @@ export class ActorStoreRecordResolver implements RecordResolver {
     >()
 
     const exists = await this.actorStore.exists(ownerDid)
-    if (!exists) {
+    if (!exists || (await isAccountTakenDown(this.takedownLog, ownerDid))) {
       return result
     }
 
     await this.actorStore.read(ownerDid, async (store) => {
-      for (const uriStr of uris) {
-        const atUri = new AtUriSyntax(uriStr)
-        const record = await store.record.getRecord(atUri, null)
-        if (record) {
-          const boundaries = StratosValidator.extractBoundaryDomains(
-            record.value,
-          )
+      const visible = await readVisibleRecordsInChunks(store, uris)
+      for (const [index, found] of visible.entries()) {
+        if (found) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-argument
-          result.set(atUri.toString() as any, {
-            uri: record.uri,
-            cid: record.cid,
-            value: record.value,
-            boundaries,
+          result.set(new AtUriSyntax(uris[index]).toString() as any, {
+            uri: found.record.uri,
+            cid: found.record.cid,
+            value: found.record.value,
+            boundaries: found.boundaries,
           })
         }
       }

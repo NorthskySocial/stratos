@@ -22,9 +22,9 @@ import {
 // 90s-anime crew DIDs and boundaries, matching the other space-sync fixtures.
 const STRATOS_DID = 'did:web:stratos.test'
 const BEBOP_BOUNDARY = `${STRATOS_DID}/bebop-crew`
-const SPACE_URI = `at://${STRATOS_DID}/space/zone.stratos.space.feed/bebop-crew`
+const SPACE_URI = `at:space/${STRATOS_DID}/zone.stratos.space.feed/bebop-crew`
 const NERV_BOUNDARY = `${STRATOS_DID}/nerv`
-const NERV_SPACE_URI = `at://${STRATOS_DID}/space/zone.stratos.space.feed/nerv`
+const NERV_SPACE_URI = `at:space/${STRATOS_DID}/zone.stratos.space.feed/nerv`
 const SPIKE_DID = 'did:plc:spikespiegel'
 const FAYE_DID = 'did:plc:fayevalentine'
 const JET_DID = 'did:plc:jetblack'
@@ -109,9 +109,8 @@ function fakeMembership(outcomes: BoundaryPassOutcome[] = []) {
 function fakeRunner() {
   return {
     completeMembershipPass: vi.fn(),
-    runTarget: vi.fn(
-      async (target: PollTarget): Promise<SpaceSyncRunResult> =>
-        runSuccess(target),
+    runTarget: vi.fn(async (target: PollTarget): Promise<SpaceSyncRunResult> =>
+      runSuccess(target),
     ),
   }
 }

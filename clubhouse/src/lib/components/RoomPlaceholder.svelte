@@ -19,6 +19,8 @@
     feedMessage: string
     onLoadMore: () => void
     topicUri: string | null
+    topicNotice: string | null
+    configurationProblem: string | null
     viewerDid: string | null
     onOpenTopic: (uri: string) => void
     onCloseTopic: () => void
@@ -41,6 +43,8 @@
     hasMore,
     feedMessage,
     topicUri,
+    topicNotice,
+    configurationProblem,
     viewerDid,
     onOpenTopic,
     onCloseTopic,
@@ -64,6 +68,20 @@
     </div>
   </div>
 
+  {#if configurationProblem}
+    <p
+      class="feed-status feed-status-error room-notice room-configuration-problem"
+      role="alert"
+    >
+      {configurationProblem}
+    </p>
+  {/if}
+  {#if topicNotice}
+    <p class="feed-status room-notice topic-notice" role="status">
+      {topicNotice}
+    </p>
+  {/if}
+
   {#if state === 'loading'}
     <p class="feed-status" aria-busy="true">Checking room access…</p>
   {:else if state === 'joined'}
@@ -71,7 +89,7 @@
       {feedState}
       {posts}
       {hasMore}
-      message={feedMessage}
+      {feedMessage}
       {topicUri}
       {viewerDid}
       {onOpenTopic}

@@ -1,7 +1,7 @@
 ---
 audience: Operators
 type: How-to
-prerequisites: Linux with flock, Node.js 24, a domain with HTTPS, a did:web identifier, and your own DID
+prerequisites: Linux with flock, Node.js 26, a domain with HTTPS, a did:web identifier, and your own DID
 status: current
 ---
 
@@ -13,7 +13,7 @@ give it an identity, configure it, and make yourself the first admin.
 ## Prerequisites
 
 - **Linux with `flock` installed** (`apk add flock` on Alpine, or `apt install util-linux` on Debian/Ubuntu). The Docker image includes it. The service identity directory must use a local filesystem supporting file locks, atomic rename, and directory fsync; see [service signing key history](/architecture/service-key-history).
-- **Node.js 24** and **pnpm**. The Docker image builds and runs on Node.js 24.
+- **Node.js 26** and **pnpm**. The Docker image builds and runs on Node.js 26.
 - **A domain with HTTPS.** OAuth callbacks need it.
 - **A `did:web` identifier** for the service, on that domain.
 - **Your own DID.** You need it to become the first admin.
@@ -65,14 +65,27 @@ The document has this shape:
       "id": "#stratos",
       "type": "StratosService",
       "serviceEndpoint": "https://stratos.example.com"
+    },
+    {
+      "id": "#atproto_pds",
+      "type": "AtprotoPersonalDataServer",
+      "serviceEndpoint": "https://stratos.example.com"
     }
   ]
 }
 ```
 
-Both entries carry the same key. The first uses `STRATOS_SERVICE_FRAGMENT`.
+The two verification methods carry the same key. The first uses
+`STRATOS_SERVICE_FRAGMENT`.
 The `#atproto` entry lets a member's PDS verify the space credentials Stratos
 issues.
+
+Both services point at the service origin. A member whose repo is on their
+own PDS writes there, and that PDS reads `#atproto_pds` to find where to send
+`com.atproto.space.notifyRepoUpdate`. If your service DID is not a `did:web`
+whose document Stratos serves, publish a `#atproto_pds` entry of type
+`AtprotoPersonalDataServer` at the Stratos origin in that DID's document
+yourself.
 
 ## Step 3: Configure the environment
 
@@ -130,7 +143,7 @@ file. After the service starts, the document is at
     "https://stratos.example.com/oauth/callback",
     "https://stratos.example.com/admin/oauth/callback"
   ],
-  "scope": "atproto repo:zone.stratos.actor.enrollment space:zone.stratos.space.feed?authority=did%3Aweb%3Astratos.example.com&collection=zone.stratos.feed.post&action=create&action=read",
+  "scope": "atproto repo:zone.stratos.actor.enrollment space:zone.stratos.space.feed?authority=did%3Aweb%3Astratos.example.com&collection=zone.stratos.feed.post&collection=app.bsky.feed.like&collection=app.bsky.feed.repost&action=create&action=read",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",
@@ -141,7 +154,10 @@ file. After the service starts, the document is at
 
 The scope asks for two things. `repo:zone.stratos.actor.enrollment` lets
 Stratos publish the enrollment record. The `space:` scope lets a spaces PDS
-keep the member's posts. A PDS without spaces support ignores that scope.
+keep the member's posts, likes and reposts. A PDS older than the November
+release refuses a space type declaration that has no `name`. Members on such a
+PDS then fail enrollment with `invalid_scope`. See
+[the space type declaration](/operator/november-upgrade#the-space-type-declaration). A PDS without spaces support ignores that scope.
 
 Both redirect URIs come from `STRATOS_PUBLIC_URL`. Your proxy must route
 `/oauth/*` and `/admin/*` to the service.

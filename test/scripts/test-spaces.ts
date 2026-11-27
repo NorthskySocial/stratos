@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run -A
-// Spaces (permissioned-data) phase — validates the 0016-shaped user flow:
+// Spaces (permissioned-data) phase — validates the space user flow:
 // a PDS user who is a MEMBER of a space obtains a space credential and uses
 // it to read and sync records hosted only in Stratos (Reading A: Stratos is
 // the repo host and permanent space owner).
@@ -8,7 +8,7 @@
 //   1. Membership → credential: an enrolled member obtains a space credential.
 //   2. Non-membership → denial: a non-member is refused (NotEnrolled).
 //   3. Addressing: foreign/malformed space URIs are rejected — pins the
-//      merged-spec `at://{spaceDid}/space/{spaceType}/{skey}` grammar.
+//      `at:space/{authority}/{spaceType}/{skey}` grammar.
 //   4. Credential-authed read: the credential (no user identity) admits reads
 //      of records in ITS space, and fails closed on records outside it.
 //   5. Syncer flow: listRepoOps with a credential returns boundary-gated ops
@@ -20,8 +20,8 @@
 //      user's PDS (no stubs), a did:key signingKey on the enrollment, and a
 //      durable signed-commit proof for the record.
 
-import { fromUint8Array } from 'npm:@atcute/car@^6.0.2'
-import { decode, toCidLink } from 'npm:@atcute/cbor@^2.3.6'
+import { fromUint8Array } from 'npm:@atcute/car@^6.1.1'
+import { decode, toCidLink } from 'npm:@atcute/cbor@^2.3.8'
 
 import {
   createRecord,
@@ -37,7 +37,13 @@ import {
   listRepoOpsWithCredential,
 } from './lib/stratos.ts'
 import { adminGetBoundaries, adminSetBoundaries } from './lib/admin.ts'
-import { DOMAINS, PDS_URL, SERVICE_DID, SPACES } from './lib/config.ts'
+import {
+  DOMAINS,
+  PDS_URL,
+  SERVICE_DID,
+  SPACES,
+  spaceUriFor,
+} from './lib/config.ts'
 import { loadState } from './lib/state.ts'
 import { assert, fail, finish, info, pass, section, skip } from './lib/log.ts'
 
@@ -100,11 +106,11 @@ async function run(): Promise<void> {
     `status=${kaorukoCred.status}, error=${kaorukoCred.body.error}`,
   )
 
-  // ── 3. Addressing guards (merged-spec at://…/space/… grammar) ────────────
+  // ── 3. Addressing guards (at:space/… grammar) ────────────────────────────
   section('Test 3: space addressing guards')
   const foreign = await getSpaceCredential(
     rei.did,
-    `at://did:web:elsewhere.example/space/zone.stratos.space.feed/swordsmith`,
+    spaceUriFor('swordsmith', 'did:web:elsewhere.example'),
   )
   assert(
     foreign.status === 400 && foreign.body.error === 'UnknownSpace',
@@ -150,9 +156,9 @@ async function run(): Promise<void> {
     `status=${crossRead.status}, error=${crossRead.body.error}`,
   )
 
-  // Spec-shaped space read (mirror of com.atproto.space.getRecord): both the
-  // member session and the space credential read the record via the space
-  // surface; a credential for a different space is refused.
+  // Stratos's own space read, zone.stratos.space.getRecord: both the member
+  // session and the space credential read the record by space URI; a
+  // credential for a different space is refused.
   const spaceReadUser = await getSpaceRecord(
     rei.did,
     SPACES.swordsmith,

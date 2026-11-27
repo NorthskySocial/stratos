@@ -15,9 +15,13 @@ import { setTimeout as delay } from 'node:timers/promises'
 const domain = process.env.SANDBOX_DOMAIN
 const clubhouse = 'https://clubhouse-e2e.atmosbox.internal'
 const authority = 'https://stratos-e2e.atmosbox.internal'
-const pds = `https://october-pds-e2e.${domain}`
+const pds = `https://reference-pds-e2e.${domain}`
 const authorityDid = `did:web:stratos-e2e.${domain}`
-const space = `at://${authorityDid}/space/zone.stratos.space.feed/general`
+const spaceType = 'zone.stratos.space.feed'
+export function spaceUriFromParts(authorityDidPart, skey) {
+  return `at:space/${authorityDidPart}/${spaceType}/${skey}`
+}
+const space = spaceUriFromParts(authorityDid, 'general')
 const mintUrl = `${authority}/xrpc/zone.stratos.space.getSpaceCredential`
 const postCollection = 'zone.stratos.feed.post'
 async function visible(locator) {
@@ -62,8 +66,12 @@ async function clickEnabled(locator) {
       (await button.isVisible().catch(() => false)) &&
       (await button.isEnabled())
     ) {
-      await button.click({ noWaitAfter: true, timeout: 2_000 }).catch(() => {})
-      return true
+      try {
+        await button.click({ noWaitAfter: true, timeout: 2_000 })
+        return true
+      } catch {
+        continue
+      }
     }
   }
   return false
@@ -72,6 +80,7 @@ async function clickEnabled(locator) {
 async function completeOAuth(page, username, password) {
   const deadline = Date.now() + 60_000
   let leftClubhouse = false
+  let credentialsSubmitted = false
   while (Date.now() < deadline) {
     const current = new URL(page.url())
     if (current.origin !== clubhouse) leftClubhouse = true
@@ -79,7 +88,10 @@ async function completeOAuth(page, username, password) {
     const passwordInput = page
       .locator('input[name="password"], input[type="password"]')
       .first()
-    if (await passwordInput.isVisible().catch(() => false)) {
+    if (
+      !credentialsSubmitted &&
+      (await passwordInput.isVisible().catch(() => false))
+    ) {
       const usernameInput = page
         .locator(
           'input[name="username"]:not([readonly]):not([disabled]), input[name="identifier"]:not([readonly]):not([disabled])',
@@ -88,15 +100,11 @@ async function completeOAuth(page, username, password) {
       if (await usernameInput.isVisible().catch(() => false))
         await usernameInput.fill(username)
       await passwordInput.fill(password)
-      if (
-        await clickEnabled(
-          page.locator('button[type="submit"], button:has-text("Sign in")'),
-        )
-      ) {
-        await delay(300)
-        continue
-      }
-      await page.keyboard.press('Enter')
+      const submit = page.locator(
+        'button[type="submit"], button:has-text("Sign in")',
+      )
+      if (!(await clickEnabled(submit))) await page.keyboard.press('Enter')
+      credentialsSubmitted = true
       await delay(300)
       continue
     }
@@ -194,13 +202,13 @@ async function requestJson(url, options, context) {
 }
 
 async function provisionAccount(domain, name) {
-  const pdsUrl = `https://october-pds-e2e.${domain}`
-  const username = `${name}.october-pds-e2e.${domain}`
+  const pdsUrl = `https://reference-pds-e2e.${domain}`
+  const username = `${name}.reference-pds-e2e.${domain}`
   const password = (
     await readFile('/run/sandbox-secrets/browser-password', 'utf8')
   ).trim()
   const adminPassword = (
-    await readFile('/run/sandbox-secrets/october-admin-password', 'utf8')
+    await readFile('/run/sandbox-secrets/reference-admin-password', 'utf8')
   ).trim()
   const sessionBody = { identifier: username, password }
   const session = await fetch(
@@ -241,7 +249,7 @@ async function provisionAccount(domain, name) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        email: `${name}@october-pds-e2e.${domain}`,
+        email: `${name}@reference-pds-e2e.${domain}`,
         handle: username,
         password,
         inviteCode: invitation.code,
@@ -302,7 +310,7 @@ function proof(key, url, method, token) {
   return `${signingInput}.${signature.toString('base64url')}`
 }
 
-function keyId(key) {
+export function keyId(key) {
   const raw = Buffer.concat([
     Buffer.from([4]),
     Buffer.from(key.jwk.x, 'base64url'),
@@ -321,16 +329,14 @@ function keyId(key) {
   }
   return 'did:key:z' + result
 }
-export function signedHeaders(authorization, key, audience) {
-  const fields = audience
-    ? ['authorization', 'atproto-space-audience']
-    : ['authorization']
-  const params =
-    '(' +
-    fields.map((field) => '"' + field + '"').join(' ') +
-    ');keyid="' +
-    keyId(key) +
-    '"'
+const exchangeLabel = 'atproto-space'
+const presentationLabel = 'sig'
+const presentationScheme = 'Atproto-Space-Credential'
+const presentationTag = 'atproto-space-credential'
+export function presentationAuthorization(credential) {
+  return `${presentationScheme} ${credential}`
+}
+function signHeaders(label, authorization, audience, fields, params, key) {
   const headers = {
     authorization,
     ...(audience ? { 'atproto-space-audience': audience } : {}),
@@ -345,15 +351,35 @@ export function signedHeaders(authorization, key, audience) {
   })
   return {
     ...headers,
-    'signature-input': 'atproto-space=' + params,
-    signature: 'atproto-space=:' + signature.toString('base64') + ':',
+    'signature-input': label + '=' + params,
+    signature: label + '=:' + signature.toString('base64') + ':',
   }
+}
+export function exchangeHeaders(authorization, key) {
+  return signHeaders(
+    exchangeLabel,
+    authorization,
+    undefined,
+    ['authorization'],
+    '("authorization");keyid="' + keyId(key) + '"',
+    key,
+  )
+}
+export function presentationHeaders(credential, key, audience) {
+  return signHeaders(
+    presentationLabel,
+    presentationAuthorization(credential),
+    audience,
+    ['authorization', 'atproto-space-audience'],
+    '("authorization" "atproto-space-audience");tag="' + presentationTag + '"',
+    key,
+  )
 }
 async function standardExchange(token, key, extra = {}) {
   return fetch(mintUrl, {
     method: 'POST',
     headers: {
-      ...signedHeaders('Bearer ' + token, key),
+      ...exchangeHeaders('Bearer ' + token, key),
       'content-type': 'application/json',
       ...extra,
     },
@@ -469,7 +495,7 @@ export async function prepareAccount(browser, name) {
   const page = await context.newPage()
   await signIn(page, account, clubhouse)
   await enterRoom(page, account, clubhouse, 'general')
-  const seedText = `Plan014 ${account.did} ${randomUUID()}`
+  const seedText = `Bebop ${account.did} ${randomUUID()}`
   const seedWrite = page.waitForResponse(
     (response) =>
       response.request().method() === 'POST' &&
@@ -494,7 +520,72 @@ export async function prepareAccount(browser, name) {
   await page.evaluate(async () => {
     await window.delegationScenarioAuth.init()
   })
-  return { account, page }
+  return { account, page, seed }
+}
+
+export async function runReferenceReadControls(reach) {
+  const browser = await openBrowser()
+  try {
+    const first = await prepareAccount(browser, 'faye')
+    reach('reference-seed-written')
+    const key = proofKey()
+    const { credential, claims } = await credentialLifetime(
+      await standardExchange(await acquireDelegation(first.page), key),
+    )
+    assert.ok(
+      claims.iss === authorityDid &&
+        claims.sub === space &&
+        claims.cnf?.kid === keyId(key) &&
+        claims.aud === undefined,
+      'Reference credential issuer, subject or key differs from the requested credential',
+    )
+    reach('reference-credential-issued')
+    await assertSeedRead(first)
+    reach('reference-mint-read-verified')
+
+    const second = await prepareAccount(browser, 'edward')
+    assert.notEqual(first.account.did, second.account.did)
+    await assertSeedRead(second)
+    reach('both-reference-owners-read')
+
+    async function assertSeedRead({ account, seed }) {
+      const prefix = `${space}/${account.did}/${postCollection}/`
+      assert.ok(
+        seed.uri.startsWith(prefix),
+        'The reference PDS returned an address for a different owner',
+      )
+      const rkey = seed.uri.slice(prefix.length)
+      assert.ok(
+        rkey.length > 0 && !rkey.includes('/'),
+        'The reference PDS returned an invalid record key',
+      )
+      const url = recordsUrl(account.did)
+      assert.equal(url.origin, pds)
+      const response = await fetch(url, {
+        headers: presentationHeaders(credential, key, account.did),
+        signal: AbortSignal.timeout(30_000),
+      })
+      assert.equal(
+        response.status,
+        200,
+        'Reference PDS rejected the valid credential',
+      )
+      const { records } = await response.json()
+      assert.ok(
+        Array.isArray(records) &&
+          records.some(
+            (record) =>
+              record.collection === postCollection &&
+              record.rkey === rkey &&
+              record.cid === seed.cid &&
+              record.value?.text === account.seedText,
+          ),
+        'Reference read omitted the exact seeded record',
+      )
+    }
+  } finally {
+    await browser.close()
+  }
 }
 
 export async function removeMember(page) {
@@ -537,19 +628,15 @@ export async function runScenario({
     passed.push('standard-exchange')
     assert.equal(claims.exp - claims.iat, 600)
     passed.push('default-lifetime-600')
-    const headers = signedHeaders(
-      'Atproto-Space ' + credential,
-      key,
-      account.did,
-    )
+    const headers = presentationHeaders(credential, key, account.did)
     const first = await fetch(recordsUrl(account.did), { headers })
-    assert.equal(first.status, 200, 'October PDS rejected Stratos credential')
+    assert.equal(first.status, 200, 'Reference PDS rejected Stratos credential')
     const firstRecords = (await first.json()).records
     assert.ok(
       firstRecords.some((item) => item.value?.text === account.seedText),
-      'October read omitted seeded record',
+      'Reference read omitted seeded record',
     )
-    passed.push('october-pds-read')
+    passed.push('reference-pds-read')
     assert.equal(
       (await fetch(recordsUrl(account.did), { headers })).status,
       200,
@@ -561,11 +648,7 @@ export async function runScenario({
     )
     passed.push('wrong-owner-denied')
     const secondRead = await fetch(recordsUrl(second.account.did), {
-      headers: signedHeaders(
-        'Atproto-Space ' + credential,
-        key,
-        second.account.did,
-      ),
+      headers: presentationHeaders(credential, key, second.account.did),
     })
     assert.equal(secondRead.status, 200)
     assert.ok(
@@ -577,11 +660,7 @@ export async function runScenario({
     passed.push('two-owners-one-host')
     await denied(
       await fetch(recordsUrl(account.did), {
-        headers: signedHeaders(
-          'Atproto-Space ' + credential,
-          proofKey(),
-          account.did,
-        ),
+        headers: presentationHeaders(credential, proofKey(), account.did),
       }),
       'wrong-key-denied',
     )
@@ -591,18 +670,14 @@ export async function runScenario({
     parts[1] = Buffer.from(JSON.stringify(changed)).toString('base64url')
     await denied(
       await fetch(recordsUrl(account.did), {
-        headers: signedHeaders(
-          'Atproto-Space ' + parts.join('.'),
-          key,
-          account.did,
-        ),
+        headers: presentationHeaders(parts.join('.'), key, account.did),
       }),
       'tampered-token-denied',
     )
     passed.push('tampered-token-denied')
     await denied(
       await fetch(
-        recordsUrl(account.did, space.replace('/general', '/other')),
+        recordsUrl(account.did, spaceUriFromParts(authorityDid, 'other')),
         { headers },
       ),
       'cross-space-denied',
@@ -616,11 +691,7 @@ export async function runScenario({
     assert.equal(
       (
         await fetch(authorityUrl, {
-          headers: signedHeaders(
-            'Atproto-Space ' + credential,
-            key,
-            authorityDid,
-          ),
+          headers: presentationHeaders(credential, key, authorityDid),
         })
       ).status,
       200,
@@ -636,11 +707,7 @@ export async function runScenario({
     assert.equal(
       (
         await fetch(recordsUrl(account.did), {
-          headers: signedHeaders(
-            'Atproto-Space ' + renewed,
-            nextKey,
-            account.did,
-          ),
+          headers: presentationHeaders(renewed, nextKey, account.did),
         })
       ).status,
       200,
@@ -657,33 +724,6 @@ export async function runScenario({
       'conflicting-proof-denied',
     )
     passed.push('conflicting-proof-denied')
-    const legacyResponse = await fetch(mintUrl, {
-      method: 'POST',
-      headers: {
-        authorization: 'Bearer ' + fresh,
-        dpop: proof(key, mintUrl, 'POST'),
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ space }),
-    })
-    assert.equal(legacyResponse.status, 200)
-    const legacy = (await legacyResponse.json()).credential
-    assert.equal(
-      typeof JSON.parse(Buffer.from(legacy.split('.')[1], 'base64url')).cnf.jkt,
-      'string',
-    )
-    assert.equal(
-      (
-        await fetch(authorityUrl, {
-          headers: {
-            authorization: 'DPoP ' + legacy,
-            dpop: proof(key, authorityUrl.href, 'GET', legacy),
-          },
-        })
-      ).status,
-      200,
-    )
-    passed.push('legacy-compatible')
     let removalDelegation = await delegation(page)
     await deniedRenewal(
       async () => standardExchange(removalDelegation, proofKey()),

@@ -11,11 +11,11 @@
  * Uses simplified Bearer DID auth (matching Stratos dev mode).
  */
 
-import postgres from 'npm:postgres@3.4.5'
-import { decodeFirst } from 'npm:@atcute/cbor@1.0.0'
-import WebSocket from 'npm:ws@8.18.0'
-import { Secp256k1Keypair } from 'npm:@atproto/crypto@^0.4.5'
-import { createServiceJwt } from 'npm:@atproto/xrpc-server@^0.10.12'
+import postgres from 'npm:postgres@4.1.1'
+import { decodeFirst } from 'npm:@atcute/cbor@2.3.8'
+import WebSocket from 'npm:ws@8.23.0'
+import { Secp256k1Keypair } from 'npm:@atproto/crypto@^0.5.8'
+import { createServiceJwt } from 'npm:@atproto/xrpc-server@^0.13.17'
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -170,8 +170,7 @@ function decodeXrpcFrame(
 
 function extractBoundaries(record: Record<string, unknown>): string[] {
   const boundary = record.boundary as
-    | { values?: Array<{ value?: string }> }
-    | undefined
+    { values?: Array<{ value?: string }> } | undefined
   if (!boundary?.values || !Array.isArray(boundary.values)) return []
   return boundary.values
     .map((d) => d.value)
@@ -494,7 +493,8 @@ async function subscribeActor(did: string, attempt = 0) {
 }
 
 async function handleActorMessage(did: string, msg: Record<string, unknown>) {
-  const type = msg.$type ?? ''
+  const type = msg.$type
+  if (typeof type !== 'string') return
 
   if (type.endsWith('#info')) {
     const name = (msg as Record<string, unknown>).name as string | undefined
@@ -505,7 +505,15 @@ async function handleActorMessage(did: string, msg: Record<string, unknown>) {
   }
 
   if (type.endsWith('#commit')) {
-    await handleActorCommit(did, msg)
+    const { seq, time, ops } = msg
+    if (
+      typeof seq !== 'number' ||
+      typeof time !== 'string' ||
+      !Array.isArray(ops)
+    ) {
+      throw new Error('Invalid actor commit frame')
+    }
+    await handleActorCommit(did, { seq, time, ops })
   }
 }
 

@@ -77,11 +77,15 @@ export const RESERVED_DOMAIN = `${SERVICE_DID}/general`
 export const SPACE_TYPE = 'zone.stratos.space.feed'
 
 /**
- * Format a space URI in the merged-spec `at://{spaceDid}/space/{spaceType}/{skey}`
- * form for a boundary's domain name (skey).
+ * Format a space URI, `at:space/{authority}/{spaceType}/{skey}`, for a
+ * boundary's domain name (skey). The authority is the Stratos service DID
+ * unless a caller names another.
  */
-export function spaceUriFor(skey: string): string {
-  return `at://${SERVICE_DID}/space/${SPACE_TYPE}/${skey}`
+export function spaceUriFor(
+  skey: string,
+  authority: string = SERVICE_DID,
+): string {
+  return `at:space/${authority}/${SPACE_TYPE}/${skey}`
 }
 
 /** Space URIs for the test domains, keyed like {@link DOMAINS}. */

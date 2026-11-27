@@ -67,6 +67,86 @@ describe('createBrowserAuth', () => {
     )
   })
 
+  describe('exact scope strings', () => {
+    const SPACE_AUTHORITY = 'did:plc:bebop'
+    const ENCODED_AUTHORITY = 'did%3Aplc%3Abebop'
+    const FEED_SPACE_SCOPE_HEAD = `space:zone.stratos.space.feed?authority=${ENCODED_AUTHORITY}&collection=zone.stratos.feed.post`
+
+    it.each([
+      {
+        who: 'the default call',
+        config: { serviceDid: SPACE_AUTHORITY },
+        scope: `${FEED_SPACE_SCOPE_HEAD}&action=read&action=create`,
+      },
+      {
+        who: 'the webapp (post, read, create, delete)',
+        config: {
+          serviceDid: SPACE_AUTHORITY,
+          actions: ['read', 'create', 'delete'] as const,
+        },
+        scope: `${FEED_SPACE_SCOPE_HEAD}&action=read&action=create&action=delete`,
+      },
+      {
+        who: 'Clubhouse (post, read, create, update, delete)',
+        config: {
+          serviceDid: SPACE_AUTHORITY,
+          actions: ['read', 'create', 'update', 'delete'] as const,
+        },
+        scope: `${FEED_SPACE_SCOPE_HEAD}&action=read&action=create&action=update&action=delete`,
+      },
+      {
+        who: 'the webapp against a did:web authority with a port',
+        config: {
+          serviceDid: 'did:web:127.0.0.1%3A3100',
+          actions: ['read', 'create', 'delete'] as const,
+        },
+        scope:
+          'space:zone.stratos.space.feed?authority=did%3Aweb%3A127.0.0.1%253A3100&collection=zone.stratos.feed.post&action=read&action=create&action=delete',
+      },
+    ])('builds $who byte for byte', ({ config, scope }) => {
+      expect(buildSpaceWriteScope(config)).toBe(scope)
+    })
+
+    it('never names a wildcard collection or a manage operation by itself', () => {
+      const scope = buildSpaceWriteScope({
+        serviceDid: SPACE_AUTHORITY,
+        actions: ['read', 'create', 'update', 'delete'],
+      })
+      expect(scope).not.toContain('*')
+      expect(scope).not.toContain('manage=')
+      expect(scope.match(/collection=/g)).toHaveLength(1)
+    })
+
+    it('compares a granted scope by exact string, not by meaning', async () => {
+      const granted = buildSpaceWriteScope({
+        serviceDid: SPACE_AUTHORITY,
+        actions: ['read', 'create', 'delete'],
+      })
+      const session = {
+        getTokenInfo: vi
+          .fn()
+          .mockResolvedValue({ scope: `atproto ${granted}` }),
+      }
+      const auth = createAuth()
+      const reordered = granted.replace(
+        'action=read&action=create&action=delete',
+        'action=delete&action=create&action=read',
+      )
+
+      await expect(auth.hasScope(session as never, granted)).resolves.toBe(true)
+      await expect(auth.hasScope(session as never, reordered)).resolves.toBe(
+        false,
+      )
+      await expect(
+        auth.hasScope(session as never, granted.replace('&action=delete', '')),
+      ).resolves.toBe(false)
+      await expect(
+        auth.hasScope(session as never, granted.slice(0, -1)),
+      ).resolves.toBe(false)
+      expect(session.getTokenInfo).toHaveBeenCalledWith(false)
+    })
+  })
+
   it('keeps factory configuration isolated and publishes injected metadata', async () => {
     const auth = createAuth()
     const otherAuth = createAuth({

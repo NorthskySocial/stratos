@@ -1,0 +1,20 @@
+{
+  "header": {
+    "classification": "target-uri-conformance",
+    "oracle": {
+      "note": "Written by hand from the at:space/ grammar; the portable feed generator never projects a blob of a space record, so the expected URL is null."
+    },
+    "generator": "hand-derived",
+    "upstreamVerified": false,
+    "reproducible": true
+  },
+  "cases": [
+    {
+      "name": "never projects a PDS space blob through Feedgen",
+      "baseUrl": "https://feedgen.example.test",
+      "uri": "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/see-you",
+      "blobRef": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku",
+      "expectedUrl": null
+    }
+  ]
+}

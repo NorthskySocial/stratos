@@ -6,6 +6,7 @@ import {
   roomStatusEndpoint,
   type ClubhouseConfig,
 } from './config'
+import { emptyDictionary, ownValue } from './dictionary'
 import { resolveAuthenticatedHandle } from './enrollment'
 import { getFeed, type FeedPage } from './feedgen'
 import { rememberRoomReturn, roomJoinUrl } from './join'
@@ -14,6 +15,7 @@ import { captureClubhouseException, withClubhouseSpan } from '../telemetry'
 import {
   createRoomPost,
   deleteRoomPost,
+  ownRoomPost,
   RoomPostConfigurationError,
   type ReplyRef,
   type StratosPostWriter,
@@ -46,7 +48,7 @@ function parseRoomStates(
 ): Readonly<Record<string, RoomAccessState>> {
   if (!Array.isArray(payload.rooms)) return {}
   const known = new Set(knownRoomIds)
-  const states: Record<string, RoomAccessState> = {}
+  const states = emptyDictionary<RoomAccessState>()
   for (const item of payload.rooms) {
     if (typeof item !== 'object' || item === null) continue
     const { id, state } = item as { id?: unknown; state?: unknown }
@@ -149,6 +151,7 @@ export function createClubhouseIntegration(
   const auth = createClubhouseAuth(config)
   let session: OAuthSession | null = null
   let identity: ClubhouseIdentity | null = null
+  let viewerCustody: RoomCustody | null = null
   let authorProfiles = new Map<string, TypeaheadActor | null>()
   let authorRequests = new Map<string, Promise<void>>()
 
@@ -210,6 +213,7 @@ export function createClubhouseIntegration(
       auth.init(),
     )
     clearAuthorProfiles()
+    viewerCustody = null
     if (!session) {
       identity = null
       return null
@@ -230,7 +234,7 @@ export function createClubhouseIntegration(
 
   async function getRoomState(roomId: string): Promise<RoomAccessState> {
     const states = await getRoomStates([roomId])
-    return states[roomId] ?? (session ? 'status-error' : 'unjoined')
+    return ownValue(states, roomId) ?? (session ? 'status-error' : 'unjoined')
   }
 
   async function getRoomStates(
@@ -244,8 +248,11 @@ export function createClubhouseIntegration(
       )
     }
     try {
-      return (await requestRoomStatus(session, endpoint, roomIds)).states
+      const status = await requestRoomStatus(session, endpoint, roomIds)
+      viewerCustody = status.custody
+      return status.states
     } catch (error) {
+      viewerCustody = null
       captureClubhouseException(error)
       return Object.fromEntries(
         roomIds.map((roomId) => [roomId, 'status-error']),
@@ -260,10 +267,12 @@ export function createClubhouseIntegration(
       await auth.signOut()
       session = null
       identity = null
+      viewerCustody = null
       clearAuthorProfiles()
     },
     getRoomState,
     getRoomStates,
+    viewerCustody: () => viewerCustody,
     async requestJoin(roomId: string): Promise<RoomAccessState> {
       if (!session) throw new Error('Sign in before joining a room.')
       // Reuse the identity resolved during session restoration. A DID is also
@@ -321,6 +330,8 @@ export function createClubhouseIntegration(
       post: import('./feedgen').ClubhouseFeedPost,
     ) {
       if (!session) throw new Error('Sign in before deleting a post.')
+      // A refused reference must not cost a status request.
+      ownRoomPost(post.uri, session.sub)
       const endpoint = roomStatusEndpoint(config)
       if (!endpoint) {
         throw new RoomPostConfigurationError(
@@ -333,6 +344,7 @@ export function createClubhouseIntegration(
         custody,
         uri: post.uri,
         cid: post.cid,
+        roomSpace: ownValue(config.pdsSpaceUriByRoom, roomId),
         stratosWriter:
           dependencies.stratosWriter ??
           createServiceRoomPostWriter(session, config),

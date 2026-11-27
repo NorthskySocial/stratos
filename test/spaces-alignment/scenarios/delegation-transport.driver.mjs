@@ -29,8 +29,10 @@ function failureOutcome(error) {
   )
 }
 import {
+  exchangeHeaders,
+  presentationHeaders,
   proofKey,
-  signedHeaders,
+  spaceUriFromParts,
 } from './standard-credential-transport.driver.mjs'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
@@ -46,7 +48,7 @@ const clubhouse = 'https://clubhouse-e2e.atmosbox.internal'
 const authority = 'https://stratos-e2e.atmosbox.internal'
 const pds = `https://pds-space1.${domain}`
 const authorityDid = `did:web:stratos-e2e.${domain}`
-const space = `at://${authorityDid}/space/zone.stratos.space.feed/general`
+const space = spaceUriFromParts(authorityDid, 'general')
 const mintUrl = `${authority}/xrpc/zone.stratos.space.getSpaceCredential`
 const passed = []
 
@@ -199,7 +201,7 @@ async function exchange(token, key, body = { space }) {
   const response = await fetch(mintUrl, {
     method: 'POST',
     headers: {
-      ...signedHeaders(`Bearer ${token}`, key),
+      ...exchangeHeaders(`Bearer ${token}`, key),
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -244,10 +246,7 @@ async function main() {
     )
     check(payload.iss === did, 'delegation-iss')
     check(payload.sub === space, 'delegation-sub')
-    check(
-      payload.aud === `${authorityDid}#atproto_space_host`,
-      'delegation-aud',
-    )
+    check(payload.aud === `${authorityDid}#atproto_pds`, 'delegation-aud')
     passed.push('pds-issued-delegation')
 
     const key = proofKey()
@@ -263,7 +262,7 @@ async function main() {
     recordsUrl.searchParams.set('collection', 'zone.stratos.feed.post')
     const recordsResponse = await fetch(recordsUrl, {
       headers: {
-        ...signedHeaders(`Atproto-Space ${credential}`, key, did),
+        ...presentationHeaders(credential, key, did),
       },
     })
     await checkResponse(recordsResponse, 200, 'foreign-repo-read')
@@ -279,7 +278,7 @@ async function main() {
     const wrongKey = proofKey()
     const wrongKeyResponse = await fetch(recordsUrl, {
       headers: {
-        ...signedHeaders(`Atproto-Space ${credential}`, wrongKey, did),
+        ...presentationHeaders(credential, wrongKey, did),
       },
     })
     await checkResponse(

@@ -1,0 +1,37 @@
+{
+  "header": {
+    "classification": "upstream-uri-free",
+    "oracle": {
+      "package": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-AasGxXJz1htNRNNR1JL/2v4EV45VvC4UrbY1x/w/cFH0avOHFxhDV0MQMMegVYhSi7DtnkJ1smwDxO6K/W402g=="
+    },
+    "generator": {
+      "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
+      "sha256": "a42fa7432ecb9f61a0fddc1abd16f2cb47de69b10f302d8f39c2c84c6465dec5"
+    },
+    "upstreamVerified": true,
+    "reproducible": true
+  },
+  "note": "The keys in oracleExport are fixed, test-only values and protect nothing.",
+  "oracleExport": {
+    "info": "atproto-mac",
+    "authorKemPrivateKey": {
+      "encoding": "hex",
+      "value": "2222222222222222222222222222222222222222222222222222222222222222",
+      "length": 32
+    },
+    "authorKemDid": "did:key:zDnaex62me84JZnkEzmeYRa8FCLNe7y1asoSwBMK26GBYpL7c",
+    "ephemeralPrivateKey": {
+      "encoding": "hex",
+      "value": "3333333333333333333333333333333333333333333333333333333333333333",
+      "length": 32
+    },
+    "keyShareDid": "did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi",
+    "sharedSecret": {
+      "encoding": "base64",
+      "value": "2XYP6iF5whnXMOd8HStZcRr/FOrpIZNfLnyoleNwbw4=",
+      "length": 32
+    }
+  }
+}

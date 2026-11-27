@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  assertionsReachedBy,
+  reachedAssertionIds,
+  runDriverCommand,
+  STANDALONE_SUITE_IDS,
   suiteExecutionOrder,
   validateAssertions,
   validateReviewReceipt,
@@ -201,5 +205,90 @@ describe('suite gate', () => {
         { id: 'also-passes', status: 'passed' },
       ]),
     ).not.toThrow()
+  })
+})
+
+describe('standalone suites', () => {
+  it('names standalone suites', () => {
+    expect([...STANDALONE_SUITE_IDS]).toEqual([
+      'ordinary-custody',
+      'november-positive',
+    ])
+  })
+
+  it('runs a standalone suite without the baseline before it', () => {
+    const suites = [
+      suite('baseline'),
+      suite('ordinary-custody'),
+      suite('extra'),
+    ]
+    expect(
+      suiteExecutionOrder('ordinary-custody', suites).map((item) => item.id),
+    ).toEqual(['ordinary-custody'])
+    expect(suiteExecutionOrder('extra', suites).map((item) => item.id)).toEqual(
+      ['baseline', 'extra'],
+    )
+    expect(
+      suiteExecutionOrder('baseline', suites).map((item) => item.id),
+    ).toEqual(['baseline'])
+  })
+
+  it('still needs the baseline to be registered for a standalone suite', () => {
+    expect(() =>
+      suiteExecutionOrder('ordinary-custody', [suite('ordinary-custody')]),
+    ).toThrow('Unknown or unavailable suite')
+  })
+})
+
+describe('assertions reached before a driver failure', () => {
+  const faye = suite('faye-suite', ['first-step', 'second-step'])
+  const progress = (id: string, suiteId = 'faye-suite') =>
+    JSON.stringify({ progress: 'assertion-reached', suite: suiteId, id })
+
+  it('reads the progress lines of the suite, in order, once each', () => {
+    const output = [
+      'noise',
+      progress('second-step'),
+      progress('first-step'),
+      progress('first-step'),
+    ].join('\n')
+    expect(reachedAssertionIds(faye, output)).toEqual([
+      'second-step',
+      'first-step',
+    ])
+  })
+
+  it('ignores other suites, unknown names and malformed lines', () => {
+    const output = [
+      progress('first-step', 'spike-suite'),
+      progress('private-token'),
+      '{"progress":"assertion-reached", broken',
+      '{"suite":"faye-suite","assertions":[]}',
+    ].join('\n')
+    expect(reachedAssertionIds(faye, output)).toEqual([])
+  })
+
+  it('attaches the reached names to a failed driver command', async () => {
+    const failure = Object.assign(new Error('docker compose exited 1'), {
+      stdout: `${progress('first-step')}\nsecret output`,
+    })
+    const error = await runDriverCommand(faye, async () => {
+      throw failure
+    }).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe('docker compose exited 1')
+    expect(assertionsReachedBy(error)).toEqual(['first-step'])
+    expect(JSON.stringify(assertionsReachedBy(error))).not.toContain('secret')
+  })
+
+  it('passes output and unrelated errors through unchanged', async () => {
+    await expect(runDriverCommand(faye, async () => 'ok')).resolves.toBe('ok')
+    const plain = new Error('no stdout')
+    await expect(
+      runDriverCommand(faye, async () => {
+        throw plain
+      }),
+    ).rejects.toBe(plain)
+    expect(assertionsReachedBy(plain)).toBeUndefined()
   })
 })

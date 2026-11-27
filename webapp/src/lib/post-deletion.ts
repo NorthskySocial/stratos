@@ -10,6 +10,9 @@ export interface DeletePostInput {
   stratosAgent: Agent | null
 }
 
+const PRIVATE_POST_COLLECTION = 'zone.stratos.feed.post'
+const PUBLIC_POST_COLLECTION = 'app.bsky.feed.post'
+
 /** Deletes a post through the host that holds its record. */
 export async function deletePost({
   post,
@@ -27,6 +30,13 @@ export async function deletePost({
   }
   if (target.repo !== session.sub) {
     throw new Error('You can only delete your own posts.')
+  }
+  const expectedCollection =
+    target.space || post.isPrivate
+      ? PRIVATE_POST_COLLECTION
+      : PUBLIC_POST_COLLECTION
+  if (target.collection !== expectedCollection) {
+    throw new Error('The post URI is invalid.')
   }
 
   if (target.space) {

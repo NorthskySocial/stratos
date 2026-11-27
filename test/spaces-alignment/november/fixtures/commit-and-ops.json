@@ -1,0 +1,129 @@
+{
+  "header": {
+    "classification": "upstream-legacy-uri",
+    "oracle": {
+      "package": "@atproto/space",
+      "version": "0.0.0-spaces-alpha-20261117141222",
+      "integrity": "sha512-AasGxXJz1htNRNNR1JL/2v4EV45VvC4UrbY1x/w/cFH0avOHFxhDV0MQMMegVYhSi7DtnkJ1smwDxO6K/W402g=="
+    },
+    "generator": {
+      "path": "test/spaces-alignment/november/fixtures/generate-oracle-vectors.mjs",
+      "sha256": "a42fa7432ecb9f61a0fddc1abd16f2cb47de69b10f302d8f39c2c84c6465dec5"
+    },
+    "upstreamVerified": true,
+    "reproducible": true
+  },
+  "note": "The space field is the legacy serialization the pinned upstream emits.",
+  "page": {
+    "ops": [
+      {
+        "rev": "3jzfcijpj2z2a",
+        "collection": "zone.stratos.feed.post",
+        "rkey": "swordfish",
+        "cid": "bafyreievvrwtsmnllxowrd3nvdjpm54wtmbkti75esfrmo3ohsxtmtwizu",
+        "prev": null,
+        "value": {
+          "text": "See you space cowboy",
+          "$type": "zone.stratos.feed.post",
+          "createdAt": "1998-10-24T00:00:00.000Z"
+        }
+      },
+      {
+        "rev": "3jzfcijpj2z2b",
+        "collection": "zone.stratos.feed.post",
+        "rkey": "swordfish",
+        "cid": "bafyreihypg3uvx3sc754r22emkw6ujpiqjozie6puum4ie4egt2jqxz6wa",
+        "prev": "bafyreievvrwtsmnllxowrd3nvdjpm54wtmbkti75esfrmo3ohsxtmtwizu",
+        "value": {
+          "text": "See you space cowboy, edited",
+          "$type": "zone.stratos.feed.post",
+          "createdAt": "1998-10-24T00:00:00.000Z"
+        }
+      },
+      {
+        "rev": "3jzfcijpj2z2b",
+        "collection": "app.bsky.feed.like",
+        "rkey": "ed",
+        "cid": "bafyreihekbbe3xrvhrxgb5mk5togl3s3g4e76ibivsidhxzv3iuqvp2nvq",
+        "prev": null,
+        "value": {
+          "$type": "app.bsky.feed.like",
+          "subject": {
+            "cid": "bafyreih2",
+            "uri": "at://did:web:bebop.example/space/zone.stratos.space.feed/crew/did:plc:fayevalentine/zone.stratos.feed.post/swordfish"
+          },
+          "createdAt": "1998-10-25T00:00:00.000Z"
+        }
+      },
+      {
+        "rev": "3jzfcijpj2z2c",
+        "collection": "zone.stratos.feed.post",
+        "rkey": "ein",
+        "cid": "bafyreias3dmzkzrqfplvectuwp2ogbzxice2mpk6psy3q3k2u7jsvfckzq",
+        "prev": null,
+        "value": {
+          "text": "Bark",
+          "$type": "zone.stratos.feed.post",
+          "createdAt": "1998-10-26T00:00:00.000Z"
+        }
+      },
+      {
+        "rev": "3jzfcijpj2z2d",
+        "collection": "zone.stratos.feed.post",
+        "rkey": "ein",
+        "cid": null,
+        "prev": "bafyreias3dmzkzrqfplvectuwp2ogbzxice2mpk6psy3q3k2u7jsvfckzq"
+      }
+    ],
+    "commit": {
+      "ver": 1,
+      "repo": "did:plc:fayevalentine",
+      "space": "at://did:web:bebop.example/space/zone.stratos.space.feed/crew",
+      "rev": "3jzfcijpj2z2d",
+      "data": {
+        "$bytes": "okNpRMGkR5B3cOe6XMIggnjUNiWAJUuWe8RpRkj4rmI"
+      }
+    }
+  },
+  "commitDataDigest": {
+    "encoding": "base64",
+    "value": "okNpRMGkR5B3cOe6XMIggnjUNiWAJUuWe8RpRkj4rmI=",
+    "length": 32
+  },
+  "macRequest": {
+    "testOnlyKeyShareDid": "did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi",
+    "acceptSignature": "mac=(\"atproto-space-commit\";sf);keyid=\"did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi\";tag=\"atproto-space-commit\"",
+    "sharedSecret": {
+      "encoding": "base64",
+      "value": "2XYP6iF5whnXMOd8HStZcRr/FOrpIZNfLnyoleNwbw4=",
+      "length": 32
+    }
+  },
+  "macResponse": {
+    "headers": {
+      "atproto-space-commit": "ver=1, repo=\"did:plc:fayevalentine\", space=\"at://did:web:bebop.example/space/zone.stratos.space.feed/crew\", rev=\"3jzfcijpj2z2d\", data=:okNpRMGkR5B3cOe6XMIggnjUNiWAJUuWe8RpRkj4rmI=:",
+      "signature-input": "mac=(\"atproto-space-commit\";sf);keyid=\"did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi\";tag=\"atproto-space-commit\"",
+      "signature": "mac=:Y4elIZUztVNcScKuA70+9Y7OdgrNz1dgcVTaA+af/68=:"
+    },
+    "mac": {
+      "encoding": "base64",
+      "value": "Y4elIZUztVNcScKuA70+9Y7OdgrNz1dgcVTaA+af/68=",
+      "length": 32
+    },
+    "verdict": {
+      "accepted": true
+    },
+    "tamperedRevision": {
+      "headers": {
+        "atproto-space-commit": "ver=1, repo=\"did:plc:fayevalentine\", space=\"at://did:web:bebop.example/space/zone.stratos.space.feed/crew\", rev=\"3jzfcijpj2z2c\", data=:okNpRMGkR5B3cOe6XMIggnjUNiWAJUuWe8RpRkj4rmI=:",
+        "signature-input": "mac=(\"atproto-space-commit\";sf);keyid=\"did:key:zDnaeoA2SUkGYYDAVZBKgd4xWMGadgX2U29YPw8iEvCuELmfi\";tag=\"atproto-space-commit\"",
+        "signature": "mac=:Y4elIZUztVNcScKuA70+9Y7OdgrNz1dgcVTaA+af/68=:"
+      },
+      "verdict": {
+        "accepted": false,
+        "error": "SpaceMacError",
+        "message": "MAC does not match"
+      }
+    }
+  }
+}

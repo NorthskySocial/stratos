@@ -2,10 +2,10 @@
 # Build from the workspace root:
 # docker build -f stratos-feedgen-ng/Dockerfile -t stratos-feedgen-ng:rehearsal .
 
-FROM rust:1.94.1-bookworm@sha256:6ae102bdbf528294bc79ad6e1fae682f6f7c2a6e6621506ba959f9685b308a55 AS builder
+FROM rust:1.100.0-bookworm@sha256:75d26c23c24cc6ea1cdabf0714a6bff8fd7bf3248716043fd7ae86dac7f41b94 AS builder
 
 WORKDIR /workspace
-ENV RUSTUP_TOOLCHAIN=1.94.1
+ENV RUSTUP_TOOLCHAIN=1.100.0
 
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY stratos-feedgen-ng/ ./stratos-feedgen-ng/
@@ -14,16 +14,17 @@ COPY stratos-feedgen-ng/ ./stratos-feedgen-ng/
 # selected at build or runtime.
 RUN cargo build --locked --release --package stratos-feedgen-ng
 
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS runtime
+FROM debian:bookworm-slim@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e AS runtime
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 RUN rm --force /etc/apt/sources.list.d/debian.sources \
     && printf '%s\n' \
-        'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260918T000000Z bookworm main' \
+        'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261120T000000Z bookworm main' \
+        'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20261120T000000Z bookworm-security main' \
         > /etc/apt/sources.list \
     && apt-get -o Acquire::Check-Valid-Until=false update \
-    && apt-get install --yes --no-install-recommends libssl3=3.0.20-1~deb12u2 \
+    && apt-get install --yes --no-install-recommends libssl3 \
     && rm --recursive --force /var/lib/apt/lists/*
 
 COPY --from=builder /workspace/target/release/stratos-feedgen-ng /usr/local/bin/stratos-feedgen-ng

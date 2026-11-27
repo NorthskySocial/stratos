@@ -21,7 +21,7 @@ const SPIKE = 'did:plc:spikespiegel'
 const FAYE = 'did:plc:fayevalentine'
 
 function spaceUriFor(boundary: string): string {
-  return `at://${STRATOS_DID}/space/zone.stratos.space.feed/${boundary.split('/')[1]}`
+  return `at:space/${STRATOS_DID}/zone.stratos.space.feed/${boundary.split('/')[1]}`
 }
 
 function fakeCredentialManager() {
@@ -100,13 +100,11 @@ describe('MembershipTracker', () => {
   describe('custody partition', () => {
     it('turns a pds-custody row with a host into a poll target', async () => {
       const client = {
-        listSpaceRepos: vi.fn(
-          async (): Promise<ListSpaceReposResult> => ({
-            repos: [
-              { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
-            ],
-          }),
-        ),
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: [
+            { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
+          ],
+        })),
       }
       const tracker = new MembershipTracker({
         client,
@@ -134,11 +132,9 @@ describe('MembershipTracker', () => {
 
     it('does not poll a row with absent custody', async () => {
       const client = {
-        listSpaceRepos: vi.fn(
-          async (): Promise<ListSpaceReposResult> => ({
-            repos: [{ did: SPIKE, host: 'https://spike.example' } as never],
-          }),
-        ),
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: [{ did: SPIKE, host: 'https://spike.example' } as never],
+        })),
       }
       const tracker = new MembershipTracker({
         client,
@@ -153,17 +149,15 @@ describe('MembershipTracker', () => {
 
     it('does not poll a row with an unrecognized custody value', async () => {
       const client = {
-        listSpaceRepos: vi.fn(
-          async (): Promise<ListSpaceReposResult> => ({
-            repos: [
-              {
-                did: SPIKE,
-                custody: 'quantum-entangled' as never,
-                host: 'https://spike.example',
-              },
-            ],
-          }),
-        ),
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: [
+            {
+              did: SPIKE,
+              custody: 'quantum-entangled' as never,
+              host: 'https://spike.example',
+            },
+          ],
+        })),
       }
       const tracker = new MembershipTracker({
         client,
@@ -178,17 +172,15 @@ describe('MembershipTracker', () => {
 
     it('ignores stratos-custody rows — the subscription arm owns them', async () => {
       const client = {
-        listSpaceRepos: vi.fn(
-          async (): Promise<ListSpaceReposResult> => ({
-            repos: [
-              {
-                did: SPIKE,
-                custody: 'stratos',
-                host: 'https://spike.example',
-              },
-            ],
-          }),
-        ),
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: [
+            {
+              did: SPIKE,
+              custody: 'stratos',
+              host: 'https://spike.example',
+            },
+          ],
+        })),
       }
       const tracker = new MembershipTracker({
         client,
@@ -203,11 +195,9 @@ describe('MembershipTracker', () => {
 
     it('logs and skips a pds-custody row with no resolvable host', async () => {
       const client = {
-        listSpaceRepos: vi.fn(
-          async (): Promise<ListSpaceReposResult> => ({
-            repos: [{ did: SPIKE, custody: 'pds' }],
-          }),
-        ),
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: [{ did: SPIKE, custody: 'pds' }],
+        })),
       }
       const log = vi.fn<(event: MembershipPassLogEvent) => void>()
       const tracker = new MembershipTracker({
@@ -234,13 +224,11 @@ describe('MembershipTracker', () => {
   describe('first pass', () => {
     it('computes no removals and purges nothing on the first pass', async () => {
       const client = {
-        listSpaceRepos: vi.fn(
-          async (): Promise<ListSpaceReposResult> => ({
-            repos: [
-              { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
-            ],
-          }),
-        ),
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: [
+            { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
+          ],
+        })),
       }
       const purger = fakePurger()
       const tracker = new MembershipTracker({
@@ -260,19 +248,17 @@ describe('MembershipTracker', () => {
     it('reloads the persisted member snapshot after a tracker restart', async () => {
       let enrolled = true
       const client = {
-        listSpaceRepos: vi.fn(
-          async (): Promise<ListSpaceReposResult> => ({
-            repos: enrolled
-              ? [
-                  {
-                    did: SPIKE,
-                    custody: 'pds',
-                    host: 'https://spike.example',
-                  },
-                ]
-              : [],
-          }),
-        ),
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: enrolled
+            ? [
+                {
+                  did: SPIKE,
+                  custody: 'pds',
+                  host: 'https://spike.example',
+                },
+              ]
+            : [],
+        })),
       }
       const snapshotStore = fakeSnapshotStore()
       const firstTracker = new MembershipTracker({
@@ -1065,13 +1051,9 @@ describe('MembershipTracker', () => {
   describe('fault isolation', () => {
     it('does not let one failing boundary stop the others', async () => {
       const client = {
-        listSpaceRepos: vi.fn(
-          async (): Promise<ListSpaceReposResult> => ({
-            repos: [
-              { did: FAYE, custody: 'pds', host: 'https://faye.example' },
-            ],
-          }),
-        ),
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: [{ did: FAYE, custody: 'pds', host: 'https://faye.example' }],
+        })),
       }
       const credentialManager = {
         getCredential: vi.fn(async (boundary: string) => {
@@ -1107,13 +1089,11 @@ describe('MembershipTracker', () => {
   describe('complete-enumeration guard', () => {
     it('purges nothing and keeps last pass poll targets when the mirror fails on page two', async () => {
       const client = {
-        listSpaceRepos: vi.fn(
-          async (): Promise<ListSpaceReposResult> => ({
-            repos: [
-              { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
-            ],
-          }),
-        ),
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: [
+            { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
+          ],
+        })),
       }
       const purger = fakePurger()
       const tracker = new MembershipTracker({
@@ -1171,17 +1151,15 @@ describe('MembershipTracker', () => {
       const snapshotStore = fakeSnapshotStore()
       const tracker = new MembershipTracker({
         client: {
-          listSpaceRepos: vi.fn(
-            async (): Promise<ListSpaceReposResult> => ({
-              repos: [
-                {
-                  did: SPIKE,
-                  custody: 'pds',
-                  host: 'https://spike.example',
-                },
-              ],
-            }),
-          ),
+          listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+            repos: [
+              {
+                did: SPIKE,
+                custody: 'pds',
+                host: 'https://spike.example',
+              },
+            ],
+          })),
         },
         credentialManager: fakeCredentialManager(),
         purger: fakePurger(),
@@ -1261,13 +1239,11 @@ describe('MembershipTracker', () => {
     it('logs a structured summary to console.log when no log override is given', async () => {
       const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
       const client = {
-        listSpaceRepos: vi.fn(
-          async (): Promise<ListSpaceReposResult> => ({
-            repos: [
-              { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
-            ],
-          }),
-        ),
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: [
+            { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
+          ],
+        })),
       }
       const tracker = new MembershipTracker({
         client,
@@ -1437,14 +1413,12 @@ describe('MembershipTracker', () => {
 
     it('treats a non-advancing cursor as a failed pass', async () => {
       const client = {
-        listSpaceRepos: vi.fn(
-          async (): Promise<ListSpaceReposResult> => ({
-            repos: [
-              { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
-            ],
-            cursor: 'stuck',
-          }),
-        ),
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: [
+            { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
+          ],
+          cursor: 'stuck',
+        })),
       }
       const purger = fakePurger()
       const tracker = new MembershipTracker({

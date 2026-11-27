@@ -10,6 +10,27 @@ export { EnrollmentRecordValidator } from './enrollment-record-validator.js'
 export { ValidatorFactory } from './factory.js'
 
 export {
+  RECORD_RULE_BUILDERS,
+  buildRecordRules,
+  findRecordRule,
+  type RecordRule,
+  type RecordRuleBuilder,
+  type RecordRuleInput,
+} from './registry.js'
+
+export {
+  isEligibleSubject,
+  parseCanonicalRepoUri,
+  parseCanonicalSpaceRecordUri,
+  SUBJECT_ERROR_MESSAGE,
+  type ExpectedSubject,
+  type RepoSubjectFacts,
+  type SpaceSubjectFacts,
+  type SubjectFacts,
+  type UnresolvableSubjectFacts,
+} from './subject.js'
+
+export {
   qualifyBoundary,
   qualifyBoundaries,
   isQualifiedBoundary,

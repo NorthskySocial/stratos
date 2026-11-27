@@ -56,7 +56,8 @@
         },
         "spaceUri": {
           "type": "string",
-          "format": "uri"
+          "format": "uri",
+          "description": "The space's URI, at:space/{authority}/{type}/{skey}."
         },
         "host": {
           "type": "string",

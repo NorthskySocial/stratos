@@ -5,7 +5,9 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::{
-    identifier::Did, space_credential::HeldSpaceCredential, space_host::SpaceCredentialProof,
+    identifier::{Did, FEED_SPACE_TYPE, SpaceUri},
+    space_credential::HeldSpaceCredential,
+    space_host::SpaceCredentialProof,
 };
 
 const LIST_REPOS_LXM: &str = "zone.stratos.space.listRepos";
@@ -168,22 +170,11 @@ fn endpoint(base: &Url) -> Url {
 }
 
 fn space_authority(space_uri: &str) -> Result<Did, SpaceMembershipError> {
-    let parts: Vec<_> = space_uri
-        .strip_prefix("at://")
-        .ok_or(SpaceMembershipError::InvalidRequest)?
-        .split('/')
-        .collect();
-    let [authority, "space", "zone.stratos.space.feed", key] = parts.as_slice() else {
-        return Err(SpaceMembershipError::InvalidRequest);
-    };
-    let did = Did::parse(*authority).map_err(|_| SpaceMembershipError::InvalidRequest)?;
-    if crate::credential_manager::boundary_to_space_uri(&format!("{authority}/{key}"))
-        .map_err(|_| SpaceMembershipError::InvalidRequest)?
-        != space_uri
-    {
+    let space = SpaceUri::parse(space_uri).map_err(|_| SpaceMembershipError::InvalidRequest)?;
+    if space.space_type() != FEED_SPACE_TYPE {
         return Err(SpaceMembershipError::InvalidRequest);
     }
-    Ok(did)
+    Ok(space.authority().clone())
 }
 
 fn validate_request(
@@ -323,7 +314,7 @@ mod tests {
         }
         assert_eq!(
             validate_request(
-                "at://did:web:stratos.example.test/space/zone.stratos.space.feed/crew",
+                "at:space/did:web:stratos.example.test/zone.stratos.space.feed/crew",
                 None,
                 0
             ),
@@ -378,10 +369,10 @@ mod tests {
                 }
             }
             let request = String::from_utf8(bytes).unwrap();
-            assert!(request.contains("authorization: Atproto-Space rei\r\n"));
+            assert!(request.contains("authorization: Atproto-Space-Credential rei\r\n"));
             assert!(request.contains("atproto-space-audience: did:web:stratos.example.test\r\n"));
             assert!(request.contains(
-                "signature-input: atproto-space=(\"authorization\" \"atproto-space-audience\")\r\n"
+                "signature-input: sig=(\"authorization\" \"atproto-space-audience\");tag=\"atproto-space-credential\"\r\n"
             ));
             assert!(!request.contains("dpop:"));
             stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 12\r\nconnection: close\r\n\r\n{\"repos\":[]}").await.unwrap();
@@ -394,7 +385,7 @@ mod tests {
         let grant =
             GrantedSpaceCredential::new("rei".to_owned(), SpaceHttpSignatureKey::generate())
                 .unwrap();
-        let space = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
+        let space = "at:space/did:web:stratos.example.test/zone.stratos.space.feed/bebop";
         assert!(
             client
                 .list(space, &grant, None, 10)
@@ -405,9 +396,9 @@ mod tests {
         );
         server.await.unwrap();
         for invalid in [
-            "at://did:plc:rei/space/zone.stratos.space.feed/",
+            "at:space/did:plc:rei/zone.stratos.space.feed/",
             "https://stratos.example.test",
-            "at://did:plc:rei/space/zone.stratos.space.feed/bebop/extra",
+            "at:space/did:plc:rei/zone.stratos.space.feed/bebop/extra",
         ] {
             assert!(super::space_authority(invalid).is_err());
         }

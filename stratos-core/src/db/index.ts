@@ -1,6 +1,6 @@
 import { Client, createClient } from '@libsql/client'
 import { drizzle, LibSQLDatabase } from 'drizzle-orm/libsql'
-import { sql } from 'drizzle-orm'
+import { defineRelations, sql } from 'drizzle-orm'
 import * as schemaModule from './schema/index.js'
 
 export * from './schema/index.js'
@@ -8,7 +8,9 @@ export * from './schema/pg-index.js'
 export * from './util.js'
 export * from './pg.js'
 
-export type StratosDb = LibSQLDatabase<typeof schemaModule.schema> & {
+const relations = defineRelations(schemaModule.schema)
+
+export type StratosDb = LibSQLDatabase<typeof relations> & {
   _client: Client
   _initialized: Promise<void>
 }
@@ -17,8 +19,8 @@ export type StratosDb = LibSQLDatabase<typeof schemaModule.schema> & {
  * Generic type for a Stratos database or transaction
  */
 export type StratosDbOrTx =
-  | LibSQLDatabase<typeof schemaModule.schema>
-  | (Omit<LibSQLDatabase<typeof schemaModule.schema>, 'batch'> & {
+  | LibSQLDatabase<typeof relations>
+  | (Omit<LibSQLDatabase<typeof relations>, 'batch'> & {
       batch?: never
     })
 
@@ -50,7 +52,7 @@ export function createStratosDb(
     ...(opts?.pragmas ?? {}),
   }
 
-  const baseDb = drizzle({ client, schema: schemaModule.schema })
+  const baseDb = drizzle({ client, relations })
   const db = baseDb as unknown as StratosDb
   db._client = client
 

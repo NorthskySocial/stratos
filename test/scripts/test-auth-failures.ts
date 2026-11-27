@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run -A
-import { type Browser, chromium, type Page } from 'npm:playwright@1.58.2'
+import { type Browser, chromium, type Page } from 'npm:playwright@1.65.1'
 import { STRATOS_URL } from './lib/config.ts'
 import { loadState } from './lib/state.ts'
 import { fillSignInForm, screenshot } from './lib/oauth-flow.ts'

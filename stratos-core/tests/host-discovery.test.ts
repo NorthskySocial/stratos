@@ -5,7 +5,7 @@ import {
   type HostOverrideReader,
 } from '../src'
 
-const SPACE_URI = 'at://did:plc:misato/space/zone.stratos.space.feed/nerv'
+const SPACE_URI = 'at:space/did:plc:misato/zone.stratos.space.feed/nerv'
 const MEMBER_DID = 'did:plc:usagi'
 
 const OVERRIDE_HOST = 'https://override.pds.example.com'

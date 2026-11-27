@@ -5,6 +5,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isValidNsid } from '@atproto/syntax'
 import { parseCommaList } from '../src/index.js'
+import {
+  buildSpaceTypeRegistry,
+  InvalidSpaceTypeDeclarationError,
+} from '../src/spaces/space-type-registry.js'
 
 // ---------------------------------------------------------------------------
 // Space-type declarations.
@@ -23,12 +27,23 @@ const repoRoot = join(__dirname, '..', '..')
 // `lexicons/` when the lex toolchain tolerates `"type": "space"`, or relocated
 // to a sibling `lexicons-spaces/` dir if codegen chokes on it. The test must
 // find it in either location.
+const SANDBOX_FIXTURE_PATH = join(
+  repoRoot,
+  'test',
+  'spaces-alignment',
+  'atmosphere',
+  'examples',
+  'lexicon-fixtures',
+  'zone.stratos.space.feed.json',
+)
+
 const LEXICON_ROOTS = ['lexicons', 'lexicons-spaces'] as const
 const SPACE_TYPE_RELPATH = join('zone', 'stratos', 'space', 'feed.json')
 
 interface SpaceDef {
   type: string
   key?: unknown
+  title?: unknown
   name?: unknown
   collections?: unknown
   description?: unknown
@@ -87,11 +102,25 @@ describe('zone.stratos.space.feed declaration', () => {
     expect((main?.key as string).length).toBeGreaterThan(0)
   })
 
-  it('carries a required human-readable `name` of length 1-64', () => {
-    expect(main?.name).toBeTypeOf('string')
-    const name = main?.name as string
-    expect(name.length).toBeGreaterThanOrEqual(1)
-    expect(name.length).toBeLessThanOrEqual(64)
+  it('carries a `title` the upstream rule accepts and no `name`', () => {
+    expect(main?.title).toBeTypeOf('string')
+    expect(upstreamAcceptsTitle(main?.title)).toBe(true)
+    expect(main).not.toHaveProperty('name')
+  })
+
+  it('gives the sandbox declaration fixture the same title and type', () => {
+    const fixtureMain = loadLexicon(SANDBOX_FIXTURE_PATH).defs?.['main']
+    expect(fixtureMain?.type).toBe('space')
+    expect(fixtureMain?.title).toBe(main?.title)
+    expect(fixtureMain?.name).toBe(fixtureMain?.title)
+  })
+
+  it('holds the sandbox declaration fixture equal to the repository declaration apart from `name`', () => {
+    const fixture = loadLexicon(SANDBOX_FIXTURE_PATH)
+    const { name: _fixtureName, ...fixtureMain } = fixture.defs?.[
+      'main'
+    ] as SpaceDef
+    expect({ ...fixture, defs: { main: fixtureMain } }).toEqual(doc)
   })
 
   it('carries a required `collections` array of syntactically valid NSIDs', () => {
@@ -116,15 +145,255 @@ describe('zone.stratos.space.feed declaration', () => {
       expect(doc.id).toBe('zone.stratos.space.feed')
       expect(main?.type).toBe('space')
       expect(main?.key).toBe('any')
-      expect(main?.name).toBe('Stratos Feed')
-      expect(main?.collections).toEqual(['zone.stratos.feed.post'])
+      expect(main?.title).toBe('Stratos Feed')
+      expect(main?.collections).toEqual([
+        'zone.stratos.feed.post',
+        'app.bsky.feed.like',
+        'app.bsky.feed.repost',
+      ])
       expect(main?.description).toBe('A members-only Stratos post feed')
     })
 
-    it('declares no localized names (none for v1)', () => {
-      // `name:lang` map is absent in v1.
-      expect(main?.['name:lang']).toBeUndefined()
+    it('declares no localized titles (none for v1)', () => {
+      expect(main?.['title:lang']).toBeUndefined()
     })
+  })
+})
+
+// Each `upstream` value is what the pinned upstream lexicon-document schema
+// (@atproto/lex-document 0.0.0-spaces-alpha-20261117141222, lexiconDocumentSchema)
+// answered for a declaration carrying that `title`. Upstream refuses a lone
+// surrogate before it measures anything, then measures the title in UTF-8
+// bytes, not characters.
+const UPSTREAM_TITLE_TABLE: ReadonlyArray<{
+  label: string
+  title: unknown
+  upstream: 'accepted' | 'refused'
+}> = [
+  { label: 'absent', title: undefined, upstream: 'accepted' },
+  { label: 'empty', title: '', upstream: 'refused' },
+  { label: '1 character', title: 'a', upstream: 'accepted' },
+  { label: '64 characters', title: 'a'.repeat(64), upstream: 'accepted' },
+  { label: '65 characters', title: 'a'.repeat(65), upstream: 'refused' },
+  { label: '512 characters', title: 'a'.repeat(512), upstream: 'refused' },
+  {
+    label: '10,000 characters',
+    title: 'a'.repeat(10_000),
+    upstream: 'refused',
+  },
+  { label: 'number', title: 5, upstream: 'refused' },
+  { label: 'null', title: null, upstream: 'refused' },
+  {
+    label: '22 three-byte characters (66 bytes)',
+    title: '日'.repeat(22),
+    upstream: 'refused',
+  },
+  {
+    label: '21 three-byte characters (63 bytes)',
+    title: '日'.repeat(21),
+    upstream: 'accepted',
+  },
+  {
+    label: '64 emoji (256 bytes)',
+    title: '😀'.repeat(64),
+    upstream: 'refused',
+  },
+  {
+    label: '16 emoji (64 bytes)',
+    title: '😀'.repeat(16),
+    upstream: 'accepted',
+  },
+  { label: 'a lone high surrogate', title: '\ud800', upstream: 'refused' },
+  { label: 'a lone low surrogate', title: '\udc00', upstream: 'refused' },
+  {
+    label: 'a lone surrogate inside a short title',
+    title: 'Bebop\ud83dCrew',
+    upstream: 'refused',
+  },
+  {
+    label: '63 characters and a lone high surrogate',
+    title: 'a'.repeat(63) + '\ud83d',
+    upstream: 'refused',
+  },
+  {
+    label: '60 characters and a surrogate pair (64 bytes)',
+    title: 'a'.repeat(60) + '😀',
+    upstream: 'accepted',
+  },
+  {
+    label: '61 characters and a surrogate pair (65 bytes)',
+    title: 'a'.repeat(61) + '😀',
+    upstream: 'refused',
+  },
+]
+
+// Declarations that vary something other than the title, with the same oracle.
+const UPSTREAM_SHAPE_TABLE: ReadonlyArray<{
+  label: string
+  change: (main: Record<string, unknown>) => void
+  upstream: 'accepted' | 'refused'
+  // The registry also refuses an empty or duplicated collection list, which
+  // upstream accepts, and does not read `key`.
+  registry: 'builds' | 'refuses'
+}> = [
+  {
+    label: 'name instead of title',
+    change: (m) => {
+      delete m['title']
+      m['name'] = 'Stratos Feed'
+    },
+    upstream: 'accepted',
+    registry: 'builds',
+  },
+  {
+    label: 'name beside title',
+    change: (m) => {
+      m['name'] = 'Stratos Feed'
+    },
+    upstream: 'accepted',
+    registry: 'builds',
+  },
+  {
+    label: 'neither name nor title',
+    change: (m) => {
+      delete m['title']
+    },
+    upstream: 'accepted',
+    registry: 'builds',
+  },
+  {
+    label: 'title:lang beside title',
+    change: (m) => {
+      m['title:lang'] = { ja: 'フィード' }
+    },
+    upstream: 'accepted',
+    registry: 'builds',
+  },
+  {
+    label: 'title:en beside title',
+    change: (m) => {
+      m['title:en'] = 'x'
+    },
+    upstream: 'accepted',
+    registry: 'builds',
+  },
+  {
+    label: 'type record',
+    change: (m) => {
+      m['type'] = 'record'
+    },
+    upstream: 'refused',
+    registry: 'refuses',
+  },
+  {
+    label: 'key tid',
+    change: (m) => {
+      m['key'] = 'tid'
+    },
+    upstream: 'accepted',
+    registry: 'builds',
+  },
+  {
+    label: 'key other than the four forms',
+    change: (m) => {
+      m['key'] = 'nope'
+    },
+    upstream: 'refused',
+    registry: 'builds',
+  },
+  {
+    label: 'empty collections',
+    change: (m) => {
+      m['collections'] = []
+    },
+    upstream: 'accepted',
+    registry: 'refuses',
+  },
+  {
+    label: 'duplicate collections',
+    change: (m) => {
+      m['collections'] = ['a.b.c', 'a.b.c']
+    },
+    upstream: 'accepted',
+    registry: 'refuses',
+  },
+  {
+    label: 'collection not an NSID',
+    change: (m) => {
+      m['collections'] = ['nope']
+    },
+    upstream: 'refused',
+    registry: 'refuses',
+  },
+  {
+    label: 'collection not a string',
+    change: (m) => {
+      m['collections'] = [1]
+    },
+    upstream: 'refused',
+    registry: 'refuses',
+  },
+  {
+    label: 'collections absent',
+    change: (m) => {
+      delete m['collections']
+    },
+    upstream: 'refused',
+    registry: 'refuses',
+  },
+]
+
+function upstreamAcceptsTitle(title: unknown): boolean {
+  if (title === undefined) return true
+  if (typeof title !== 'string') return false
+  // TextEncoder would count a lone surrogate as the three bytes of U+FFFD.
+  if (!title.isWellFormed()) return false
+  const bytes = new TextEncoder().encode(title).length
+  return bytes >= 1 && bytes <= 64
+}
+
+describe('title rule against the pinned upstream schema', () => {
+  const { path } = locateSpaceTypeFile()
+  const authored = loadLexicon(path)
+
+  it.each(UPSTREAM_TITLE_TABLE)('title $label: upstream $upstream', (row) => {
+    expect(upstreamAcceptsTitle(row.title) ? 'accepted' : 'refused').toBe(
+      row.upstream,
+    )
+  })
+
+  it('builds a registry from the authored declaration for every title upstream accepts', () => {
+    for (const row of UPSTREAM_TITLE_TABLE) {
+      if (row.upstream !== 'accepted') continue
+      const copy = structuredClone(authored)
+      const main = copy.defs?.['main'] as Record<string, unknown>
+      if (row.title === undefined) delete main['title']
+      else main['title'] = row.title
+      expect(() => buildSpaceTypeRegistry([copy])).not.toThrow()
+    }
+  })
+
+  it.each(UPSTREAM_SHAPE_TABLE)(
+    'declaration with $label: upstream $upstream, registry $registry',
+    (row) => {
+      const copy = structuredClone(authored)
+      row.change(copy.defs?.['main'] as Record<string, unknown>)
+      const build = () => buildSpaceTypeRegistry([copy])
+      if (row.registry === 'refuses') {
+        expect(build).toThrow(InvalidSpaceTypeDeclarationError)
+      } else {
+        expect(build).not.toThrow()
+      }
+    },
+  )
+
+  it('still requires the three hosted collections of the authored declaration', () => {
+    const registry = buildSpaceTypeRegistry([authored])
+    expect(registry.collections('zone.stratos.space.feed')).toEqual([
+      'zone.stratos.feed.post',
+      'app.bsky.feed.like',
+      'app.bsky.feed.repost',
+    ])
   })
 })
 

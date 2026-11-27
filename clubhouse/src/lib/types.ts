@@ -48,6 +48,8 @@ export interface ClubhouseIntegration {
   getRoomStates?: (
     roomIds: readonly string[],
   ) => Promise<Readonly<Record<string, RoomAccessState>>>
+  /** The signed-in member's custody from the latest room status answer; null while unknown. */
+  viewerCustody?: () => RoomCustody | null
   /** Start the existing enrollment flow for this room ID. */
   requestJoin?: (
     roomId: string,
