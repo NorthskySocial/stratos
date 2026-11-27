@@ -46,7 +46,7 @@ jobs:
         run: pnpm install
 
       # stratos-core is published for server-side consumers that depend on it
-      # directly (indexer / service / feedgen). stratos-client does not
+      # directly, including stratos-service. stratos-client does not
       # depend on it — it carries its own copy of enrollment discovery — so
       # this ordering is incidental: the client is installable whether or
       # not stratos-core is in the registry.
@@ -137,28 +137,3 @@ jobs:
           tags: |
             ghcr.io/northskysocial/stratos:${{ steps.stratos-image-check.outputs.version }}
             ghcr.io/northskysocial/stratos:latest
-
-      - name: Check if feedgen image version already pushed
-        id: feedgen-image-check
-        run: |
-          VERSION=$(node -p "require('./stratos-feedgen/package.json').version")
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          if docker manifest inspect "ghcr.io/northskysocial/stratos-feedgen:${VERSION}" >/dev/null 2>&1; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-            echo "stratos-feedgen ${VERSION} already pushed — skipping"
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-            echo "stratos-feedgen ${VERSION} not yet pushed — proceeding"
-          fi
-
-      - name: Build and push feedgen image
-        if: steps.feedgen-image-check.outputs.skip == 'false'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: stratos-feedgen/Dockerfile
-          target: feedgen
-          push: true
-          tags: |
-            ghcr.io/northskysocial/stratos-feedgen:${{ steps.feedgen-image-check.outputs.version }}
-            ghcr.io/northskysocial/stratos-feedgen:latest

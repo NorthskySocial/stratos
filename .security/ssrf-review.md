@@ -1,5 +1,8 @@
 # Outbound request security disclosure
 
+This disclosure records the components and dependencies present at the time of
+remediation. Use the current operator guides to deploy Stratos.
+
 ## Summary
 
 Stratos accepted user-controlled identifiers in several server-side outbound request paths. Before remediation, these paths could resolve or request private network destinations, follow redirects, or consume unbounded decoded response bodies. This created server-side request forgery (SSRF) risk.
@@ -75,7 +78,8 @@ Database, blob-storage, telemetry, and external allow-list endpoints are operato
 
 ## Deployment and compatibility
 
-Rebuild and restart `stratos-service`, `stratos-feedgen`, and `stratos-indexer` to deploy these changes.
+The remediation required rebuilding and restarting `stratos-service`,
+`stratos-feedgen`, and `stratos-indexer`.
 
 User-discovered DID, PDS, OAuth, and client-metadata hosts must resolve to public HTTPS destinations. `STRATOS_DEV_MODE` does not bypass this rule. Local OAuth development requires a public HTTPS endpoint. The explicit loopback exception for space host sync remains limited to configured origins.
 

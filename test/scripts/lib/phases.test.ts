@@ -4,40 +4,29 @@ import assert from 'node:assert/strict'
 
 import { parseRunOptions, phasesFor, SPACES_PDS_OPTION } from './phases.ts'
 
-const SPACES_PDS_SCRIPTS = ['test-mixed-mode.ts', 'test-webapp-mixed-mode.ts']
+const SPACES_PDS_SCRIPT = 'test-mixed-mode.ts'
 
 function scriptsFor(args: string[]): string[] {
   return phasesFor(parseRunOptions(args)).map((phase) => phase.script)
 }
 
 Deno.test('the default run has no spaces PDS phase', () => {
-  const scripts = scriptsFor([])
-  for (const script of SPACES_PDS_SCRIPTS) {
-    assert.ok(!scripts.includes(script), `${script} is not in the default run`)
-  }
+  assert.ok(!scriptsFor([]).includes(SPACES_PDS_SCRIPT))
 })
 
 Deno.test(
-  'asking for a spaces PDS adds both PDS-custody phases in order',
+  'the option adds the mixed-custody phase before the admin checks',
   () => {
     const scripts = scriptsFor([SPACES_PDS_OPTION])
-    const positions = SPACES_PDS_SCRIPTS.map((script) =>
-      scripts.indexOf(script),
+    const position = scripts.indexOf(SPACES_PDS_SCRIPT)
+    assert.ok(position > scripts.indexOf('test-feedgen.ts'))
+    assert.ok(position < scripts.indexOf('test-admin-api.ts'))
+    assert.deepEqual(
+      scripts.filter((script) => script !== SPACES_PDS_SCRIPT),
+      scriptsFor([]),
     )
-    assert.ok(positions.every((position) => position >= 0))
-    assert.equal(positions[1], positions[0] + 1)
-    assert.ok(positions[0] > scripts.indexOf('test-feedgen.ts'))
-    assert.ok(positions[1] < scripts.indexOf('test-admin-api.ts'))
   },
 )
-
-Deno.test('the option changes nothing but the two PDS-custody phases', () => {
-  const without = scriptsFor([])
-  const withPds = scriptsFor([SPACES_PDS_OPTION]).filter(
-    (script) => !SPACES_PDS_SCRIPTS.includes(script),
-  )
-  assert.deepEqual(withPds, without)
-})
 
 Deno.test('teardown runs after a failure in both modes', () => {
   for (const args of [[], [SPACES_PDS_OPTION]]) {
@@ -90,7 +79,9 @@ Deno.test(
           assert.match(
             `${lines[index - 1]}\n${line}`,
             /if \(spacesPdsRequested\(\)[^\n]*\) \{\n/,
-            `${script}:${index + 1} calls a PDS-custody check without the option`,
+            `${script}:${
+              index + 1
+            } calls a PDS-custody check without the option`,
           )
         }
       })

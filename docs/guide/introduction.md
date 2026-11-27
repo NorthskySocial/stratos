@@ -67,10 +67,6 @@ A private post never reaches the public firehose.
 | `webapp`             | [Svelte demo client](/guide/webapp) for enrollment and private posting   |
 | `lexicons`           | Lexicon definitions for every `zone.stratos.*` method and record         |
 
-The TypeScript feed generator (`stratos-feedgen`) and the AppView indexer
-(`stratos-indexer`) are deprecated. They stay in the repository for rollback
-and reference.
-
 ## Where to go next
 
 **To understand it:**

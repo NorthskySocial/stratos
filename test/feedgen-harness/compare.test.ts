@@ -42,15 +42,19 @@ describe('compareFeedEndpoints', () => {
 
     await expect(
       compareFeedEndpoints({
-        tsBaseUrl: 'http://127.0.0.1:3000',
-        rustBaseUrl: 'http://[::1]:3001',
+        baselineBaseUrl: 'http://127.0.0.1:3000',
+        candidateBaseUrl: 'http://[::1]:3001',
         authorization: 'Bearer private-token',
         feed: 'bebop',
         cursor: 'private-cursor',
         limit: 50,
         fetch,
       }),
-    ).resolves.toEqual({ outcome: 'matched', tsStatus: 200, rustStatus: 200 })
+    ).resolves.toEqual({
+      outcome: 'matched',
+      baselineStatus: 200,
+      candidateStatus: 200,
+    })
     expect(fetch.mock.calls).toHaveLength(2)
     for (const [url, options] of fetch.mock.calls) {
       expect(String(url)).not.toContain('private-token')
@@ -80,8 +84,8 @@ describe('compareFeedEndpoints', () => {
 
     await expect(
       compareFeedEndpoints({
-        tsBaseUrl: 'http://localhost:3000',
-        rustBaseUrl: 'http://localhost:3001',
+        baselineBaseUrl: 'http://localhost:3000',
+        candidateBaseUrl: 'http://localhost:3001',
         authorization: 'Bearer private-token',
         feed: 'bebop',
         fetch,
@@ -89,8 +93,8 @@ describe('compareFeedEndpoints', () => {
     ).resolves.toEqual({
       outcome: 'mismatch',
       reason: 'post-count',
-      tsStatus: 200,
-      rustStatus: 200,
+      baselineStatus: 200,
+      candidateStatus: 200,
     })
   })
 
@@ -99,8 +103,8 @@ describe('compareFeedEndpoints', () => {
 
     await expect(
       compareFeedEndpoints({
-        tsBaseUrl: 'https://ts.example.test',
-        rustBaseUrl: 'http://127.0.0.1:3001',
+        baselineBaseUrl: 'https://baseline.example.test',
+        candidateBaseUrl: 'http://127.0.0.1:3001',
         authorization: 'Bearer private-token',
         feed: 'bebop',
         fetch,
@@ -121,8 +125,8 @@ describe('compareFeedEndpoints', () => {
 
     await expect(
       compareFeedEndpoints({
-        tsBaseUrl: 'http://localhost:3000',
-        rustBaseUrl: 'http://localhost:3001',
+        baselineBaseUrl: 'http://localhost:3000',
+        candidateBaseUrl: 'http://localhost:3001',
         authorization: 'Bearer private-token',
         feed: 'bebop',
         requestTimeoutMs: 10,

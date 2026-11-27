@@ -6,7 +6,7 @@ import { stratosLexicons } from '@northskysocial/stratos-client/lexicons'
 // The Rust feed generator writes and pins this file in its conformance tests.
 // Validating it here keeps what it serves inside the published lexicon.
 const FIXTURE_URL = new URL(
-  '../../stratos-feedgen/testdata/conformance/v1/feed-view.json',
+  '../../test/feedgen-harness/fixtures/feed-view.json',
   import.meta.url,
 )
 

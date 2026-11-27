@@ -135,7 +135,7 @@ async function migrate() {
 }
 
 // ---------------------------------------------------------------------------
-// CBOR frame decoding (same approach as stratos-indexer)
+// CBOR frame decoding
 // ---------------------------------------------------------------------------
 
 interface FrameHeader {

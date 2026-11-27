@@ -38,12 +38,6 @@ In that model the feed generator reads and verifies. It never signs records.
 A compromised feed generator leaks what it can read, which is worth guarding
 closely, but it cannot forge a post.
 
-::: info The TypeScript feed generator
-`stratos-feedgen` is the earlier TypeScript implementation. It stays in the
-repository as a rollback reference. New work belongs in `stratos-feedgen-ng`,
-and this page describes only that service.
-:::
-
 ## A feed is a boundary
 
 The operator configures a short list of feeds. Each feed has an id and names
@@ -236,4 +230,4 @@ otherwise reach Stratos.
 Configuration, storage profiles, health checks, and limits are in the
 [operator guide](/operator/feedgen-ng). Source lives in
 `stratos-feedgen-ng/`; its README covers build and test, and `CUTOVER.md`
-covers rehearsal and rollback from the TypeScript service.
+covers routing rehearsals and rollback between builds.

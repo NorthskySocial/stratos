@@ -31,5 +31,3 @@ effect.
 
 These names appear in older guides and do not exist: `STRATOS_OAUTH_REDIRECT_URI`,
 `STRATOS_ALLOWED_APPVIEWS`, `STRATOS_LOG_LEVEL`, and `STRATOS_PLC_URL`.
-`STRATOS_SYNC_TOKEN` and `BSKY_DB_POSTGRES_URL` belong to the deprecated
-standalone indexer, not to the Stratos service.

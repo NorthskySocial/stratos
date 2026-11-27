@@ -20,17 +20,14 @@ The viewer must currently hold the configured feed boundary. Unknown feeds and
 boundary mismatches fail instead of returning an empty feed. If authority
 reconciliation is incomplete, the endpoint fails with retryable
 `FeedNotReady`; closed reconciliation must not be presented as authorized or
-complete. This readiness rule is separate from the legacy mutation race
-described below.
+complete.
 
 Posts are ordered by `sortAt DESC, uri ASC`. A cursor is the literal
 `{sortAt}::{uri}` pair. A malformed cursor is treated as no cursor. A page
 contains an optional next cursor and `feed` entries retaining URI, CID, record,
-author DID, optional author handle, and indexed timestamp. The legacy handler
-returns every stored boundary label for a selected post, including labels the
-viewer does not hold. That metadata disclosure is a known deviation; the Rust
-response filters labels to the viewer's current boundaries. Optional handle
-lookup failure leaves the DID usable.
+author DID, optional author handle, and indexed timestamp. The response filters
+labels to the viewer's current boundaries. Optional handle lookup failure leaves
+the DID usable.
 
 Rust accepts `ES256` with a P-256 DID key and `ES256K` with a secp256k1 DID
 key. The algorithm and resolved key curve must match; neither curve is an
@@ -52,8 +49,7 @@ blob responses include `Cache-Control: private, no-store`, `Vary:
 Authorization`, `X-Content-Type-Options: nosniff`, and a restrictive content
 security policy.
 
-The legacy Feed XRPC path does not set an explicit private cache directive on
-success or error. The Rust feed and blob paths set `Cache-Control: private,
+The feed and blob paths set `Cache-Control: private,
 no-store` for private success and error responses. The authenticated PDS proxy
 must preserve that response policy rather than supplying a shared-cache
 default.
@@ -69,14 +65,8 @@ The projection is a local, bounded cache rather than authority. A PDS-custody
 record's claimed boundary is not authoritative: only authority-derived
 membership and boundary state may admit it. Revocation, deletion, membership
 loss, readiness loss, or a changed authorization epoch must invalidate a
-prepared response before its body is released. The legacy feed path only
-rechecks readiness and feed-catalogue identity before returning; it lacks that
-final authorization-epoch fence. The Rust admission path is required to close
-this deviation. The TypeScript durable profile requires
-a protected volume, private filesystem modes, and bounded retention, but does
-not provide SQLCipher at-rest encryption. A Rust projection must use independent
-encrypted state and must never share a writer or database with the TypeScript
-projection.
+prepared response before its body is released. Durable feed generators use independent encrypted projections.
+Each projection has one writer.
 
 The Rust Feedgen takes a Stratos-custody post's boundary from the operation
 `boundary` the authority sets, and uses the record body only for operations
@@ -124,27 +114,3 @@ authorization, and its sync worker stops. A replayed `enroll` or a staged space
 page does not re-admit it while the takedown stands. A taken-down record is
 removed and its cached blobs are evicted. A later update, replay or staged page
 does not re-admit it.
-
-## Known legacy deviations
-
-The legacy implementation normalizes a malformed cursor to the first page and
-performs optional author-handle work on the response path. Compatibility tests
-preserve the wire outcome while the Rust implementation keeps optional display
-metadata outside the authorization-critical path. Neither behavior permits a
-partial feed presented as complete because a cursor is malformed or display
-metadata is unavailable. Legacy TypeScript can race a later authorization
-mutation; Rust closes that race before release. The Rust durable projection
-adds encrypted-at-rest storage before it is eligible to replace the legacy
-durable path.
-
-The deprecated TypeScript Feedgen does not apply labels. It never reads the
-label log, so a takedown has no effect on what it serves.
-
-The deprecated TypeScript Feedgen reads only the record body's boundary for a
-Stratos-custody post and ignores the operation `boundary`. A post written
-without a body boundary does not appear after a rollback to it.
-
-The deprecated TypeScript Feedgen has no likes or reposts. It emits none of
-`likeCount`, `repostCount` and `viewer`. Its copy of the `getFeed` lexicon
-lists these three fields as optional so that it stays identical to the
-lexicon, but it never emits them.

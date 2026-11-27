@@ -26,8 +26,6 @@ Each TypeScript package has a `mutation` script (`stryker run`) and its own
 - `stratos-service/stryker.config.json`
 - `stratos-client/stryker.config.json`
 - `stratos-browser/stryker.config.json`
-- `stratos-indexer/stryker.config.json`
-- `stratos-feedgen/stryker.config.json`
 - `webapp/stryker.config.json`
 
 Each config uses the vitest runner with the package's `vitest.config.ts`. The

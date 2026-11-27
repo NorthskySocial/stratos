@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "starts closed",
+      "events": [],
+      "expected_ready": false
+    },
+    {
+      "name": "requires an authoritative session",
+      "events": [
+        { "type": "begin_reconciliation" },
+        { "type": "complete_reconciliation", "errors": 0, "truncated": false }
+      ],
+      "expected_ready": false
+    },
+    {
+      "name": "opens after complete reconciliation",
+      "events": [
+        { "type": "mark_session_established" },
+        { "type": "begin_reconciliation" },
+        { "type": "complete_reconciliation", "errors": 0, "truncated": false }
+      ],
+      "expected_ready": true
+    },
+    {
+      "name": "stays closed after reconciliation errors",
+      "events": [
+        { "type": "mark_session_established" },
+        { "type": "begin_reconciliation" },
+        { "type": "complete_reconciliation", "errors": 1, "truncated": false }
+      ],
+      "expected_ready": false
+    },
+    {
+      "name": "stays closed after truncation",
+      "events": [
+        { "type": "mark_session_established" },
+        { "type": "begin_reconciliation" },
+        { "type": "complete_reconciliation", "errors": 0, "truncated": true }
+      ],
+      "expected_ready": false
+    },
+    {
+      "name": "closes after a disconnect",
+      "events": [
+        { "type": "mark_session_established" },
+        { "type": "begin_reconciliation" },
+        { "type": "complete_reconciliation", "errors": 0, "truncated": false },
+        { "type": "mark_unavailable" }
+      ],
+      "expected_ready": false
+    }
+  ]
+}

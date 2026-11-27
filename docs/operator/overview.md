@@ -36,8 +36,7 @@ explains how they fit together.
 | `stratos-service`    | XRPC and HTTP service: enrollment, boundaries, record storage, sync stream, admin interface |
 | `stratos-feedgen-ng` | Rust feed generator: stores private posts locally and serves feeds by current membership    |
 
-The TypeScript feed generator and the standalone indexer are deprecated. See
-[Run the feed generator](/operator/feedgen-ng) for the current feed architecture.
+See [Run the feed generator](/operator/feedgen-ng) for setup and operation.
 
 ## Request flow
 

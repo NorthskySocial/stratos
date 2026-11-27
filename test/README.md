@@ -123,25 +123,27 @@ deno run -A scripts/run-all.ts
 Runs the stages in order. On any stage failure the remaining stages (except teardown) are
 skipped. The default run starts no spaces PDS.
 
+The standard Deno E2E run builds the Rust feed generator with Cargo. It checks feed
+discovery, read authorization, and reconstruction of the in-memory projection on restart.
+
 ### Spaces PDS phases (opt-in)
 
-Two phases drive a member whose repository lives on a spaces PDS: `test-mixed-mode.ts` and
-`test-webapp-mixed-mode.ts`. They run only when the run asks for them:
+Run the low-level mixed-custody phase against a spaces PDS with:
 
 ```bash
 deno run -A scripts/run-all.ts --spaces-pds
 ```
 
-With `--spaces-pds`, `setup.ts` also starts the `pds-spaces` service (compose profile
-`spaces-pds`), waits for it and creates its two fixture accounts. The pinned image refuses the
-`at:space/` URI spelling, so these two phases cannot pass against it; they are there for the day a
-host that accepts the spelling is pinned. To run `setup.ts` on its own with the same choice, set
-`STRATOS_E2E_SPACES_PDS=true` in the environment.
+With `--spaces-pds`, `setup.ts` starts the `pds-spaces` service, waits for it and
+creates its two fixture accounts. The pinned image refuses the current `at:space/`
+URI spelling. The mixed-custody phase requires a host that accepts it. To run
+`setup.ts` on its own with the same choice, set `STRATOS_E2E_SPACES_PDS=true`.
 
-The admin phases (`test-admin-api.ts`, `test-admin-ui.ts`) check the PDS-custody member only when
-the run asks for a spaces PDS, so a default run needs nothing those two phases create. A deno test
-in `test/scripts/lib/phases.test.ts` holds that: it fails if a default-run script reads the PDS
-fixture, or calls its PDS-custody check, outside the option.
+The admin phases check the PDS-custody member only with this option.
+`test/scripts/lib/phases.test.ts` verifies that default runs need no PDS-custody fixtures.
+
+Run the browser custody checks with the [Spaces alignment sandbox gate](spaces-alignment/README.md#baseline-and-ordinary-custody).
+The gate uses the Rust feed generator and an HTTPS sandbox PDS.
 
 ### Host-free checks
 

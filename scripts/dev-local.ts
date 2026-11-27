@@ -24,11 +24,6 @@ interface CloudflareTunnel {
   exit: Promise<never>
 }
 
-interface FeedgenKey {
-  didKey: string
-  signingKey: string
-}
-
 function localPort(name: string, fallback: number): number {
   const value = Number(process.env[name] ?? fallback)
   if (!Number.isInteger(value) || value <= 0) {
@@ -111,45 +106,6 @@ function startCloudflareTunnel(
   })
 }
 
-function generateFeedgenKey(): Promise<FeedgenKey> {
-  return new Promise((resolve, reject) => {
-    const generator = spawn('node', ['stratos-feedgen/local/gen-key.mjs'], {
-      cwd: rootDir,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let output = ''
-
-    generator.stdout.on('data', (chunk: Buffer) => {
-      output += chunk.toString()
-    })
-    generator.once('error', () => {
-      reject(new Error('Could not start the feedgen key generator'))
-    })
-    generator.once('exit', (code) => {
-      if (code !== 0) {
-        reject(new Error('The feedgen key generator failed'))
-        return
-      }
-
-      try {
-        const value: unknown = JSON.parse(output)
-        if (
-          typeof value !== 'object' ||
-          value === null ||
-          typeof (value as { didKey?: unknown }).didKey !== 'string' ||
-          typeof (value as { privHex?: unknown }).privHex !== 'string'
-        ) {
-          throw new Error('The key generator returned an invalid result')
-        }
-        const key = value as { didKey: string; privHex: string }
-        resolve({ didKey: key.didKey, signingKey: key.privHex })
-      } catch {
-        reject(new Error('The key generator returned an invalid result'))
-      }
-    })
-  })
-}
-
 function updateClientMetadata(webappUrl: string, serviceDid: string): void {
   const publicDir = path.join(rootDir, 'webapp', 'public')
   const clientMetadataPath = path.join(publicDir, 'client-metadata.json')
@@ -182,7 +138,6 @@ async function start(): Promise<void> {
 
   try {
     const servicePort = localPort('STRATOS_PORT', 3100)
-    const feedgenPort = localPort('FEEDGEN_PORT', 3302)
     const serviceLocalUrl = `http://127.0.0.1:${servicePort}`
 
     console.log('Starting Cloudflare tunnels...')
@@ -191,11 +146,6 @@ async function start(): Promise<void> {
       serviceLocalUrl,
     )
     tunnels.push(serviceTunnel.process)
-    const feedgenTunnel = await startCloudflareTunnel(
-      'Feedgen',
-      `http://127.0.0.1:${feedgenPort}`,
-    )
-    tunnels.push(feedgenTunnel.process)
     const webappTunnel = await startCloudflareTunnel(
       'Webapp',
       `http://127.0.0.1:${webappPort}`,
@@ -203,11 +153,8 @@ async function start(): Promise<void> {
     tunnels.push(webappTunnel.process)
 
     const serviceUrl = serviceTunnel.url
-    const feedgenUrl = feedgenTunnel.url
     const webappUrl = webappTunnel.url
     const serviceDid = didWebForUrl(serviceUrl)
-    const feedgenDid = didWebForUrl(feedgenUrl)
-    const feedgenKey = await generateFeedgenKey()
 
     updateClientMetadata(webappUrl, serviceDid)
     fs.mkdirSync(path.join(rootDir, 'data'), { recursive: true })
@@ -220,36 +167,8 @@ async function start(): Promise<void> {
       STRATOS_SERVICE_DID: serviceDid,
       STRATOS_ENROLLMENT_MODE: 'open',
       STRATOS_AUTO_ENROLL_DOMAINS: 'swordsmith',
-      FEEDGEN_PORT: String(feedgenPort),
-      FEEDGEN_SERVICE_DID: feedgenDid,
-      FEEDGEN_PUBLIC_URL: feedgenUrl,
-      FEEDGEN_SIGNING_KEY: feedgenKey.signingKey,
-      FEEDGEN_STORAGE_BACKEND: 'sqlite',
-      FEEDGEN_SQLITE_PATH: path.join(rootDir, 'data', 'feedgen.sqlite'),
-      FEEDGEN_FEEDS_FILE: '',
-      FEEDGEN_FEEDS_JSON: JSON.stringify({
-        feeds: [
-          {
-            id: 'swordsmith',
-            boundary: `${serviceDid}/swordsmith`,
-            displayName: 'Swordsmith',
-            description: 'Local feedgen test feed',
-          },
-        ],
-      }),
-      FEEDGEN_SUBSCRIBE_ENROLLMENTS: 'true',
-      STRATOS_SERVICE_URL: serviceLocalUrl,
-      STRATOS_SERVICE_ENROLLMENTS: JSON.stringify([
-        {
-          boundaries: ['swordsmith'],
-          did: feedgenDid,
-          signingKey: feedgenKey.didKey,
-        },
-      ]),
       VITE_STRATOS_URL: serviceUrl,
       VITE_STRATOS_SERVICE_DID: serviceDid,
-      VITE_FEEDGEN_DID: feedgenDid,
-      VITE_FEEDGEN_FEED: 'swordsmith',
       VITE_WEBAPP_URL: webappUrl,
       VITE_APPVIEW_URL: process.env.VITE_APPVIEW_URL || 'https://api.bsky.app',
       VITE_ATPROTO_HANDLE_RESOLVER:
@@ -269,12 +188,6 @@ async function start(): Promise<void> {
           env,
         },
         {
-          command: 'tsx src/bin/main.ts',
-          name: 'feedgen',
-          cwd: path.join(rootDir, 'stratos-feedgen'),
-          env,
-        },
-        {
           command: 'pnpm --filter @northskysocial/stratos-webapp run dev',
           name: 'webapp',
           cwd: path.join(rootDir, 'webapp'),
@@ -291,7 +204,6 @@ async function start(): Promise<void> {
 
     const tunnelResult = Promise.race([
       serviceTunnel.exit,
-      feedgenTunnel.exit,
       webappTunnel.exit,
     ]).then(
       () => 1,
@@ -318,34 +230,25 @@ async function start(): Promise<void> {
     const startup = await Promise.race([
       Promise.all([
         waitForOk(`${serviceLocalUrl}/ready`),
-        waitForOk(`http://127.0.0.1:${feedgenPort}/health`),
         waitForOk(`http://127.0.0.1:${webappPort}/`),
-      ]).then(([serviceReady, feedgenReady, webappReady]) => ({
-        feedgenReady,
+      ]).then(([serviceReady, webappReady]) => ({
         serviceReady,
         webappReady,
       })),
       stackResult.then(() => null),
     ])
 
-    if (
-      !startup ||
-      !startup.serviceReady ||
-      !startup.feedgenReady ||
-      !startup.webappReady
-    ) {
+    if (!startup || !startup.serviceReady || !startup.webappReady) {
       cleanup(1)
       return
     }
 
     console.log(`Webapp:  ${webappUrl}`)
     console.log(`Stratos: ${serviceUrl} (${serviceDid})`)
-    console.log(`Feedgen: ${feedgenUrl} (${feedgenDid})`)
 
     checkInterval = setInterval(() => {
       void Promise.all([
         fetch(serviceUrl).catch(() => null),
-        fetch(feedgenUrl).catch(() => null),
         fetch(webappUrl).catch(() => null),
       ])
     }, 60000)

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "input": {
+    "serviceDid": "did:web:feedgen.example.test",
+    "publicUrl": "https://feedgen.example.test",
+    "publicKeyMultibase": "zTestKey"
+  },
+  "expected": {
+    "@context": [
+      "https://www.w3.org/ns/did/v1",
+      "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:feedgen.example.test",
+    "verificationMethod": [
+      {
+        "id": "did:web:feedgen.example.test#atproto",
+        "type": "Multikey",
+        "controller": "did:web:feedgen.example.test",
+        "publicKeyMultibase": "zTestKey"
+      }
+    ],
+    "service": [
+      {
+        "id": "#stratos_feedgen",
+        "type": "NorthskyStratosFeedGen",
+        "serviceEndpoint": "https://feedgen.example.test"
+      }
+    ]
+  }
+}

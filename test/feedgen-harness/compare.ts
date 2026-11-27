@@ -2,15 +2,15 @@ import {
   compareShadowFeedDecisions,
   type ShadowFeedDecision,
   type ShadowMismatchReason,
-} from '../../stratos-feedgen/src/shadow/feed-comparator.js'
+} from './feed-comparator.js'
 
 const FEED_ENDPOINT = '/xrpc/zone.stratos.feedgen.getFeed'
 const MAX_RESPONSE_BYTES = 1_048_576
 const DEFAULT_REQUEST_TIMEOUT_MS = 1_000
 
 export interface FeedEndpointComparisonInput {
-  tsBaseUrl: string
-  rustBaseUrl: string
+  baselineBaseUrl: string
+  candidateBaseUrl: string
   authorization: string
   feed: string
   cursor?: string
@@ -23,14 +23,14 @@ export interface FeedEndpointComparisonInput {
 export type FeedEndpointComparison =
   | {
       outcome: 'matched'
-      tsStatus: number
-      rustStatus: number
+      baselineStatus: number
+      candidateStatus: number
     }
   | {
       outcome: 'mismatch'
       reason: ShadowMismatchReason
-      tsStatus: number
-      rustStatus: number
+      baselineStatus: number
+      candidateStatus: number
     }
 
 /**
@@ -41,11 +41,11 @@ export async function compareFeedEndpoints(
   input: FeedEndpointComparisonInput,
 ): Promise<FeedEndpointComparison> {
   const fetch = input.fetch ?? globalThis.fetch
-  const tsUrl = feedUrl(input.tsBaseUrl, input)
-  const rustUrl = feedUrl(input.rustBaseUrl, input)
+  const baselineUrl = feedUrl(input.baselineBaseUrl, input)
+  const candidateUrl = feedUrl(input.candidateBaseUrl, input)
   if (!input.allowRemote) {
-    assertLoopback(tsUrl)
-    assertLoopback(rustUrl)
+    assertLoopback(baselineUrl)
+    assertLoopback(candidateUrl)
   }
   const options = {
     headers: { authorization: input.authorization },
@@ -54,22 +54,26 @@ export async function compareFeedEndpoints(
       input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     ),
   }
-  const [tsResponse, rustResponse] = await Promise.all([
-    fetch(tsUrl, options),
-    fetch(rustUrl, options),
+  const [baselineResponse, candidateResponse] = await Promise.all([
+    fetch(baselineUrl, options),
+    fetch(candidateUrl, options),
   ])
-  const [ts, rust] = await Promise.all([
-    feedDecision(tsResponse),
-    feedDecision(rustResponse),
+  const [baseline, candidate] = await Promise.all([
+    feedDecision(baselineResponse),
+    feedDecision(candidateResponse),
   ])
-  const comparison = compareShadowFeedDecisions(ts, rust)
+  const comparison = compareShadowFeedDecisions(baseline, candidate)
   return comparison.matched
-    ? { outcome: 'matched', tsStatus: ts.status, rustStatus: rust.status }
+    ? {
+        outcome: 'matched',
+        baselineStatus: baseline.status,
+        candidateStatus: candidate.status,
+      }
     : {
         outcome: 'mismatch',
         reason: comparison.reason,
-        tsStatus: ts.status,
-        rustStatus: rust.status,
+        baselineStatus: baseline.status,
+        candidateStatus: candidate.status,
       }
 }
 

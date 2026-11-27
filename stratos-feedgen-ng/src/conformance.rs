@@ -183,7 +183,7 @@ mod tests {
     #[test]
     fn follows_the_shared_readiness_fixture() {
         let fixture: ReadinessFixture = serde_json::from_str(include_str!(
-            "../../stratos-feedgen/testdata/conformance/v1/readiness.json"
+            "../../test/feedgen-harness/fixtures/readiness.json"
         ))
         .unwrap();
         assert_eq!(fixture.version, 1);
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn follows_the_shared_cursor_fixture() {
         let fixture: CursorFixture = serde_json::from_str(include_str!(
-            "../../stratos-feedgen/testdata/conformance/v1/cursor.json"
+            "../../test/feedgen-harness/fixtures/cursor.json"
         ))
         .unwrap();
         assert_eq!(fixture.version, 1);
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn follows_the_shared_blob_url_fixture() {
         let fixture: BlobUrlFixture = serde_json::from_str(include_str!(
-            "../../stratos-feedgen/testdata/conformance/v1/blob-url.json"
+            "../../test/feedgen-harness/fixtures/blob-url.json"
         ))
         .unwrap();
         assert_eq!(fixture.version, 1);
@@ -377,7 +377,7 @@ mod tests {
     #[tokio::test]
     async fn keeps_the_discovery_contract_in_the_shared_fixture() {
         let fixture: DidFixture = serde_json::from_str(include_str!(
-            "../../stratos-feedgen/testdata/conformance/v1/did-document.json"
+            "../../test/feedgen-harness/fixtures/did-document.json"
         ))
         .unwrap();
         assert_eq!(fixture.version, 1);
@@ -427,7 +427,7 @@ mod tests {
         const ASUKA_SPACE_POST: &str = "at:space/did:web:stratos.test/zone.stratos.space.feed/tokyo-3/did:plc:asuka/zone.stratos.feed.post/eva-02";
         const GEOFRONT_POST: &str = "at://did:plc:shinji-ikari/zone.stratos.feed.post/eva-01";
         let fixture: ModerationLabelFixture = serde_json::from_str(include_str!(
-            "../../stratos-feedgen/testdata/conformance/v1/moderation-labels.json"
+            "../../test/feedgen-harness/fixtures/moderation-labels.json"
         ))
         .unwrap();
         assert_eq!(fixture.version, 1);
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn parses_the_actor_commit_frames_stratos_sends_in_the_shared_fixture() {
         let fixture: ActorFrameFixture = serde_json::from_str(include_str!(
-            "../../stratos-feedgen/testdata/conformance/v1/actor-commit-frames.json"
+            "../../test/feedgen-harness/fixtures/actor-commit-frames.json"
         ))
         .unwrap();
         assert_eq!(fixture.version, 1);
@@ -616,7 +616,7 @@ mod tests {
     #[test]
     fn reads_no_post_change_in_the_like_and_repost_frames_stratos_sends() {
         let fixture: ActorFrameFixture = serde_json::from_str(include_str!(
-            "../../stratos-feedgen/testdata/conformance/v1/actor-commit-frames.json"
+            "../../test/feedgen-harness/fixtures/actor-commit-frames.json"
         ))
         .unwrap();
 
@@ -662,7 +662,7 @@ mod tests {
 
     const FEED_VIEW_FIXTURE_PATH: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../stratos-feedgen/testdata/conformance/v1/feed-view.json"
+        "/../test/feedgen-harness/fixtures/feed-view.json"
     );
 
     fn served_feed_view_with_a_liked_and_reposted_post() -> serde_json::Value {

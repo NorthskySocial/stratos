@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "encodes a timestamp and repository URI",
+      "input": "2026-09-21T00:00:00.000Z::at://did:plc:spikespiegel/zone.stratos.feed.post/see-you",
+      "expected": {
+        "sortAt": "2026-09-21T00:00:00.000Z",
+        "uri": "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you"
+      }
+    },
+    {
+      "name": "splits only at the first separator",
+      "input": "2026-09-21T00:00:00.000Z::at://did:plc:fayevalentine/zone.stratos.feed.post/a::b",
+      "expected": {
+        "sortAt": "2026-09-21T00:00:00.000Z",
+        "uri": "at://did:plc:fayevalentine/zone.stratos.feed.post/a::b"
+      }
+    },
+    {
+      "name": "rejects a missing separator",
+      "input": "not-a-cursor",
+      "expected": null
+    },
+    {
+      "name": "rejects an empty sort timestamp",
+      "input": "::at://did:plc:spikespiegel/zone.stratos.feed.post/see-you",
+      "expected": null
+    },
+    {
+      "name": "rejects an empty URI",
+      "input": "2026-09-21T00:00:00.000Z::",
+      "expected": null
+    }
+  ]
+}

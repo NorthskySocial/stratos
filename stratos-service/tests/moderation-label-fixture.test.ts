@@ -37,7 +37,7 @@ import { buildSqliteMembershipStores } from './helpers/enrollment-holds.js'
 // The Rust feed generator parses the same file in its conformance tests, so
 // the two sides cannot drift apart unnoticed.
 const FIXTURE_URL = new URL(
-  '../../stratos-feedgen/testdata/conformance/v1/moderation-labels.json',
+  '../../test/feedgen-harness/fixtures/moderation-labels.json',
   import.meta.url,
 )
 
